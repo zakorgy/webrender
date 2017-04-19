@@ -90,7 +90,7 @@ fn main() {
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender) = webrender::renderer::Renderer::new(gl, opts, size).unwrap();
+    let (mut renderer, sender) = webrender::renderer::Renderer::new(&window, opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(window.create_window_proxy()));
@@ -222,10 +222,10 @@ fn main() {
                 glutin::Event::MouseMoved(x, y) => {
                     cursor_position = WorldPoint::new(x as f32, y as f32);
                 }
-                glutin::Event::MouseWheel(delta, _, event_cursor_position) => {
-                    if let Some((x, y)) = event_cursor_position {
+                glutin::Event::MouseWheel(delta, /*_, */event_cursor_position) => {
+                    /*if let Some((x, y)) = event_cursor_position {
                         cursor_position = WorldPoint::new(x as f32, y as f32);
-                    }
+                    }*/
 
                     const LINE_HEIGHT: f32 = 38.0;
                     let (dx, dy) = match delta {

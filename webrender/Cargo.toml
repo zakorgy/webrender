@@ -32,9 +32,17 @@ gamma-lut = "0.2"
 thread_profiler = "0.1.1"
 plane-split = "0.3"
 
+rand = "0.3"
+gfx = "0.14"
+gfx_window_glutin = "0.14"
+gfx_core = "0.6.0"
+gfx_device_gl = "0.13"
+glutin = "0.7"
+
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
-servo-glutin = "0.10.1"     # for the example apps
+glutin = "0.7"
+#servo-glutin = "0.10.1"     # for the example apps
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.2", default-features = false }

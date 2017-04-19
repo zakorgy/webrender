@@ -6,7 +6,6 @@ use app_units::Au;
 use device::TextureFilter;
 use euclid::{TypedPoint2D, UnknownUnit};
 use fnv::FnvHasher;
-use profiler::BackendProfileCounters;
 use std::collections::{HashMap, HashSet};
 use std::f32;
 use std::hash::BuildHasherDefault;
@@ -347,7 +346,7 @@ impl RendererFrame {
 
 pub enum ResultMsg {
     RefreshShader(PathBuf),
-    NewFrame(RendererFrame, TextureUpdateList, BackendProfileCounters),
+    NewFrame(RendererFrame, TextureUpdateList),
 }
 
 #[repr(u32)]

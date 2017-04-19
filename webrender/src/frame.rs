@@ -10,7 +10,6 @@ use internal_types::{LowLevelFilterOp};
 use internal_types::{RendererFrame};
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use clip_scroll_tree::{ClipScrollTree, ScrollStates};
-use profiler::TextureCacheProfileCounters;
 use resource_cache::ResourceCache;
 use scene::{Scene, SceneProperties};
 use std::collections::HashMap;
@@ -968,14 +967,12 @@ impl Frame {
                  resource_cache: &mut ResourceCache,
                  display_lists: &DisplayListMap,
                  device_pixel_ratio: f32,
-                 pan: LayerPoint,
-                 texture_cache_profile: &mut TextureCacheProfileCounters)
+                 pan: LayerPoint)
                  -> RendererFrame {
         self.clip_scroll_tree.update_all_node_transforms(pan);
         let frame = self.build_frame(resource_cache,
                                      display_lists,
-                                     device_pixel_ratio,
-                                     texture_cache_profile);
+                                     device_pixel_ratio);
         resource_cache.expire_old_resources(self.id);
         frame
     }
@@ -983,8 +980,7 @@ impl Frame {
     fn build_frame(&mut self,
                    resource_cache: &mut ResourceCache,
                    display_lists: &DisplayListMap,
-                   device_pixel_ratio: f32,
-                   texture_cache_profile: &mut TextureCacheProfileCounters)
+                   device_pixel_ratio: f32)
                    -> RendererFrame {
         let mut frame_builder = self.frame_builder.take();
         let frame = frame_builder.as_mut().map(|builder|
@@ -992,8 +988,7 @@ impl Frame {
                           self.id,
                           &mut self.clip_scroll_tree,
                           display_lists,
-                          device_pixel_ratio,
-                          texture_cache_profile)
+                          device_pixel_ratio)
         );
         self.frame_builder = frame_builder;
 

@@ -54,6 +54,10 @@ impl TexelRect {
             uv1: DevicePoint::new(u1 as f32, v1 as f32),
         }
     }
+
+    pub fn to_vec(&self) -> Vec<f32> {
+        vec!(self.uv0.x, self.uv0.y, self.uv1.x, self.uv1.y)
+    }
 }
 
 /// For external images, it's not possible to know the
@@ -1360,7 +1364,7 @@ macro_rules! define_gpu_block {
         #[derive(Clone)]
         #[repr(C)]
         pub struct $name {
-            data: $ty,
+            pub data: $ty,
         }
 
         impl Default for $name {
