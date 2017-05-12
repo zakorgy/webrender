@@ -119,8 +119,6 @@ pub enum ProgramId {
     PS_ANGLE_GRADIENT,
     PS_ANGLE_GRADIENT_TRANSFORM,
     PS_BLEND,
-    PS_BORDER,
-    PS_BORDER_TRANSFORM,
     PS_BORDER_CORNER,
     PS_BORDER_CORNER_TRANSFORM,
     PS_BORDER_EDGE,
@@ -129,8 +127,6 @@ pub enum ProgramId {
     PS_BOX_SHADOW_TRANSFORM,
     PS_CACHE_IMAGE,
     PS_CACHE_IMAGE_TRANSFORM,
-    PS_CLEAR,
-    PS_CLEAR_TRANSFORM,
     PS_COMPOSITE,
     PS_GRADIENT,
     PS_GRADIENT_TRANSFORM,
@@ -166,8 +162,6 @@ gfx_defines! {
         element_index: i32 = "aElementIndex",
         user_data: [i32; 2] = "aUserData",
         z_index: i32 = "aZIndex",
-        // Only ps_clear and ps_clear_transform use this
-        //clear_rectangle: [i32; 4] = "aClearRectangle",
     }
 
     pipeline primitive {
@@ -176,7 +170,6 @@ gfx_defines! {
         vbuf: gfx::VertexBuffer<Position> = (),
         ibuf: gfx::InstanceBuffer<Instances> = (),
 
-        // FIXME: Find the correct data type for these color samplers
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
@@ -604,12 +597,6 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_CACHE_IMAGE_TRANSFORM);
-        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.vert")),
-                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR);
-        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear_transform.vert")),
-                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_clear_transform.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_CLEAR_TRANSFORM);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);*/
