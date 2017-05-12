@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 use texture_cache::TextureCache;
-use time::precise_time_ns;
+//use time::precise_time_ns;
 use thread_profiler::register_thread_with_profiler;
 use rayon::ThreadPool;
 use webgl_types::{GLContextHandleWrapper, GLContextWrapper};
@@ -144,7 +144,8 @@ impl RenderBackend {
                             tx.send(glyph_dimensions).unwrap();
                         }
                         ApiMsg::AddImage(id, descriptor, data, tiling) => {
-                            if let ImageData::Raw(ref bytes) = data {
+                            if let ImageData::Raw(ref _bytes) = data {
+                                //profile_counters.resources.image_templates.inc(bytes.len());
                             }
                             self.resource_cache.add_image_template(id, descriptor, data, tiling);
                         }

@@ -50,7 +50,6 @@ extern crate glutin;
 #[macro_use]
 extern crate gfx;
 extern crate gfx_window_glutin;
-#[macro_use]
 extern crate gfx_core;
 extern crate gfx_device_gl;
 
@@ -67,6 +66,7 @@ mod frame_builder;
 mod freelist;
 mod geometry;
 mod gpu_store;
+#[allow(dead_code)]
 mod internal_types;
 mod mask_cache;
 mod prim_store;
@@ -117,6 +117,8 @@ mod platform {
     }
 }
 
+#[allow(dead_code)]
+#[allow(unused_variables)]
 pub mod renderer;
 
 #[cfg(target_os="macos")]

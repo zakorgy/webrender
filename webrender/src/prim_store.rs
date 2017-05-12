@@ -54,10 +54,6 @@ impl TexelRect {
             uv1: DevicePoint::new(u1 as f32, v1 as f32),
         }
     }
-
-    pub fn to_vec(&self) -> Vec<f32> {
-        vec!(self.uv0.x, self.uv0.y, self.uv1.x, self.uv1.y)
-    }
 }
 
 /// For external images, it's not possible to know the
@@ -1108,9 +1104,9 @@ impl PrimitiveStore {
         &self.cpu_metadata[index.0]
     }
 
-    pub fn prim_count(&self) -> usize {
+    /*pub fn prim_count(&self) -> usize {
         self.cpu_metadata.len()
-    }
+    }*/
 
     pub fn build_bounding_rect(&mut self,
                                prim_index: PrimitiveIndex,

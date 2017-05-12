@@ -1746,7 +1746,7 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
 
                 let prim_metadata = &mut self.frame_builder.prim_store.cpu_metadata[prim_index.0];
                 let prim_clip_info = prim_metadata.clip_cache_info.as_ref();
-                let mut visible = true;
+                //let mut visible = true;
 
                 stacking_context.screen_bounds =
                     stacking_context.screen_bounds.union(&prim_bounding_rect);
@@ -1773,7 +1773,7 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
                         MaskResult::Outside => { // Primitive is completely clipped out.
                             prim_metadata.clip_task = None;
                             self.frame_builder.prim_store.cpu_bounding_rects[prim_index.0] = None;
-                            visible = false;
+                            //visible = false;
                         }
                         MaskResult::Inside(task) => prim_metadata.clip_task = Some(task),
                     }
@@ -1782,6 +1782,10 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
                 if prim_clip_info.is_some() {
                     self.current_clip_stack.pop();
                 }
+
+                /*if visible {
+                    self.profile_counters.visible_primitives.inc();
+                }*/
             }
         }
     }

@@ -639,8 +639,9 @@ impl TextureCache {
                     op: texture_grow_op(texture_size, format, mode),
                 });
 
-                let extra_texels = new_width * new_height - page.texture_size.width * page.texture_size.height;
-                let extra_bytes = extra_texels * format.bytes_per_pixel().unwrap_or(0);
+                //let extra_texels = new_width * new_height - page.texture_size.width * page.texture_size.height;
+                //let extra_bytes = extra_texels * format.bytes_per_pixel().unwrap_or(0);
+                //page_profile.inc(extra_bytes as usize);
 
                 page.grow(texture_size);
 
@@ -663,7 +664,8 @@ impl TextureCache {
                 let init_texture_size = initial_texture_size(self.max_texture_size);
                 let texture_size = DeviceUintSize::new(cmp::max(requested_width, init_texture_size.width),
                                                        cmp::max(requested_height, init_texture_size.height));
-                let extra_bytes = texture_size.width * texture_size.height * format.bytes_per_pixel().unwrap_or(0);
+                //let extra_bytes = texture_size.width * texture_size.height * format.bytes_per_pixel().unwrap_or(0);
+                //page_profile.inc(extra_bytes as usize);
 
                 let free_texture_levels_entry = self.free_texture_levels.entry(format);
                 let mut free_texture_levels = match free_texture_levels_entry {

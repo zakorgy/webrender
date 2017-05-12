@@ -3,47 +3,41 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use euclid::Matrix4D;
-use fnv::FnvHasher;
-use internal_types::{PackedVertex, RenderTargetMode, TextureSampler, DEFAULT_TEXTURE};
-use internal_types::{BlurAttribute, ClearAttribute, ClipAttribute, VertexAttribute};
-use internal_types::{BatchTextures, DebugFontVertex, DebugColorVertex};
+//use fnv::FnvHasher;
+//use internal_types::{PackedVertex, RenderTargetMode, TextureSampler, DEFAULT_TEXTURE};
+//use internal_types::{BlurAttribute, ClearAttribute, ClipAttribute, VertexAttribute};
+//use internal_types::{BatchTextures, DebugFontVertex, DebugColorVertex};
+use internal_types::{BatchTextures, RenderTargetMode, TextureSampler};
 //use notify::{self, Watcher};
-use super::shader_source;
+//use super::shader_source;
 use std::collections::HashMap;
-use std::fs::File;
-use std::hash::BuildHasherDefault;
-use std::io::Read;
-use std::iter::repeat;
+//use std::fs::File;
+//use std::hash::BuildHasherDefault;
+//use std::io::Read;
+//use std::iter::repeat;
 use std::mem;
-use std::path::PathBuf;
-use std::rc::Rc;
+//use std::path::PathBuf;
+//use std::rc::Rc;
 //use std::sync::mpsc::{channel, Sender};
 //use std::thread;
-use webrender_traits::{ColorF, ImageFormat};
-use webrender_traits::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintSize};
+use webrender_traits::/*{ColorF, ImageFormat};*/ImageFormat;
+//use webrender_traits::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintSize};
 
 use rand::Rng;
 use std;
-use std::env;
 use glutin;
 use gfx;
-use gfx::CommandBuffer;
-use gfx::pso::PipelineData;
-use gfx::state::{Blend, BlendChannel, BlendValue, Equation, Factor, RefValues};
+use gfx::state::{Blend, BlendChannel, BlendValue, Equation, Factor};
 use gfx_core;
 use gfx_core::memory::Typed;
 use gfx::Factory;
-use gfx::texture;
 use gfx::traits::FactoryExt;
 use gfx::format::{DepthStencil as DepthFormat, Rgba32F as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx_window_glutin;
 use gfx::CombinedError;
-use gfx::format::{Format, R8, Unorm, R8_G8_B8_A8, Rgba8, R32_G32_B32_A32, Rgba32F};
-use gfx::memory::{Usage, SHADER_RESOURCE};
-//use gfx::format::ChannelType::Unorm;
-use gfx::format::TextureSurface;
+use gfx::format::{Format, R8, Unorm, Rgba8, Rgba32F};
 use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
 use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, GradientData, PrimitiveGeometry, SplitGeometry, TexelRect};
@@ -110,6 +104,8 @@ pub const SUBPIXEL: Blend = Blend {
 
 type PSPrimitive = gfx::PipelineState<R, primitive::Meta>;
 
+#[allow(non_camel_case_types)]
+#[allow(dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ProgramId {
     CS_BLUR,
@@ -295,9 +291,10 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
                 &tex, levels, format::Swizzle::new()
             ));
             let format = match surface {
-                R8 => ImageFormat::A8,
-                R8_G8_B8_A8 => ImageFormat::RGBA8,
-                R32_G32_B32_A32 => ImageFormat::RGBAF32,
+                gfx_core::format::SurfaceType::R8 => ImageFormat::A8,
+                gfx_core::format::SurfaceType::R8_G8_B8_A8 => ImageFormat::RGBA8,
+                gfx_core::format::SurfaceType::R32_G32_B32_A32 => ImageFormat::RGBAF32,
+                _ => unimplemented!(),
             };
             (tex, view, format)
         };
@@ -318,18 +315,6 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
     pub fn get_size(&self) -> (u32, u32) {
         let (w, h, _, _) = self.surface.get_info().kind.get_dimensions();
         (w as u32, h as u32)
-    }
-
-    #[inline(always)]
-    fn get_width(&self) -> u32 {
-        let (w, _) = self.get_size();
-        w
-    }
-
-    #[inline(always)]
-    fn get_height(&self) -> u32 {
-        let (_, h) = self.get_size();
-        h
     }
 }
 
@@ -372,7 +357,7 @@ pub struct FrameId(usize);
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureTarget {
     Default,
-    Array,
+    _Array,
     External,
     Rect,
 }
@@ -405,7 +390,7 @@ impl TextureId {
         }
     }
 
-    pub fn is_valid(&self) -> bool { *self != TextureId::invalid() && *self != TextureId::invalid_a8() }
+    pub fn _is_valid(&self) -> bool { *self != TextureId::invalid() && *self != TextureId::invalid_a8() }
 }
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
@@ -431,7 +416,6 @@ pub struct Device {
     device: device_gl::Device,
     factory: device_gl::Factory,
     encoder: gfx::Encoder<R,CB>,
-    //textures: HashMap<TextureId, gfx::handle::Texture<R, Rgba8>>,
     textures: HashMap<TextureId, TextureData>,
     programs: HashMap<ProgramId, Program>,
     color0: Texture<R, Rgba8>,
@@ -457,13 +441,13 @@ pub struct Device {
 
 impl Device {
     pub fn new(window: &glutin::Window) -> Device {
-        let (mut device, mut factory, main_color, main_depth) =
+        let (device, mut factory, main_color, main_depth) =
             gfx_window_glutin::init_existing::<ColorFormat, DepthFormat>(window);
-        println!("Vendor: {:?}", device.get_info().platform_name.vendor);
+        /*println!("Vendor: {:?}", device.get_info().platform_name.vendor);
         println!("Renderer: {:?}", device.get_info().platform_name.renderer);
         println!("Version: {:?}", device.get_info().version);
-        println!("Shading Language: {:?}", device.get_info().shading_language);
-        let mut encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
+        println!("Shading Language: {:?}", device.get_info().shading_language);*/
+        let encoder: gfx::Encoder<_,_> = factory.create_command_buffer().into();
         let max_texture_size = factory.get_capabilities().max_texture_size as u32;
 
         let x0 = 0.0;
@@ -502,8 +486,6 @@ impl Device {
         let data128_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_128 as u32, TEXTURE_HEIGTH * 4]).unwrap();
         let resource_rects = Texture::empty(&mut factory, [1024 / VECS_PER_RESOURCE_RECTS as u32, TEXTURE_HEIGTH * 2]).unwrap();
 
-        let mut programs = HashMap::new();
-
         let mut textures = HashMap::new();
         let (w, h) = color0.get_size();
         let invalid_id = TextureId::invalid();
@@ -520,7 +502,7 @@ impl Device {
             factory: factory,
             encoder: encoder,
             textures: textures,
-            programs: programs,
+            programs: HashMap::new(),
             color0: color0,
             color1: color1,
             color2: color2,
@@ -754,7 +736,7 @@ impl Device {
         texture_id
     }
 
-    pub fn create_texture_ids(&mut self,
+    pub fn _create_texture_ids(&mut self,
                               count: i32,
                               _target: TextureTarget,
                               format: ImageFormat) -> Vec<TextureId> {
@@ -763,8 +745,6 @@ impl Device {
         let (w, h) = self.color0.get_size();
         for _ in 0..count {
             let texture_id = self.generate_texture_id();
-
-            //let texture = self.create_texture::<Rgba8>(gfx::texture::Kind::D2(w as u16, h as u16, gfx::texture::AaMode::Single)).unwrap();
             let stride = match format {
                 ImageFormat::A8 => A8_STRIDE,
                 ImageFormat::RGBA8 => RGBA8_STRIDE,
@@ -774,8 +754,6 @@ impl Device {
 
             debug_assert!(self.textures.contains_key(&texture_id) == false);
             self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
-            //println!("after instert {:?} ts:{:?} s:{:?} {:?}", self.textures[&texture_id].id, self.textures[&texture_id].stride, stride, format);
-
             texture_ids.push(texture_id);
         }
 
@@ -786,22 +764,17 @@ impl Device {
                              _target: TextureTarget,
                              format: ImageFormat) -> TextureId {
         let mut texture_ids = Vec::new();
-
         let (w, h) = self.color0.get_size();
         let texture_id = self.generate_texture_id();
 
-        //let texture = self.create_texture::<Rgba8>(gfx::texture::Kind::D2(w as u16, h as u16, gfx::texture::AaMode::Single)).unwrap();
         let stride = match format {
             ImageFormat::A8 => A8_STRIDE,
             ImageFormat::RGBA8 => RGBA8_STRIDE,
             _ => unimplemented!(),
         };
         let texture_data = vec![0u8; (w*h*stride) as usize];
-
         debug_assert!(self.textures.contains_key(&texture_id) == false);
         self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
-        //println!("after instert {:?} ts:{:?} s:{:?} {:?}", self.textures[&texture_id].id, self.textures[&texture_id].stride, stride, format);
-
         texture_ids.push(texture_id);
 
         texture_id
@@ -833,9 +806,7 @@ impl Device {
                 data
             }
         };
-        //println!("init_texture id:{:?} {} {} {}", texture_id, texture.data.len(), actual_pixels.len(), texture.stride);
         //debug_assert!(texture.len() == actual_pixels.len());
-        //texture = &mut actual_pixels.to_vec();
         mem::replace(&mut texture.data, actual_pixels);
     }
 
@@ -845,30 +816,21 @@ impl Device {
                           y0: u32,
                           width: u32,
                           height: u32,
-                          stride: Option<u32>,
+                          _stride: Option<u32>,
                           data: &[u8]) {
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
-        //println!("update_texture id:{:?} {} {} ts:{:?} s:{:?}", texture_id, texture.data.len(), data.len(), texture.stride, stride);
         //debug_assert!(texture.len() == data.len());
-        //texture = &mut data.to_vec();
-        let (w, h) = self.color0.get_size();
-        /*let row_length = match stride {
-            Some(value) => value / bpp,
-            None => width,
-        };*/
-        /*let converted_data = */Device::update_texture_data(&mut texture.data, x0, y0, width, height, w, h, data, texture.stride);
-        //println!("update_texture id:{:?} {} {}", texture_id, texture.data.len(), converted_data.len());
-        
-        //mem::replace(&mut texture.data, converted_data);
+        let (w, _) = self.color0.get_size();
+        Device::update_texture_data(&mut texture.data, x0, y0, width, height, w, data, texture.stride);
     }
 
     pub fn resize_texture(&mut self,
-                          texture_id: TextureId,
-                          new_width: u32,
-                          new_height: u32,
-                          format: ImageFormat,
-                          filter: TextureFilter,
-                          mode: RenderTargetMode) {
+                          _texture_id: TextureId,
+                          _new_width: u32,
+                          _new_height: u32,
+                          _format: ImageFormat,
+                          _filter: TextureFilter,
+                          _mode: RenderTargetMode) {
           println!("Unimplemented! resize_texture");
     }
 
@@ -876,14 +838,11 @@ impl Device {
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         let (w, h) = self.color0.get_size();
         let data = vec![0u8; (w*h*4) as usize];
-        //println!("deinit_texture id:{:?} {} {}", texture_id, texture.data.len(), data.len());
         //debug_assert!(texture.len() == data.len());
-        //texture = &mut data.to_vec();
         mem::replace(&mut texture.data, data.to_vec());
     }
 
-    fn update_texture_data(data: &mut [u8], x_offset: u32, y_offset: u32, width: u32, height: u32, max_width: u32, max_height: u32, new_data: &[u8], stride: u32)/* -> Vec<u8>*/ {
-        //let mut data = vec![0u8; (max_width*max_height*stride) as usize];
+    fn update_texture_data(data: &mut [u8], x_offset: u32, y_offset: u32, width: u32, height: u32, max_width: u32, new_data: &[u8], stride: u32) {
         assert_eq!(width * height * stride, new_data.len() as u32);
         for j in 0..height {
             for i in 0..width*stride {
@@ -901,13 +860,11 @@ impl Device {
                 data[((i+x_offset*stride)+(j+y_offset)*max_width*stride) as usize] = new_data[(k+j*width*stride) as usize];
             }
         }
-        /*data.to_vec()*/
     }
 
     pub fn bind_texture(&mut self,
                         sampler: TextureSampler,
                         texture_id: TextureId) {
-        //println!("bind_texture {:?} {:?}", texture_id, sampler);
         let texture = match self.textures.get(&texture_id) {
             Some(data) => data,
             None => {
@@ -921,15 +878,12 @@ impl Device {
             TextureSampler::Color2 => Device::update_rgba_texture_u8(&mut self.encoder, &self.color2, texture.data.as_slice()),
             TextureSampler::CacheA8 => Device::update_a_texture_u8(&mut self.encoder, &self.cache_a8, texture.data.as_slice()),
             TextureSampler::CacheRGBA8 => Device::update_rgba_texture_u8(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice()),
-            _ => {
-                println!("There are only 5 samplers supported. {:?}", sampler);
-            }
+            _ => println!("There are only 5 samplers supported. {:?}", sampler),
         }
     }
 
     pub fn clear_target(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
         if let Some(color) = color {
-            println!("clear:{:?}", color);
             self.encoder.clear(&self.main_color,
                                [color[0].powf(2.2),
                                 color[1].powf(2.2),
@@ -943,17 +897,6 @@ impl Device {
     }
 
     pub fn update(&mut self, frame: &mut Frame) {
-        /*println!("update!");
-        println!("gpu_data16.len {}", frame.gpu_data16.len());
-        println!("gpu_data32.len {}", frame.gpu_data32.len());
-        println!("gpu_data64.len {}", frame.gpu_data64.len());
-        println!("gpu_data128.len {}", frame.gpu_data128.len());
-        println!("gpu_geometry.len {}", frame.gpu_geometry.len());
-        println!("gpu_resource_rects.len {}", frame.gpu_resource_rects.len());
-        println!("layer_texture_data.len {}", frame.layer_texture_data.len());
-        println!("render_task_data.len {}", frame.render_task_data.len());
-        println!("gpu_gradient_data.len {}", frame.gpu_gradient_data.len());
-        println!("device_pixel_ratio: {}", frame.device_pixel_ratio);*/
         Device::update_texture_f32(&mut self.encoder, &self.layers, Device::convert_layer(frame.layer_texture_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.render_tasks, Device::convert_render_task(frame.render_task_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.prim_geo, Device::convert_prim_geo(frame.gpu_geometry.clone()).as_slice());
@@ -967,43 +910,34 @@ impl Device {
     }
 
     pub fn flush(&mut self) {
-        println!("flush");
         self.encoder.flush(&mut self.device);
     }
 
-    pub fn draw(&mut self, program_id: &ProgramId, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], textures: &BatchTextures, blendmode: &BlendMode) {
-        /*println!("draw!");
-        println!("proj: {:?}", proj);
-        println!("data: {:?}", instances);*/
+    pub fn draw(&mut self,
+                program_id: &ProgramId,
+                proj: &Matrix4D<f32>,
+                instances: &[PrimitiveInstance],
+                _textures: &BatchTextures,
+                blendmode: &BlendMode) {
         if let Some(program) = self.programs.get_mut(program_id) {
             program.data.transform = proj.to_row_arrays();
+
             {
                 let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-                //println!("writer: {} instances: {}", writer.len(), instances.len());
                 for (i, inst) in instances.iter().enumerate() {
-                    //println!("instance[{}]: {:?}", i, inst);
                     writer[i].update(inst);
-                    //println!("instance[{}]: {:?}", i, writer[i]);
                 }
             }
+
             {
-                //writer[0].update(&instances[0]);
                 program.slice.instances = Some((instances.len() as u32, 0));
             }
-            //println!("upload {:?}", &self.upload);
-            //println!("copy");
+
             if let &BlendMode::Subpixel(ref color) = blendmode {
                 program.data.blend_value = [color.r, color.g, color.b, color.a];
             }
 
-            self.encoder.copy_buffer(&program.upload, &program.data.ibuf,
-                                     0, 0, program.upload.len()).unwrap();
-            /*println!("vbuf {:?}", self.data.vbuf.get_info());
-            println!("ibuf {:?}", self.data.ibuf);
-            println!("layers {:?}", self.layers);
-            println!("render_tasks {:?}", self.render_tasks);
-            println!("prim_geo {:?}", self.prim_geo);
-            println!("data16 {:?}", self.data16);*/
+            self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
             self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
         } else {
             println!("Shader not yet implemented {:?}",  program_id);
@@ -1127,7 +1061,6 @@ impl Device {
     fn convert_layer(layers: Vec<PackedLayer>) -> Vec<f32> {
         let mut data: Vec<f32> = vec!();
         for l in layers {
-            //println!("{:?}", l);
             data.append(&mut l.transform.to_row_major_array().to_vec());
             data.append(&mut l.inv_transform.to_row_major_array().to_vec());
             data.append(&mut l.local_clip_rect.origin.to_array().to_vec());
@@ -1166,9 +1099,6 @@ impl Device {
         println!("PrimitiveGeometry Vec length: {:?}", prim_geo.len());
         let mut data: Vec<f32> = vec!();
         for pg in prim_geo {
-            if data.len() < 30 {
-                println!("PrimitiveGeometry : {:?}", pg);
-            }
             data.append(&mut pg.local_rect.origin.to_array().to_vec());
             data.append(&mut pg.local_rect.size.to_array().to_vec());
             data.append(&mut pg.local_clip_rect.origin.to_array().to_vec());

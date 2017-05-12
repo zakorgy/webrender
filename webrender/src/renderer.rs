@@ -23,40 +23,40 @@ use gpu_store::{GpuStore, GpuStoreLayout};
 use internal_types::{CacheTextureId, RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{TextureUpdateList, PackedVertex, RenderTargetMode};
 use internal_types::{ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, SourceTexture};
-use internal_types::{BatchTextures, TextureSampler};
+use internal_types::/*{BatchTextures, TextureSampler};*/TextureSampler;
 use prim_store::{GradientData, SplitGeometry};
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
 use render_task::RenderTaskData;
 use std;
 use std::cmp;
-use std::collections::{HashMap, VecDeque};
+use std::collections::/*{HashMap, VecDeque};*/HashMap;
 use std::f32;
 use std::hash::BuildHasherDefault;
 use std::marker::PhantomData;
 use std::mem;
 use std::path::PathBuf;
-use std::rc::Rc;
+//use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver/*, Sender*/};
 use std::thread;
 use texture_cache::TextureCache;
 use rayon::ThreadPool;
 use rayon::Configuration as ThreadPoolConfig;
-use tiling::{AlphaBatchKind, BlurCommand, Frame, PrimitiveBatch, RenderTarget};
-use tiling::{AlphaRenderTarget, CacheClipInstance, PrimitiveInstance, ColorRenderTarget, RenderTargetKind};
-use time::precise_time_ns;
-use thread_profiler::{register_thread_with_profiler, write_profile};
+use tiling::{AlphaBatchKind/*, BlurCommand*/, Frame, PrimitiveBatch/*, RenderTarget*/};
+use tiling::{AlphaRenderTarget/*, CacheClipInstance, PrimitiveInstance*/, ColorRenderTarget, RenderTargetKind};
+//use time::precise_time_ns;
+use thread_profiler::{register_thread_with_profiler/*, write_profile*/};
 use util::TransformedRectKind;
 use webgl_types::GLContextHandleWrapper;
 use webrender_traits::{ColorF, Epoch, PipelineId, RenderNotifier, RenderDispatcher};
 use webrender_traits::{ExternalImageId, ExternalImageType, ImageData, ImageFormat, RenderApiSender};
-use webrender_traits::{DeviceIntRect, DevicePoint, DeviceIntPoint, DeviceIntSize, DeviceUintSize};
-use webrender_traits::{ImageDescriptor, BlobImageRenderer};
+use webrender_traits::{/*DeviceIntRect,*/ DevicePoint/*, DeviceIntPoint, DeviceIntSize*/, DeviceUintSize};
+use webrender_traits::/*{ImageDescriptor, BlobImageRenderer};*/BlobImageRenderer;
 use webrender_traits::{channel, FontRenderMode};
 use webrender_traits::VRCompositorHandler;
-use webrender_traits::{YuvColorSpace, YuvFormat};
-use webrender_traits::{YUV_COLOR_SPACES, YUV_FORMATS};
+//use webrender_traits::{YuvColorSpace, YuvFormat};
+//use webrender_traits::{YUV_COLOR_SPACES, YUV_FORMATS};
 
 use glutin;
 
@@ -333,7 +333,7 @@ impl Renderer {
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
 
-        let mut texture_cache = TextureCache::new(max_texture_size);
+        let /*mut */texture_cache = TextureCache::new(max_texture_size);
         let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Default);
         let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Default);
         let dither_matrix_texture_id = None;
@@ -1424,7 +1424,7 @@ impl Renderer {
     }*/
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
-    pub fn deinit(mut self) {
+    pub fn deinit(/*mut */self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         // self.device.begin_frame(1.0);
         // self.device.deinit_texture(self.dummy_cache_texture_id);
