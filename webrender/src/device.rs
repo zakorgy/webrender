@@ -44,20 +44,20 @@ use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, GradientData, 
 use renderer::{BlendMode, DUMMY_A8_ID, DUMMY_RGBA8_ID};
 
 pub type A8 = (R8, Unorm);
-pub const VECS_PER_LAYER: u32 = 13;
-pub const VECS_PER_RENDER_TASK: u32 = 3;
-pub const VECS_PER_PRIM_GEOM: u32 = 2;
-pub const VECS_PER_SPLIT_GEOM: u32 = 3;
-pub const MAX_INSTANCE_COUNT: usize = 2000;
 pub const VECS_PER_DATA_16: u32 = 1;
 pub const VECS_PER_DATA_32: u32 = 2;
 pub const VECS_PER_DATA_64: u32 = 4;
 pub const VECS_PER_DATA_128: u32 = 8;
-pub const VECS_PER_RESOURCE_RECTS: u32 = 1;
 pub const VECS_PER_GRADIENT_DATA: u32 = 4;
+pub const VECS_PER_LAYER: u32 = 13;
+pub const VECS_PER_PRIM_GEOM: u32 = 2;
+pub const VECS_PER_RENDER_TASK: u32 = 3;
+pub const VECS_PER_RESOURCE_RECTS: u32 = 1;
+pub const VECS_PER_SPLIT_GEOM: u32 = 3;
 pub const FLOAT_SIZE: u32 = 4;
 pub const TEXTURE_HEIGTH: u32 = 8;
 pub const DEVICE_PIXEL_RATIO: f32 = 1.0;
+pub const MAX_INSTANCE_COUNT: usize = 2000;
 
 pub const A8_STRIDE: u32 = 1;
 pub const RGBA8_STRIDE: u32 = 4;
@@ -174,18 +174,22 @@ gfx_defines! {
         cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
-        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
-        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
-        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
         data16: gfx::TextureSampler<[f32; 4]> = "sData16",
         data32: gfx::TextureSampler<[f32; 4]> = "sData32",
         data64: gfx::TextureSampler<[f32; 4]> = "sData64",
         data128: gfx::TextureSampler<[f32; 4]> = "sData128",
-        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
         gradients : gfx::TextureSampler<[f32; 4]> = "sGradients",
+        layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
+        prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
+        render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
+        resource_rects: gfx::TextureSampler<[f32; 4]> = "sResourceRects",
+        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
 
-        out_color: gfx::RawRenderTarget = ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, None),
+        out_color: gfx::RawRenderTarget = ("oFragColor",
+                                           Format(gfx::format::SurfaceType::R32_G32_B32_A32,
+                                                  gfx::format::ChannelType::Float),
+                                           gfx::state::MASK_ALL,
+                                           None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
         blend_value: gfx::BlendRef = (),
     }
@@ -210,7 +214,6 @@ impl Instances {
             element_index: 0,
             user_data: [0, 0],
             z_index: 0,
-            //clear_rectangle: [0, 0, 0, 0],
         }
     }
 
@@ -223,7 +226,6 @@ impl Instances {
         self.element_index = instance.sub_index;
         self.user_data = instance.user_data;
         self.z_index = instance.z_sort_index;
-        // FIXME: Find the value which is used to update self.clear_rectangle.
     }
 }
 
@@ -260,12 +262,12 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
-        let tex_kind = gfx::texture::Kind::D2(width, height,
-            gfx::texture::AaMode::Single);
+        let tex_kind = gfx::texture::Kind::D2(width, height, gfx::texture::AaMode::Single);
         let filter_method = match filter {
             TextureFilter::Nearest => gfx::texture::FilterMethod::Scale,
             TextureFilter::Linear => gfx::texture::FilterMethod::Bilinear,
         };
+
         let sampler_info = gfx::texture::SamplerInfo::new(
             filter_method,
             gfx::texture::WrapMode::Clamp
@@ -372,37 +374,33 @@ impl TextureId {
     pub fn new(name: u32, _: TextureTarget) -> TextureId {
         TextureId {
             name: name,
-            //target: gfx::texture::Kind::D2(1,1,gfx::texture::AaMode::Single),
         }
     }
 
     pub fn invalid() -> TextureId {
         TextureId {
             name: 0,
-            //target: gfx::texture::Kind::D2(1,1,gfx::texture::AaMode::Single),
         }
     }
 
     pub fn invalid_a8() -> TextureId {
         TextureId {
             name: 1,
-            //target: gfx::texture::Kind::D2(1,1,gfx::texture::AaMode::Single),
         }
     }
 
-    pub fn _is_valid(&self) -> bool { *self != TextureId::invalid() && *self != TextureId::invalid_a8() }
+    pub fn _is_valid(&self) -> bool { !(*self == TextureId::invalid() || *self == TextureId::invalid_a8()) }
 }
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
 pub struct TextureId {
     name: u32,
-    //target: gfx::texture::Kind,
 }
 
 #[derive(Debug)]
 pub struct TextureData {
     id: TextureId,
-    data: Vec<u8>,
+    pub data: Vec<u8>,
     stride: u32,
 }
 
@@ -424,16 +422,16 @@ pub struct Device {
     dither: Texture<R, Rgba8>,
     cache_a8: Texture<R, A8>,
     cache_rgba8: Texture<R, Rgba8>,
-    layers: Texture<R, Rgba32F>,
-    render_tasks: Texture<R, Rgba32F>,
-    prim_geo: Texture<R, Rgba32F>,
-    split_geo: Texture<R, Rgba32F>,
     data16: Texture<R, Rgba32F>,
     data32: Texture<R, Rgba32F>,
     data64: Texture<R, Rgba32F>,
     data128: Texture<R, Rgba32F>,
-    resource_rects: Texture<R, Rgba32F>,
     gradient_data: Texture<R, Rgba8>,
+    layers: Texture<R, Rgba32F>,
+    prim_geo: Texture<R, Rgba32F>,
+    render_tasks: Texture<R, Rgba32F>,
+    resource_rects: Texture<R, Rgba32F>,
+    split_geo: Texture<R, Rgba32F>,
     max_texture_size: u32,
     main_color: gfx_core::handle::RenderTargetView<R, ColorFormat>,
     main_depth: gfx_core::handle::DepthStencilView<R, DepthFormat>,
@@ -475,16 +473,16 @@ impl Device {
         let cache_a8 = Texture::empty(&mut factory, texture_size).unwrap();
         let cache_rgba8 = Texture::empty(&mut factory, texture_size).unwrap();
 
-        let gradient_data = Texture::empty(&mut factory, [1024 / VECS_PER_GRADIENT_DATA as u32 , TEXTURE_HEIGTH * 10]).unwrap();
-        let layers_tex = Texture::empty(&mut factory, [1024 / VECS_PER_LAYER as u32, 64]).unwrap();
-        let render_tasks_tex = Texture::empty(&mut factory, [1024 / VECS_PER_RENDER_TASK as u32, TEXTURE_HEIGTH]).unwrap();
-        let prim_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_PRIM_GEOM as u32, TEXTURE_HEIGTH]).unwrap();
-        let split_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_SPLIT_GEOM as u32, TEXTURE_HEIGTH * 2]).unwrap();
         let data16_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_16 as u32, TEXTURE_HEIGTH * 4]).unwrap();
         let data32_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_32 as u32, TEXTURE_HEIGTH]).unwrap();
         let data64_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_64 as u32, TEXTURE_HEIGTH]).unwrap();
         let data128_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_128 as u32, TEXTURE_HEIGTH * 4]).unwrap();
+        let gradient_data = Texture::empty(&mut factory, [1024 / VECS_PER_GRADIENT_DATA as u32 , TEXTURE_HEIGTH * 10]).unwrap();
+        let layers_tex = Texture::empty(&mut factory, [1024 / VECS_PER_LAYER as u32, 64]).unwrap();
+        let prim_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_PRIM_GEOM as u32, TEXTURE_HEIGTH]).unwrap();
+        let render_tasks_tex = Texture::empty(&mut factory, [1024 / VECS_PER_RENDER_TASK as u32, TEXTURE_HEIGTH]).unwrap();
         let resource_rects = Texture::empty(&mut factory, [1024 / VECS_PER_RESOURCE_RECTS as u32, TEXTURE_HEIGTH * 2]).unwrap();
+        let split_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_SPLIT_GEOM as u32, TEXTURE_HEIGTH * 2]).unwrap();
 
         let mut textures = HashMap::new();
         let (w, h) = color0.get_size();
@@ -509,16 +507,16 @@ impl Device {
             dither: dither,
             cache_a8: cache_a8,
             cache_rgba8: cache_rgba8,
-            layers: layers_tex,
-            render_tasks: render_tasks_tex,
-            prim_geo: prim_geo_tex,
-            split_geo: split_geo_tex,
             data16: data16_tex,
             data32: data32_tex,
             data64: data64_tex,
             data128: data128_tex,
-            resource_rects: resource_rects,
             gradient_data: gradient_data,
+            layers: layers_tex,
+            prim_geo: prim_geo_tex,
+            render_tasks: render_tasks_tex,
+            resource_rects: resource_rects,
+            split_geo: split_geo_tex,
             max_texture_size: max_texture_size,
             main_color: main_color,
             main_depth: main_depth,
@@ -642,7 +640,10 @@ impl Device {
             vert_src,
             frag_src,
             primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(ALPHA)),
+                out_color: ("oFragColor",
+                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float),
+                            gfx::state::MASK_ALL,
+                            Some(ALPHA)),
                 .. primitive::new()
             }
         ).unwrap();
@@ -651,7 +652,10 @@ impl Device {
             vert_src,
             frag_src,
             primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(PREM_ALPHA)),
+                out_color: ("oFragColor",
+                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float),
+                            gfx::state::MASK_ALL,
+                            Some(PREM_ALPHA)),
                 .. primitive::new()
             }
         ).unwrap();
@@ -660,7 +664,10 @@ impl Device {
             vert_src,
             frag_src,
             primitive::Init {
-                out_color: ("oFragColor", Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float), gfx::state::MASK_ALL, Some(SUBPIXEL)),
+                out_color: ("oFragColor",
+                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float),
+                            gfx::state::MASK_ALL,
+                            Some(SUBPIXEL)),
                 .. primitive::new()
             }
         ).unwrap();
@@ -698,16 +705,16 @@ impl Device {
             dither: (self.dither.clone().view, self.dither.clone().sampler),
             cache_a8: (self.cache_a8.clone().view, self.cache_a8.clone().sampler),
             cache_rgba8: (self.cache_rgba8.clone().view, self.cache_rgba8.clone().sampler),
-            layers: (self.layers.clone().view, self.layers.clone().sampler),
-            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
-            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
-            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
             data16: (self.data16.clone().view, self.data16.clone().sampler),
             data32: (self.data32.clone().view, self.data32.clone().sampler),
             data64: (self.data64.clone().view, self.data64.clone().sampler),
             data128: (self.data128.clone().view, self.data128.clone().sampler),
-            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
             gradients: (self.gradient_data.clone().view, self.gradient_data.clone().sampler),
+            layers: (self.layers.clone().view, self.layers.clone().sampler),
+            prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
+            render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
+            resource_rects: (self.resource_rects.clone().view, self.resource_rects.clone().sampler),
+            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
             out_color: self.main_color.raw().clone(),
             out_depth: self.main_depth.clone(),
             blend_value: [0.0, 0.0, 0.0, 0.0]
@@ -722,10 +729,9 @@ impl Device {
     }
 
     fn generate_texture_id(&mut self) -> TextureId {
-        //let mut rng = rand::thread_rng();
         use rand::OsRng;
-        let mut rng = OsRng::new().unwrap();
 
+        let mut rng = OsRng::new().unwrap();
         let mut texture_id = TextureId::invalid();
         loop {
             texture_id.name = rng.gen_range(FIRST_UNRESERVED_ID, u32::max_value());
@@ -752,7 +758,7 @@ impl Device {
             };
             let texture_data = vec![0u8; (w*h*stride) as usize];
 
-            debug_assert!(self.textures.contains_key(&texture_id) == false);
+            assert!(self.textures.contains_key(&texture_id) == false);
             self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
             texture_ids.push(texture_id);
         }
@@ -773,7 +779,7 @@ impl Device {
             _ => unimplemented!(),
         };
         let texture_data = vec![0u8; (w*h*stride) as usize];
-        debug_assert!(self.textures.contains_key(&texture_id) == false);
+        assert!(self.textures.contains_key(&texture_id) == false);
         self.textures.insert(texture_id, TextureData {id: texture_id, data: texture_data, stride: stride });
         texture_ids.push(texture_id);
 
@@ -806,7 +812,7 @@ impl Device {
                 data
             }
         };
-        //debug_assert!(texture.len() == actual_pixels.len());
+        assert!(texture.data.len() == actual_pixels.len());
         mem::replace(&mut texture.data, actual_pixels);
     }
 
@@ -819,7 +825,7 @@ impl Device {
                           _stride: Option<u32>,
                           data: &[u8]) {
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
-        //debug_assert!(texture.len() == data.len());
+        assert!(texture.data.len() >= data.len());
         let (w, _) = self.color0.get_size();
         Device::update_texture_data(&mut texture.data, x0, y0, width, height, w, data, texture.stride);
     }
@@ -838,7 +844,7 @@ impl Device {
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         let (w, h) = self.color0.get_size();
         let data = vec![0u8; (w*h*4) as usize];
-        //debug_assert!(texture.len() == data.len());
+        assert!(texture.data.len() == data.len());
         mem::replace(&mut texture.data, data.to_vec());
     }
 
@@ -846,6 +852,8 @@ impl Device {
         assert_eq!(width * height * stride, new_data.len() as u32);
         for j in 0..height {
             for i in 0..width*stride {
+                // If we have alpha values (stride == 1) we do nothing,
+                // otherwise we have bgra values and switch the red and blue bytes.
                 let k = {
                     if stride == 1 {
                         i
@@ -857,6 +865,7 @@ impl Device {
                         i
                     }
                 };
+                // Write the data array with the new values starting from the (offset * stride) position.
                 data[((i+x_offset*stride)+(j+y_offset)*max_width*stride) as usize] = new_data[(k+j*width*stride) as usize];
             }
         }
@@ -999,12 +1008,9 @@ impl Device {
     }
 
     fn convert_data16(data16: Vec<GpuBlock16>) -> Vec<f32> {
-        let mut data: Vec<f32> = vec!();
-        for d in data16 {
-            data.append(&mut d.data.to_vec());
-        }
+        let mut data: Vec<f32> = data16.iter().flat_map(|d| d.data.to_vec()).collect();
         let max_size = ((1024 / VECS_PER_DATA_16) * FLOAT_SIZE * TEXTURE_HEIGTH * 4) as usize;
-        println!("convert_data16 len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1014,12 +1020,9 @@ impl Device {
     }
 
     fn convert_data32(data32: Vec<GpuBlock32>) -> Vec<f32> {
-        let mut data: Vec<f32> = vec!();
-        for d in data32 {
-            data.append(&mut d.data.to_vec());
-        }
+        let mut data: Vec<f32> = data32.iter().flat_map(|d| d.data.to_vec()).collect();
         let max_size = ((1024 / VECS_PER_DATA_32) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
-        println!("convert_data32 len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1029,12 +1032,9 @@ impl Device {
     }
 
     fn convert_data64(data64: Vec<GpuBlock64>) -> Vec<f32> {
-        let mut data: Vec<f32> = vec!();
-        for d in data64 {
-            data.append(&mut d.data.to_vec());
-        }
+        let mut data: Vec<f32> = data64.iter().flat_map(|d| d.data.to_vec()).collect();
         let max_size = ((1024 / VECS_PER_DATA_64) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
-        println!("convert_data64 len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; (max_size - data.len())];
             data.append(&mut zeros);
@@ -1044,12 +1044,9 @@ impl Device {
     }
 
     fn convert_data128(data128: Vec<GpuBlock128>) -> Vec<f32> {
-        let mut data: Vec<f32> = vec!();
-        for d in data128 {
-            data.append(&mut d.data.to_vec());
-        }
+        let mut data: Vec<f32> = data128.iter().flat_map(|d| d.data.to_vec()).collect();
         let max_size = ((1024 / VECS_PER_DATA_128) * FLOAT_SIZE * TEXTURE_HEIGTH * 4) as usize;
-        println!("convert_data128 len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1071,7 +1068,7 @@ impl Device {
             data.append(&mut l.screen_vertices[3].to_array().to_vec());
         }
         let max_size = ((1024 / VECS_PER_LAYER) * FLOAT_SIZE * 64) as usize;
-        println!("convert_layer len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1081,12 +1078,9 @@ impl Device {
     }
 
     fn convert_render_task(render_tasks: Vec<RenderTaskData>) -> Vec<f32> {
-        let mut data: Vec<f32> = vec!();
-        for rt in render_tasks {
-            data.append(&mut rt.data.to_vec());
-        }
+        let mut data: Vec<f32> = render_tasks.iter().flat_map(|rt| rt.data.to_vec()).collect();
         let max_size = ((1024 / VECS_PER_RENDER_TASK) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
-        println!("convert_render_task len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1096,7 +1090,6 @@ impl Device {
     }
 
     fn convert_prim_geo(prim_geo: Vec<PrimitiveGeometry>) -> Vec<f32> {
-        println!("PrimitiveGeometry Vec length: {:?}", prim_geo.len());
         let mut data: Vec<f32> = vec!();
         for pg in prim_geo {
             data.append(&mut pg.local_rect.origin.to_array().to_vec());
@@ -1105,7 +1098,7 @@ impl Device {
             data.append(&mut pg.local_clip_rect.size.to_array().to_vec());
         }
         let max_size = ((1024 / VECS_PER_PRIM_GEOM) * FLOAT_SIZE * TEXTURE_HEIGTH) as usize;
-        println!("convert_prim_geo len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1121,7 +1114,7 @@ impl Device {
             data.append(&mut r.uv1.to_array().to_vec());
         }
         let max_size = ((1024 / VECS_PER_RESOURCE_RECTS) * FLOAT_SIZE * TEXTURE_HEIGTH * 2) as usize;
-        println!("convert_resource_rects len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
@@ -1155,7 +1148,7 @@ impl Device {
             }
         }
         let max_size = ((1024 / VECS_PER_GRADIENT_DATA) * 4 * TEXTURE_HEIGTH * 10) as usize;
-        println!("convert_gradient_data len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0u8; max_size - data.len()];
             data.append(&mut zeros);
@@ -1165,12 +1158,9 @@ impl Device {
     }
 
     fn convert_split_geo(split_geo: Vec<SplitGeometry>) -> Vec<f32> {
-        let mut data: Vec<f32> = vec!();
-        for g in split_geo {
-            data.append(&mut g.data.to_vec());
-        }
+        let mut data: Vec<f32> = split_geo.iter().flat_map(|g| g.data.to_vec()).collect();
         let max_size = ((1024 / VECS_PER_SPLIT_GEOM) * FLOAT_SIZE * TEXTURE_HEIGTH * 2) as usize;
-        println!("convert_split_geo len {:?} max_size: {}", data.len(), max_size);
+        assert!(!(data.len() > max_size));
         if max_size > data.len() {
             let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);

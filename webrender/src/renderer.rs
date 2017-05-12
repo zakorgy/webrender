@@ -758,7 +758,6 @@ impl Renderer {
         debug_assert!(!needs_clipping ||
                       batch.key.blend_mode == BlendMode::Alpha ||
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
-        println!("AlphaBatchKind in submit_batch {:?}, with blend mode : {:?}", batch.key.kind, batch.key.blend_mode);
         let program_id = match batch.key.kind {
             AlphaBatchKind::Rectangle => {
                 match transform_kind {
