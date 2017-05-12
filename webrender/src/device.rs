@@ -46,13 +46,14 @@ use gfx::memory::{Usage, SHADER_RESOURCE};
 use gfx::format::TextureSurface;
 use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
-use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, GradientData, PrimitiveGeometry, TexelRect};
+use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, GradientData, PrimitiveGeometry, SplitGeometry, TexelRect};
 use renderer::{BlendMode, DUMMY_A8_ID, DUMMY_RGBA8_ID};
 
 pub type A8 = (R8, Unorm);
 pub const VECS_PER_LAYER: u32 = 13;
 pub const VECS_PER_RENDER_TASK: u32 = 3;
 pub const VECS_PER_PRIM_GEOM: u32 = 2;
+pub const VECS_PER_SPLIT_GEOM: u32 = 3;
 pub const MAX_INSTANCE_COUNT: usize = 2000;
 pub const VECS_PER_DATA_16: u32 = 1;
 pub const VECS_PER_DATA_32: u32 = 2;
@@ -180,8 +181,8 @@ gfx_defines! {
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
         prim_geometry: gfx::TextureSampler<[f32; 4]> = "sPrimGeometry",
+        split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
         data16: gfx::TextureSampler<[f32; 4]> = "sData16",
-
         data32: gfx::TextureSampler<[f32; 4]> = "sData32",
         data64: gfx::TextureSampler<[f32; 4]> = "sData64",
         data128: gfx::TextureSampler<[f32; 4]> = "sData128",
@@ -442,6 +443,7 @@ pub struct Device {
     layers: Texture<R, Rgba32F>,
     render_tasks: Texture<R, Rgba32F>,
     prim_geo: Texture<R, Rgba32F>,
+    split_geo: Texture<R, Rgba32F>,
     data16: Texture<R, Rgba32F>,
     data32: Texture<R, Rgba32F>,
     data64: Texture<R, Rgba32F>,
@@ -493,6 +495,7 @@ impl Device {
         let layers_tex = Texture::empty(&mut factory, [1024 / VECS_PER_LAYER as u32, 64]).unwrap();
         let render_tasks_tex = Texture::empty(&mut factory, [1024 / VECS_PER_RENDER_TASK as u32, TEXTURE_HEIGTH]).unwrap();
         let prim_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_PRIM_GEOM as u32, TEXTURE_HEIGTH]).unwrap();
+        let split_geo_tex = Texture::empty(&mut factory, [1024 / VECS_PER_SPLIT_GEOM as u32, TEXTURE_HEIGTH * 2]).unwrap();
         let data16_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_16 as u32, TEXTURE_HEIGTH * 4]).unwrap();
         let data32_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_32 as u32, TEXTURE_HEIGTH]).unwrap();
         let data64_tex = Texture::empty(&mut factory, [1024 / VECS_PER_DATA_64 as u32, TEXTURE_HEIGTH]).unwrap();
@@ -527,6 +530,7 @@ impl Device {
             layers: layers_tex,
             render_tasks: render_tasks_tex,
             prim_geo: prim_geo_tex,
+            split_geo: split_geo_tex,
             data16: data16_tex,
             data32: data32_tex,
             data64: data64_tex,
@@ -582,7 +586,7 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_ANGLE_GRADIENT_TRANSFORM);
-        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_BLEND);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.vert")),
@@ -599,7 +603,7 @@ impl Device {
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_CACHE_IMAGE_TRANSFORM);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")),
-                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);*/
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_COMPOSITE);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT);
@@ -627,13 +631,16 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_TRANSFORM);
-        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.vert")),
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_SUBPIXEL);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_TEXT_RUN_SUBPIXEL_TRANSFORM);
-        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_split_composite.vert")),
+                           include_bytes!(concat!(env!("OUT_DIR"), "/ps_split_composite.frag")),
+                           vertex_buffer.clone(), slice.clone(), ProgramId::PS_SPLIT_COMPOSITE);
+        /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE);
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
@@ -712,6 +719,7 @@ impl Device {
             layers: (self.layers.clone().view, self.layers.clone().sampler),
             render_tasks: (self.render_tasks.clone().view, self.render_tasks.clone().sampler),
             prim_geometry: (self.prim_geo.clone().view, self.prim_geo.clone().sampler),
+            split_geometry: (self.split_geo.clone().view, self.split_geo.clone().sampler),
             data16: (self.data16.clone().view, self.data16.clone().sampler),
             data32: (self.data32.clone().view, self.data32.clone().sampler),
             data64: (self.data64.clone().view, self.data64.clone().sampler),
@@ -949,6 +957,7 @@ impl Device {
         Device::update_texture_f32(&mut self.encoder, &self.layers, Device::convert_layer(frame.layer_texture_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.render_tasks, Device::convert_render_task(frame.render_task_data.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.prim_geo, Device::convert_prim_geo(frame.gpu_geometry.clone()).as_slice());
+        Device::update_texture_f32(&mut self.encoder, &self.split_geo, Device::convert_split_geo(frame.gpu_split_geometry.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data16, Device::convert_data16(frame.gpu_data16.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data32, Device::convert_data32(frame.gpu_data32.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data64, Device::convert_data64(frame.gpu_data64.clone()).as_slice());
@@ -1219,6 +1228,21 @@ impl Device {
         println!("convert_gradient_data len {:?} max_size: {}", data.len(), max_size);
         if max_size > data.len() {
             let mut zeros = vec![0u8; max_size - data.len()];
+            data.append(&mut zeros);
+        }
+        assert!(data.len() == max_size);
+        data
+    }
+
+    fn convert_split_geo(split_geo: Vec<SplitGeometry>) -> Vec<f32> {
+        let mut data: Vec<f32> = vec!();
+        for g in split_geo {
+            data.append(&mut g.data.to_vec());
+        }
+        let max_size = ((1024 / VECS_PER_SPLIT_GEOM) * FLOAT_SIZE * TEXTURE_HEIGTH * 2) as usize;
+        println!("convert_split_geo len {:?} max_size: {}", data.len(), max_size);
+        if max_size > data.len() {
+            let mut zeros = vec![0f32; max_size - data.len()];
             data.append(&mut zeros);
         }
         assert!(data.len() == max_size);
