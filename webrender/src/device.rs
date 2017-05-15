@@ -41,7 +41,7 @@ use gfx::format::{Format, R8, Unorm, Rgba8, Rgba32F};
 use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
 use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, GradientData, PrimitiveGeometry, SplitGeometry, TexelRect};
-use renderer::{BlendMode, DUMMY_A8_ID, DUMMY_RGBA8_ID};
+use renderer::{BlendMode, DUMMY_A8_ID, DUMMY_DITHER_ID, DUMMY_RGBA8_ID};
 
 pub type A8 = (R8, Unorm);
 pub const VECS_PER_DATA_16: u32 = 1;
@@ -61,7 +61,7 @@ pub const MAX_INSTANCE_COUNT: usize = 2000;
 
 pub const A8_STRIDE: u32 = 1;
 pub const RGBA8_STRIDE: u32 = 4;
-pub const FIRST_UNRESERVED_ID: u32 = DUMMY_A8_ID + 1;
+pub const FIRST_UNRESERVED_ID: u32 = DUMMY_DITHER_ID + 1;
 
 pub const ALPHA: Blend = Blend {
     color: BlendChannel {
@@ -114,7 +114,9 @@ pub enum ProgramId {
     CS_CLIP_RECTANGLE,
     CS_TEXT_RUN,
     PS_ANGLE_GRADIENT,
+    PS_ANGLE_GRADIENT_DITHER,
     PS_ANGLE_GRADIENT_TRANSFORM,
+    PS_ANGLE_GRADIENT_DITHER_TRANSFORM,
     PS_BLEND,
     PS_BORDER_CORNER,
     PS_BORDER_CORNER_TRANSFORM,
@@ -126,12 +128,16 @@ pub enum ProgramId {
     PS_CACHE_IMAGE_TRANSFORM,
     PS_COMPOSITE,
     PS_GRADIENT,
+    PS_GRADIENT_DITHER,
     PS_GRADIENT_TRANSFORM,
+    PS_GRADIENT_DITHER_TRANSFORM,
     PS_HARDWARE_COMPOSITE,
     PS_IMAGE,
     PS_IMAGE_TRANSFORM,
     PS_RADIAL_GRADIENT,
+    PS_RADIAL_GRADIENT_DITHER,
     PS_RADIAL_GRADIENT_TRANSFORM,
+    PS_RADIAL_GRADIENT_DITHER_TRANSFORM,
     PS_RECTANGLE,
     PS_RECTANGLE_TRANSFORM,
     PS_RECTANGLE_CLIP,
@@ -170,7 +176,7 @@ gfx_defines! {
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<[f32; 4]> = "sDither",
+        dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
@@ -419,7 +425,7 @@ pub struct Device {
     color0: Texture<R, Rgba8>,
     color1: Texture<R, Rgba8>,
     color2: Texture<R, Rgba8>,
-    dither: Texture<R, Rgba8>,
+    dither: Texture<R, A8>,
     cache_a8: Texture<R, A8>,
     cache_rgba8: Texture<R, Rgba8>,
     data16: Texture<R, Rgba32F>,
@@ -469,7 +475,7 @@ impl Device {
         let color0 = Texture::empty(&mut factory, texture_size).unwrap();
         let color1 = Texture::empty(&mut factory, texture_size).unwrap();
         let color2 = Texture::empty(&mut factory, texture_size).unwrap();
-        let dither = Texture::empty(&mut factory, texture_size).unwrap();
+        let dither = Texture::empty(&mut factory, [8,8]).unwrap();
         let cache_a8 = Texture::empty(&mut factory, texture_size).unwrap();
         let cache_rgba8 = Texture::empty(&mut factory, texture_size).unwrap();
 
@@ -494,6 +500,18 @@ impl Device {
         textures.insert(dummy_rgba8_id, TextureData { id: dummy_rgba8_id, data: vec![0u8; (w*h*RGBA8_STRIDE) as usize], stride: RGBA8_STRIDE });
         let dummy_a8_id = TextureId { name: DUMMY_A8_ID };
         textures.insert(dummy_a8_id, TextureData { id: dummy_a8_id, data: vec![0u8; (w*h*A8_STRIDE) as usize], stride: A8_STRIDE });
+        let dummy_dither_id = TextureId { name: DUMMY_DITHER_ID };
+        let dither_matrix = vec![
+            00, 48, 12, 60, 03, 51, 15, 63,
+            32, 16, 44, 28, 35, 19, 47, 31,
+            08, 56, 04, 52, 11, 59, 07, 55,
+            40, 24, 36, 20, 43, 27, 39, 23,
+            02, 50, 14, 62, 01, 49, 13, 61,
+            34, 18, 46, 30, 33, 17, 45, 29,
+            10, 58, 06, 54, 09, 57, 05, 53,
+            42, 26, 38, 22, 41, 25, 37, 21
+        ];
+        textures.insert(dummy_dither_id, TextureData { id: dummy_dither_id, data: dither_matrix, stride: A8_STRIDE });
 
         let mut device = Device {
             device: device,
@@ -626,6 +644,24 @@ impl Device {
         device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
                            include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.frag")),
                            vertex_buffer.clone(), slice.clone(), ProgramId::PS_YUV_IMAGE_TRANSFORM);*/
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither.vert")),
+                   include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither.frag")),
+                   vertex_buffer.clone(), slice.clone(), ProgramId::PS_ANGLE_GRADIENT_DITHER);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither_transform.vert")),
+                   include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither_transform.frag")),
+                   vertex_buffer.clone(), slice.clone(), ProgramId::PS_ANGLE_GRADIENT_DITHER_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither.vert")),
+                   include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither.frag")),
+                   vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT_DITHER);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither_transform.vert")),
+                   include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither_transform.frag")),
+                   vertex_buffer.clone(), slice.clone(), ProgramId::PS_GRADIENT_DITHER_TRANSFORM);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither.vert")),
+                   include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither.frag")),
+                   vertex_buffer.clone(), slice.clone(), ProgramId::PS_RADIAL_GRADIENT_DITHER);
+        device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither_transform.vert")),
+                   include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither_transform.frag")),
+                   vertex_buffer.clone(), slice.clone(), ProgramId::PS_RADIAL_GRADIENT_DITHER_TRANSFORM);
         device
     }
 
@@ -887,6 +923,7 @@ impl Device {
             TextureSampler::Color2 => Device::update_rgba_texture_u8(&mut self.encoder, &self.color2, texture.data.as_slice()),
             TextureSampler::CacheA8 => Device::update_a_texture_u8(&mut self.encoder, &self.cache_a8, texture.data.as_slice()),
             TextureSampler::CacheRGBA8 => Device::update_rgba_texture_u8(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice()),
+            TextureSampler::Dither => Device::update_a_texture_u8(&mut self.encoder, &self.dither, texture.data.as_slice()),
             _ => println!("There are only 5 samplers supported. {:?}", sampler),
         }
     }

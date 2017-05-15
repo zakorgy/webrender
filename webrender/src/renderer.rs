@@ -64,6 +64,7 @@ pub const GPU_DATA_TEXTURE_POOL: usize = 5;
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
+pub const DUMMY_DITHER_ID: u32 = 4;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ImageBufferKind {
@@ -240,6 +241,7 @@ pub struct Renderer {
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
     enable_profiler: bool,
+    enable_dithering: bool,
     max_recorded_profiles: usize,
     clear_framebuffer: bool,
     clear_color: ColorF,
@@ -336,7 +338,11 @@ impl Renderer {
         let /*mut */texture_cache = TextureCache::new(max_texture_size);
         let dummy_cache_texture_id = TextureId::new(DUMMY_RGBA8_ID, TextureTarget::Default);
         let dummy_cache_texture_a8_id = TextureId::new(DUMMY_A8_ID, TextureTarget::Default);
-        let dither_matrix_texture_id = None;
+        let dither_matrix_texture_id = if options.enable_dithering {
+                                           Some(TextureId::new(DUMMY_DITHER_ID, TextureTarget::Default))
+                                       } else {
+                                           None
+                                       };
 
         let x0 = 0.0;
         let y0 = 0.0;
@@ -423,6 +429,7 @@ impl Renderer {
             notifier: notifier,
             render_target_debug: render_target_debug,
             enable_profiler: options.enable_profiler,
+            enable_dithering: options.enable_dithering,
             max_recorded_profiles: options.max_recorded_profiles,
             clear_framebuffer: options.clear_framebuffer,
             clear_color: options.clear_color,
@@ -823,20 +830,56 @@ impl Renderer {
             },
             AlphaBatchKind::AlignedGradient => {
                 match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_GRADIENT,
-                    TransformedRectKind::Complex => ProgramId::PS_GRADIENT_TRANSFORM,
+                    TransformedRectKind::AxisAligned => {
+                        if self.enable_dithering {
+                            ProgramId::PS_GRADIENT_DITHER
+                        } else {
+                            ProgramId::PS_GRADIENT
+                        }
+                    },
+                    TransformedRectKind::Complex => {
+                        if self.enable_dithering {
+                            ProgramId::PS_GRADIENT_DITHER_TRANSFORM
+                        } else {
+                            ProgramId::PS_GRADIENT_TRANSFORM
+                        }
+                    },
                 }
             },
             AlphaBatchKind::AngleGradient => {
                 match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_ANGLE_GRADIENT,
-                    TransformedRectKind::Complex => ProgramId::PS_ANGLE_GRADIENT_TRANSFORM,
+                    TransformedRectKind::AxisAligned => {
+                        if self.enable_dithering {
+                            ProgramId::PS_ANGLE_GRADIENT_DITHER
+                        } else {
+                            ProgramId::PS_ANGLE_GRADIENT
+                        }
+                    },
+                    TransformedRectKind::Complex => {
+                        if self.enable_dithering {
+                            ProgramId::PS_ANGLE_GRADIENT_DITHER_TRANSFORM
+                        } else {
+                            ProgramId::PS_ANGLE_GRADIENT_TRANSFORM
+                        }
+                    },
                 }
             },
             AlphaBatchKind::RadialGradient => {
                 match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_RADIAL_GRADIENT,
-                    TransformedRectKind::Complex => ProgramId::PS_RADIAL_GRADIENT_TRANSFORM,
+                    TransformedRectKind::AxisAligned => {
+                        if self.enable_dithering {
+                            ProgramId::PS_RADIAL_GRADIENT_DITHER
+                        } else {
+                            ProgramId::PS_RADIAL_GRADIENT
+                        }
+                    },
+                    TransformedRectKind::Complex => {
+                        if self.enable_dithering {
+                            ProgramId::PS_RADIAL_GRADIENT_DITHER_TRANSFORM
+                        } else {
+                            ProgramId::PS_RADIAL_GRADIENT_TRANSFORM
+                        }
+                    },
                 }
             },
             AlphaBatchKind::BoxShadow => {
@@ -858,6 +901,9 @@ impl Renderer {
             self.device.bind_texture(TextureSampler::color(i), texture_id);
         }
 
+        if let Some(id) = self.dither_matrix_texture_id {
+            self.device.bind_texture(TextureSampler::Dither, id);
+        }
         self.device.draw(&program_id, projection, &batch.instances, &batch.key.textures, &batch.key.blend_mode);
 
         // Handle special case readback for composites.
