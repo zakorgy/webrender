@@ -80,6 +80,9 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
         let is_ps_hw_composite = filename.starts_with("ps_hardware_composite");
         let is_ps_composite = filename.starts_with("ps_composite");
         let is_ps_split_composite = filename.starts_with("ps_split_composite");
+        let use_dither  = filename.starts_with("ps_gradient") ||
+                          filename.starts_with("ps_angle_gradient") ||
+                          filename.starts_with("ps_radial_gradient");
         // The shader must be primitive or clip (only one of them)
         // and it must be fragment or vertex shader (only one of them), else we skip it.
         if !(is_prim ^ is_clip) || !(is_vert ^ is_frag) {
@@ -113,6 +116,11 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
             build_configs.push("// WR_FEATURE_TRANSFORM disabled\n#define WR_FEATURE_SUBPIXEL_AA\n");
         }
 
+        if use_dither {
+            build_configs.push("#define WR_FEATURE_TRANSFORM\n#define WR_FEATURE_DITHERING\n");
+            build_configs.push("// WR_FEATURE_TRANSFORM disabled\n#define WR_FEATURE_DITHERING\n");
+        }
+
         for (iter, config_prefix) in build_configs.iter().enumerate() {
             let mut shader_source = String::new();
             shader_source.push_str(shader_prefix.as_str());
@@ -132,10 +140,10 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
             //    Except for ps_blend, ps_hw_composite, ps_composite and ps_split_composite shaders.
             // 1: If the shader is prim shader, and the transform feature is disabled.
             //    This is the default case for ps_blend, ps_hw_composite, ps_composite and ps_split_composite shaders.
-            // 2: If the shader is the `ps_rectangle`/`ps_text_run` shader
-            //    and the `clip`/`subpixel AA`, transfrom features are enabled.
-            // 3: If the shader is the `ps_rectangle`/`ps_text_run` shader
-            //    and the `clip`/`subpixel AA` feature is enabled but the the transfrom feature is disabled.
+            // 2: If the shader is the `ps_rectangle`/`ps_text_run`/`gradient` shader
+            //    and the `clip`/`subpixel AA`/`dither`, transfrom features are enabled.
+            // 3: If the shader is the `ps_rectangle`/`ps_text_run`/`gradient` shader
+            //    and the `clip`/`subpixel AA`/`dither` feature is enabled but the the transfrom feature is disabled.
             match iter {
                 0 => {
                     if is_prim && !(is_ps_blend || is_ps_hw_composite || is_ps_composite || is_ps_split_composite) {
@@ -150,6 +158,9 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
                     if is_ps_text_run {
                         file_name.push_str("_subpixel_transform");
                     }
+                    if use_dither {
+                        file_name.push_str("_dither_transform");
+                    }
                 },
                 3 => {
                     if is_ps_rect {
@@ -157,6 +168,9 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) {
                     }
                     if is_ps_text_run {
                         file_name.push_str("_subpixel");
+                    }
+                    if use_dither {
+                        file_name.push_str("_dither");
                     }
                 },
                 _ => unreachable!(),
