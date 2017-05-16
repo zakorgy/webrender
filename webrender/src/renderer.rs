@@ -238,10 +238,51 @@ pub struct Renderer {
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
     current_frame: Option<RendererFrame>,
+
+    // These are "cache shaders". These shaders are used to
+    // draw intermediate results to cache targets. The results
+    // of these shaders are then used by the primitive shaders.
+    cs_box_shadow: ProgramId,
+    cs_text_run: ProgramId,
+    cs_blur: ProgramId,
+    /// These are "cache clip shaders". These shaders are used to
+    /// draw clip instances into the cached clip mask. The results
+    /// of these shaders are also used by the primitive shaders.
+    cs_clip_rectangle: ProgramId,
+    cs_clip_image: ProgramId,
+    cs_clip_border: ProgramId,
+
+    // The are "primitive shaders". These shaders draw and blend
+    // final results on screen. They are aware of tile boundaries.
+    // Most draw directly to the framebuffer, but some use inputs
+    // from the cache shaders to draw. Specifically, the box
+    // shadow primitive shader stretches the box shadow cache
+    // output, and the cache_image shader blits the results of
+    // a cache shader (e.g. blur) to the screen.
+    ps_rectangle: ProgramIdPair,
+    ps_rectangle_clip: ProgramIdPair,
+    ps_text_run: ProgramIdPair,
+    ps_text_run_subpixel: ProgramIdPair,
+    //ps_image: Vec<Option<PrimitiveShader>>,
+    //ps_yuv_image: Vec<Option<PrimitiveShader>>,
+    ps_image: ProgramIdPair,
+    ps_yuv_image: ProgramIdPair,
+    ps_border_corner: ProgramIdPair,
+    ps_border_edge: ProgramIdPair,
+    ps_gradient: ProgramIdPair,
+    ps_angle_gradient: ProgramIdPair,
+    ps_radial_gradient: ProgramIdPair,
+    ps_box_shadow: ProgramIdPair,
+    ps_cache_image: ProgramIdPair,
+
+    ps_blend: ProgramId,
+    ps_hw_composite: ProgramId,
+    ps_split_composite: ProgramId,
+    ps_composite: ProgramId,
+
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
     enable_profiler: bool,
-    enable_dithering: bool,
     max_recorded_profiles: usize,
     clear_framebuffer: bool,
     clear_color: ColorF,
@@ -300,6 +341,17 @@ impl From<std::io::Error> for InitError {
     fn from(err: std::io::Error) -> Self { InitError::Thread(err) }
 }
 
+struct ProgramIdPair((ProgramId, ProgramId));
+
+impl ProgramIdPair {
+    fn get(&self, transform_kind: TransformedRectKind) -> ProgramId {
+        match transform_kind {
+            TransformedRectKind::AxisAligned => (self.0).0,
+            TransformedRectKind::Complex => (self.0).1,
+        }
+    }
+}
+
 impl Renderer {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
@@ -331,6 +383,140 @@ impl Renderer {
         let notifier = Arc::new(Mutex::new(None));
 
         let mut device = Device::new(window);
+
+        let cs_box_shadow = ProgramId::invalid();
+            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.frag")));*/
+        let cs_text_run = ProgramId::invalid();
+            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));*/
+        let cs_blur = ProgramId::invalid();
+            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
+        let cs_clip_rectangle = ProgramId::invalid();
+            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
+        let cs_clip_image = ProgramId::invalid();
+            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
+        let cs_clip_border = ProgramId::invalid();
+            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
+
+        let ps_rectangle =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_transform.frag"))));
+
+        let ps_rectangle_clip =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip_transform.frag"))));
+
+        let ps_text_run =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.frag"))));
+
+        let ps_text_run_subpixel =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.frag"))));
+        let ps_image =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_transform.frag"))));
+
+        let ps_yuv_image = (ProgramId::invalid(), ProgramId::invalid());
+            /*(device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.frag"))));*/
+        let ps_border_corner =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.frag"))));
+
+        let ps_border_edge =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.frag"))));
+
+        let ps_gradient =
+            if options.enable_dithering {
+                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither.frag"))),
+                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither_transform.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither_transform.frag"))))
+            } else {
+                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.frag"))),
+                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_transform.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_transform.frag"))))
+            };
+
+        let ps_angle_gradient =
+            if options.enable_dithering {
+                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither.frag"))),
+                 device.add_program(include_bytes!(
+                                        concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither_transform.vert")),
+                                    include_bytes!(
+                                        concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither_transform.frag"))))
+            } else {
+                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient.frag"))),
+                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.frag"))))
+            };
+
+        let ps_radial_gradient =
+            if options.enable_dithering {
+                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither.frag"))),
+                 device.add_program(include_bytes!(
+                                        concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither_transform.vert")),
+                                    include_bytes!(
+                                        concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither_transform.frag"))))
+            } else {
+                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.frag"))),
+                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.frag"))))
+            };
+
+        let ps_box_shadow =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow_transform.frag"))));
+
+        let ps_cache_image =
+            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image.frag"))),
+             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.vert")),
+                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.frag"))));
+
+        let ps_blend =
+            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.frag")));
+        let ps_hw_composite =
+            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.frag")));
+        let ps_split_composite =
+            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_split_composite.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_split_composite.frag")));
+        let ps_composite =
+            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));
+
 
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
@@ -426,10 +612,32 @@ impl Renderer {
             current_frame: None,
             pending_texture_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
+            cs_box_shadow: cs_box_shadow,
+            cs_text_run: cs_text_run,
+            cs_blur: cs_blur,
+            cs_clip_rectangle: cs_clip_rectangle,
+            cs_clip_border: cs_clip_border,
+            cs_clip_image: cs_clip_image,
+            ps_rectangle: ProgramIdPair(ps_rectangle),
+            ps_rectangle_clip: ProgramIdPair(ps_rectangle_clip),
+            ps_text_run: ProgramIdPair(ps_text_run),
+            ps_text_run_subpixel: ProgramIdPair(ps_text_run_subpixel),
+            ps_image: ProgramIdPair(ps_image),
+            ps_yuv_image: ProgramIdPair(ps_yuv_image),
+            ps_border_corner: ProgramIdPair(ps_border_corner),
+            ps_border_edge: ProgramIdPair(ps_border_edge),
+            ps_gradient: ProgramIdPair(ps_gradient),
+            ps_angle_gradient: ProgramIdPair(ps_angle_gradient),
+            ps_radial_gradient: ProgramIdPair(ps_radial_gradient),
+            ps_box_shadow: ProgramIdPair(ps_box_shadow),
+            ps_cache_image: ProgramIdPair(ps_cache_image),
+            ps_blend: ps_blend,
+            ps_hw_composite: ps_hw_composite,
+            ps_split_composite: ps_split_composite,
+            ps_composite: ps_composite,
             notifier: notifier,
             render_target_debug: render_target_debug,
             enable_profiler: options.enable_profiler,
-            enable_dithering: options.enable_dithering,
             max_recorded_profiles: options.max_recorded_profiles,
             clear_framebuffer: options.clear_framebuffer,
             clear_color: options.clear_color,
@@ -767,133 +975,31 @@ impl Renderer {
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
         let program_id = match batch.key.kind {
             AlphaBatchKind::Rectangle => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        if needs_clipping {
-                            ProgramId::PS_RECTANGLE_CLIP
-                        } else {
-                            ProgramId::PS_RECTANGLE
-                        }
-                    },
-                    TransformedRectKind::Complex => {
-                        if needs_clipping {
-                            ProgramId::PS_RECTANGLE_CLIP_TRANSFORM
-                        } else {
-                            ProgramId::PS_RECTANGLE_TRANSFORM
-                        }
-                    },
+                if needs_clipping {
+                    self.ps_rectangle_clip.get(transform_kind)
+                } else {
+                    self.ps_rectangle.get(transform_kind)
                 }
             },
-            AlphaBatchKind::Composite => ProgramId::PS_COMPOSITE,
-            AlphaBatchKind::SplitComposite => ProgramId::PS_SPLIT_COMPOSITE,
-            AlphaBatchKind::HardwareComposite => ProgramId::PS_HARDWARE_COMPOSITE,
-            AlphaBatchKind::Blend => ProgramId::PS_BLEND,
+            AlphaBatchKind::Composite => self.ps_composite,
+            AlphaBatchKind::SplitComposite => self.ps_split_composite,
+            AlphaBatchKind::HardwareComposite => self.ps_hw_composite,
+            AlphaBatchKind::Blend => self.ps_blend,
             AlphaBatchKind::TextRun => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        match batch.key.blend_mode {
-                            BlendMode::Subpixel(..) => ProgramId::PS_TEXT_RUN_SUBPIXEL,
-                            _ => ProgramId::PS_TEXT_RUN,
-                        }
-                    },
-                    TransformedRectKind::Complex => {
-                        match batch.key.blend_mode {
-                            BlendMode::Subpixel(..) => ProgramId::PS_TEXT_RUN_SUBPIXEL_TRANSFORM,
-                            _ => ProgramId::PS_TEXT_RUN_TRANSFORM,
-                        }
-                    },
+                match batch.key.blend_mode {
+                    BlendMode::Subpixel(..) => self.ps_text_run_subpixel.get(transform_kind),
+                    _ => self.ps_text_run.get(transform_kind),
                 }
             },
-            AlphaBatchKind::Image(..) => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_IMAGE,
-                    TransformedRectKind::Complex =>  ProgramId::PS_IMAGE_TRANSFORM,
-                }
-            },
-            AlphaBatchKind::YuvImage(..) => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_YUV_IMAGE,
-                    TransformedRectKind::Complex => ProgramId::PS_YUV_IMAGE_TRANSFORM,
-                }
-            },
-            AlphaBatchKind::BorderCorner => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_BORDER_CORNER,
-                    TransformedRectKind::Complex => ProgramId::PS_BORDER_CORNER_TRANSFORM,
-                }
-            },
-            AlphaBatchKind::BorderEdge => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_BORDER_EDGE,
-                    TransformedRectKind::Complex => ProgramId::PS_BORDER_EDGE_TRANSFORM,
-                }
-            },
-            AlphaBatchKind::AlignedGradient => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        if self.enable_dithering {
-                            ProgramId::PS_GRADIENT_DITHER
-                        } else {
-                            ProgramId::PS_GRADIENT
-                        }
-                    },
-                    TransformedRectKind::Complex => {
-                        if self.enable_dithering {
-                            ProgramId::PS_GRADIENT_DITHER_TRANSFORM
-                        } else {
-                            ProgramId::PS_GRADIENT_TRANSFORM
-                        }
-                    },
-                }
-            },
-            AlphaBatchKind::AngleGradient => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        if self.enable_dithering {
-                            ProgramId::PS_ANGLE_GRADIENT_DITHER
-                        } else {
-                            ProgramId::PS_ANGLE_GRADIENT
-                        }
-                    },
-                    TransformedRectKind::Complex => {
-                        if self.enable_dithering {
-                            ProgramId::PS_ANGLE_GRADIENT_DITHER_TRANSFORM
-                        } else {
-                            ProgramId::PS_ANGLE_GRADIENT_TRANSFORM
-                        }
-                    },
-                }
-            },
-            AlphaBatchKind::RadialGradient => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => {
-                        if self.enable_dithering {
-                            ProgramId::PS_RADIAL_GRADIENT_DITHER
-                        } else {
-                            ProgramId::PS_RADIAL_GRADIENT
-                        }
-                    },
-                    TransformedRectKind::Complex => {
-                        if self.enable_dithering {
-                            ProgramId::PS_RADIAL_GRADIENT_DITHER_TRANSFORM
-                        } else {
-                            ProgramId::PS_RADIAL_GRADIENT_TRANSFORM
-                        }
-                    },
-                }
-            },
-            AlphaBatchKind::BoxShadow => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_BOX_SHADOW,
-                    TransformedRectKind::Complex => ProgramId::PS_BOX_SHADOW_TRANSFORM,
-                }
-            },
-            AlphaBatchKind::CacheImage => {
-                match transform_kind {
-                    TransformedRectKind::AxisAligned => ProgramId::PS_CACHE_IMAGE,
-                    TransformedRectKind::Complex => ProgramId::PS_CACHE_IMAGE_TRANSFORM,
-                }
-            },
+            AlphaBatchKind::Image(..) => self.ps_image.get(transform_kind),
+            AlphaBatchKind::YuvImage(..) => self.ps_yuv_image.get(transform_kind),
+            AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),
+            AlphaBatchKind::BorderEdge => self.ps_border_edge.get(transform_kind),
+            AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
+            AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
+            AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
+            AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
+            AlphaBatchKind::CacheImage => self.ps_cache_image.get(transform_kind),
         };
 
         for i in 0..batch.key.textures.colors.len() {
