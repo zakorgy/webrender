@@ -279,7 +279,7 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
     }
 }
 
-struct Program {
+pub struct Program {
     pub data: primitive::Data<R>,
     pub pso: PSPrimitive,
     pub pso_alpha: PSPrimitive,
@@ -356,27 +356,6 @@ pub struct TextureId {
     name: u32,
 }
 
-#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
-pub struct ProgramId {
-    name: u32,
-}
-
-impl ProgramId {
-    pub fn new(name: u32) -> ProgramId {
-        ProgramId {
-            name: name,
-        }
-    }
-
-    pub fn invalid() -> ProgramId {
-        ProgramId {
-            name: 0,
-        }
-    }
-
-    pub fn _is_valid(&self) -> bool { *self != ProgramId::invalid() }
-}
-
 #[derive(Debug)]
 pub struct TextureData {
     id: TextureId,
@@ -395,7 +374,6 @@ pub struct Device {
     factory: device_gl::Factory,
     encoder: gfx::Encoder<R,CB>,
     textures: HashMap<TextureId, TextureData>,
-    programs: HashMap<ProgramId, Program>,
     color0: Texture<R, Rgba8>,
     color1: Texture<R, Rgba8>,
     color2: Texture<R, Rgba8>,
@@ -494,7 +472,6 @@ impl Device {
             factory: factory,
             encoder: encoder,
             textures: textures,
-            programs: HashMap::new(),
             color0: color0,
             color1: color1,
             color2: color2,
@@ -565,7 +542,7 @@ impl Device {
         (pso, pso_alpha, pso_prem_alpha, pso_subpixel)
     }
 
-    pub fn add_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ProgramId {
+    pub fn create_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> Program {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
         {
             let mut writer = self.factory.write_mapping(&upload).unwrap();
@@ -605,28 +582,11 @@ impl Device {
             blend_value: [0.0, 0.0, 0.0, 0.0]
         };
         let psos = self.create_psos(vert_src, frag_src);
-        let program = Program::new(data, psos, self.slice.clone(), upload);
-        let program_id = self.generate_program_id();
-        self.programs.insert(program_id, program);
-        program_id
+        Program::new(data, psos, self.slice.clone(), upload)
     }
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size
-    }
-
-    fn generate_program_id(&mut self) -> ProgramId {
-        use rand::OsRng;
-
-        let mut rng = OsRng::new().unwrap();
-        let mut program_id = ProgramId::invalid();
-        loop {
-            program_id.name = rng.gen_range(1, u32::max_value());
-            if !self.programs.contains_key(&program_id) {
-                break;
-            }
-        }
-        program_id
     }
 
     fn generate_texture_id(&mut self) -> TextureId {
@@ -825,34 +785,30 @@ impl Device {
     }
 
     pub fn draw(&mut self,
-                program_id: &ProgramId,
+                program: &mut Program,
                 proj: &Matrix4D<f32>,
                 instances: &[PrimitiveInstance],
                 _textures: &BatchTextures,
                 blendmode: &BlendMode) {
-        if let Some(program) = self.programs.get_mut(program_id) {
-            program.data.transform = proj.to_row_arrays();
+        program.data.transform = proj.to_row_arrays();
 
-            {
-                let mut writer = self.factory.write_mapping(&program.upload).unwrap();
-                for (i, inst) in instances.iter().enumerate() {
-                    writer[i].update(inst);
-                }
+        {
+            let mut writer = self.factory.write_mapping(&program.upload).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i].update(inst);
             }
-
-            {
-                program.slice.instances = Some((instances.len() as u32, 0));
-            }
-
-            if let &BlendMode::Subpixel(ref color) = blendmode {
-                program.data.blend_value = [color.r, color.g, color.b, color.a];
-            }
-
-            self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
-            self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
-        } else {
-            println!("Shader not yet implemented {:?}",  program_id);
         }
+
+        {
+            program.slice.instances = Some((instances.len() as u32, 0));
+        }
+
+        if let &BlendMode::Subpixel(ref color) = blendmode {
+            program.data.blend_value = [color.r, color.g, color.b, color.a];
+        }
+
+        self.encoder.copy_buffer(&program.upload, &program.data.ibuf, 0, 0, program.upload.len()).unwrap();
+        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
     }
 
     pub fn update_rgba_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {

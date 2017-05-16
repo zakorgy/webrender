@@ -14,7 +14,7 @@
 // use device::{DepthFunction, Device, FrameId, ProgramId, TextureId, VertexFormat, GpuMarker, GpuProfiler};
 // use device::{GpuSample, TextureFilter, VAOId, VertexUsageHint, FileWatcherHandler, TextureTarget, ShaderError};
 
-use device::{Device, TextureId, TextureFilter, TextureTarget, ProgramId, ShaderError};
+use device::{Device, TextureId, TextureFilter, TextureTarget, Program, ShaderError};
 use euclid::Matrix4D;
 use fnv::FnvHasher;
 use frame_builder::FrameBuilderConfig;
@@ -68,8 +68,8 @@ pub const DUMMY_DITHER_ID: u32 = 4;
 
 macro_rules! create_program (
     ($device: ident, $shader: expr) => {
-        $device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
-                            include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag")))
+        $device.create_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
+                               include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag")))
     };
 );
 
@@ -255,15 +255,15 @@ pub struct Renderer {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    cs_box_shadow: ProgramId,
-    cs_text_run: ProgramId,
-    cs_blur: ProgramId,
+    cs_box_shadow: Option<Program>,
+    cs_text_run: Option<Program>,
+    cs_blur: Option<Program>,
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    cs_clip_rectangle: ProgramId,
-    cs_clip_image: ProgramId,
-    cs_clip_border: ProgramId,
+    cs_clip_rectangle: Option<Program>,
+    cs_clip_image: Option<Program>,
+    cs_clip_border: Option<Program>,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -272,26 +272,26 @@ pub struct Renderer {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    ps_rectangle: ProgramIdPair,
-    ps_rectangle_clip: ProgramIdPair,
-    ps_text_run: ProgramIdPair,
-    ps_text_run_subpixel: ProgramIdPair,
+    ps_rectangle: ProgramPair,
+    ps_rectangle_clip: ProgramPair,
+    ps_text_run: ProgramPair,
+    ps_text_run_subpixel: ProgramPair,
     //ps_image: Vec<Option<PrimitiveShader>>,
     //ps_yuv_image: Vec<Option<PrimitiveShader>>,
-    ps_image: ProgramIdPair,
-    ps_yuv_image: ProgramIdPair,
-    ps_border_corner: ProgramIdPair,
-    ps_border_edge: ProgramIdPair,
-    ps_gradient: ProgramIdPair,
-    ps_angle_gradient: ProgramIdPair,
-    ps_radial_gradient: ProgramIdPair,
-    ps_box_shadow: ProgramIdPair,
-    ps_cache_image: ProgramIdPair,
+    ps_image: ProgramPair,
+    ps_yuv_image: ProgramPair,
+    ps_border_corner: ProgramPair,
+    ps_border_edge: ProgramPair,
+    ps_gradient: ProgramPair,
+    ps_angle_gradient: ProgramPair,
+    ps_radial_gradient: ProgramPair,
+    ps_box_shadow: ProgramPair,
+    ps_cache_image: ProgramPair,
 
-    ps_blend: ProgramId,
-    ps_hw_composite: ProgramId,
-    ps_split_composite: ProgramId,
-    ps_composite: ProgramId,
+    ps_blend: Program,
+    ps_hw_composite: Program,
+    ps_split_composite: Program,
+    ps_composite: Program,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
@@ -354,13 +354,13 @@ impl From<std::io::Error> for InitError {
     fn from(err: std::io::Error) -> Self { InitError::Thread(err) }
 }
 
-struct ProgramIdPair((ProgramId, ProgramId));
+struct ProgramPair((Program, Program));
 
-impl ProgramIdPair {
-    fn get(&self, transform_kind: TransformedRectKind) -> ProgramId {
+impl ProgramPair {
+    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
         match transform_kind {
-            TransformedRectKind::AxisAligned => (self.0).0,
-            TransformedRectKind::Complex => (self.0).1,
+            TransformedRectKind::AxisAligned => &mut (self.0).0,
+            TransformedRectKind::Complex => &mut (self.0).1,
         }
     }
 }
@@ -397,19 +397,19 @@ impl Renderer {
 
         let mut device = Device::new(window);
 
-        let cs_box_shadow = ProgramId::invalid();//create_program(device, cs_box_shadow);
-        let cs_text_run = ProgramId::invalid();//create_program(device, cs_text_run);
-        let cs_blur = ProgramId::invalid();//create_program(device, cs_blur);
-        let cs_clip_rectangle = ProgramId::invalid();//create_program(device, cs_clip_rectangle);
-        let cs_clip_image = ProgramId::invalid();//create_program(device, cs_clip_image);
-        let cs_clip_border = ProgramId::invalid();//create_program(device, cs_clip_border);
+        let cs_box_shadow = None;//create_program(device, cs_box_shadow);
+        let cs_text_run = None;//create_program(device, cs_text_run);
+        let cs_blur = None;//create_program(device, cs_blur);
+        let cs_clip_rectangle = None;//create_program(device, cs_clip_rectangle);
+        let cs_clip_image = None;//create_program(device, cs_clip_image);
+        let cs_clip_border = None;//create_program(device, cs_clip_border);
 
         let ps_rectangle = create_programs!(device, "ps_rectangle");
         let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
         let ps_text_run = create_programs!(device, "ps_text_run");
         let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");
         let ps_image = create_programs!(device, "ps_image");
-        let ps_yuv_image = (ProgramId::invalid(), ProgramId::invalid()); //create_programs!(device, "ps_yuv_image");
+        let ps_yuv_image = create_programs!(device, "ps_yuv_image");
         let ps_border_corner = create_programs!(device, "ps_border_corner");
         let ps_border_edge = create_programs!(device, "ps_border_edge");
 
@@ -532,19 +532,19 @@ impl Renderer {
             cs_clip_rectangle: cs_clip_rectangle,
             cs_clip_border: cs_clip_border,
             cs_clip_image: cs_clip_image,
-            ps_rectangle: ProgramIdPair(ps_rectangle),
-            ps_rectangle_clip: ProgramIdPair(ps_rectangle_clip),
-            ps_text_run: ProgramIdPair(ps_text_run),
-            ps_text_run_subpixel: ProgramIdPair(ps_text_run_subpixel),
-            ps_image: ProgramIdPair(ps_image),
-            ps_yuv_image: ProgramIdPair(ps_yuv_image),
-            ps_border_corner: ProgramIdPair(ps_border_corner),
-            ps_border_edge: ProgramIdPair(ps_border_edge),
-            ps_gradient: ProgramIdPair(ps_gradient),
-            ps_angle_gradient: ProgramIdPair(ps_angle_gradient),
-            ps_radial_gradient: ProgramIdPair(ps_radial_gradient),
-            ps_box_shadow: ProgramIdPair(ps_box_shadow),
-            ps_cache_image: ProgramIdPair(ps_cache_image),
+            ps_rectangle: ProgramPair(ps_rectangle),
+            ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
+            ps_text_run: ProgramPair(ps_text_run),
+            ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),
+            ps_image: ProgramPair(ps_image),
+            ps_yuv_image: ProgramPair(ps_yuv_image),
+            ps_border_corner: ProgramPair(ps_border_corner),
+            ps_border_edge: ProgramPair(ps_border_edge),
+            ps_gradient: ProgramPair(ps_gradient),
+            ps_angle_gradient: ProgramPair(ps_angle_gradient),
+            ps_radial_gradient: ProgramPair(ps_radial_gradient),
+            ps_box_shadow: ProgramPair(ps_box_shadow),
+            ps_cache_image: ProgramPair(ps_cache_image),
             ps_blend: ps_blend,
             ps_hw_composite: ps_hw_composite,
             ps_split_composite: ps_split_composite,
@@ -887,44 +887,47 @@ impl Renderer {
         debug_assert!(!needs_clipping ||
                       batch.key.blend_mode == BlendMode::Alpha ||
                       batch.key.blend_mode == BlendMode::PremultipliedAlpha);
-        let program_id = match batch.key.kind {
-            AlphaBatchKind::Rectangle => {
-                if needs_clipping {
-                    self.ps_rectangle_clip.get(transform_kind)
-                } else {
-                    self.ps_rectangle.get(transform_kind)
-                }
-            },
-            AlphaBatchKind::Composite => self.ps_composite,
-            AlphaBatchKind::SplitComposite => self.ps_split_composite,
-            AlphaBatchKind::HardwareComposite => self.ps_hw_composite,
-            AlphaBatchKind::Blend => self.ps_blend,
-            AlphaBatchKind::TextRun => {
-                match batch.key.blend_mode {
-                    BlendMode::Subpixel(..) => self.ps_text_run_subpixel.get(transform_kind),
-                    _ => self.ps_text_run.get(transform_kind),
-                }
-            },
-            AlphaBatchKind::Image(..) => self.ps_image.get(transform_kind),
-            AlphaBatchKind::YuvImage(..) => self.ps_yuv_image.get(transform_kind),
-            AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),
-            AlphaBatchKind::BorderEdge => self.ps_border_edge.get(transform_kind),
-            AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
-            AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
-            AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
-            AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
-            AlphaBatchKind::CacheImage => self.ps_cache_image.get(transform_kind),
-        };
 
         for i in 0..batch.key.textures.colors.len() {
             let texture_id = self.resolve_source_texture(&batch.key.textures.colors[i]);
             self.device.bind_texture(TextureSampler::color(i), texture_id);
         }
 
-        if let Some(id) = self.dither_matrix_texture_id {
-            self.device.bind_texture(TextureSampler::Dither, id);
+        {
+            let mut program = match batch.key.kind {
+                AlphaBatchKind::Rectangle => {
+                    if needs_clipping {
+                        self.ps_rectangle_clip.get(transform_kind)
+                    } else {
+                        self.ps_rectangle.get(transform_kind)
+                    }
+                },
+                AlphaBatchKind::Composite => &mut self.ps_composite,
+                AlphaBatchKind::SplitComposite => &mut self.ps_split_composite,
+                AlphaBatchKind::HardwareComposite => &mut self.ps_hw_composite,
+                AlphaBatchKind::Blend => &mut self.ps_blend,
+                AlphaBatchKind::TextRun => {
+                    match batch.key.blend_mode {
+                        BlendMode::Subpixel(..) => self.ps_text_run_subpixel.get(transform_kind),
+                        _ => self.ps_text_run.get(transform_kind),
+                    }
+                },
+                AlphaBatchKind::Image(..) => self.ps_image.get(transform_kind),
+                AlphaBatchKind::YuvImage(..) => self.ps_yuv_image.get(transform_kind),
+                AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),
+                AlphaBatchKind::BorderEdge => self.ps_border_edge.get(transform_kind),
+                AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
+                AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
+                AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
+                AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
+                AlphaBatchKind::CacheImage => self.ps_cache_image.get(transform_kind),
+            };
+
+            if let Some(id) = self.dither_matrix_texture_id {
+                self.device.bind_texture(TextureSampler::Dither, id);
+            }
+            self.device.draw(&mut program, projection, &batch.instances, &batch.key.textures, &batch.key.blend_mode);
         }
-        self.device.draw(&program_id, projection, &batch.instances, &batch.key.textures, &batch.key.blend_mode);
 
         // Handle special case readback for composites.
         /*if batch.key.kind == AlphaBatchKind::Composite {
