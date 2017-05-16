@@ -66,6 +66,19 @@ pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
 pub const DUMMY_DITHER_ID: u32 = 4;
 
+macro_rules! create_program (
+    ($device: ident, $shader: expr) => {
+        $device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
+                            include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag")))
+    };
+);
+
+macro_rules! create_programs (
+    ($device: ident, $shader: expr) => {
+        (create_program!($device, $shader), create_program!($device, concat!($shader, "_transform")))
+    };
+);
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ImageBufferKind {
     Texture2D = 0,
@@ -384,139 +397,40 @@ impl Renderer {
 
         let mut device = Device::new(window);
 
-        let cs_box_shadow = ProgramId::invalid();
-            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.frag")));*/
-        let cs_text_run = ProgramId::invalid();
-            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));*/
-        let cs_blur = ProgramId::invalid();
-            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
-        let cs_clip_rectangle = ProgramId::invalid();
-            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
-        let cs_clip_image = ProgramId::invalid();
-            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
-        let cs_clip_border = ProgramId::invalid();
-            /*device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));*/
+        let cs_box_shadow = ProgramId::invalid();//create_program(device, cs_box_shadow);
+        let cs_text_run = ProgramId::invalid();//create_program(device, cs_text_run);
+        let cs_blur = ProgramId::invalid();//create_program(device, cs_blur);
+        let cs_clip_rectangle = ProgramId::invalid();//create_program(device, cs_clip_rectangle);
+        let cs_clip_image = ProgramId::invalid();//create_program(device, cs_clip_image);
+        let cs_clip_border = ProgramId::invalid();//create_program(device, cs_clip_border);
 
-        let ps_rectangle =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_transform.frag"))));
+        let ps_rectangle = create_programs!(device, "ps_rectangle");
+        let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
+        let ps_text_run = create_programs!(device, "ps_text_run");
+        let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");
+        let ps_image = create_programs!(device, "ps_image");
+        let ps_yuv_image = (ProgramId::invalid(), ProgramId::invalid()); //create_programs!(device, "ps_yuv_image");
+        let ps_border_corner = create_programs!(device, "ps_border_corner");
+        let ps_border_edge = create_programs!(device, "ps_border_edge");
 
-        let ps_rectangle_clip =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_rectangle_clip_transform.frag"))));
-
-        let ps_text_run =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_transform.frag"))));
-
-        let ps_text_run_subpixel =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_text_run_subpixel_transform.frag"))));
-        let ps_image =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_image.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_image_transform.frag"))));
-
-        let ps_yuv_image = (ProgramId::invalid(), ProgramId::invalid());
-            /*(device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_yuv_image_transform.frag"))));*/
-        let ps_border_corner =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_corner_transform.frag"))));
-
-        let ps_border_edge =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_border_edge_transform.frag"))));
-
-        let ps_gradient =
+        let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
             if options.enable_dithering {
-                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither.frag"))),
-                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither_transform.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_dither_transform.frag"))))
+                (create_programs!(device, "ps_gradient_dither"),
+                 create_programs!(device, "ps_angle_gradient_dither"),
+                 create_programs!(device, "ps_radial_gradient_dither"))
             } else {
-                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient.frag"))),
-                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_transform.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_gradient_transform.frag"))))
+                (create_programs!(device, "ps_gradient"),
+                 create_programs!(device, "ps_angle_gradient"),
+                 create_programs!(device, "ps_radial_gradient"))
             };
+        
+        let ps_box_shadow = create_programs!(device, "ps_box_shadow");
+        let ps_cache_image = create_programs!(device, "ps_cache_image");
 
-        let ps_angle_gradient =
-            if options.enable_dithering {
-                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither.frag"))),
-                 device.add_program(include_bytes!(
-                                        concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither_transform.vert")),
-                                    include_bytes!(
-                                        concat!(env!("OUT_DIR"), "/ps_angle_gradient_dither_transform.frag"))))
-            } else {
-                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient.frag"))),
-                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_angle_gradient_transform.frag"))))
-            };
-
-        let ps_radial_gradient =
-            if options.enable_dithering {
-                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither.frag"))),
-                 device.add_program(include_bytes!(
-                                        concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither_transform.vert")),
-                                    include_bytes!(
-                                        concat!(env!("OUT_DIR"), "/ps_radial_gradient_dither_transform.frag"))))
-            } else {
-                (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient.frag"))),
-                 device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/ps_radial_gradient_transform.frag"))))
-            };
-
-        let ps_box_shadow =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_box_shadow_transform.frag"))));
-
-        let ps_cache_image =
-            (device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image.frag"))),
-             device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.vert")),
-                                include_bytes!(concat!(env!("OUT_DIR"), "/ps_cache_image_transform.frag"))));
-
-        let ps_blend =
-            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_blend.frag")));
-        let ps_hw_composite =
-            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_hardware_composite.frag")));
-        let ps_split_composite =
-            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_split_composite.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_split_composite.frag")));
-        let ps_composite =
-            device.add_program(include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/ps_composite.frag")));
-
+        let ps_blend = create_program!(device, "ps_blend");
+        let ps_hw_composite = create_program!(device, "ps_hardware_composite");
+        let ps_split_composite = create_program!(device, "ps_split_composite");
+        let ps_composite = create_program!(device, "ps_composite");
 
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
