@@ -37,7 +37,7 @@ use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx_window_glutin;
 use gfx::CombinedError;
-use gfx::format::{Format, R8, Unorm, Rgba8, Rgba32F};
+use gfx::format::{Format, R8, Unorm, Rgba8, Bgra8, Rgba32F, Srgba8};
 use tiling::{Frame, PackedLayer, PrimitiveInstance};
 use render_task::RenderTaskData;
 use prim_store::{GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128, GradientData, PrimitiveGeometry, SplitGeometry, TexelRect};
@@ -61,6 +61,7 @@ pub const MAX_INSTANCE_COUNT: usize = 2000;
 
 pub const A8_STRIDE: u32 = 1;
 pub const RGBA8_STRIDE: u32 = 4;
+pub const RG8_STRIDE: u32 = 2;
 pub const FIRST_UNRESERVED_ID: u32 = DUMMY_DITHER_ID + 1;
 
 pub const ALPHA: Blend = Blend {
@@ -145,8 +146,7 @@ gfx_defines! {
         split_geometry: gfx::TextureSampler<[f32; 4]> = "sSplitGeometry",
 
         out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R32_G32_B32_A32,
-                                                  gfx::format::ChannelType::Float),
+                                           Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
@@ -245,15 +245,17 @@ impl<R, T> Texture<R, T> where R: gfx::Resources, T: gfx::format::TextureFormat 
                 usage: Usage::Dynamic,
             };
             let cty = <T::Channel as format::ChannelTyped>::get_channel_type();
+            println!("CREATE_TEXTURE_RAW desc: {:?}, cty: {:?}, data :{:?}", desc, cty, data);
             let raw = try!(factory.create_texture_raw(desc, Some(cty), data));
             let levels = (0, raw.get_info().levels - 1);
             let tex = Typed::new(raw);
+            println!("VIEW_TEXTURE_AS_SHADER_RESOURCE");
             let view = try!(factory.view_texture_as_shader_resource::<T>(
                 &tex, levels, format::Swizzle::new()
             ));
             let format = match surface {
                 gfx_core::format::SurfaceType::R8 => ImageFormat::A8,
-                gfx_core::format::SurfaceType::R8_G8_B8_A8 => ImageFormat::RGBA8,
+                gfx_core::format::SurfaceType::R8_G8_B8_A8 | gfx_core::format::SurfaceType::B8_G8_R8_A8 => ImageFormat::RGBA8,
                 gfx_core::format::SurfaceType::R32_G32_B32_A32 => ImageFormat::RGBAF32,
                 _ => unimplemented!(),
             };
@@ -374,17 +376,17 @@ pub struct Device {
     factory: device_gl::Factory,
     encoder: gfx::Encoder<R,CB>,
     textures: HashMap<TextureId, TextureData>,
-    color0: Texture<R, Rgba8>,
-    color1: Texture<R, Rgba8>,
-    color2: Texture<R, Rgba8>,
+    color0: Texture<R, Srgba8>,
+    color1: Texture<R, Srgba8>,
+    color2: Texture<R, Srgba8>,
     dither: Texture<R, A8>,
     cache_a8: Texture<R, A8>,
-    cache_rgba8: Texture<R, Rgba8>,
+    cache_rgba8: Texture<R, Srgba8>,
     data16: Texture<R, Rgba32F>,
     data32: Texture<R, Rgba32F>,
     data64: Texture<R, Rgba32F>,
     data128: Texture<R, Rgba32F>,
-    gradient_data: Texture<R, Rgba8>,
+    gradient_data: Texture<R, Bgra8>,
     layers: Texture<R, Rgba32F>,
     prim_geo: Texture<R, Rgba32F>,
     render_tasks: Texture<R, Rgba32F>,
@@ -508,7 +510,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float),
+                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(ALPHA)),
                 .. primitive::new()
@@ -520,7 +522,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float),
+                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(PREM_ALPHA)),
                 .. primitive::new()
@@ -532,7 +534,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Float),
+                            Format(gfx::format::SurfaceType::R32_G32_B32_A32, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(SUBPIXEL)),
                 .. primitive::new()
@@ -637,6 +639,7 @@ impl Device {
         let stride = match format {
             ImageFormat::A8 => A8_STRIDE,
             ImageFormat::RGBA8 => RGBA8_STRIDE,
+            ImageFormat::RG8 => RG8_STRIDE,
             _ => unimplemented!(),
         };
         let texture_data = vec![0u8; (w*h*stride) as usize];
@@ -655,10 +658,12 @@ impl Device {
                         _filter: TextureFilter,
                         _mode: RenderTargetMode,
                         pixels: Option<&[u8]>) {
+        //println!("ID: {:?}, format: {:?}", texture_id, format);
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         let stride = match format {
             ImageFormat::A8 => A8_STRIDE,
             ImageFormat::RGBA8 => RGBA8_STRIDE,
+            ImageFormat::RG8 => RG8_STRIDE,
             _ => unimplemented!(),
         };
         if stride != texture.stride {
@@ -688,6 +693,7 @@ impl Device {
         let texture = self.textures.get_mut(&texture_id).expect("Didn't find texture!");
         assert!(texture.data.len() >= data.len());
         let (w, _) = self.color0.get_size();
+        //println!("Stride form arg: {:?}, stride from texture: {:?}", _stride, texture.stride);
         Device::update_texture_data(&mut texture.data, x0, y0, width, height, w, data, texture.stride);
     }
 
@@ -716,7 +722,7 @@ impl Device {
                 // If we have alpha values (stride == 1) we do nothing,
                 // otherwise we have bgra values and switch the red and blue bytes.
                 let k = {
-                    if stride == 1 {
+                    if stride != 4 {
                         i
                     } else if i % 4 == 0 {
                         i + 2
@@ -735,6 +741,7 @@ impl Device {
     pub fn bind_texture(&mut self,
                         sampler: TextureSampler,
                         texture_id: TextureId) {
+        //println!("ID: {:?}, sampler: {:?}", texture_id, sampler);
         let texture = match self.textures.get(&texture_id) {
             Some(data) => data,
             None => {
@@ -742,12 +749,13 @@ impl Device {
                 return;
             }
         };
+        //println!("Sampler in bind texture: {:?}", sampler);
         match sampler {
-            TextureSampler::Color0 => Device::update_rgba_texture_u8(&mut self.encoder, &self.color0, texture.data.as_slice()),
-            TextureSampler::Color1 => Device::update_rgba_texture_u8(&mut self.encoder, &self.color1, texture.data.as_slice()),
-            TextureSampler::Color2 => Device::update_rgba_texture_u8(&mut self.encoder, &self.color2, texture.data.as_slice()),
+            TextureSampler::Color0 => Device::update_srgba_texture_u8(&mut self.encoder, &self.color0, texture.data.as_slice()),
+            TextureSampler::Color1 => Device::update_srgba_texture_u8(&mut self.encoder, &self.color1, texture.data.as_slice()),
+            TextureSampler::Color2 => Device::update_srgba_texture_u8(&mut self.encoder, &self.color2, texture.data.as_slice()),
             TextureSampler::CacheA8 => Device::update_a_texture_u8(&mut self.encoder, &self.cache_a8, texture.data.as_slice()),
-            TextureSampler::CacheRGBA8 => Device::update_rgba_texture_u8(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice()),
+            TextureSampler::CacheRGBA8 => Device::update_srgba_texture_u8(&mut self.encoder, &self.cache_rgba8, texture.data.as_slice()),
             TextureSampler::Dither => Device::update_a_texture_u8(&mut self.encoder, &self.dither, texture.data.as_slice()),
             _ => println!("There are only 5 samplers supported. {:?}", sampler),
         }
@@ -777,7 +785,7 @@ impl Device {
         Device::update_texture_f32(&mut self.encoder, &self.data64, Device::convert_data64(frame.gpu_data64.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.data128, Device::convert_data128(frame.gpu_data128.clone()).as_slice());
         Device::update_texture_f32(&mut self.encoder, &self.resource_rects, Device::convert_resource_rects(frame.gpu_resource_rects.clone()).as_slice());
-        Device::update_rgba_texture_u8(&mut self.encoder, &self.gradient_data, Device::convert_gradient_data(frame.gpu_gradient_data.clone()).as_slice());
+        Device::update_bgra_texture(&mut self.encoder, &self.gradient_data, Device::convert_gradient_data(frame.gpu_gradient_data.clone()).as_slice());
     }
 
     pub fn flush(&mut self) {
@@ -811,10 +819,10 @@ impl Device {
         self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
     }
 
-    pub fn update_rgba_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {
+    pub fn update_srgba_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Srgba8>, memory: &[u8]) {
         let tex = &texture.surface;
         let (width, height) = texture.get_size();
-        let img_info = gfx::texture::ImageInfoCommon {
+        let mut img_info = gfx::texture::ImageInfoCommon {
             xoffset: 0,
             yoffset: 0,
             zoffset: 0,
@@ -825,8 +833,44 @@ impl Device {
             mipmap: 0,
         };
 
-        let data = gfx::memory::cast_slice(memory);
+        let mut data = gfx::memory::cast_slice(memory);
+        encoder.update_texture::<_, Srgba8>(tex, None, img_info, data).unwrap();
+    }
+
+    pub fn update_rgba_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Rgba8>, memory: &[u8]) {
+        let tex = &texture.surface;
+        let (width, height) = texture.get_size();
+        let mut img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: 0,
+            zoffset: 0,
+            width: width as u16,
+            height: height as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let mut data = gfx::memory::cast_slice(memory);
         encoder.update_texture::<_, Rgba8>(tex, None, img_info, data).unwrap();
+    }
+
+    pub fn update_bgra_texture(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, Bgra8>, memory: &[u8]) {
+        let tex = &texture.surface;
+        let (width, height) = texture.get_size();
+        let mut img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: 0,
+            zoffset: 0,
+            width: width as u16,
+            height: height as u16,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let mut data = gfx::memory::cast_slice(memory);
+        encoder.update_texture::<_, Bgra8>(tex, None, img_info, data).unwrap();
     }
 
     pub fn update_a_texture_u8(encoder: &mut gfx::Encoder<R,CB>, texture: &Texture<R, A8>, memory: &[u8]) {
@@ -985,23 +1029,23 @@ impl Device {
         let mut data: Vec<u8> = vec!();
         for gradient_data in gradient_data_vec {
             for entry in gradient_data.colors_high.iter() {
-                data.push(entry.start_color.r);
-                data.push(entry.start_color.g);
                 data.push(entry.start_color.b);
+                data.push(entry.start_color.g);
+                data.push(entry.start_color.r);
                 data.push(entry.start_color.a);
-                data.push(entry.end_color.r);
-                data.push(entry.end_color.g);
                 data.push(entry.end_color.b);
+                data.push(entry.end_color.g);
+                data.push(entry.end_color.r);
                 data.push(entry.end_color.a);
             }
             for entry in gradient_data.colors_low.iter() {
-                data.push(entry.start_color.r);
-                data.push(entry.start_color.g);
                 data.push(entry.start_color.b);
+                data.push(entry.start_color.g);
+                data.push(entry.start_color.r);
                 data.push(entry.start_color.a);
-                data.push(entry.end_color.r);
-                data.push(entry.end_color.g);
                 data.push(entry.end_color.b);
+                data.push(entry.end_color.g);
+                data.push(entry.end_color.r);
                 data.push(entry.end_color.a);
             }
         }

@@ -33,10 +33,10 @@ thread_profiler = "0.1.1"
 plane-split = "0.3"
 
 rand = "0.3"
-gfx = "0.14"
-gfx_window_glutin = "0.14"
-gfx_core = "0.6.0"
-gfx_device_gl = "0.13"
+gfx = {path = "../../gfx_rs/src/render"}
+gfx_window_glutin = {path = "../../gfx_rs/src/window/glutin"}
+gfx_core = {path = "../../gfx_rs/src/core"}
+gfx_device_gl = {path = "../../gfx_rs/src/backend/gl/"}
 glutin = "0.7"
 
 [dev-dependencies]
