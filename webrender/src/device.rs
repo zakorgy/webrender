@@ -218,8 +218,7 @@ impl TextureId {
 
     pub fn is_valid(&self) -> bool { !(*self == TextureId::invalid() || *self == TextureId::invalid_a8()) }
     pub fn is_dummy(&self) -> bool { self.name == DUMMY_A8_ID || self.name == DUMMY_RGBA8_ID }
-    pub fn is_dither(&self) -> bool { self.name == DITHER_ID }
-    pub fn is_skipable(&self) -> bool { !(self.is_valid()) || self.is_dummy() || self.is_dither() }
+    pub fn is_skipable(&self) -> bool { !(self.is_valid()) || self.is_dummy() }
 }
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
