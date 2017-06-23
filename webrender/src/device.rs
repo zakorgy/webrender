@@ -245,7 +245,7 @@ pub struct Device {
     pub factory: device_gl::Factory,
     pub encoder: gfx::Encoder<R,CB>,
     pub textures: HashMap<TextureId, TextureData>,
-    pub color0: Texture<R, Srgba8>,
+    pub color0: Texture<R, Rgba8>,
     pub color1: Texture<R, Rgba8>,
     pub color2: Texture<R, Rgba8>,
     pub dither: Texture<R, A8>,
@@ -621,12 +621,7 @@ impl Device {
 
     pub fn clear_target(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
         if let Some(color) = color {
-            self.encoder.clear(&self.main_color,
-                               //Srgba gamma correction
-                               [color[0].powf(2.2),
-                                color[1].powf(2.2),
-                                color[2].powf(2.2),
-                                color[3].powf(2.2)]);
+            self.encoder.clear(&self.main_color, [color[0], color[1], color[2], color[3]]);
         }
 
         if let Some(depth) = depth {
