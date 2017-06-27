@@ -33,7 +33,7 @@ use gfx::memory::Typed;
 use gfx::Factory;
 use gfx::texture::Kind;
 use gfx::traits::FactoryExt;
-use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
+use gfx::format::{DepthStencil as DepthFormat, Srgba8 as ColorFormat};
 use gfx_device_gl as device_gl;
 use gfx_device_gl::{Resources as R, CommandBuffer as CB};
 use gfx::CombinedError;

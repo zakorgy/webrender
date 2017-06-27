@@ -123,8 +123,7 @@ gfx_defines! {
         resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
+                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
@@ -146,8 +145,7 @@ gfx_defines! {
         resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
+                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
@@ -168,8 +166,7 @@ gfx_defines! {
         resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
+                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
@@ -193,8 +190,7 @@ gfx_defines! {
         resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("oFragColor",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8,
-                                                  gfx::format::ChannelType::Unorm),
+                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
@@ -400,7 +396,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(ALPHA)),
                 .. primitive::new()
@@ -412,7 +408,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(ALPHA)),
                 out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
@@ -425,7 +421,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(PREM_ALPHA)),
                 .. primitive::new()
@@ -437,7 +433,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(PREM_ALPHA)),
             out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
@@ -450,7 +446,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(SUBPIXEL)),
                 .. primitive::new()
@@ -462,7 +458,7 @@ impl Device {
             frag_src,
             primitive::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(SUBPIXEL)),
                 out_depth: gfx::preset::depth::LESS_EQUAL_TEST,
@@ -487,7 +483,7 @@ impl Device {
             frag_src,
             cache::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(ALPHA)),
                 .. cache::new()
@@ -505,7 +501,7 @@ impl Device {
             frag_src,
             clip::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(MULTIPLY)),
                 .. clip::new()
@@ -517,7 +513,7 @@ impl Device {
             frag_src,
             clip::Init {
                 out_color: ("oFragColor",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Unorm),
+                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(MAX)),
                 .. clip::new()
