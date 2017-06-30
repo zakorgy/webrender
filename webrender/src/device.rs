@@ -68,6 +68,8 @@ pub const RG_STRIDE: usize = 2;
 pub const RGB_STRIDE: usize = 3;
 pub const RGBA_STRIDE: usize = 4;
 pub const FIRST_UNRESERVED_ID: u32 = DITHER_ID + 1;
+// The value of the type GL_FRAMEBUFFER_SRGB from https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_framebuffer_sRGB.txt
+const GL_FRAMEBUFFER_SRGB: u32 = 0x8DB9;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Texture<R, T> where R: gfx::Resources,
@@ -855,8 +857,10 @@ pub fn init_existing<Cf, Df>(window: &glutin::Window) ->
 where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
 {
     unsafe { window.make_current().unwrap() };
-    let (device, factory) = device_gl::create(|s|
+    let (mut device, factory) = device_gl::create(|s|
         window.get_proc_address(s) as *const std::os::raw::c_void);
+
+    unsafe { device.with_gl(|ref gl| gl.Disable(GL_FRAMEBUFFER_SRGB)); }
 
     let (width, height) = window.get_inner_size().unwrap();
     let aa = window.get_pixel_format().multisampling.unwrap_or(0) as gfx::texture::NumSamples;
