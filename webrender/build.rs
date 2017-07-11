@@ -7,6 +7,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::io::prelude::*;
 use std::fs::{canonicalize, read_dir, File};
+use std::process::{self, Command, Stdio};
 
 #[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
 const SHADER_VERSION: &'static str = "#version 150\n";
@@ -43,7 +44,7 @@ fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) -> HashMap<S
     shader_map
 }
 
-fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) {
+fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<String> {
     fn get_shader_source(shader_name: &str, shaders: &HashMap<String, String>) -> Option<String> {
         if let Some(shader_file) = shaders.get(shader_name) {
             let shader_file_path = Path::new(shader_file);
@@ -63,7 +64,6 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) {
         for line in source.lines() {
             if line.starts_with(SHADER_IMPORT) {
                 let imports = line[SHADER_IMPORT.len()..].split(",");
-
                 // For each import, get the source, and recurse.
                 for import in imports {
                     if let Some(include) = get_shader_source(import, shaders) {
@@ -77,6 +77,7 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) {
         }
     }
 
+    let mut file_names = Vec::new();
     for (filename, _) in shaders {
         let is_vert = filename.ends_with(".vs");
         let is_frag = filename.ends_with(".fs");
@@ -98,8 +99,13 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) {
         let is_ps_yuv = filename.starts_with("ps_yuv");
 
         let base_filename = filename.splitn(2, '.').next().unwrap();
-        let shader_prefix =
-            format!("{}\n// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n", SHADER_VERSION, base_filename, 1024);
+        let shader_prefix = if cfg!(target_os = "windows") && cfg!(feature = "dx11") {
+            format!("// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n#define WR_DX11\n",
+                    base_filename, 1024)
+        } else {
+            format!("{}\n// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
+                    SHADER_VERSION, base_filename, 1024)
+        };
 
         let mut build_configs = vec!["#define WR_FEATURE_TRANSFORM\n"];
         if is_prim {
@@ -221,10 +227,51 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) {
             let (mut vs_name, mut fs_name) = (out_file_name.clone(), out_file_name);
             vs_name.push_str(".vert");
             fs_name.push_str(".frag");
-            let (vs_file_path, fs_file_path) = (Path::new(&out_dir).join(vs_name), Path::new(&out_dir).join(fs_name));
+            let (vs_file_path, fs_file_path) = (Path::new(&out_dir).join(vs_name.clone()), Path::new(&out_dir).join(fs_name.clone()));
             let (mut vs_file, mut fs_file) = (File::create(vs_file_path).unwrap(), File::create(fs_file_path).unwrap());
             write!(vs_file, "{}", vs_source).unwrap();
             write!(fs_file, "{}", fs_source).unwrap();
+            file_names.push(vs_name);
+            file_names.push(fs_name);
+        }
+    }
+    file_names
+}
+
+#[cfg(any(target_os = "windows"))]
+fn compile_fx_files(file_names: Vec<String>, out_dir: String) {
+    for mut file_name in file_names {
+        //TODO: Remove SUPPORTED_SHADERS when all shader conversion is done.
+        if file_name.contains("ps_clear") || file_name.contains("ps_line")
+           || !(file_name.contains("ps_") || file_name.contains("cs_clip_") || file_name.starts_with("debug_")) {
+            continue;
+        }
+        let is_vert = file_name.ends_with(".vert");
+        if !is_vert && !file_name.ends_with(".frag") {
+            continue;
+        }
+        let file_path = Path::new(&out_dir).join(&file_name);
+        file_name.push_str(".fx");
+        let fx_file_path = Path::new(&out_dir).join(&file_name);
+        let pf_path = env::var("ProgramFiles(x86)").ok().expect("Please set the ProgramFiles(x86) enviroment variable");
+        let pf_path = Path::new(&pf_path);
+        let format = if is_vert {
+            "vs_5_0"
+        } else {
+            "ps_5_0"
+        };
+        let mut command = Command::new(pf_path.join("Windows Kits").join("8.1").join("bin").join("x64").join("fxc.exe").to_str().unwrap());
+        command.arg("/Zi"); // Debug info
+        command.arg("/T");
+        command.arg(format);
+        command.arg("/Fo");
+        command.arg(&fx_file_path);
+        command.arg(&file_path);
+        println!("{:?}", command);
+        if command.stdout(Stdio::inherit()).stderr(Stdio::inherit()).status().unwrap().code().unwrap() != 0
+        {
+            println!("Error while executing fxc");
+            process::exit(1)
         }
     }
 }
@@ -252,5 +299,8 @@ fn main() {
     glsl_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
     let shader_map = write_shaders(glsl_files, &shaders_file);
-    create_shaders(out_dir, &shader_map);
+    let file_names = create_shaders(out_dir.clone(), &shader_map);
+    if cfg!(feature = "dx11") && cfg!(target_os = "windows"){
+        compile_fx_files(file_names, out_dir);
+    }
 }
