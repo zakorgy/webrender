@@ -82,5 +82,5 @@ void main(void) {
     float m = smoothstep(-0.5 * afwidth, 0.5 * afwidth, ld);
     vec4 color = mix(color0, color1, m);
 
-    oFragColor = color * vec4(1.0, 1.0, 1.0, alpha);
+    Target0 = color * vec4(1.0, 1.0, 1.0, alpha);
 }

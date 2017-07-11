@@ -8,8 +8,8 @@ void main(void) {
                                  vec4(vUv.xy, vUvTaskBounds.zw));
     if (all(inside)) {
         vec2 uv = clamp(vUv.xy, vUvSampleBounds.xy, vUvSampleBounds.zw);
-        oFragColor = textureLod(sCacheRGBA8, vec3(uv, vUv.z), 0.0);
+        Target0 = textureLod(sCacheRGBA8, vec3(uv, vUv.z), 0.0);
     } else {
-        oFragColor = vec4(0.0);
+        Target0 = vec4(0.0);
     }
 }

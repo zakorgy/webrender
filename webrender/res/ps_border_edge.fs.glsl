@@ -61,5 +61,5 @@ void main(void) {
     // Select between dot/dash alpha based on clip mode.
     alpha = min(alpha, mix(dash_alpha, dot_alpha, vClipSelect));
 
-    oFragColor = color * vec4(1.0, 1.0, 1.0, alpha);
+    Target0 = color * vec4(1.0, 1.0, 1.0, alpha);
 }

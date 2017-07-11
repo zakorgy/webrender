@@ -8,10 +8,10 @@ void main(void) {
 #else
 void main(in a2v IN, out v2p OUT) {
     vec3 aPosition = IN.pos;
-    ivec4 aData0 = IN.data0;
-    ivec4 aData1 = IN.data1;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
 #endif
-    Primitive prim = load_primitive(aData0, aData1);
+    Primitive prim = load_primitive(aDataA, aDataB);
     Rectangle rect = fetch_rectangle(prim.specific_prim_address);
 #ifdef WR_DX11
     OUT.vColor = rect.color;

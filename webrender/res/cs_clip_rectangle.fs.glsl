@@ -61,5 +61,5 @@ void main(void) {
     // Select alpha or inverse alpha depending on clip in/out.
     float final_alpha = mix(combined_alpha, 1.0 - combined_alpha, vClipMode);
 
-    oFragColor = vec4(final_alpha, 0.0, 0.0, 1.0);
+    Target0 = vec4(final_alpha, 0.0, 0.0, 1.0);
 }

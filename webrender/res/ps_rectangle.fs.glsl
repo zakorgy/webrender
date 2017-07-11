@@ -20,8 +20,8 @@
     alpha = min(alpha, do_clip());
 #endif
 #ifdef WR_DX11
-    OUT.oFragColor = IN.vColor * vec4(1.0, 1.0, 1.0, alpha);
+    OUT.Target0 = IN.vColor * vec4(1.0, 1.0, 1.0, alpha);
 #else
-    oFragColor = vColor * vec4(1.0, 1.0, 1.0, alpha);
+    Target0 = vColor * vec4(1.0, 1.0, 1.0, alpha);
 #endif
 }

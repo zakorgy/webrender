@@ -176,11 +176,11 @@ void main(void) {
     Cs.rgb /= Cs.a;
 
     if (Cb.a == 0.0) {
-        oFragColor = Cs;
+        Target0 = Cs;
         return;
     }
     if (Cs.a == 0.0) {
-        oFragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        Target0 = vec4(0.0, 0.0, 0.0, 0.0);
         return;
     }
 
@@ -245,5 +245,5 @@ void main(void) {
     result.rgb = (1.0 - Cb.a) * Cs.rgb + Cb.a * result.rgb;
     result.a = Cs.a;
 
-    oFragColor = result;
+    Target0 = result;
 }

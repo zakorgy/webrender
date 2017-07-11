@@ -109,31 +109,31 @@ void main(void) {
     switch (vOp) {
         case 0:
             // Gaussian blur is specially handled:
-            oFragColor = Cs;// Blur(vAmount, vec2(0,0));
+            Target0 = Cs;// Blur(vAmount, vec2(0,0));
             break;
         case 1:
-            oFragColor = Contrast(Cs, vAmount);
+            Target0 = Contrast(Cs, vAmount);
             break;
         case 2:
-            oFragColor = Grayscale(Cs, vAmount);
+            Target0 = Grayscale(Cs, vAmount);
             break;
         case 3:
-            oFragColor = HueRotate(Cs, vAmount);
+            Target0 = HueRotate(Cs, vAmount);
             break;
         case 4:
-            oFragColor = Invert(Cs, vAmount);
+            Target0 = Invert(Cs, vAmount);
             break;
         case 5:
-            oFragColor = Saturate(Cs, vAmount);
+            Target0 = Saturate(Cs, vAmount);
             break;
         case 6:
-            oFragColor = Sepia(Cs, vAmount);
+            Target0 = Sepia(Cs, vAmount);
             break;
         case 7:
-            oFragColor = Brightness(Cs, vAmount);
+            Target0 = Brightness(Cs, vAmount);
             break;
         case 8:
-            oFragColor = Opacity(Cs, vAmount);
+            Target0 = Opacity(Cs, vAmount);
             break;
     }
 }

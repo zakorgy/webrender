@@ -18,5 +18,5 @@ void main(void) {
     uv = mix(vCacheUvRectCoords.xy, vCacheUvRectCoords.zw, uv);
 
     // Modulate the box shadow by the color.
-    oFragColor = clip_scale * dither(vColor * texture(sCacheRGBA8, vec3(uv, vUv.z)));
+    Target0 = clip_scale * dither(vColor * texture(sCacheRGBA8, vec3(uv, vUv.z)));
 }

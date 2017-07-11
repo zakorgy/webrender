@@ -104,10 +104,10 @@
     // Fragment shader outputs
 #ifdef WR_DX11
     struct p2f {
-        vec4 oFragColor : SV_Target;
+        vec4 Target0 : SV_Target;
     };
 #else
-    out vec4 oFragColor;
+    out vec4 Target0;
 #endif
 
 #endif

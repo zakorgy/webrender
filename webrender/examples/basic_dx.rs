@@ -65,7 +65,7 @@ fn main() {
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut window, mut renderer, sender) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
+    let (mut renderer, sender, mut window) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
     let api = sender.create_api();
 
     let epoch = Epoch(0);

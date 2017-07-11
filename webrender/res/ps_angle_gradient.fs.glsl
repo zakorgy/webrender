@@ -14,7 +14,7 @@ void main(void) {
 
     float offset = dot(pos - vStartPoint, vScaledDir);
 
-    oFragColor = sample_gradient(vGradientAddress,
+    Target0 = sample_gradient(vGradientAddress,
                                  offset,
                                  vGradientRepeat);
 }

@@ -12,5 +12,5 @@ void main(void)
 #else
     float alpha = texture(sColor0, vColorTexCoord.xy).r;
 #endif
-    oFragColor = vec4(vColor.xyz, vColor.w * alpha);
+    Target0 = vec4(vColor.xyz, vColor.w * alpha);
 }

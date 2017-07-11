@@ -6,7 +6,7 @@ void main(void) {
     vec2 tc = clamp(vUv, vUvBorder.xy, vUvBorder.zw);
 #ifdef WR_FEATURE_SUBPIXEL_AA
     //note: the blend mode is not compatible with clipping
-    oFragColor = texture(sColor0, tc);
+    Target0 = texture(sColor0, tc);
 #else
     float alpha = texture(sColor0, tc).a;
 #ifdef WR_FEATURE_TRANSFORM
@@ -16,6 +16,6 @@ void main(void) {
 #endif
     vec4 color = vColor;
     alpha = min(alpha, do_clip());
-    oFragColor = vec4(vColor.rgb, vColor.a * alpha);
+    Target0 = vec4(vColor.rgb, vColor.a * alpha);
 #endif
 }

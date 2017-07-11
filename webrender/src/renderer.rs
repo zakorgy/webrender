@@ -60,10 +60,8 @@ use webrender_traits::VRCompositorHandler;
 use webrender_traits::{YuvColorSpace, YuvFormat};
 use webrender_traits::{YUV_COLOR_SPACES, YUV_FORMATS};
 
-#[cfg(target_os = "windows")]
-use winit;
-#[cfg(target_os = "windows")]
-use gfx_window_dxgi as window;
+use window;
+use wrapper_window;
 use gfx;
 use gfx::memory::Pod;
 
@@ -470,6 +468,7 @@ pub struct Renderer {
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
     ps_rectangle: ProgramPair,
+
     /*ps_rectangle_clip: ProgramPair,
     ps_text_run: ProgramPair,
     ps_text_run_subpixel: ProgramPair,
@@ -600,9 +599,9 @@ impl Renderer {
     /// let (renderer, sender) = Renderer::new(opts);
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
-    pub fn new(window: winit::Window,
+    pub fn new(window: window::Window,
                mut options: RendererOptions,
-               initial_window_size: DeviceUintSize) -> Result<(window::Window, Renderer, RenderApiSender), InitError> {
+               initial_window_size: DeviceUintSize) -> Result<(Renderer, RenderApiSender, wrapper_window::Window), InitError> {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
         let (payload_tx, payload_rx) = try!{ channel::payload_channel() };
         let (result_tx, result_rx) = channel();
@@ -612,7 +611,7 @@ impl Renderer {
         let notifier = Arc::new(Mutex::new(None));
 
 
-        let (mut win, mut device) = Device::new(window);
+        let (mut device, window) = Device::new(window);
         // device-pixel ratio doesn't matter here - we are just creating resources.
 
         /*let cs_box_shadow = device.create_cache_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_box_shadow.vert")),
@@ -807,7 +806,7 @@ impl Renderer {
         };
 
         let sender = RenderApiSender::new(api_tx, payload_tx);
-        Ok((win, renderer, sender))
+        Ok((renderer, sender, window))
     }
 
     /*pub fn get_graphics_api_info(&self) -> GraphicsApiInfo {

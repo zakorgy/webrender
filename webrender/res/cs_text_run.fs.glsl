@@ -5,5 +5,5 @@
 
 void main(void) {
     float a = texture(sColor0, vUv).a;
-    oFragColor = vec4(vColor.rgb, vColor.a * a);
+    Target0 = vec4(vColor.rgb, vColor.a * a);
 }

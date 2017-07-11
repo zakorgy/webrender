@@ -36,5 +36,5 @@ void main(void) {
     // Unpremultiply the alpha.
     color.rgb /= color.a;
 
-    oFragColor = dither(color);
+    Target0 = dither(color);
 }

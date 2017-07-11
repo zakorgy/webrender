@@ -99,7 +99,7 @@ pub fn main_wrapper(builder_callback: fn(&RenderApi,
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender) = webrender::renderer::Renderer::new(&window, opts, size).unwrap();
+    let (mut renderer, sender, window) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(window.create_window_proxy()));

@@ -12,5 +12,5 @@ void main(void) {
 #endif
 
     alpha = min(alpha, do_clip());
-    oFragColor = dither(vColor * vec4(1.0, 1.0, 1.0, alpha));
+    Target0 = dither(vColor * vec4(1.0, 1.0, 1.0, alpha));
 }
