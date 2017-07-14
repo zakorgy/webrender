@@ -640,10 +640,10 @@ impl Renderer {
                  ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_709"))];
 
-        let ps_border_corner = create_programs!(device, "ps_border_corner");
+        let ps_border_corner = create_programs!(device, "ps_border_corner");*/
         let ps_border_edge = create_programs!(device, "ps_border_edge");
 
-        let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
+        /*let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
             if options.enable_dithering {
                 (create_programs!(device, "ps_gradient_dither"),
                  create_programs!(device, "ps_angle_gradient_dither"),

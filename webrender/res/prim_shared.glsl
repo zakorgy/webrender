@@ -55,6 +55,10 @@
 #define EXTEND_MODE_REPEAT 1
 
 uniform sampler2DArray sCacheA8;
+#ifdef WR_DX11
+SamplerState sCacheA8_;
+// TODO: May modify this state
+#endif
 uniform sampler2DArray sCacheRGBA8;
 
 uniform sampler2D sGradients;
@@ -103,8 +107,11 @@ float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
 }
 
 // TODO: convert back to RectWithEndPoint if driver issues are resolved, if ever.
-//flat varying vec4 vClipMaskUvBounds;
-//varying vec3 vClipMaskUv;
+#ifndef WR_DX11
+flat varying vec4 vClipMaskUvBounds;
+varying vec3 vClipMaskUv;
+#endif
+
 #ifdef WR_FEATURE_TRANSFORM
     //flat varying vec4 vLocalBounds;
 #endif
@@ -178,6 +185,7 @@ struct a2v {
     vec3 pos : aPosition;
     ivec4 data0 : aDataA;
     ivec4 data1 : aDataB;
+    uint vertexId: SV_VertexId;
 };
 #else
 in ivec4 aDataA;
@@ -765,7 +773,8 @@ vec2 intersect_lines(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     return vec2(nx / d, ny / d);
 }
 
-TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
+TransformVertexInfo write_transform_vertex(uint vertex_id,
+                                           RectWithSize instance_rect,
                                            RectWithSize local_clip_rect,
                                            float z,
                                            Layer layer,
@@ -778,7 +787,7 @@ TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
     // Select the current vertex and the previous/next vertices,
     // based on the vertex ID that is known based on the instance rect.
     //TODO pass the vertex_id via param (from dx struct)
-    switch (0) {
+    switch (vertex_id) {
         case 0:
             current_local_pos = vec2(local_rect.p0.x, local_rect.p0.y);
             next_local_pos = vec2(local_rect.p0.x, local_rect.p1.y);
@@ -951,12 +960,20 @@ BoxShadow fetch_boxshadow(int address) {
     return box_shadow;
 }
 
-void write_clip(vec2 global_pos, ClipArea area) {
+struct WriteClipResult {
+    vec4 clip_mask_uv_bounds;
+    vec3 clip_mask_uv;
+};
+
+WriteClipResult write_clip(vec2 global_pos, ClipArea area) {
     vec2 texture_size = vec2(textureSize(sCacheA8, 0).xy);
     vec2 uv = global_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
-    //vClipMaskUvBounds = area.task_bounds / texture_size.xyxy;
-    //vClipMaskUv = vec3(uv / texture_size, area.screen_origin_target_index.z);
+    WriteClipResult write_clip_res;
+    write_clip_res.clip_mask_uv_bounds = area.task_bounds / texture_size.xyxy;
+    write_clip_res.clip_mask_uv = vec3(uv / texture_size, area.screen_origin_target_index.z);
+    return write_clip_res;
 }
+
 #endif //WR_VERTEX_SHADER
 
 #ifdef WR_FRAGMENT_SHADER
@@ -984,15 +1001,21 @@ vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha) {
 }
 #endif //WR_FEATURE_TRANSFORM
 
-float do_clip() {
-    /*// anything outside of the mask is considered transparent
+float do_clip(vec4 clip_mask_uv_bounds, vec3 clip_mask_uv) {
+    // anything outside of the mask is considered transparent
     bvec4 inside = lessThanEqual(
-        vec4(vClipMaskUvBounds.xy, vClipMaskUv.xy),
-        vec4(vClipMaskUv.xy, vClipMaskUvBounds.zw));
+        vec4(clip_mask_uv_bounds.xy, clip_mask_uv.xy),
+        vec4(clip_mask_uv.xy, clip_mask_uv_bounds.zw));
     // check for the dummy bounds, which are given to the opaque objects
-    return vClipMaskUvBounds.xy == vClipMaskUvBounds.zw ? 1.0:
-        all(inside) ? textureLod(sCacheA8, vClipMaskUv, 0.0).r : 0.0;*/
-    return 0.0;
+#ifdef WR_DX11
+    return ((clip_mask_uv_bounds.x == clip_mask_uv_bounds.z)
+            && (clip_mask_uv_bounds.y == clip_mask_uv_bounds.w)) ? 1.0:
+        all(inside) ? sCacheA8.SampleLevel(sCacheA8_, clip_mask_uv, 0.0).r : 0.0;
+#else
+    return clip_mask_uv_bounds.xy == clip_mask_uv_bounds.zw ? 1.0:
+        all(inside) ? textureLod(sCacheA8, clip_mask_uv, 0.0).r : 0.0;
+#endif
+    //return 0.0;
 }
 
 #ifdef WR_FEATURE_DITHERING

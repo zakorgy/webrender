@@ -19,7 +19,7 @@ void main(in a2v IN, out v2p OUT) {
     vColor = rect.color;
 #endif
 #ifdef WR_FEATURE_TRANSFORM
-    TransformVertexInfo vi = write_transform_vertex(//TODO vertex_id,
+    TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
                                                     prim.local_rect,
                                                     prim.local_clip_rect,
                                                     prim.z,
@@ -46,6 +46,6 @@ void main(in a2v IN, out v2p OUT) {
 #endif
 
 #ifdef WR_FEATURE_CLIP
-    write_clip(vi.screen_pos, prim.clip_area);
+    write_clip(vi.screen_pos, prim.clip_area); //TODO
 #endif
 }

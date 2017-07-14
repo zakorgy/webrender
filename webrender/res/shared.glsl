@@ -25,7 +25,8 @@
     #define gl_InstanceID SV_InstanceID
     #define gl_VertexID SV_VertexID
     #define point p
-    #define flat
+    //#define flat
+    #define flat nointerpolation
     #define texelFetchOffset(sampler, loc, index, offset) sampler.Load(vec3(loc, 0.0), offset)
     #define texelFetch(sampler, loc, index) sampler.Load(vec3(loc, 0.0))
 
@@ -62,6 +63,19 @@
 #else
 // In normal case, we use textureLod(). We haven't used the lod yet. So, we always pass 0.0 now.
 #define TEX_SAMPLE(sampler, tex_coord) textureLod(sampler, tex_coord, 0.0)
+#endif
+
+#ifdef WR_DX11
+bool4 lessThanEqual(float4 value, float4 comparison) {
+    return bool4(value.x <= comparison.x,
+                 value.y <= comparison.y,
+                 value.z <= comparison.z,
+                 value.w <= comparison.w);
+}
+
+float mod(float x,float y) {
+    return x - y * floor(x/y);
+}
 #endif
 
 //======================================================================================
