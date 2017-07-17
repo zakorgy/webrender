@@ -73,7 +73,7 @@ bool4 lessThanEqual(float4 value, float4 comparison) {
                  value.w <= comparison.w);
 }
 
-float mod(float x,float y) {
+float mod(float x, float y) {
     return x - y * floor(x/y);
 }
 #endif
@@ -145,6 +145,15 @@ uniform sampler2D sColor2;
 
 #ifdef WR_FEATURE_DITHERING
 uniform sampler2D sDither;
+    #ifdef WR_DX11
+    SamplerState sDither_;
+    #endif
+#endif
+
+#ifdef WR_DX11
+SamplerState sColor0_;
+SamplerState sColor1_;
+SamplerState sColor2_;
 #endif
 
 //======================================================================================

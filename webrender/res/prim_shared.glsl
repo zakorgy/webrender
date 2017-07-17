@@ -57,7 +57,6 @@
 uniform sampler2DArray sCacheA8;
 #ifdef WR_DX11
 SamplerState sCacheA8_;
-// TODO: May modify this state
 #endif
 uniform sampler2DArray sCacheRGBA8;
 

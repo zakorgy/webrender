@@ -471,9 +471,9 @@ pub struct Renderer {
 
     /*ps_rectangle_clip: ProgramPair,
     ps_text_run: ProgramPair,
-    ps_text_run_subpixel: ProgramPair,
+    ps_text_run_subpixel: ProgramPair,*/
     ps_image: ProgramPair,
-    ps_yuv_image: Vec<ProgramPair>,
+    /*ps_yuv_image: Vec<ProgramPair>,
     ps_border_corner: ProgramPair,
     ps_border_edge: ProgramPair,
     ps_gradient: ProgramPair,
@@ -630,9 +630,9 @@ impl Renderer {
         let ps_rectangle = create_programs!(device, "ps_rectangle");
         /*let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
         let ps_text_run = create_programs!(device, "ps_text_run");
-        let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");
+        let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");*/
         let ps_image = create_programs!(device, "ps_image");
-        let ps_yuv_image =
+        /*let ps_yuv_image =
             vec![ProgramPair(create_programs!(device, "ps_yuv_image_nv12_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_nv12_709")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_planar_601")),
@@ -760,9 +760,9 @@ impl Renderer {
             ps_rectangle: ProgramPair(ps_rectangle),
             /*ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
             ps_text_run: ProgramPair(ps_text_run),
-            ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),
+            ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),*/
             ps_image: ProgramPair(ps_image),
-            ps_yuv_image: ps_yuv_image,
+            /*ps_yuv_image: ps_yuv_image,
             ps_border_corner: ProgramPair(ps_border_corner),
             ps_border_edge: ProgramPair(ps_border_edge),
             ps_box_shadow: ProgramPair(ps_box_shadow),
@@ -1034,9 +1034,9 @@ impl Renderer {
         self.ps_rectangle.reset_upload_offset();
         /*self.ps_rectangle_clip.reset_upload_offset();
         self.ps_text_run.reset_upload_offset();
-        self.ps_text_run_subpixel.reset_upload_offset();
+        self.ps_text_run_subpixel.reset_upload_offset();*/
         self.ps_image.reset_upload_offset();
-        self.ps_border_corner.reset_upload_offset();
+        /*self.ps_border_corner.reset_upload_offset();
         self.ps_border_edge.reset_upload_offset();
         self.ps_gradient.reset_upload_offset();
         self.ps_angle_gradient.reset_upload_offset();
@@ -1285,9 +1285,9 @@ impl Renderer {
                         BlendMode::Subpixel(..) => self.ps_text_run_subpixel.get(transform_kind),
                         _ => self.ps_text_run.get(transform_kind),
                     }
-                },
+                },*/
                 AlphaBatchKind::Image(..) => self.ps_image.get(transform_kind),
-                AlphaBatchKind::YuvImage(_, format, color_space) => {
+                /*AlphaBatchKind::YuvImage(_, format, color_space) => {
                     let shader_index = Renderer::get_yuv_shader_index(ImageBufferKind::Texture2D,
                                                                       format,
                                                                       color_space);
