@@ -1170,9 +1170,8 @@ impl FrameBuilder {
                          -> (RenderTask, usize) {
         profile_scope!("build_render_task");
 
-        //let mut next_z = 0;
+        let mut next_z = 0;
         let mut next_task_index = RenderTaskIndex(0);
-        let mut next_prim_z = 65535;
 
         let mut sc_stack: Vec<StackingContextIndex> = Vec::new();
         let mut current_task = RenderTask::new_alpha_batch(next_task_index,
@@ -1256,9 +1255,8 @@ impl FrameBuilder {
                         let item = AlphaRenderItem::HardwareComposite(stacking_context_index,
                                                                       current_task.id,
                                                                       HardwareCompositeOp::PremultipliedAlpha,
-                                                                      /*next_z*/next_prim_z);
-                        //next_z += 1;
-                        next_prim_z -= 1;
+                                                                      next_z);
+                        next_z += 1;
                         prev_task.as_alpha_batch().items.push(item);
                         prev_task.children.push(current_task);
                         current_task = prev_task;
@@ -1269,9 +1267,8 @@ impl FrameBuilder {
                         let item = AlphaRenderItem::Blend(stacking_context_index,
                                                           current_task.id,
                                                           *filter,
-                                                          /*next_z*/next_prim_z);
-                        //next_z += 1;
-                        next_prim_z -= 1;
+                                                          next_z);
+                        next_z += 1;
                         prev_task.as_alpha_batch().items.push(item);
                         prev_task.children.push(current_task);
                         current_task = prev_task;
@@ -1287,9 +1284,8 @@ impl FrameBuilder {
                                                               readback_task.id,
                                                               current_task.id,
                                                               mix_blend_mode,
-                                                              /*next_z*/next_prim_z);
-                        //next_z += 1;
-                        next_prim_z -= 1;
+                                                              next_z);
+                        next_z += 1;
                         prev_task.as_alpha_batch().items.push(item);
                         prev_task.children.push(current_task);
                         prev_task.children.push(readback_task);
@@ -1322,13 +1318,12 @@ impl FrameBuilder {
                                 [pp[2].z, pp[3].x, pp[3].y, pp[3].z].into(),
                             ];
                             let handle = gpu_cache.push_per_frame_blocks(&gpu_blocks);
-                            let item = AlphaRenderItem::SplitComposite(sc_index, task_id, handle, /*next_z*/next_prim_z);
+                            let item = AlphaRenderItem::SplitComposite(sc_index, task_id, handle, next_z);
                             current_task.as_alpha_batch().items.push(item);
                         }
                         splitter.reset();
                         preserve_3d_map.clear();
-                        //next_z += 1;
-                        next_prim_z -= 1;
+                        next_z += 1;
                     }
                 }
                 PrimitiveRunCmd::PrimitiveRun(first_prim_index, prim_count, clip_and_scroll) => {
@@ -1362,10 +1357,9 @@ impl FrameBuilder {
                                 current_task.children.push(clip_task.clone());
                             }
 
-                            let item = AlphaRenderItem::Primitive(Some(group_index), prim_index, /*next_z*/next_prim_z);
+                            let item = AlphaRenderItem::Primitive(Some(group_index), prim_index, next_z);
                             current_task.as_alpha_batch().items.push(item);
-                            //next_z += 1;
-                            next_prim_z -= 1;
+                            next_z += 1;
                         }
                     }
                 }
