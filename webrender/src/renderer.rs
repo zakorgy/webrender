@@ -474,9 +474,9 @@ pub struct Renderer {
     ps_text_run_subpixel: ProgramPair,*/
     ps_image: ProgramPair,
     /*ps_yuv_image: Vec<ProgramPair>,
-    ps_border_corner: ProgramPair,
+    ps_border_corner: ProgramPair,*/
     ps_border_edge: ProgramPair,
-    ps_gradient: ProgramPair,
+    /*ps_gradient: ProgramPair,
     ps_angle_gradient: ProgramPair,
     ps_radial_gradient: ProgramPair,
     ps_box_shadow: ProgramPair,
@@ -763,9 +763,9 @@ impl Renderer {
             ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),*/
             ps_image: ProgramPair(ps_image),
             /*ps_yuv_image: ps_yuv_image,
-            ps_border_corner: ProgramPair(ps_border_corner),
+            ps_border_corner: ProgramPair(ps_border_corner),*/
             ps_border_edge: ProgramPair(ps_border_edge),
-            ps_box_shadow: ProgramPair(ps_box_shadow),
+            /*ps_box_shadow: ProgramPair(ps_box_shadow),
             ps_gradient: ProgramPair(ps_gradient),
             ps_angle_gradient: ProgramPair(ps_angle_gradient),
             ps_radial_gradient: ProgramPair(ps_radial_gradient),
@@ -1036,9 +1036,9 @@ impl Renderer {
         self.ps_text_run.reset_upload_offset();
         self.ps_text_run_subpixel.reset_upload_offset();*/
         self.ps_image.reset_upload_offset();
-        /*self.ps_border_corner.reset_upload_offset();
+        /*self.ps_border_corner.reset_upload_offset();*/
         self.ps_border_edge.reset_upload_offset();
-        self.ps_gradient.reset_upload_offset();
+        /*self.ps_gradient.reset_upload_offset();
         self.ps_angle_gradient.reset_upload_offset();
         self.ps_radial_gradient.reset_upload_offset();
         self.ps_box_shadow.reset_upload_offset();
@@ -1268,6 +1268,7 @@ impl Renderer {
         }
 
         {
+            println!("KIND = {:?}", batch.key.kind);
             let mut program = match batch.key.kind {
                 AlphaBatchKind::Rectangle => {
                     //if needs_clipping {
@@ -1293,9 +1294,9 @@ impl Renderer {
                                                                       color_space);
                     self.ps_yuv_image[shader_index].get(transform_kind)
                 },
-                AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),
+                AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),*/
                 AlphaBatchKind::BorderEdge => self.ps_border_edge.get(transform_kind),
-                AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
+                /*AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
                 AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
                 AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
                 AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
