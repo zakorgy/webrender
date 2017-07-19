@@ -734,7 +734,7 @@ VertexInfo write_vertex(vec3 aPosition,
     VertexInfo vi;
     vi.local_pos = clamped_local_pos;
     vi.screen_pos = device_pos;
-    vi.out_pos = out_pos;
+    vi.out_pos = vec4(out_pos.x, out_pos.y, out_pos.z * 0.5 + 0.5, out_pos.w);
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
     VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
@@ -861,7 +861,7 @@ TransformVertexInfo write_transform_vertex(uint vertex_id,
     TransformVertexInfo tvi;
     tvi.local_pos = layer_pos.xyw;
     tvi.screen_pos = device_pos;
-    tvi.out_pos = out_pos;
+    tvi.out_pos = vec4(out_pos.x, out_pos.y, out_pos.z * 0.5 + 0.5, out_pos.w);
     return tvi;
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
