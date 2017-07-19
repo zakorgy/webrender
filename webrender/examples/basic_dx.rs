@@ -85,15 +85,30 @@ fn main() {
                                   Vec::new());
 
     let clip = push_sub_clip(&api, &mut builder, &bounds);
-    builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
+    builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 200.0)),
                       clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
 
-    /*let clip = push_sub_clip(&api, &mut builder, &bounds);
-    builder.push_rect(LayoutRect::new(LayoutPoint::new(250.0, 100.0), LayoutSize::new(100.0, 100.0)),
+    let clip = push_sub_clip(&api, &mut builder, &bounds);
+    builder.push_rect(LayoutRect::new(LayoutPoint::new(400.0, 100.0), LayoutSize::new(200.0, 200.0)),
                       clip,
-                      ColorF::new(0.0, 1.0, 0.0, 1.0));
-    let border_side = webrender_traits::BorderSide {
+                      ColorF::new(1.0, 0.0, 1.0, 1.0));
+
+    let clip = push_sub_clip(&api, &mut builder, &bounds);
+    builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 250.0), LayoutSize::new(300.0, 200.0)),
+                      clip,
+                      ColorF::new(0.0, 1.0, 1.0, 1.0));
+
+    let clip = push_sub_clip(&api, &mut builder, &bounds);
+    builder.push_rect(LayoutRect::new(LayoutPoint::new(400.0, 400.0), LayoutSize::new(100.0, 200.0)),
+                      clip,
+                      ColorF::new(1.0, 1.0, 0.0, 1.0));
+
+    let clip = push_sub_clip(&api, &mut builder, &bounds);
+    builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 500.0), LayoutSize::new(100.0, 200.0)),
+                      clip,
+                      ColorF::new(1.0, 1.0, 1.0, 1.0));
+    /*let border_side = webrender_traits::BorderSide {
         color: ColorF::new(0.0, 0.0, 1.0, 1.0),
         style: webrender_traits::BorderStyle::Groove,
     };
