@@ -730,11 +730,17 @@ VertexInfo write_vertex(vec3 aPosition,
                      task.render_target_origin;
 
 #ifdef WR_DX11
-    vec4 out_pos = mul(uTransform, vec4(final_pos, z, 1.0));
+    float4x4 transform = float4x4(
+        float4(1.0, 0.0, 0.0, 0.0),
+        float4(0.0, 1.0, 0.0, 0.0),
+        float4(0.0, 0.0, 0.5, 0.5),
+        float4(0.0, 0.0, 0.0, 1.0)
+    );
+    vec4 out_pos = mul(transform, mul(uTransform, vec4(final_pos, z, 1.0)));
     VertexInfo vi;
     vi.local_pos = clamped_local_pos;
     vi.screen_pos = device_pos;
-    vi.out_pos = vec4(out_pos.x, out_pos.y, out_pos.z * 0.5 + 0.5, out_pos.w);
+    vi.out_pos = out_pos;
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
     VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
