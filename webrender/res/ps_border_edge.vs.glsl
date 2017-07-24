@@ -220,7 +220,7 @@ void main(in a2v IN, out v2p OUT) {
 #endif
             break;
         }
-        case 3: {
+        default: {
             segment_rect.p0 = vec2(corners.bl_inner.x, corners.bl_outer.y - border.widths.w);
             segment_rect.size = vec2(corners.br_inner.x - corners.bl_inner.x, border.widths.w);
             vec4 adjusted_widths = get_effective_border_widths(border, int(border.style.w));
@@ -267,7 +267,7 @@ void main(in a2v IN, out v2p OUT) {
 
 #ifdef WR_FEATURE_TRANSFORM
     TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
-                                                    prim.local_rect,
+                                                    segment_rect,
                                                     prim.local_clip_rect,
                                                     prim.z,
                                                     prim.layer,
@@ -275,7 +275,7 @@ void main(in a2v IN, out v2p OUT) {
                                                     prim.local_rect);
 #else
     VertexInfo vi = write_vertex(aPosition,
-                                 prim.local_rect,
+                                 segment_rect,
                                  prim.local_clip_rect,
                                  prim.z,
                                  prim.layer,
