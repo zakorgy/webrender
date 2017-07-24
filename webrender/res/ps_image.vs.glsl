@@ -23,11 +23,7 @@ void main(in a2v IN, out v2p OUT) {
                                                     prim.layer,
                                                     prim.task,
                                                     prim.local_rect);
-#ifdef WR_DX11
-    OUT.vLocalPos = vi.local_pos;
-#else
-    vLocalPos = vi.local_pos;
-#endif
+    SHADER_OUT(vLocalPos,vi.local_pos);
 
 #else
     VertexInfo vi = write_vertex(aPosition,
@@ -37,22 +33,13 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.layer,
                                  prim.task,
                                  prim.local_rect);
-#ifdef WR_DX11
-    OUT.vLocalPos = vi.local_pos - prim.local_rect.p0;
-#else
-    vLocalPos = vi.local_pos - prim.local_rect.p0;
-#endif
+    SHADER_OUT(vLocalPos,vi.local_pos - prim.local_rect.p0);
 #endif
 
     WriteClipResult write_clip_res = write_clip(vi.screen_pos, prim.clip_area);
 
-#ifdef WR_DX11
-    OUT.vClipMaskUvBounds = write_clip_res.clip_mask_uv_bounds;
-    OUT.vClipMaskUv = write_clip_res.clip_mask_uv;
-#else
-    vClipMaskUvBounds = write_clip_res.clip_mask_uv_bounds;
-    vClipMaskUv = write_clip_res.clip_mask_uv;
-#endif
+    SHADER_OUT(vClipMaskUvBounds, write_clip_res.clip_mask_uv_bounds);
+    SHADER_OUT(vClipMaskUv, write_clip_res.clip_mask_uv);
 
     // If this is in WR_FEATURE_TEXTURE_RECT mode, the rect and size use
     // non-normalized texture coordinates.
@@ -88,27 +75,15 @@ void main(in a2v IN, out v2p OUT) {
     //vec2 st1 = vec2(uv1.x / texture_size_normalization_factor.x,
     //                uv1.y / texture_size_normalization_factor.y);
 
-#ifdef WR_DX11
-    OUT.vTextureSize = vec2(st1 - st0);
-    OUT.vTextureOffset = st0;
-    OUT.vTileSpacing = vec2(image.stretch_size_and_tile_spacing.zw);
-    OUT.vStretchSize = vec2(image.stretch_size_and_tile_spacing.xy);
-#else
-    vTextureSize = st1 - st0;
-    vTextureOffset = st0;
-    vTileSpacing = image.stretch_size_and_tile_spacing.zw;
-    vStretchSize = image.stretch_size_and_tile_spacing.xy;
-#endif
+    SHADER_OUT(vTextureSize, st1 - st0);
+    SHADER_OUT(vTextureOffset, st0);
+    SHADER_OUT(vTileSpacing, image.stretch_size_and_tile_spacing.zw);
+    SHADER_OUT(vStretchSize, image.stretch_size_and_tile_spacing.xy);
 
     // We clamp the texture coordinates to the half-pixel offset from the borders
     // in order to avoid sampling outside of the texture area.
-#ifdef WR_DX11
     vec2 half_texel = vec2(0.5, 0.5) / texture_size_normalization_factor;
-    OUT.vStRect = vec4(min(st0, st1) + half_texel, max(st0, st1) - half_texel);
-#else
-    vec2 half_texel = vec2(0.5) / texture_size_normalization_factor;
-    vStRect = vec4(min(st0, st1) + half_texel, max(st0, st1) - half_texel);
-#endif
+    SHADER_OUT(vStRect, vec4(min(st0, st1) + half_texel, max(st0, st1) - half_texel));
 
 #ifdef WR_DX11
     OUT.Position = vi.out_pos;

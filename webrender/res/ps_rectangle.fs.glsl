@@ -20,9 +20,5 @@ void main(in v2p IN, out p2f OUT) {
 	//TODO: Replace the two zero vec4
     alpha = min(alpha, do_clip(vec4(0.0, 0.0, 0.0, 0.0), vec4(0.0, 0.0, 0.0, 0.0)));
 #endif
-#ifdef WR_DX11
-    OUT.Target0 = IN.vColor * vec4(1.0, 1.0, 1.0, alpha);
-#else
-    Target0 = vColor * vec4(1.0, 1.0, 1.0, alpha);
-#endif
+    SHADER_OUT(Target0, vColor * vec4(1.0, 1.0, 1.0, alpha));
 }

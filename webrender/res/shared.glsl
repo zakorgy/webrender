@@ -44,6 +44,9 @@
         s.GetDimensions(width, height, elements);
         return vec2(width, height);
     }
+    #define SHADER_OUT(value, expr) OUT.##value = expr;
+#else
+    #define SHADER_OUT(value, expr) value = expr;
 #endif
 
 #ifdef WR_FEATURE_TEXTURE_EXTERNAL

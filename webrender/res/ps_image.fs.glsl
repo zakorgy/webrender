@@ -57,7 +57,6 @@ void main(in v2p IN, out p2f OUT) {
     alpha = alpha * float(all(bvec2(step(position_in_tile, vStretchSize))));
 
 #ifdef WR_DX11
-    //#define TEX_SAMPLE(sampler, tex_coord) texture(sampler, tex_coo
     //TODO: Add the Sample for the WR_FEATURE_TRANSFORM case.
     OUT.Target0 = vec4(alpha, alpha, alpha, alpha) * vec4(sColor0.Sample(sColor0_, st));
 #else

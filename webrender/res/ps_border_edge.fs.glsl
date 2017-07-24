@@ -96,9 +96,5 @@ void main(in v2p IN, out p2f OUT) {
 #endif
     // Select between dot/dash alpha based on clip mode.
     alpha = min(alpha, mix(dash_alpha, dot_alpha, vClipSelect));
-#ifdef WR_DX11
-    OUT.Target0 = color * vec4(1.0, 1.0, 1.0, alpha);
-#else
-    Target0 = color * vec4(1.0, 1.0, 1.0, alpha);
-#endif
+    SHADER_OUT(Target0, color * vec4(1.0, 1.0, 1.0, alpha));
 }

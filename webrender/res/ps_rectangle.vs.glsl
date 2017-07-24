@@ -13,11 +13,7 @@ void main(in a2v IN, out v2p OUT) {
 #endif
     Primitive prim = load_primitive(aDataA, aDataB);
     Rectangle rect = fetch_rectangle(prim.specific_prim_address);
-#ifdef WR_DX11
-    OUT.vColor = rect.color;
-#else
-    vColor = rect.color;
-#endif
+    SHADER_OUT(vColor, rect.color);
 #ifdef WR_FEATURE_TRANSFORM
     TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
                                                     prim.local_rect,
@@ -26,11 +22,7 @@ void main(in a2v IN, out v2p OUT) {
                                                     prim.layer,
                                                     prim.task,
                                                     prim.local_rect);
-#ifdef WR_DX11
-    OUT.vLocalPos = vi.local_pos;
-#else
-    vLocalPos = vi.local_pos;
-#endif
+    SHADER_OUT(vLocalPos, vi.local_pos);
 #else
     VertexInfo vi = write_vertex(aPosition,
                                  prim.local_rect,
