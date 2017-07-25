@@ -11,6 +11,7 @@ default = ["freetype-lib", "webgl"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 webgl = ["offscreen_gl_context", "webrender_traits/webgl"]
+dx11 = ["gfx_device_dx11", "gfx_window_dxgi"]
 
 [dependencies]
 app_units = "0.5"
@@ -34,7 +35,6 @@ plane-split = "0.6"
 rand = "0.3"
 winit = "0.6.0"
 
-[target.'cfg(not(windows))'.dependencies]
 #gfx = { git = 'https://github.com/gfx-rs/gfx' }
 gfx = { path = '../../gfx/src/render' }
 #gfx_device_gl = { git = 'https://github.com/gfx-rs/gfx' }
@@ -42,12 +42,10 @@ gfx_device_gl = { path = '../../gfx/src/backend/gl' }
 servo-glutin = "0.11"
 
 [target.'cfg(windows)'.dependencies]
-#gfx = { git = 'https://github.com/gfx-rs/gfx' }
-gfx = { path = '../../gfx/src/render' }
-#gfx_device_dx11 = { git = 'https://github.com/gfx-rs/gfx' }
-gfx_device_dx11 = { path = '../../gfx/src/backend/dx11' }
-#gfx_window_dxgi = { git = 'https://github.com/gfx-rs/gfx' }
-gfx_window_dxgi = { path = '../../gfx/src/window/dxgi' }
+#gfx_device_dx11 = { git = 'https://github.com/gfx-rs/gfx', optional = true}
+gfx_device_dx11 = { path = '../../gfx/src/backend/dx11', optional = true}
+#gfx_window_dxgi = { git = 'https://github.com/gfx-rs/gfx', optional = true}
+gfx_window_dxgi = { path = '../../gfx/src/window/dxgi', optional = true}
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}

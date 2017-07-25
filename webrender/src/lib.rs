@@ -48,18 +48,18 @@ extern crate rand;
 #[macro_use]
 extern crate gfx;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 extern crate gfx_device_dx11 as backend;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 extern crate winit as window;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 extern crate gfx_window_dxgi as wrapper_window;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 extern crate gfx_device_gl as backend;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 extern crate glutin as window;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 extern crate glutin as wrapper_window;
 
 mod border;

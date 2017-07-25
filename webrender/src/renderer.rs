@@ -70,7 +70,7 @@ pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
 pub const DITHER_ID: u32 = 4;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 macro_rules! create_program (
     ($device: ident, $shader: expr) => {
         $device.create_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
@@ -78,7 +78,7 @@ macro_rules! create_program (
     };
 );
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 macro_rules! create_program (
     ($device: ident, $shader: expr) => {
         $device.create_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert.fx")),

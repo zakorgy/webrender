@@ -40,14 +40,14 @@ use window;
 use wrapper_window;
 
 use backend::Resources as R;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 pub type CB = self::backend::CommandBuffer<backend::DeferredContext>;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 pub type CB = self::backend::CommandBuffer;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 pub type BackendDevice = backend::Deferred;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 pub type BackendDevice = backend::Device;
 
 use gfx::CombinedError;
@@ -280,19 +280,19 @@ pub struct Device {
 
 impl Device {
     pub fn new(window: window::Window) -> (Device, wrapper_window::Window) {
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", feature="dx11"))]
         let (mut win, device, mut factory, main_color, main_depth) = init_existing(window);
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(feature = "dx11"))]
         let (mut win, device, mut factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
         /*println!("Vendor: {:?}", device.get_info().platform_name.vendor);
         println!("Renderer: {:?}", device.get_info().platform_name.renderer);
         println!("Version: {:?}", device.get_info().version);
         println!("Shading Language: {:?}", device.get_info().shading_language);*/
 
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", feature="dx11"))]
         let encoder = factory.create_command_buffer_native().into();
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(feature = "dx11"))]
         let encoder = factory.create_command_buffer().into();
 
         let max_texture_size = MAX_VERTEX_TEXTURE_WIDTH as u32;
@@ -880,7 +880,7 @@ impl Device {
     Ok((rtv, dsv))
 }*/
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(feature = "dx11"))]
 pub fn init_existing<Cf, Df>(window: window::Window) ->
                             (wrapper_window::Window, BackendDevice, backend::Factory,
                              gfx::handle::RenderTargetView<R, Cf>, gfx::handle::DepthStencilView<R, Df>)
@@ -902,7 +902,7 @@ where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
     (window, device, factory, Typed::new(color_view), Typed::new(ds_view))
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 pub fn init_existing(window: window::Window) ->
                     (wrapper_window::Window, BackendDevice, backend::Factory,
                      gfx::handle::RenderTargetView<R, ColorFormat>, gfx::handle::DepthStencilView<R, DepthFormat>)
