@@ -241,7 +241,8 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
 fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
     for mut file_name in file_name_vector {
         let is_vert = file_name.ends_with(".vert");
-        let supported = file_name.contains("ps_rectangle.");
+        let supported = file_name.contains("ps_rectangle.") || file_name.contains("ps_border_edge.") || file_name.contains("ps_image.")
+                        || file_name.contains("ps_text_run.") || file_name.contains("ps_text_run_subpixel.");
         let file_path = Path::new(&out_dir).join(&file_name);
         if cfg!(target_os = "windows") && supported {
             file_name.push_str(".fx");
