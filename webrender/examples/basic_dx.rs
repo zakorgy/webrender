@@ -39,6 +39,13 @@ fn push_sub_clip(api: &RenderApi, builder: &mut DisplayListBuilder, bounds: &Lay
     builder.push_clip_region(bounds, vec![/*complex*/], None/*Some(mask)*/)
 }
 
+fn load_file(name: &str) -> Vec<u8> {
+    let mut file = File::open(name).unwrap();
+    let mut buffer = vec![];
+    file.read_to_end(&mut buffer).unwrap();
+    buffer
+}
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -84,7 +91,7 @@ fn main() {
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
 
-    let clip = push_sub_clip(&api, &mut builder, &bounds);
+    /*let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 200.0)),
                       clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
@@ -108,7 +115,7 @@ fn main() {
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 500.0), LayoutSize::new(100.0, 200.0)),
                       clip,
                       ColorF::new(1.0, 1.0, 1.0, 1.0));
-    /*let border_side = webrender_traits::BorderSide {
+    let border_side = webrender_traits::BorderSide {
         color: ColorF::new(0.0, 0.0, 1.0, 1.0),
         style: webrender_traits::BorderStyle::Groove,
     };
@@ -131,6 +138,74 @@ fn main() {
                         clip,
                         border_widths,
                         border_details);*/
+if true { // draw text?
+        let font_key = api.generate_font_key();
+        let font_bytes = load_file("res/FreeSans.ttf");
+        api.add_raw_font(font_key, font_bytes, 0);
+
+        let text_bounds = LayoutRect::new(LayoutPoint::new(100.0, 200.0), LayoutSize::new(700.0, 300.0));
+
+        let glyphs = vec![
+            GlyphInstance {
+                index: 48,
+                point: LayoutPoint::new(100.0, 100.0),
+            },
+            GlyphInstance {
+                index: 68,
+                point: LayoutPoint::new(150.0, 100.0),
+            },
+            GlyphInstance {
+                index: 80,
+                point: LayoutPoint::new(200.0, 100.0),
+            },
+            GlyphInstance {
+                index: 82,
+                point: LayoutPoint::new(250.0, 100.0),
+            },
+            GlyphInstance {
+                index: 81,
+                point: LayoutPoint::new(300.0, 100.0),
+            },
+            GlyphInstance {
+                index: 3,
+                point: LayoutPoint::new(350.0, 100.0),
+            },
+            GlyphInstance {
+                index: 86,
+                point: LayoutPoint::new(400.0, 100.0),
+            },
+            GlyphInstance {
+                index: 79,
+                point: LayoutPoint::new(450.0, 100.0),
+            },
+            GlyphInstance {
+                index: 72,
+                point: LayoutPoint::new(500.0, 100.0),
+            },
+            GlyphInstance {
+                index: 83,
+                point: LayoutPoint::new(550.0, 100.0),
+            },
+            GlyphInstance {
+                index: 87,
+                point: LayoutPoint::new(600.0, 100.0),
+            },
+            GlyphInstance {
+                index: 17,
+                point: LayoutPoint::new(650.0, 100.0),
+            },
+        ];
+
+        let clip = builder.push_clip_region(&bounds, Vec::new(), None);
+        builder.push_text(text_bounds,
+                          clip,
+                          &glyphs,
+                          font_key,
+                          ColorF::new(1.0, 1.0, 0.0, 1.0),
+                          Au::from_px(32),
+                          0.0,
+                          None);
+    }
 
     builder.pop_stacking_context();
 
