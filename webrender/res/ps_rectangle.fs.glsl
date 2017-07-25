@@ -6,6 +6,7 @@
 void main(void) {
 #else
 void main(in v2p IN, out p2f OUT) {
+    vec4 vColor = IN.vColor;
 #endif
     float alpha = 1.0;
 #ifdef WR_FEATURE_TRANSFORM
