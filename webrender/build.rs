@@ -12,11 +12,8 @@ use std::process::{self, Command, Stdio};
 #[cfg(not(any(target_arch = "arm", target_arch = "aarch64", target_os = "windows")))]
 const SHADER_VERSION: &'static str = "#version 150\n";
 
-#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64", target_os = "windows"))]
 const SHADER_VERSION: &'static str = "#version 300 es\n";
-
-#[cfg(any(target_os = "windows"))]
-const SHADER_VERSION: &'static str = "";
 
 //const SUPPORTED_SHADERS: &'static [&'static str] = &["ps_rectangle."];
 
@@ -99,13 +96,13 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
         }
 
         let base_filename = filename.splitn(2, '.').next().unwrap();
-        let mut shader_prefix =
+        let mut shader_prefix = if cfg!(target_os = "windows") && cfg!(feature = "dx11") {
+            format!("// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n#define WR_DX11\n",
+                    base_filename, 1024)
+        } else {
             format!("{}\n// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
-                    SHADER_VERSION, base_filename, 1024);
-
-        if cfg!(target_os = "windows") {
-            shader_prefix.push_str("#define WR_DX11\n");
-        }
+                    SHADER_VERSION, base_filename, 1024)
+        };
 
         if is_vert {
             shader_prefix.push_str("#define WR_VERTEX_SHADER\n");
@@ -237,39 +234,42 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
     return file_name_vector;
 }
 
-#[cfg(any(target_os = "windows"))]
+#[cfg(all(target_os = "windows", feature = "dx11"))]
 fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
     for mut file_name in file_name_vector {
         let is_vert = file_name.ends_with(".vert");
-        let supported = file_name.contains("ps_rectangle.") || file_name.contains("ps_border_edge.") || file_name.contains("ps_image.")
-                        || file_name.contains("ps_text_run.") || file_name.contains("ps_text_run_subpixel.");
+        if  !(file_name.contains("ps_rectangle.")
+            || file_name.contains("ps_border_edge.")
+            || file_name.contains("ps_image.")
+            || file_name.contains("ps_text_run.")
+            || file_name.contains("ps_text_run_subpixel.")) {
+            continue;
+        }
         let file_path = Path::new(&out_dir).join(&file_name);
-        if cfg!(target_os = "windows") && supported {
-            file_name.push_str(".fx");
-            let fx_file_path = Path::new(&out_dir).join(&file_name);
-            //let sdk_path = env::var("DXSDK_DIR").ok().expect("Please set the DXSDK_DIR enviroment variable");
-            //let sdk_path = Path::new(&sdk_path);
-            let pf_path = env::var("ProgramFiles(x86)").ok().expect("Please set the ProgramFiles(x86) enviroment variable");
-            let pf_path = Path::new(&pf_path);
-            let format = if is_vert {
-                "vs_5_0"
-            } else {
-                "ps_5_0"
-            };
-            let mut command = Command::new(pf_path.join("Windows Kits").join("8.1").join("bin").join("x64").join("fxc.exe").to_str().unwrap());
-            command.arg("/T");
-            command.arg(format);
-            command.arg("/Fo");
-            command.arg(&fx_file_path);
-            command.arg(&file_path);
-            println!("{:?}", command);
-            if command.stdout(Stdio::inherit())
-                      .stderr(Stdio::inherit())
-                      .status().unwrap().code().unwrap() != 0
-            {
-                println!("Error while executing fxc");
-                process::exit(1)
-            }
+        file_name.push_str(".fx");
+        let fx_file_path = Path::new(&out_dir).join(&file_name);
+        //let sdk_path = env::var("DXSDK_DIR").ok().expect("Please set the DXSDK_DIR enviroment variable");
+        //let sdk_path = Path::new(&sdk_path);
+        let pf_path = env::var("ProgramFiles(x86)").ok().expect("Please set the ProgramFiles(x86) enviroment variable");
+        let pf_path = Path::new(&pf_path);
+        let format = if is_vert {
+            "vs_5_0"
+        } else {
+            "ps_5_0"
+        };
+        let mut command = Command::new(pf_path.join("Windows Kits").join("8.1").join("bin").join("x64").join("fxc.exe").to_str().unwrap());
+        command.arg("/T");
+        command.arg(format);
+        command.arg("/Fo");
+        command.arg(&fx_file_path);
+        command.arg(&file_path);
+        println!("{:?}", command);
+        if command.stdout(Stdio::inherit())
+                  .stderr(Stdio::inherit())
+                  .status().unwrap().code().unwrap() != 0
+        {
+            println!("Error while executing fxc");
+            process::exit(1)
         }
     }  
 }
@@ -294,6 +294,6 @@ fn main() {
 
     write_shaders(glsl_files.clone(), &shaders_file);
     let file_name_vector = create_shaders(glsl_files.clone(), out_dir.clone());
-    #[cfg(any(target_os = "windows"))]
+    #[cfg(all(target_os = "windows", feature = "dx11"))]
     compile_fx_files(file_name_vector, out_dir);
 }
