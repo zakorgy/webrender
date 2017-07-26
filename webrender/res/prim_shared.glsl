@@ -740,7 +740,7 @@ VertexInfo write_vertex(vec3 aPosition,
     VertexInfo vi;
     vi.local_pos = clamped_local_pos;
     vi.screen_pos = device_pos;
-    vi.out_pos = out_pos;
+    vi.out_pos = out_pos / out_pos.w;
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
     VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
