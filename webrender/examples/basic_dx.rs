@@ -20,6 +20,37 @@ use webrender_traits::{ImageData, ImageDescriptor, ImageFormat};
 use webrender_traits::{PipelineId, RenderApi, TransformStyle, BoxShadowClipMode};
 use euclid::vec2;
 
+fn load_file(name: &str) -> Vec<u8> {
+    let mut file = File::open(name).unwrap();
+    let mut buffer = vec![];
+    file.read_to_end(&mut buffer).unwrap();
+    buffer
+}
+
+struct Notifier {
+    proxy: winit::EventsLoopProxy,
+}
+
+impl Notifier {
+    fn new(proxy: winit::EventsLoopProxy) -> Notifier {
+        Notifier {
+            proxy: proxy,
+        }
+    }
+}
+
+impl webrender_traits::RenderNotifier for Notifier {
+    fn new_frame_ready(&mut self) {
+        #[cfg(not(target_os = "android"))]
+        self.proxy.wakeup();
+    }
+
+    fn new_scroll_frame_ready(&mut self, _composite_needed: bool) {
+        #[cfg(not(target_os = "android"))]
+        self.proxy.wakeup();
+    }
+}
+
 fn push_sub_clip(api: &RenderApi, builder: &mut DisplayListBuilder, bounds: &LayoutRect)
                  -> ClipRegionToken {
     let mask_image = api.generate_image_key();
@@ -39,14 +70,6 @@ fn push_sub_clip(api: &RenderApi, builder: &mut DisplayListBuilder, bounds: &Lay
     builder.push_clip_region(bounds, vec![/*complex*/], None/*Some(mask)*/)
 }
 
-fn load_file(name: &str) -> Vec<u8> {
-    let mut file = File::open(name).unwrap();
-    let mut buffer = vec![];
-    file.read_to_end(&mut buffer).unwrap();
-    buffer
-}
-
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let res_path = if args.len() > 1 {
@@ -55,7 +78,7 @@ fn main() {
         None
     };
 
-    let events_loop = winit::EventsLoop::new();
+    let mut events_loop = winit::EventsLoop::new();
     let window = winit::WindowBuilder::new()
                 .with_title("WebRender Sample")
                 .build(&events_loop)
@@ -74,6 +97,9 @@ fn main() {
     let size = DeviceUintSize::new(width, height);
     let (mut renderer, sender, mut window) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
     let api = sender.create_api();
+
+    let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
+    renderer.set_render_notifier(notifier);
 
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
@@ -219,8 +245,16 @@ if true { // draw text?
     api.generate_frame(None);
 
     events_loop.run_forever(|event| {
-        renderer.update();
-        renderer.render(DeviceUintSize::new(width, height));
-        window.swap_buffers(1);
+        match event {
+            winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => {
+                winit::ControlFlow::Break
+            },
+            _ => {
+                renderer.update();
+                renderer.render(DeviceUintSize::new(width, height));
+                window.swap_buffers(1);
+                winit::ControlFlow::Continue
+            },
+        }
     });
 }
