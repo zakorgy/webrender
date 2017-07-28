@@ -106,9 +106,9 @@ fn main() {
 
     let border_styles = vec![webrender_traits::BorderStyle::None,
                              webrender_traits::BorderStyle::Solid,
-                             //webrender_traits::BorderStyle::Double,
-                             //webrender_traits::BorderStyle::Dotted,
-                             //webrender_traits::BorderStyle::Dashed,
+                             webrender_traits::BorderStyle::Double,
+                             webrender_traits::BorderStyle::Dotted,
+                             webrender_traits::BorderStyle::Dashed,
                              webrender_traits::BorderStyle::Hidden,
                              webrender_traits::BorderStyle::Groove,
                              webrender_traits::BorderStyle::Ridge,

@@ -117,7 +117,7 @@ fn main() {
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
 
-    /*let clip = push_sub_clip(&api, &mut builder, &bounds);
+    let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 200.0)),
                       clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
@@ -163,8 +163,9 @@ fn main() {
     builder.push_border(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                         clip,
                         border_widths,
-                        border_details);*/
-if true { // draw text?
+                        border_details);
+
+    if true { // draw text?
         let font_key = api.generate_font_key();
         let font_bytes = load_file("res/FreeSans.ttf");
         api.add_raw_font(font_key, font_bytes, 0);
