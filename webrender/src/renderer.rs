@@ -265,7 +265,7 @@ impl CacheTexture {
         // Updating the texture via PBO avoids CPU-side driver stalls.
         //device.bind_pbo(Some(self.pbo_id));
 
-        for (row_index, row) in self.rows.iter_mut().enumerate() {
+        /*for (row_index, row) in self.rows.iter_mut().enumerate() {
             if row.is_dirty {
                 // Get the data for this row and push to the PBO.
                 let block_index = row_index * MAX_VERTEX_TEXTURE_WIDTH;
@@ -291,8 +291,19 @@ impl CacheTexture {
 
                 row.is_dirty = false;
             }
-        }
+        }*/
 
+        let is_dirty = self.rows.iter().any(|r| r.is_dirty);
+        println!("is_dirty = {:?}", is_dirty);
+
+        if is_dirty {
+            let cpu_blocks = &self.cpu_blocks[..];
+            device.update_gpu_cache(gfx::memory::cast_slice(cpu_blocks));
+
+            for row in self.rows.iter_mut() {
+                row.is_dirty = false;
+            }
+        }
         // Ensure that other texture updates won't read from this PBO.
         //device.bind_pbo(None);
     }
