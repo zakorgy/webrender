@@ -61,9 +61,9 @@ use webrender_traits::{YuvColorSpace, YuvFormat};
 use webrender_traits::{YUV_COLOR_SPACES, YUV_FORMATS};
 
 use window;
-use wrapper_window;
 use gfx;
 use gfx::memory::Pod;
+use WrapperWindow;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 pub const DUMMY_RGBA8_ID: u32 = 2;
@@ -610,9 +610,9 @@ impl Renderer {
     /// let (renderer, sender) = Renderer::new(opts);
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
-    pub fn new(window: window::Window,
+    pub fn new(window: Rc<window::Window>,
                mut options: RendererOptions,
-               initial_window_size: DeviceUintSize) -> Result<(Renderer, RenderApiSender, wrapper_window::Window), InitError> {
+               initial_window_size: DeviceUintSize) -> Result<(Renderer, RenderApiSender, WrapperWindow), InitError> {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
         let (payload_tx, payload_rx) = try!{ channel::payload_channel() };
         let (result_tx, result_rx) = channel();

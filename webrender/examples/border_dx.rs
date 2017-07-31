@@ -10,6 +10,7 @@ extern crate webrender_traits;
 
 use std::env;
 use std::path::PathBuf;
+use std::rc::Rc;
 use webrender_traits::{ClipRegionToken, ColorF, DisplayListBuilder, Epoch};
 use webrender_traits::{DeviceUintSize, LayoutPoint, LayoutRect, LayoutSize};
 use webrender_traits::{ImageData, ImageDescriptor, ImageFormat};
@@ -59,10 +60,10 @@ fn main() {
     };
 
     let mut events_loop = winit::EventsLoop::new();
-    let window = winit::WindowBuilder::new()
-                .with_title("WebRender Sample")
-                .build(&events_loop)
-                .unwrap();
+    let window = Rc::new(winit::WindowBuilder::new()
+                         .with_title("WebRender Sample dx11")
+                         .build(&events_loop)
+                         .unwrap());
 
     let (width, height) = window.get_inner_size_pixels().unwrap();
 
@@ -75,7 +76,7 @@ fn main() {
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender, mut window) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
+    let (mut renderer, sender, gfx_window) = webrender::renderer::Renderer::new(window.clone(), opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
@@ -156,7 +157,7 @@ fn main() {
             _ => {
                 renderer.update();
                 renderer.render(DeviceUintSize::new(width, height));
-                window.swap_buffers(1);
+                gfx_window.swap_buffers(1);
                 winit::ControlFlow::Continue
             },
         }

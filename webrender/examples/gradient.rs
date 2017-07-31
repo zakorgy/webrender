@@ -16,6 +16,7 @@ use rayon::Configuration as ThreadPoolConfig;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
+use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use webrender_traits::{BlobImageData, BlobImageDescriptor, BlobImageError, BlobImageRenderer, BlobImageRequest};
 use webrender_traits::{BlobImageResult, TileOffset, ColorF, ColorU, Epoch};
@@ -25,15 +26,15 @@ use webrender_traits::{PipelineId, RasterizedBlobImage, TransformStyle};
 use webrender_traits::{ExtendMode, GradientStop};
 
 fn main() {
-    let window = glutin::WindowBuilder::new()
-                .with_title("WebRender Sample (Gradient)")
-                .with_multitouch()
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0)
-                })
-                .build()
-                .unwrap();
+    let window = Rc::new(glutin::WindowBuilder::new()
+                         .with_title("WebRender Sample")
+                         .with_multitouch()
+                         .with_gl(glutin::GlRequest::GlThenGles {
+                             opengl_version: (3, 2),
+                             opengles_version: (3, 0)
+                         })
+                         .build()
+                         .unwrap());
 
     unsafe {
         window.make_current().ok();
@@ -67,7 +68,7 @@ fn main() {
     // Original
     // let (mut renderer, sender) = webrender::renderer::Renderer::new(gl, opts, size).unwrap();
     // Gfx
-    let (mut renderer, sender) = webrender::renderer::Renderer::new(&window, opts, size).unwrap();
+    let (mut renderer, sender, _) = webrender::renderer::Renderer::new(window.clone(), opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(window.create_window_proxy()));

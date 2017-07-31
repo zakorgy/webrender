@@ -17,6 +17,7 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::rc::Rc;
 use webrender_traits::{ClipRegionToken, ColorF, DisplayListBuilder, Epoch, GlyphInstance};
 use webrender_traits::{DeviceIntPoint, DeviceUintSize, LayoutPoint, LayoutRect, LayoutSize};
 use webrender_traits::{ImageData, ImageDescriptor, ImageFormat};
@@ -220,15 +221,15 @@ fn main() {
         None
     };
 
-    let window = glutin::WindowBuilder::new()
-                .with_title("WebRender Sample")
-                .with_multitouch()
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0)
-                })
-                .build()
-                .unwrap();
+    let window = Rc::new(glutin::WindowBuilder::new()
+                         .with_title("WebRender Sample")
+                         .with_multitouch()
+                         .with_gl(glutin::GlRequest::GlThenGles {
+                             opengl_version: (3, 2),
+                             opengles_version: (3, 0)
+                         })
+                         .build()
+                         .unwrap());
 
     unsafe {
         window.make_current().ok();
@@ -253,7 +254,7 @@ fn main() {
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender, window) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
+    let (mut renderer, sender, _) = webrender::renderer::Renderer::new(window.clone(), opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(window.create_window_proxy()));
@@ -275,7 +276,7 @@ fn main() {
                                   webrender_traits::MixBlendMode::Normal,
                                   Vec::new());
 
-    let clip = push_sub_clip(&api, &mut builder, &bounds);
+    /*let clip = push_sub_clip(&api, &mut builder, &bounds);
     builder.push_rect(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                       clip,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
@@ -306,7 +307,7 @@ fn main() {
     builder.push_border(LayoutRect::new(LayoutPoint::new(100.0, 100.0), LayoutSize::new(100.0, 100.0)),
                         clip,
                         border_widths,
-                        border_details);
+                        border_details);*/
 
 
     if true { // draw text?

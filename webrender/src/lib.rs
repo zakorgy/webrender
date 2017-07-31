@@ -53,14 +53,18 @@ extern crate gfx_device_dx11 as backend;
 #[cfg(all(target_os = "windows", feature="dx11"))]
 extern crate winit as window;
 #[cfg(all(target_os = "windows", feature="dx11"))]
-extern crate gfx_window_dxgi as wrapper_window;
+extern crate gfx_window_dxgi;
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub type WrapperWindow = gfx_window_dxgi::Window;
 
 #[cfg(not(feature = "dx11"))]
 extern crate gfx_device_gl as backend;
 #[cfg(not(feature = "dx11"))]
 extern crate glutin as window;
 #[cfg(not(feature = "dx11"))]
-extern crate glutin as wrapper_window;
+extern crate glutin;
+#[cfg(not(feature = "dx11"))]
+pub type WrapperWindow = Option<glutin::Window>;
 
 mod border;
 mod clip_scroll_node;

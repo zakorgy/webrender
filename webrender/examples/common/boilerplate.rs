@@ -6,6 +6,7 @@ use gleam::gl;
 use glutin;
 use std::env;
 use std::path::PathBuf;
+use std::rc::Rc;
 use webrender;
 use webrender_traits::*;
 
@@ -66,15 +67,15 @@ pub fn main_wrapper(builder_callback: fn(&RenderApi,
         None
     };
 
-    let window = glutin::WindowBuilder::new()
-                .with_title("WebRender Sample App")
-                .with_multitouch()
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0)
-                })
-                .build()
-                .unwrap();
+    let window = Rc::new(glutin::WindowBuilder::new()
+                         .with_title("WebRender Sample")
+                         .with_multitouch()
+                         .with_gl(glutin::GlRequest::GlThenGles {
+                             opengl_version: (3, 2),
+                             opengles_version: (3, 0)
+                         })
+                         .build()
+                         .unwrap());
 
     unsafe {
         window.make_current().ok();
@@ -99,7 +100,7 @@ pub fn main_wrapper(builder_callback: fn(&RenderApi,
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender, window) = webrender::renderer::Renderer::new(window, opts, size).unwrap();
+    let (mut renderer, sender, _) = webrender::renderer::Renderer::new(window.clone(), opts, size).unwrap();
     let api = sender.create_api();
 
     let notifier = Box::new(Notifier::new(window.create_window_proxy()));

@@ -37,7 +37,8 @@ use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
 
 use backend;
 use window;
-use wrapper_window;
+use WrapperWindow;
+
 
 use backend::Resources as R;
 #[cfg(all(target_os = "windows", feature="dx11"))]
@@ -49,6 +50,8 @@ pub type CB = self::backend::CommandBuffer;
 pub type BackendDevice = backend::Deferred;
 #[cfg(not(feature = "dx11"))]
 pub type BackendDevice = backend::Device;
+#[cfg(all(target_os = "windows", feature="dx11"))]
+use gfx_window_dxgi;
 
 use gfx::CombinedError;
 use gfx::format::{Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
@@ -279,11 +282,11 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(window: window::Window) -> (Device, wrapper_window::Window) {
+    pub fn new(window: Rc<window::Window>) -> (Device, WrapperWindow) {
         #[cfg(all(target_os = "windows", feature="dx11"))]
-        let (mut win, device, mut factory, main_color, main_depth) = init_existing(window);
+        let (win, device, mut factory, main_color, main_depth) = init_existing(window);
         #[cfg(not(feature = "dx11"))]
-        let (mut win, device, mut factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
+        let (win, device, mut factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
         /*println!("Vendor: {:?}", device.get_info().platform_name.vendor);
         println!("Renderer: {:?}", device.get_info().platform_name.renderer);
         println!("Version: {:?}", device.get_info().version);
@@ -883,8 +886,8 @@ impl Device {
 }*/
 
 #[cfg(not(feature = "dx11"))]
-pub fn init_existing<Cf, Df>(window: window::Window) ->
-                            (wrapper_window::Window, BackendDevice, backend::Factory,
+pub fn init_existing<Cf, Df>(window: Rc<window::Window>) ->
+                            (WrapperWindow, BackendDevice, backend::Factory,
                              gfx::handle::RenderTargetView<R, Cf>, gfx::handle::DepthStencilView<R, Df>)
 where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
 {
@@ -901,15 +904,15 @@ where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
                1,
                aa.into());
     let (color_view, ds_view) = backend::create_main_targets_raw(dim, Cf::get_format().0, Df::get_format().0);
-    (window, device, factory, Typed::new(color_view), Typed::new(ds_view))
+    (None, device, factory, Typed::new(color_view), Typed::new(ds_view))
 }
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-pub fn init_existing(window: window::Window) ->
-                    (wrapper_window::Window, BackendDevice, backend::Factory,
+pub fn init_existing(window: Rc<window::Window>) ->
+                    (WrapperWindow, BackendDevice, backend::Factory,
                      gfx::handle::RenderTargetView<R, ColorFormat>, gfx::handle::DepthStencilView<R, DepthFormat>)
 {
-    let (mut win, device, mut factory, main_color) = wrapper_window::init_existing_raw(window, ColorFormat::get_format()).unwrap();
+    let (mut win, device, mut factory, main_color) = gfx_window_dxgi::init_existing_raw(window, ColorFormat::get_format()).unwrap();
     let main_depth = factory.create_depth_stencil_view_only(win.size.0, win.size.1).unwrap();
     let mut device = backend::Deferred::from(device);
     (win, device, factory, gfx::memory::Typed::new(main_color), main_depth)
