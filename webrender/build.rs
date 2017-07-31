@@ -9,10 +9,10 @@ use std::io::prelude::*;
 use std::fs::{canonicalize, read_dir, File};
 use std::process::{self, Command, Stdio};
 
-#[cfg(not(any(target_arch = "arm", target_arch = "aarch64", target_os = "windows")))]
+#[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
 const SHADER_VERSION: &'static str = "#version 150\n";
 
-#[cfg(any(target_arch = "arm", target_arch = "aarch64", target_os = "windows"))]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 const SHADER_VERSION: &'static str = "#version 300 es\n";
 
 //const SUPPORTED_SHADERS: &'static [&'static str] = &["ps_rectangle."];
