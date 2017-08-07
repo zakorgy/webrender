@@ -258,6 +258,7 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
             "ps_5_0"
         };
         let mut command = Command::new(pf_path.join("Windows Kits").join("8.1").join("bin").join("x64").join("fxc.exe").to_str().unwrap());
+        command.arg("/Zi"); // Debug info
         command.arg("/T");
         command.arg(format);
         command.arg("/Fo");
@@ -271,7 +272,7 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
             println!("Error while executing fxc");
             process::exit(1)
         }
-    }  
+    }
 }
 
 fn main() {
