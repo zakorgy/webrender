@@ -44,13 +44,13 @@ void main(in v2p IN, out p2f OUT) {
     // We calculate the particular tile this fragment belongs to, taking into
     // account the spacing in between tiles. We only paint if our fragment does
     // not fall into that spacing.
-    #ifdef WR_DX_11
+#ifdef WR_DX11
     vec2 stretch_tile = vStretchSize + vTileSpacing;
     vec2 position_in_tile = vec2(mod(relative_pos_in_rect.x, stretch_tile.x),
-                                 mod(relative_pos_in_rect.y, stretch_tile.y))
-    #else
+                                 mod(relative_pos_in_rect.y, stretch_tile.y));
+#else
     vec2 position_in_tile = mod(relative_pos_in_rect, vStretchSize + vTileSpacing);
-    #endif
+#endif
     vec2 st = vTextureOffset + ((position_in_tile / vStretchSize) * vTextureSize);
     st = clamp(st, vStRect.xy, vStRect.zw);
 
