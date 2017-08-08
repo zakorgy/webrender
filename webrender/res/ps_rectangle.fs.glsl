@@ -22,7 +22,7 @@ void main(in v2p IN, out p2f OUT) {
 #ifdef WR_FEATURE_CLIP
     alpha = min(alpha, do_clip(
 #ifdef WR_DX11
-                               , vClipMaskUvBounds
+                                 vClipMaskUvBounds
                                , vClipMaskUv
 #endif
                                ));
