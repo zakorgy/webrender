@@ -489,8 +489,8 @@ pub struct Renderer {
     ps_border_corner: ProgramPair,
     ps_border_edge: ProgramPair,
     ps_gradient: ProgramPair,
-    /*ps_angle_gradient: ProgramPair,
-    ps_radial_gradient: ProgramPair,
+    ps_angle_gradient: ProgramPair,
+    /*ps_radial_gradient: ProgramPair,
     ps_box_shadow: ProgramPair,
     ps_cache_image: ProgramPair,
 
@@ -655,16 +655,15 @@ impl Renderer {
         let ps_border_corner = create_programs!(device, "ps_border_corner");
         let ps_border_edge = create_programs!(device, "ps_border_edge");
 
-        //let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
-        let ps_gradient =
+        let (ps_gradient, ps_angle_gradient/*, ps_radial_gradient*/) =
             if options.enable_dithering {
-                /*(*/create_programs!(device, "ps_gradient_dither")/*,
-                 create_programs!(device, "ps_angle_gradient_dither"),
-                 create_programs!(device, "ps_radial_gradient_dither"))*/
+                (create_programs!(device, "ps_gradient_dither"),
+                 create_programs!(device, "ps_angle_gradient_dither")/*,
+                 create_programs!(device, "ps_radial_gradient_dither")*/)
             } else {
-                /*(*/create_programs!(device, "ps_gradient")/*,
-                 create_programs!(device, "ps_angle_gradient"),
-                 create_programs!(device, "ps_radial_gradient"))*/
+                (create_programs!(device, "ps_gradient"),
+                 create_programs!(device, "ps_angle_gradient")/*,
+                 create_programs!(device, "ps_radial_gradient")*/)
             };
 
         /*let ps_box_shadow = create_programs!(device, "ps_box_shadow");
@@ -780,8 +779,8 @@ impl Renderer {
             ps_border_edge: ProgramPair(ps_border_edge),
             //ps_box_shadow: ProgramPair(ps_box_shadow),
             ps_gradient: ProgramPair(ps_gradient),
-            /*ps_angle_gradient: ProgramPair(ps_angle_gradient),
-            ps_radial_gradient: ProgramPair(ps_radial_gradient),
+            ps_angle_gradient: ProgramPair(ps_angle_gradient),
+            /*ps_radial_gradient: ProgramPair(ps_radial_gradient),
             ps_cache_image: ProgramPair(ps_cache_image),
             ps_blend: ps_blend,
             ps_hw_composite: ps_hw_composite,
@@ -1052,8 +1051,8 @@ impl Renderer {
         self.ps_border_corner.reset_upload_offset();
         self.ps_border_edge.reset_upload_offset();
         self.ps_gradient.reset_upload_offset();
-        /*self.ps_angle_gradient.reset_upload_offset();
-        self.ps_radial_gradient.reset_upload_offset();
+        self.ps_angle_gradient.reset_upload_offset();
+        /*self.ps_radial_gradient.reset_upload_offset();
         self.ps_box_shadow.reset_upload_offset();
         self.ps_cache_image.reset_upload_offset();
         self.ps_blend.reset_upload_offset();
@@ -1310,8 +1309,8 @@ impl Renderer {
                 AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),
                 AlphaBatchKind::BorderEdge => self.ps_border_edge.get(transform_kind),
                 AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
-                /*AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
-                AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
+                AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
+                /*AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
                 AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
                 AlphaBatchKind::CacheImage => self.ps_cache_image.get(transform_kind),*/
                 _ => {
