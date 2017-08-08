@@ -1036,10 +1036,14 @@ float do_clip(
 }
 
 #ifdef WR_FEATURE_DITHERING
-vec4 dither(vec4 color) {
+vec4 dither(vec4 color
+#ifdef WR_DX11
+            , vec4 gl_FragCoord
+#endif
+            ) {
     const int matrix_mask = 7;
 
-    ivec2 pos = ivec2(gl_FragCoord.xy) & ivec2(matrix_mask);
+    ivec2 pos = ivec2(gl_FragCoord.xy) & ivec2(matrix_mask, matrix_mask);
     float noise_normalized = (texelFetch(sDither, pos, 0).r * 255.0 + 0.5) / 64.0;
     float noise = (noise_normalized - 0.5) / 256.0; // scale down to the unit length
 
@@ -1051,7 +1055,11 @@ vec4 dither(vec4 color) {
 }
 #endif //WR_FEATURE_DITHERING
 
-vec4 sample_gradient(int address, float offset, float gradient_repeat) {
+vec4 sample_gradient(int address, float offset, float gradient_repeat
+#if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
+            , vec4 gl_FragCoord
+#endif
+) {
     // Modulo the offset if the gradient repeats.
     float x = mix(offset, fract(offset), gradient_repeat);
 
@@ -1078,7 +1086,11 @@ vec4 sample_gradient(int address, float offset, float gradient_repeat) {
     ResourceCacheData2 texels = fetch_from_resource_cache_2(address + lut_offset);
 
     // Finally interpolate and apply dithering
-    return dither(mix(texels.data0, texels.data1, fract(x)));
+    return dither(mix(texels.data0, texels.data1, fract(x))
+#if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
+                  , gl_FragCoord
+#endif
+                  );
 }
 
 //

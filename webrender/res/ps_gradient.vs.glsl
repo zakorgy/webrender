@@ -3,8 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef WR_DX11
 void main(void) {
-    Primitive prim = load_primitive();
+#else
+void main(in a2v IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+#endif
+    Primitive prim = load_primitive(aDataA, aDataB);
     Gradient gradient = fetch_gradient(prim.specific_prim_address);
 
     vec4 abs_start_end_point = gradient.start_end_point + prim.local_rect.p0.xyxy;
@@ -61,27 +68,43 @@ void main(void) {
     }
 
 #ifdef WR_FEATURE_TRANSFORM
-    TransformVertexInfo vi = write_transform_vertex(segment_rect,
+    TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
+                                                    segment_rect,
                                                     prim.local_clip_rect,
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect);
-    vLocalPos = vi.local_pos;
+                                                    prim.local_rect
+#ifdef WR_DX11
+                                                    , OUT.Position
+                                                    , OUT.vLocalBounds
+#endif
+                                                    );
+    SHADER_OUT(vLocalPos, vi.local_pos);
     vec2 f = (vi.local_pos.xy - prim.local_rect.p0) / prim.local_rect.size;
 #else
-    VertexInfo vi = write_vertex(segment_rect,
+    VertexInfo vi = write_vertex(aPosition,
+                                 segment_rect,
                                  prim.local_clip_rect,
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect);
-
-    vec2 f = (vi.local_pos - segment_rect.p0) / segment_rect.size;
-    vPos = vi.local_pos;
+                                 prim.local_rect
+#ifdef WR_DX11
+                                 , OUT.Position
+#endif
+                                 );
+     vec2 f = (vi.local_pos - segment_rect.p0) / segment_rect.size;
+     SHADER_OUT(vPos, vi.local_pos);
 #endif
 
-    write_clip(vi.screen_pos, prim.clip_area);
+    write_clip(vi.screen_pos,
+               prim.clip_area
+    #ifdef WR_DX11
+               , OUT.vClipMaskUvBounds
+               , OUT.vClipMaskUv
+    #endif
+               );
 
-    vColor = mix(adjusted_color_g0, adjusted_color_g1, dot(f, axis));
+    SHADER_OUT(vColor, mix(adjusted_color_g0, adjusted_color_g1, dot(f, axis)));
 }
