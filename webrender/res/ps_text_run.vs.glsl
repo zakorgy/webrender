@@ -10,6 +10,7 @@ void main(in a2v IN, out v2p OUT) {
     vec3 aPosition = IN.pos;
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
+    int gl_VertexID = IN.vertexId;
 #endif
     Primitive prim = load_primitive(aDataA, aDataB);
     TextRun text = fetch_text_run(prim.specific_prim_address);
@@ -29,7 +30,7 @@ void main(in a2v IN, out v2p OUT) {
 #endif
 
 #ifdef WR_FEATURE_TRANSFORM
-    TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
+    TransformVertexInfo vi = write_transform_vertex(gl_VertexID,
                                                     local_rect,
                                                     prim.local_clip_rect,
                                                     prim.z,

@@ -109,10 +109,10 @@ float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
 #ifndef WR_DX11
 flat varying vec4 vClipMaskUvBounds;
 varying vec3 vClipMaskUv;
-#endif
 
 #ifdef WR_FEATURE_TRANSFORM
     flat varying vec4 vLocalBounds;
+#endif
 #endif
 
 // TODO(gw): This is here temporarily while we have
@@ -776,7 +776,7 @@ vec2 intersect_lines(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     return vec2(nx / d, ny / d);
 }
 
-TransformVertexInfo write_transform_vertex(uint vertex_id,
+TransformVertexInfo write_transform_vertex(int vertex_id,
                                            RectWithSize instance_rect,
                                            RectWithSize local_clip_rect,
                                            float z,
@@ -815,6 +815,11 @@ TransformVertexInfo write_transform_vertex(uint vertex_id,
             current_local_pos = vec2(local_rect.p1.x, local_rect.p1.y);
             prev_local_pos = vec2(local_rect.p0.x, local_rect.p1.y);
             next_local_pos = vec2(local_rect.p1.x, local_rect.p0.y);
+            break;
+        default:
+            current_local_pos = vec2(local_rect.p0.x, local_rect.p0.y);
+            next_local_pos = vec2(local_rect.p0.x, local_rect.p1.y);
+            prev_local_pos = vec2(local_rect.p1.x, local_rect.p0.y);
             break;
     }
 

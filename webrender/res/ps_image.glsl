@@ -13,12 +13,12 @@
         flat vec4 vStRect: POSITION5;        // Rectangle of valid texture rect.
         flat vec2 vStretchSize: POSITION6;
 
-        #ifdef WR_FEATURE_TRANSFORM
+#ifdef WR_FEATURE_TRANSFORM
         vec3 vLocalPos: POSITION7;
-        #else
+        flat vec4 vLocalBounds : POSITION8;
+#else
         vec2 vLocalPos: POSITION7;
-        #endif
-
+#endif
     };
 #else
 

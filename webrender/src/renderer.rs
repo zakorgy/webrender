@@ -88,8 +88,7 @@ macro_rules! create_program (
 
 macro_rules! create_programs (
     ($device: ident, $shader: expr) => {
-        //(create_program!($device, $shader), create_program!($device, concat!($shader, "_transform")))
-        (create_program!($device, $shader), create_program!($device, $shader))
+        (create_program!($device, $shader), create_program!($device, concat!($shader, "_transform")))
     };
 );
 
@@ -481,7 +480,7 @@ pub struct Renderer {
     // a cache shader (e.g. blur) to the screen.
     ps_rectangle: ProgramPair,
 
-    //ps_rectangle_clip: ProgramPair,
+    ps_rectangle_clip: ProgramPair,
     ps_text_run: ProgramPair,
     ps_text_run_subpixel: ProgramPair,
     ps_image: ProgramPair,
@@ -640,7 +639,7 @@ impl Renderer {
                                                         include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.frag")));
         */
         let ps_rectangle = create_programs!(device, "ps_rectangle");
-        //let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
+        let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
         let ps_text_run = create_programs!(device, "ps_text_run");
         let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");
         let ps_image = create_programs!(device, "ps_image");
@@ -770,7 +769,7 @@ impl Renderer {
             //cs_clip_border: cs_clip_border,
             //cs_clip_image: cs_clip_image,
             ps_rectangle: ProgramPair(ps_rectangle),
-            //ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
+            ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
             ps_text_run: ProgramPair(ps_text_run),
             ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),
             ps_image: ProgramPair(ps_image),
@@ -1044,7 +1043,7 @@ impl Renderer {
         //self.cs_clip_image.reset_upload_offset();
         //self.cs_clip_border.reset_upload_offset();
         self.ps_rectangle.reset_upload_offset();
-        //self.ps_rectangle_clip.reset_upload_offset();
+        self.ps_rectangle_clip.reset_upload_offset();
         self.ps_text_run.reset_upload_offset();
         self.ps_text_run_subpixel.reset_upload_offset();
         self.ps_image.reset_upload_offset();
@@ -1283,11 +1282,11 @@ impl Renderer {
             println!("KIND = {:?}", batch.key.kind);
             let mut program = match batch.key.kind {
                 AlphaBatchKind::Rectangle => {
-                    //if needs_clipping {
-                    //    self.ps_rectangle_clip.get(transform_kind)
-                    //} else {
+                    if needs_clipping {
+                        self.ps_rectangle_clip.get(transform_kind)
+                    } else {
                         self.ps_rectangle.get(transform_kind)
-                    //}
+                    }
                 },
                 /*AlphaBatchKind::Composite => &mut self.ps_composite,
                 AlphaBatchKind::SplitComposite => &mut self.ps_split_composite,

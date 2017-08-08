@@ -28,6 +28,7 @@
         flat float vAlphaSelect : PSIZE1;
 #ifdef WR_FEATURE_TRANSFORM
         vec3 vLocalPos : POSITION8;
+        flat vec4 vLocalBounds : POSITION9;
 #else
         vec2 vLocalPos : POSITION8;
 #endif

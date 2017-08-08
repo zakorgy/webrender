@@ -10,6 +10,7 @@
         vec4 vColor : COLOR;
     #ifdef WR_FEATURE_TRANSFORM
         vec3 vLocalPos : POSITION2;
+        flat vec4 vLocalBounds : POSITION3;
     #endif
     };
 #else

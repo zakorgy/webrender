@@ -11,6 +11,7 @@
 
 #ifdef WR_FEATURE_TRANSFORM
         vec3 vLocalPos : POSITION2;
+        flat vec4 vLocalBounds : POSITION3;
 #else
         vec2 vPos : POSITION2;
 #endif

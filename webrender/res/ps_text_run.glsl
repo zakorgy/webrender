@@ -12,6 +12,7 @@
         flat vec4 vUvBorder: POSITION3;
     #ifdef WR_FEATURE_TRANSFORM
         vec3 vLocalPos : POSITION4;
+        flat vec4 vLocalBounds : POSITION5;
     #endif
     };
 #else
