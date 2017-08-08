@@ -29,12 +29,18 @@ void main(in a2v IN, out v2p OUT) {
 #endif
 
 #ifdef WR_FEATURE_TRANSFORM
-    TransformVertexInfo vi = write_transform_vertex(local_rect,
+    TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
+                                                    local_rect,
                                                     prim.local_clip_rect,
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    local_rect);
+                                                    local_rect
+#ifdef WR_DX11
+                                                    , OUT.Position
+                                                    , OUT.vLocalBounds
+#endif
+                                                    );
     SHADER_OUT(vLocalPos, vi.local_pos);
     vec2 f = (vi.local_pos.xy / vi.local_pos.z - local_rect.p0) / local_rect.size;
 #else
@@ -44,22 +50,27 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 local_rect);
+                                 local_rect
+#ifdef WR_DX11
+                                 , OUT.Position
+#endif
+                                 );
     vec2 f = (vi.local_pos - local_rect.p0) / local_rect.size;
 #endif
-    WriteClipResult write_clip_res = write_clip(vi.screen_pos, prim.clip_area);
 
+    write_clip(vi.screen_pos,
+               prim.clip_area
+#ifdef WR_DX11
+               , OUT.vClipMaskUvBounds
+               , OUT.vClipMaskUv
+#endif
+               );
 
     vec2 texture_size = vec2(textureSize(sColor0, 0));
     vec2 st0 = res.uv_rect.xy / texture_size;
     vec2 st1 = res.uv_rect.zw / texture_size;
 
-    SHADER_OUT(vClipMaskUvBounds, write_clip_res.clip_mask_uv_bounds);
-    SHADER_OUT(vClipMaskUv, write_clip_res.clip_mask_uv);
     SHADER_OUT(vColor, text.color);
     SHADER_OUT(vUv, mix(st0, st1, f));
     SHADER_OUT(vUvBorder, (res.uv_rect + vec4(0.5, 0.5, -0.5, -0.5)) / texture_size.xyxy);
-#ifdef WR_DX11
-    OUT.Position = vi.out_pos;
-#endif
 }

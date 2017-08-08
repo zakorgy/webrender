@@ -8,6 +8,13 @@
 void main(void) {
 #else
 void main(in v2p IN, out p2f OUT) {
+    vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
+    vec3 vClipMaskUv = IN.vClipMaskUv;
+    vec2 vTextureOffset = IN.vTextureOffset;
+    vec2 vTextureSize = IN.vTextureSize;
+    vec2 vTileSpacing = IN.vTileSpacing;
+    vec4 vStRect = IN.vStRect;
+    vec2 vStretchSize = IN.vStretchSize;
 #endif
 #ifdef WR_FEATURE_TRANSFORM
     float alpha = 0.0;
@@ -29,17 +36,12 @@ void main(in v2p IN, out p2f OUT) {
     vec2 relative_pos_in_rect = vLocalPos;
 #endif
 
-#ifdef WR_DX11
-    vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
-    vec3 vClipMaskUv = IN.vClipMaskUv;
-    vec2 vTextureOffset = IN.vTextureOffset;
-    vec2 vTextureSize = IN.vTextureSize;
-    vec2 vTileSpacing = IN.vTileSpacing;
-    vec4 vStRect = IN.vStRect;
-    vec2 vStretchSize = IN.vStretchSize;
-#endif
-
-    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
+    alpha = min(alpha, do_clip(
+    #ifdef WR_DX11
+                                 vClipMaskUvBounds
+                               , vClipMaskUv
+    #endif
+                               ));
 
     // We calculate the particular tile this fragment belongs to, taking into
     // account the spacing in between tiles. We only paint if our fragment does

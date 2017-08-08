@@ -6,6 +6,8 @@
 void main(void) {
 #else
 void main(in v2p IN, out p2f OUT) {
+    vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
+    vec3 vClipMaskUv = IN.vClipMaskUv;
     vec4 vColor = IN.vColor;
 #endif
     float alpha = 1.0;
@@ -18,8 +20,12 @@ void main(in v2p IN, out p2f OUT) {
 #endif
 
 #ifdef WR_FEATURE_CLIP
-	//TODO: Replace the two zero vec4
-    alpha = min(alpha, do_clip(vec4(0.0, 0.0, 0.0, 0.0), vec4(0.0, 0.0, 0.0, 0.0)));
+    alpha = min(alpha, do_clip(
+#ifdef WR_DX11
+                               , vClipMaskUvBounds
+                               , vClipMaskUv
+#endif
+                               ));
 #endif
     SHADER_OUT(Target0, vColor * vec4(1.0, 1.0, 1.0, alpha));
 }

@@ -240,6 +240,7 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
         let is_vert = file_name.ends_with(".vert");
         if  !(file_name.contains("ps_rectangle.")
             || file_name.contains("ps_border_edge.")
+            || file_name.contains("ps_border_corner.")
             || file_name.contains("ps_image.")
             || file_name.contains("ps_text_run.")
             || file_name.contains("ps_text_run_subpixel.")) {

@@ -3,27 +3,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
- #ifndef WR_DX11
- void main(void) {
- #else
- void main(in v2p IN, out p2f OUT) {
-     // Edge color transition
-     vec4 vColor00 = IN.vColor00;
-     vec4 vColor01 = IN.vColor01;
-     vec4 vColor10 = IN.vColor10;
-     vec4 vColor11 = IN.vColor11;
-     vec4 vColorEdgeLine = IN.vColorEdgeLine;
+#ifndef WR_DX11
+void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
+    vec3 vClipMaskUv = IN.vClipMaskUv;
 
-     // Border radius
-     vec2 vClipCenter = IN.vClipCenter;
-     vec4 vRadii0 = IN.vRadii0;
-     vec4 vRadii1 = IN.vRadii1;
-     vec2 vClipSign = IN.vClipSign;
-     vec4 vEdgeDistance = IN.vEdgeDistance;
-     float vSDFSelect = IN.vSDFSelect;
+    // Edge color transition
+    vec4 vColor00 = IN.vColor00;
+    vec4 vColor01 = IN.vColor01;
+    vec4 vColor10 = IN.vColor10;
+    vec4 vColor11 = IN.vColor11;
+    vec4 vColorEdgeLine = IN.vColorEdgeLine;
 
-     // Border style
-     float vAlphaSelect = IN.vAlphaSelect;
+    // Border radius
+    vec2 vClipCenter = IN.vClipCenter;
+    vec4 vRadii0 = IN.vRadii0;
+    vec4 vRadii1 = IN.vRadii1;
+    vec2 vClipSign = IN.vClipSign;
+    vec4 vEdgeDistance = IN.vEdgeDistance;
+    float vSDFSelect = IN.vSDFSelect;
+
+    // Border style
+    float vAlphaSelect = IN.vAlphaSelect;
 #ifdef WR_FEATURE_TRANSFORM
      vec3 vLocalPos = IN.vLocalPos;
 #else
@@ -38,7 +41,12 @@
     vec2 local_pos = vLocalPos;
 #endif
 
-    alpha = min(alpha, do_clip(vec4(0.0, 0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0)));
+    alpha = min(alpha, do_clip(
+#ifdef WR_DX11
+                                 vClipMaskUvBounds
+                               , vClipMaskUv
+#endif
+                               ));
 
     // Find the appropriate distance to apply the AA smoothstep over.
     vec2 fw = fwidth(local_pos);

@@ -21,7 +21,12 @@ void main(in a2v IN, out v2p OUT) {
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect);
+                                                    prim.local_rect
+#ifdef WR_DX11
+                                                    , OUT.Position
+                                                    , OUT.vLocalBounds
+#endif
+                                                    );
     SHADER_OUT(vLocalPos, vi.local_pos);
 #else
     VertexInfo vi = write_vertex(aPosition,
@@ -30,14 +35,20 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect);
-#endif
-
+                                 prim.local_rect
 #ifdef WR_DX11
-    OUT.Position = vi.out_pos;
+                                 , OUT.Position
+#endif
+                                 );
 #endif
 
 #ifdef WR_FEATURE_CLIP
-    write_clip(vi.screen_pos, prim.clip_area); //TODO
+    write_clip(vi.screen_pos,
+               prim.clip_area
+#ifdef WR_DX11
+               , OUT.vClipMaskUvBounds
+               , OUT.vClipMaskUv
+#endif
+               );
 #endif
 }

@@ -3,43 +3,59 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-vec2 write_edge_distance(float p0,
+void write_edge_distance(float p0,
                          float original_width,
                          float adjusted_width,
                          float style,
-                         //float axis_select,
-                         float sign_adjust) {
+                         float axis_select,
+                         float sign_adjust
+#ifdef WR_DX11
+                         , out vec2 vEdgeDistance
+                         , out float vAxisSelect
+#endif
+                         ) {
     switch (int(style)) {
         case BORDER_STYLE_DOUBLE:
-            return vec2(p0 + adjusted_width, p0 + original_width - adjusted_width);
+            vEdgeDistance = vec2(p0 + adjusted_width,
+                                 p0 + original_width - adjusted_width);
+            break;
         case BORDER_STYLE_GROOVE:
         case BORDER_STYLE_RIDGE:
-            return vec2(p0 + adjusted_width, sign_adjust);
+            vEdgeDistance = vec2(p0 + adjusted_width, sign_adjust);
+            break;
         default:
-            return vec2(0.0, 0.0);
+            vEdgeDistance = vec2(0.0, 0.0);
+            break;
     }
 
-    //vAxisSelect = axis_select;
+    vAxisSelect = axis_select;
 }
 
-float write_alpha_select(float style) {
+void write_alpha_select(float style
+#ifdef WR_DX11
+                        , out float vAlphaSelect
+#endif
+                        ) {
     switch (int(style)) {
         case BORDER_STYLE_DOUBLE:
-            return 0.0;
+            vAlphaSelect = 0.0;
+            break;
         default:
-            return 1.0;
+            vAlphaSelect = 1.0;
+            break;
     }
 }
 
-struct WriteColorResult {
-    vec4 color0;
-    vec4 color1;
-};
-
-WriteColorResult write_color(vec4 color, float style, bool flip) {
+void write_color(vec4 color,
+                 float style,
+                 bool flip
+#ifdef WR_DX11
+                 , out vec4 vColor0
+                 , out vec4 vColor1
+#endif
+                 ) {
     vec2 modulate;
 
-    WriteColorResult wcr;
     switch (int(style)) {
         case BORDER_STYLE_GROOVE:
         {
@@ -56,42 +72,35 @@ WriteColorResult write_color(vec4 color, float style, bool flip) {
             break;
     }
 
-    /*#ifdef WR_DX11
-    wcr.color0 = vec4(mul(color.rgb, modulate.x), color.a);
-    wcr.color1 = vec4(mul(color.rgb, modulate.y), color.a);
-    #else*/
-    wcr.color0 = vec4(color.rgb * modulate.x, color.a);
-    wcr.color1 = vec4(color.rgb * modulate.y, color.a);
-    //#endif
-    return wcr;
+    vColor0 = vec4(color.rgb * modulate.x, color.a);
+    vColor1 = vec4(color.rgb * modulate.y, color.a);
 }
 
-struct WriteClipParamsResult {
-    vec4 clip_params;
-    float clip_select;
-};
-
-WriteClipParamsResult write_clip_params(float style,
-                                  float border_width,
-                                  float edge_length,
-                                  float edge_offset,
-                                  float center_line) {
+void write_clip_params(float style,
+                       float border_width,
+                       float edge_length,
+                       float edge_offset,
+                       float center_line
+#ifdef WR_DX11
+                       , out vec4 vClipParams
+                       , out float vClipSelect
+#endif
+                       ) {
     // x = offset
     // y = dash on + off length
     // z = dash length
     // w = center line of edge cross-axis (for dots only)
-    WriteClipParamsResult wcpr;
     switch (int(style)) {
         case BORDER_STYLE_DASHED: {
             float desired_dash_length = border_width * 3.0;
             // Consider half total length since there is an equal on/off for each dash.
             float dash_count = ceil(0.5 * edge_length / desired_dash_length);
             float dash_length = 0.5 * edge_length / dash_count;
-            wcpr.clip_params = vec4(edge_offset - 0.5 * dash_length,
-                                    2.0 * dash_length,
-                                    dash_length,
-                                    0.0);
-            wcpr.clip_select = 0.0;
+            vClipParams = vec4(edge_offset - 0.5 * dash_length,
+                               2.0 * dash_length,
+                               dash_length,
+                               0.0);
+            vClipSelect = 0.0;
             break;
         }
         case BORDER_STYLE_DOTTED: {
@@ -100,19 +109,18 @@ WriteClipParamsResult write_clip_params(float style,
             float dot_count = ceil(0.5 * edge_length / diameter);
             float empty_space = edge_length - dot_count * diameter;
             float distance_between_centers = diameter + empty_space / dot_count;
-            wcpr.clip_params = vec4(edge_offset - radius,
-                                    distance_between_centers,
-                                    radius,
-                                    center_line);
-            wcpr.clip_select = 1.0;
+            vClipParams = vec4(edge_offset - radius,
+                               distance_between_centers,
+                               radius,
+                               center_line);
+            vClipSelect = 1.0;
             break;
         }
         default:
-            wcpr.clip_params = vec4(1.0, 1.0, 1.0, 1.0);
-            wcpr.clip_select = 0.0;
+            vClipParams = vec4(1.0, 1.0, 1.0, 1.0);
+            vClipSelect = 0.0;
             break;
     }
-    return wcpr;
 }
 
 #ifndef WR_DX11
@@ -141,80 +149,134 @@ void main(in a2v IN, out v2p OUT) {
             segment_rect.p0 = vec2(corners.tl_outer.x, corners.tl_inner.y);
             segment_rect.size = vec2(border.widths.x, corners.bl_inner.y - corners.tl_inner.y);
             vec4 adjusted_widths = get_effective_border_widths(border, int(border.style.x));
-            SHADER_OUT(vEdgeDistance, write_edge_distance(segment_rect.p0.x, border.widths.x, adjusted_widths.x, border.style.x, 1.0));
-            SHADER_OUT(vAxisSelect, 0.0);
+            write_edge_distance(segment_rect.p0.x,
+                                border.widths.x,
+                                adjusted_widths.x,
+                                border.style.x,
+                                0.0,
+                                1.0
+#ifdef WR_DX11
+                                , OUT.vEdgeDistance
+                                , OUT.vAxisSelect
+#endif
+                                );
             style = border.style.x;
             color_flip = false;
-            WriteClipParamsResult wcpr = write_clip_params(border.style.x,
-                                                           border.widths.x,
-                                                           segment_rect.size.y,
-                                                           segment_rect.p0.y,
-                                                           segment_rect.p0.x + 0.5 * segment_rect.size.x);
-
-            SHADER_OUT(vClipParams, wcpr.clip_params);
-            SHADER_OUT(vClipSelect, wcpr.clip_select);
+            write_clip_params(border.style.x,
+                              border.widths.x,
+                              segment_rect.size.y,
+                              segment_rect.p0.y,
+                              segment_rect.p0.x + 0.5 * segment_rect.size.x
+#ifdef WR_DX11
+                              , OUT.vClipParams
+                              , OUT.vClipSelect
+#endif
+                              );
             break;
         }
         case 1: {
             segment_rect.p0 = vec2(corners.tl_inner.x, corners.tl_outer.y);
             segment_rect.size = vec2(corners.tr_inner.x - corners.tl_inner.x, border.widths.y);
             vec4 adjusted_widths = get_effective_border_widths(border, int(border.style.y));
-            SHADER_OUT(vEdgeDistance, write_edge_distance(segment_rect.p0.y, border.widths.y, adjusted_widths.y, border.style.y, 1.0));
-            SHADER_OUT(vAxisSelect, 1.0);
+            write_edge_distance(segment_rect.p0.y,
+                                border.widths.y,
+                                adjusted_widths.y,
+                                border.style.y,
+                                1.0,
+                                1.0
+#ifdef WR_DX11
+                                , OUT.vEdgeDistance
+                                , OUT.vAxisSelect
+#endif
+                                );
             style = border.style.y;
             color_flip = false;
-            WriteClipParamsResult wcpr = write_clip_params(border.style.y,
-                                                           border.widths.y,
-                                                           segment_rect.size.x,
-                                                           segment_rect.p0.x,
-                                                           segment_rect.p0.y + 0.5 * segment_rect.size.y);
-            SHADER_OUT(vClipParams, wcpr.clip_params);
-            SHADER_OUT(vClipSelect, wcpr.clip_select);
+            write_clip_params(border.style.y,
+                              border.widths.y,
+                              segment_rect.size.x,
+                              segment_rect.p0.x,
+                              segment_rect.p0.y + 0.5 * segment_rect.size.y
+#ifdef WR_DX11
+                              , OUT.vClipParams
+                              , OUT.vClipSelect
+#endif
+                              );
             break;
         }
         case 2: {
             segment_rect.p0 = vec2(corners.tr_outer.x - border.widths.z, corners.tr_inner.y);
             segment_rect.size = vec2(border.widths.z, corners.br_inner.y - corners.tr_inner.y);
             vec4 adjusted_widths = get_effective_border_widths(border, int(border.style.z));
-            SHADER_OUT(vEdgeDistance, write_edge_distance(segment_rect.p0.x, border.widths.z, adjusted_widths.z, border.style.z, -1.0));
-            SHADER_OUT(vAxisSelect, 0.0);
+            write_edge_distance(segment_rect.p0.x,
+                                border.widths.z,
+                                adjusted_widths.z,
+                                border.style.z,
+                                0.0,
+                                -1.0
+#ifdef WR_DX11
+                                , OUT.vEdgeDistance
+                                , OUT.vAxisSelect
+#endif
+                                );
             style = border.style.z;
             color_flip = true;
-            WriteClipParamsResult wcpr = write_clip_params(border.style.z,
-                                                           border.widths.z,
-                                                           segment_rect.size.y,
-                                                           segment_rect.p0.y,
-                                                           segment_rect.p0.x + 0.5 * segment_rect.size.x);
-            SHADER_OUT(vClipParams, wcpr.clip_params);
-            SHADER_OUT(vClipSelect, wcpr.clip_select);
+            write_clip_params(border.style.z,
+                              border.widths.z,
+                              segment_rect.size.y,
+                              segment_rect.p0.y,
+                              segment_rect.p0.x + 0.5 * segment_rect.size.x
+#ifdef WR_DX11
+                              , OUT.vClipParams
+                              , OUT.vClipSelect
+#endif
+                              );
             break;
         }
         default: {
             segment_rect.p0 = vec2(corners.bl_inner.x, corners.bl_outer.y - border.widths.w);
             segment_rect.size = vec2(corners.br_inner.x - corners.bl_inner.x, border.widths.w);
             vec4 adjusted_widths = get_effective_border_widths(border, int(border.style.w));
-            write_edge_distance(segment_rect.p0.y, border.widths.w, adjusted_widths.w, border.style.w, -1.0);
-            SHADER_OUT(vEdgeDistance, write_edge_distance(segment_rect.p0.y, border.widths.w, adjusted_widths.w, border.style.w, -1.0));
-            SHADER_OUT(vAxisSelect, 1.0);
+            write_edge_distance(segment_rect.p0.y,
+                                border.widths.w,
+                                adjusted_widths.w,
+                                border.style.w,
+                                1.0,
+                                -1.0
+#ifdef WR_DX11
+                                , OUT.vEdgeDistance
+                                , OUT.vAxisSelect
+#endif
+                                );
             style = border.style.w;
             color_flip = true;
-            WriteClipParamsResult wcpr = write_clip_params(border.style.w,
-                                                           border.widths.w,
-                                                           segment_rect.size.x,
-                                                           segment_rect.p0.x,
-                                                           segment_rect.p0.y + 0.5 * segment_rect.size.y);
-            SHADER_OUT(vClipParams, wcpr.clip_params);
-            SHADER_OUT(vClipSelect, wcpr.clip_select);
+            write_clip_params(border.style.w,
+                              border.widths.w,
+                              segment_rect.size.x,
+                              segment_rect.p0.x,
+                              segment_rect.p0.y + 0.5 * segment_rect.size.y
+#ifdef WR_DX11
+                              , OUT.vClipParams
+                              , OUT.vClipSelect
+#endif
+                              );
             break;
         }
     }
 
-    SHADER_OUT(vAlphaSelect, write_alpha_select(style));
+    write_alpha_select(style
+#ifdef WR_DX11
+                       , OUT.vAlphaSelect
+#endif
+                        );
 
-    WriteColorResult wcr = write_color(color, style, color_flip);
-
-    SHADER_OUT(vColor0, wcr.color0);
-    SHADER_OUT(vColor1, wcr.color1);
+    write_color(color,
+                style,
+                color_flip
+#ifdef WR_DX11
+                , OUT.vColor0
+                , OUT.vColor1
+#endif
+                );
 
 #ifdef WR_FEATURE_TRANSFORM
     TransformVertexInfo vi = write_transform_vertex(IN.vertexId,
@@ -223,7 +285,12 @@ void main(in a2v IN, out v2p OUT) {
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect);
+                                                    prim.local_rect
+#ifdef WR_DX11
+                                                    , OUT.Position
+                                                    , OUT.vLocalBounds
+#endif
+                                                    );
 #else
     VertexInfo vi = write_vertex(aPosition,
                                  segment_rect,
@@ -231,16 +298,19 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect);
-#endif
-
-    WriteClipResult write_clip_res = write_clip(vi.screen_pos, prim.clip_area);
-
-    SHADER_OUT(vClipMaskUvBounds, write_clip_res.clip_mask_uv_bounds);
-    SHADER_OUT(vClipMaskUv, write_clip_res.clip_mask_uv);
-    SHADER_OUT(vLocalPos, vi.local_pos);
-
+                                 prim.local_rect
 #ifdef WR_DX11
-    OUT.Position = vi.out_pos;
+                                 , OUT.Position
 #endif
+                                 );
+#endif
+
+    SHADER_OUT(vLocalPos, vi.local_pos);
+    write_clip(vi.screen_pos,
+               prim.clip_area
+#ifdef WR_DX11
+               , OUT.vClipMaskUvBounds
+               , OUT.vClipMaskUv
+#endif
+               );
 }

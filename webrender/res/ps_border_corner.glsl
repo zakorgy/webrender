@@ -6,28 +6,30 @@
  #ifdef WR_DX11
     struct v2p {
         vec4 Position : SV_Position;
+        flat vec4 vClipMaskUvBounds : POSITION0;
+        vec3 vClipMaskUv : POSITION1;
 
         // Edge color transition
         flat vec4 vColor00 : COLOR0;
         flat vec4 vColor01 : COLOR1;
         flat vec4 vColor10 : COLOR2;
         flat vec4 vColor11 : COLOR3;
-        flat vec4 vColorEdgeLine : POSITION0;
+        flat vec4 vColorEdgeLine : POSITION2;
 
         // Border radius
-        flat vec2 vClipCenter : POSITION1;
-        flat vec4 vRadii0 : POSITION2;
-        flat vec4 vRadii1 : POSITION3;
-        flat vec2 vClipSign : POSITION4;
-        flat vec4 vEdgeDistance : POSITION5;
+        flat vec2 vClipCenter : POSITION3;
+        flat vec4 vRadii0 : POSITION4;
+        flat vec4 vRadii1 : POSITION5;
+        flat vec2 vClipSign : POSITION6;
+        flat vec4 vEdgeDistance : POSITION7;
         flat float vSDFSelect : PSIZE0;
 
         // Border style
         flat float vAlphaSelect : PSIZE1;
 #ifdef WR_FEATURE_TRANSFORM
-        vec3 vLocalPos : POSITION7;
+        vec3 vLocalPos : POSITION8;
 #else
-        vec2 vLocalPos : POSITION7;
+        vec2 vLocalPos : POSITION8;
 #endif
      };
 #else

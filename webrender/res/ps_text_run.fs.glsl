@@ -27,7 +27,12 @@ void main(in v2p IN, out p2f OUT) {
     init_transform_fs(vLocalPos, a);
     alpha *= a;
 #endif
-    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
+    alpha = min(alpha, do_clip(
+#ifdef WR_DX11
+                                 vClipMaskUvBounds
+                               , vClipMaskUv
+#endif
+                               ));
     SHADER_OUT(Target0, vec4(vColor.rgb, vColor.a * alpha));
 #endif
 }

@@ -33,7 +33,12 @@ void main(in v2p IN, out p2f OUT) {
     vec2 local_pos = vLocalPos;
 #endif
 
-    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
+    alpha = min(alpha, do_clip(
+#ifdef WR_DX11
+                                 vClipMaskUvBounds
+                               , vClipMaskUv
+#endif
+                               ));
 
     // Find the appropriate distance to apply the step over.
     vec2 fw = fwidth(local_pos);

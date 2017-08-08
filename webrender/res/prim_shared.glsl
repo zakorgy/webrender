@@ -112,7 +112,7 @@ varying vec3 vClipMaskUv;
 #endif
 
 #ifdef WR_FEATURE_TRANSFORM
-    //flat varying vec4 vLocalBounds;
+    flat varying vec4 vLocalBounds;
 #endif
 
 // TODO(gw): This is here temporarily while we have
@@ -691,9 +691,6 @@ vec2 compute_snap_offset(vec2 local_pos,
 struct VertexInfo {
     vec2 local_pos;
     vec2 screen_pos;
-#ifdef WR_DX11
-    vec4 out_pos;
-#endif
 };
 
 VertexInfo write_vertex(vec3 aPosition,
@@ -702,7 +699,11 @@ VertexInfo write_vertex(vec3 aPosition,
                         float z,
                         Layer layer,
                         AlphaBatchTask task,
-                        RectWithSize snap_rect) {
+                        RectWithSize snap_rect
+#ifdef WR_DX11
+                        , out vec4 vPosition
+#endif
+                        ) {
 
     // Select the corner of the local rect that we are processing.
     vec2 local_pos = instance_rect.p0 + instance_rect.size * aPosition.xy;
@@ -730,6 +731,7 @@ VertexInfo write_vertex(vec3 aPosition,
                      task.render_target_origin;
 
 #ifdef WR_DX11
+    // In DX11 the z is between 0 and 1
     float4x4 transform = float4x4(
         float4(1.0, 0.0, 0.0, 0.0),
         float4(0.0, 1.0, 0.0, 0.0),
@@ -737,14 +739,13 @@ VertexInfo write_vertex(vec3 aPosition,
         float4(0.0, 0.0, 0.0, 1.0)
     );
     vec4 out_pos = mul(transform, mul(uTransform, vec4(final_pos, z, 1.0)));
+    vPosition = out_pos / out_pos.w;
+#else
+    gl_Position = uTransform * vec4(final_pos, z, 1.0);
+#endif
     VertexInfo vi;
     vi.local_pos = clamped_local_pos;
     vi.screen_pos = device_pos;
-    vi.out_pos = out_pos / out_pos.w;
-#else
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
-    VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
-#endif
 
     return vi;
 }
@@ -754,9 +755,6 @@ VertexInfo write_vertex(vec3 aPosition,
 struct TransformVertexInfo {
     vec3 local_pos;
     vec2 screen_pos;
-#ifdef WR_DX11
-    vec4 out_pos;
-#endif
 };
 
 float cross2(vec2 v0, vec2 v1) {
@@ -784,7 +782,12 @@ TransformVertexInfo write_transform_vertex(uint vertex_id,
                                            float z,
                                            Layer layer,
                                            AlphaBatchTask task,
-                                           RectWithSize snap_rect) {
+                                           RectWithSize snap_rect
+#ifdef WR_DX11
+                                           , out vec4 vPosition
+                                           , out vec4 vLocalBounds
+#endif
+                                           ) {
     RectWithEndpoint local_rect = to_rect_with_endpoint(instance_rect);
 
     vec2 current_local_pos, prev_local_pos, next_local_pos;
@@ -861,18 +864,24 @@ TransformVertexInfo write_transform_vertex(uint vertex_id,
                      task.screen_space_origin +
                      task.render_target_origin;
 
-    //vLocalBounds = vec4(local_rect.p0, local_rect.p1);
+    vLocalBounds = vec4(local_rect.p0, local_rect.p1);
 #ifdef WR_DX11
-    vec4 out_pos = mul(uTransform, vec4(final_pos, z, 1.0));
+    // In DX11 the z is between 0 and 1
+    float4x4 transform = float4x4(
+        float4(1.0, 0.0, 0.0, 0.0),
+        float4(0.0, 1.0, 0.0, 0.0),
+        float4(0.0, 0.0, 0.5, 0.5),
+        float4(0.0, 0.0, 0.0, 1.0)
+    );
+    vec4 out_pos = mul(transform, mul(uTransform, vec4(final_pos, z, 1.0)));
+    vPosition = out_pos / out_pos.w;
+#else
+    gl_Position = uTransform * vec4(final_pos, z, 1.0);
+#endif
     TransformVertexInfo tvi;
     tvi.local_pos = layer_pos.xyw;
     tvi.screen_pos = device_pos;
-    tvi.out_pos = vec4(out_pos.x, out_pos.y, out_pos.z * 0.5 + 0.5, out_pos.w);
     return tvi;
-#else
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
-    return TransformVertexInfo(layer_pos.xyw, device_pos);
-#endif
 }
 
 #endif //WR_FEATURE_TRANSFORM
@@ -965,18 +974,17 @@ BoxShadow fetch_boxshadow(int address) {
     return box_shadow;
 }
 
-struct WriteClipResult {
-    vec4 clip_mask_uv_bounds;
-    vec3 clip_mask_uv;
-};
-
-WriteClipResult write_clip(vec2 global_pos, ClipArea area) {
+void write_clip(vec2 global_pos,
+                ClipArea area
+#ifdef WR_DX11
+                , out vec4 vClipMaskUvBounds
+                , out vec3 vClipMaskUv
+#endif
+                ) {
     vec2 texture_size = vec2(textureSize(sCacheA8, 0).xy);
     vec2 uv = global_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
-    WriteClipResult write_clip_res;
-    write_clip_res.clip_mask_uv_bounds = area.task_bounds / texture_size.xyxy;
-    write_clip_res.clip_mask_uv = vec3(uv / texture_size, area.screen_origin_target_index.z);
-    return write_clip_res;
+    vClipMaskUvBounds = area.task_bounds / texture_size.xyxy;
+    vClipMaskUv = vec3(uv / texture_size, area.screen_origin_target_index.z);
 }
 
 #endif //WR_VERTEX_SHADER
@@ -1006,21 +1014,25 @@ vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha) {
 }
 #endif //WR_FEATURE_TRANSFORM
 
-float do_clip(vec4 clip_mask_uv_bounds, vec3 clip_mask_uv) {
+float do_clip(
+#ifdef WR_DX11
+                vec4 vClipMaskUvBounds
+              , vec3 vClipMaskUv
+#endif
+              ) {
     // anything outside of the mask is considered transparent
     bvec4 inside = lessThanEqual(
-        vec4(clip_mask_uv_bounds.xy, clip_mask_uv.xy),
-        vec4(clip_mask_uv.xy, clip_mask_uv_bounds.zw));
+        vec4(vClipMaskUvBounds.xy, vClipMaskUv.xy),
+        vec4(vClipMaskUv.xy, vClipMaskUvBounds.zw));
     // check for the dummy bounds, which are given to the opaque objects
 #ifdef WR_DX11
-    return ((clip_mask_uv_bounds.x == clip_mask_uv_bounds.z)
-            && (clip_mask_uv_bounds.y == clip_mask_uv_bounds.w)) ? 1.0:
-        all(inside) ? sCacheA8.SampleLevel(sCacheA8_, clip_mask_uv, 0.0).r : 0.0;
+    return ((vClipMaskUvBounds.x == vClipMaskUvBounds.z)
+            && (vClipMaskUvBounds.y == vClipMaskUvBounds.w)) ? 1.0:
+        all(inside) ? sCacheA8.SampleLevel(sCacheA8_, vClipMaskUv, 0.0).r : 0.0;
 #else
-    return clip_mask_uv_bounds.xy == clip_mask_uv_bounds.zw ? 1.0:
-        all(inside) ? textureLod(sCacheA8, clip_mask_uv, 0.0).r : 0.0;
+    return vClipMaskUvBounds.xy == vClipMaskUvBounds.zw ? 1.0:
+        all(inside) ? textureLod(sCacheA8, vClipMaskUv, 0.0).r : 0.0;
 #endif
-    //return 0.0;
 }
 
 #ifdef WR_FEATURE_DITHERING
