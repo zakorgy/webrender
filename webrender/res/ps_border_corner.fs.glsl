@@ -3,7 +3,33 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-void main(void) {
+ #ifndef WR_DX11
+ void main(void) {
+ #else
+ void main(in v2p IN, out p2f OUT) {
+     // Edge color transition
+     vec4 vColor00 = IN.vColor00;
+     vec4 vColor01 = IN.vColor01;
+     vec4 vColor10 = IN.vColor10;
+     vec4 vColor11 = IN.vColor11;
+     vec4 vColorEdgeLine = IN.vColorEdgeLine;
+
+     // Border radius
+     vec2 vClipCenter = IN.vClipCenter;
+     vec4 vRadii0 = IN.vRadii0;
+     vec4 vRadii1 = IN.vRadii1;
+     vec2 vClipSign = IN.vClipSign;
+     vec4 vEdgeDistance = IN.vEdgeDistance;
+     float vSDFSelect = IN.vSDFSelect;
+
+     // Border style
+     float vAlphaSelect = IN.vAlphaSelect;
+#ifdef WR_FEATURE_TRANSFORM
+     vec3 vLocalPos = IN.vLocalPos;
+#else
+     vec2 vLocalPos = IN.vLocalPos;
+#endif
+#endif
     float alpha = 1.0;
 #ifdef WR_FEATURE_TRANSFORM
     alpha = 0.0;
@@ -12,7 +38,7 @@ void main(void) {
     vec2 local_pos = vLocalPos;
 #endif
 
-    alpha = min(alpha, do_clip());
+    alpha = min(alpha, do_clip(vec4(0.0, 0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0)));
 
     // Find the appropriate distance to apply the AA smoothstep over.
     vec2 fw = fwidth(local_pos);
@@ -82,5 +108,5 @@ void main(void) {
     float m = smoothstep(-0.5 * afwidth, 0.5 * afwidth, ld);
     vec4 color = mix(color0, color1, m);
 
-    Target0 = color * vec4(1.0, 1.0, 1.0, alpha);
+    SHADER_OUT(Target0, color * vec4(1.0, 1.0, 1.0, alpha));
 }

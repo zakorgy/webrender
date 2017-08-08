@@ -70,6 +70,16 @@
 #endif
 
 #ifdef WR_DX11
+bool2 lessThan(float2 value, float2 comparison) {
+    return bool2(value.x < comparison.x,
+                 value.y < comparison.y);
+}
+
+bool2 greaterThan(float2 value, float2 comparison) {
+    return bool2(value.x > comparison.x,
+                 value.y > comparison.y);
+}
+
 bool4 lessThanEqual(float4 value, float4 comparison) {
     return bool4(value.x <= comparison.x,
                  value.y <= comparison.y,
