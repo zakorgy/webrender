@@ -484,7 +484,7 @@ pub struct Renderer {
     ps_text_run: ProgramPair,
     ps_text_run_subpixel: ProgramPair,
     ps_image: ProgramPair,
-    /*ps_yuv_image: Vec<ProgramPair>,*/
+    ps_yuv_image: Vec<ProgramPair>,
     ps_border_corner: ProgramPair,
     ps_border_edge: ProgramPair,
     ps_gradient: ProgramPair,
@@ -643,13 +643,13 @@ impl Renderer {
         let ps_text_run = create_programs!(device, "ps_text_run");
         let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");
         let ps_image = create_programs!(device, "ps_image");
-        /*let ps_yuv_image =
+        let ps_yuv_image =
             vec![ProgramPair(create_programs!(device, "ps_yuv_image_nv12_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_nv12_709")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_planar_601")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_planar_709")),
                  ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_601")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_709"))];*/
+                 ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_709"))];
 
         let ps_border_corner = create_programs!(device, "ps_border_corner");
         let ps_border_edge = create_programs!(device, "ps_border_edge");
@@ -773,7 +773,7 @@ impl Renderer {
             ps_text_run: ProgramPair(ps_text_run),
             ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),
             ps_image: ProgramPair(ps_image),
-            /*ps_yuv_image: ps_yuv_image,*/
+            ps_yuv_image: ps_yuv_image,
             ps_border_corner: ProgramPair(ps_border_corner),
             ps_border_edge: ProgramPair(ps_border_edge),
             //ps_box_shadow: ProgramPair(ps_box_shadow),
@@ -1057,10 +1057,10 @@ impl Renderer {
         self.ps_blend.reset_upload_offset();
         self.ps_hw_composite.reset_upload_offset();
         self.ps_split_composite.reset_upload_offset();
-        self.ps_composite.reset_upload_offset();
+        self.ps_composite.reset_upload_offset();*/
         for mut program in &mut self.ps_yuv_image {
             program.reset_upload_offset();
-        }*/
+        }
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
@@ -1299,12 +1299,12 @@ impl Renderer {
                     }
                 },
                 AlphaBatchKind::Image(..) => self.ps_image.get(transform_kind),
-                /*AlphaBatchKind::YuvImage(_, format, color_space) => {
+                AlphaBatchKind::YuvImage(_, format, color_space) => {
                     let shader_index = Renderer::get_yuv_shader_index(ImageBufferKind::Texture2D,
                                                                       format,
                                                                       color_space);
                     self.ps_yuv_image[shader_index].get(transform_kind)
-                },*/
+                },
                 AlphaBatchKind::BorderCorner => self.ps_border_corner.get(transform_kind),
                 AlphaBatchKind::BorderEdge => self.ps_border_edge.get(transform_kind),
                 AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),

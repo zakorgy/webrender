@@ -244,7 +244,8 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
             || file_name.contains("ps_angle_gradient")
             || file_name.contains("ps_radial_gradient")
             || file_name.contains("ps_image")
-            || file_name.contains("ps_text_run")) {
+            || file_name.contains("ps_text_run")
+            || file_name.contains("ps_yuv")) {
             continue;
         }
         let file_path = Path::new(&out_dir).join(&file_name);

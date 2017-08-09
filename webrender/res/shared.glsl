@@ -44,6 +44,7 @@
     #define SHADER_OUT(value, expr) OUT.##value = expr;
 #else
     #define SHADER_OUT(value, expr) value = expr;
+    #define static
 #endif
 
 #ifdef WR_FEATURE_TEXTURE_EXTERNAL
