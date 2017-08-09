@@ -24,19 +24,10 @@ void main(in v2p IN, out p2f OUT) {
     float alpha = texture(sColor0, tc).a;
 #ifdef WR_FEATURE_TRANSFORM
     float a = 0.0;
-    init_transform_fs(vLocalPos, a
-#ifdef WR_DX11
-                      , vLocalBounds
-#endif //WR_DX11
-                      );
+    init_transform_fs(vLocalPos, vLocalBounds, a);
     alpha *= a;
 #endif //WR_FEATURE_TRANSFORM
-    alpha = min(alpha, do_clip(
-#ifdef WR_DX11
-                                 vClipMaskUvBounds
-                               , vClipMaskUv
-#endif //WR_DX11
-                               ));
+    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
     SHADER_OUT(Target0, vec4(vColor.rgb, vColor.a * alpha));
 #endif //WR_FEATURE_SUBPIXEL_AA
 }

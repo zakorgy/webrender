@@ -15,6 +15,7 @@ void main(in v2p IN, out p2f OUT) {
     vec2 vTileSize = IN.vTileSize;
     vec2 vTileRepeat = IN.vTileRepeat;
     vec2 vPos = IN.vPos;
+    vec4 gl_FragCoord = IN.Position;
 #endif
     vec2 pos = mod(vPos, vTileRepeat);
 
@@ -62,12 +63,5 @@ void main(in v2p IN, out p2f OUT) {
         }
     }
 
-    vec4 color = sample_gradient(vGradientAddress,
-                                 offset,
-                                 vGradientRepeat
-#if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
-                                 , IN.Position
-#endif
-                                 );
-    SHADER_OUT(Target0, color);
+    SHADER_OUT(Target0, sample_gradient(vGradientAddress, offset, vGradientRepeat, gl_FragCoord));
 }

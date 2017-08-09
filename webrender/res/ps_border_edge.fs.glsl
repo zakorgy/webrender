@@ -25,11 +25,7 @@ void main(in v2p IN, out p2f OUT) {
     vec3 vLocalPos = IN.vLocalPos;
     vec4 vLocalBounds = IN.vLocalBounds;
 #endif //WR_DX11
-    vec2 local_pos = init_transform_fs(vLocalPos, alpha
-#ifdef WR_DX11
-                                        , vLocalBounds
-#endif //WR_DX11
-                                       );
+    vec2 local_pos = init_transform_fs(vLocalPos, vLocalBounds, alpha);
 #else
 #ifdef WR_DX11
         vec2 vLocalPos = IN.vLocalPos;
@@ -37,12 +33,7 @@ void main(in v2p IN, out p2f OUT) {
     vec2 local_pos = vLocalPos;
 #endif //WR_FEATURE_TRANSFORM
 
-    alpha = min(alpha, do_clip(
-#ifdef WR_DX11
-                                 vClipMaskUvBounds
-                               , vClipMaskUv
-#endif //WR_DX11
-                               ));
+    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
 
     // Find the appropriate distance to apply the step over.
     vec2 fw = fwidth(local_pos);

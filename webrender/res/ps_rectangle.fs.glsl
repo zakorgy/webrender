@@ -19,20 +19,11 @@ void main(in v2p IN, out p2f OUT) {
     vec3 vLocalPos = IN.vLocalPos;
     vec4 vLocalBounds = IN.vLocalBounds;
 #endif //WR_DX11
-    init_transform_fs(vLocalPos, alpha
-#ifdef WR_DX11
-                      , vLocalBounds
-#endif //WR_DX11
-                      );
+    init_transform_fs(vLocalPos, vLocalBounds, alpha);
 #endif //WR_FEATURE_TRANSFORM
 
 #ifdef WR_FEATURE_CLIP
-    alpha = min(alpha, do_clip(
-#ifdef WR_DX11
-                                 vClipMaskUvBounds
-                               , vClipMaskUv
-#endif //WR_DX11
-                               ));
+    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
 #endif //WR_FEATURE_CLIP
     SHADER_OUT(Target0, vColor * vec4(1.0, 1.0, 1.0, alpha));
 }

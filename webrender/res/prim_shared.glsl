@@ -794,7 +794,6 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
 
     // Select the current vertex and the previous/next vertices,
     // based on the vertex ID that is known based on the instance rect.
-    //TODO pass the vertex_id via param (from dx struct)
     switch (vertex_id) {
         case 0:
             current_local_pos = vec2(local_rect.p0.x, local_rect.p0.y);
@@ -1002,73 +1001,51 @@ float signed_distance_rect(vec2 pos, vec2 p0, vec2 p1) {
     return length(max(vec2(0.0, 0.0), d)) + min(0.0, max(d.x, d.y));
 }
 
-vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha
-#ifdef WR_DX11
-                       , vec4 vLocalBounds
-#endif //WR_DX11
-) {
+vec2 init_transform_fs(vec3 local_pos, vec4 vLocalBounds, out float fragment_alpha) {
     fragment_alpha = 1.0;
     vec2 pos = local_pos.xy / local_pos.z;
 
-    /*// Now get the actual signed distance.
+    // Now get the actual signed distance.
     float d = signed_distance_rect(pos, vLocalBounds.xy, vLocalBounds.zw);
 
     // Find the appropriate distance to apply the AA smoothstep over.
     float afwidth = 0.5 * length(fwidth(pos.xy));
 
     // Only apply AA to fragments outside the signed distance field.
-    fragment_alpha = 1.0 - smoothstep(0.0, afwidth, d);*/
+    fragment_alpha = 1.0 - smoothstep(0.0, afwidth, d);
 
     return pos;
 }
 #endif //WR_FEATURE_TRANSFORM
 
-float do_clip(
-#ifdef WR_DX11
-                vec4 vClipMaskUvBounds
-              , vec3 vClipMaskUv
-#endif //WR_DX11
-              ) {
+float do_clip(vec4 clip_mask_uv_bounds, vec3 clip_mask_uv) {
     // anything outside of the mask is considered transparent
     bvec4 inside = lessThanEqual(
-        vec4(vClipMaskUvBounds.xy, vClipMaskUv.xy),
-        vec4(vClipMaskUv.xy, vClipMaskUvBounds.zw));
+        vec4(clip_mask_uv_bounds.xy, clip_mask_uv.xy),
+        vec4(clip_mask_uv.xy, clip_mask_uv_bounds.zw));
     // check for the dummy bounds, which are given to the opaque objects
-#ifdef WR_DX11
-    return ((vClipMaskUvBounds.x == vClipMaskUvBounds.z)
-            && (vClipMaskUvBounds.y == vClipMaskUvBounds.w)) ? 1.0:
-        all(inside) ? sCacheA8.SampleLevel(sCacheA8_, vClipMaskUv, 0.0).r : 0.0;
-#else
-    return vClipMaskUvBounds.xy == vClipMaskUvBounds.zw ? 1.0:
-        all(inside) ? textureLod(sCacheA8, vClipMaskUv, 0.0).r : 0.0;
-#endif //WR_DX11
+    return ((clip_mask_uv_bounds.x == clip_mask_uv_bounds.z)
+            && (clip_mask_uv_bounds.y == clip_mask_uv_bounds.w)) ? 1.0:
+        all(inside) ? textureLod(sCacheA8, clip_mask_uv, 0.0).r : 0.0;
 }
 
 #ifdef WR_FEATURE_DITHERING
-vec4 dither(vec4 color
-#ifdef WR_DX11
-            , vec4 gl_FragCoord
-#endif //WR_DX11
-            ) {
+vec4 dither(vec4 color, vec4 frag_coord) {
     const int matrix_mask = 7;
 
-    ivec2 pos = ivec2(gl_FragCoord.xy) & ivec2(matrix_mask, matrix_mask);
+    ivec2 pos = ivec2(frag_coord.xy) & ivec2(matrix_mask, matrix_mask);
     float noise_normalized = (texelFetch(sDither, pos, 0).r * 255.0 + 0.5) / 64.0;
     float noise = (noise_normalized - 0.5) / 256.0; // scale down to the unit length
 
     return color + vec4(noise, noise, noise, 0);
 }
 #else
-vec4 dither(vec4 color) {
+vec4 dither(vec4 color, vec4 _frag_coord) {
     return color;
 }
 #endif //WR_FEATURE_DITHERING
 
-vec4 sample_gradient(int address, float offset, float gradient_repeat
-#if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
-            , vec4 gl_FragCoord
-#endif //WR_DX11 && WR_FEATURE_DITHERING
-) {
+vec4 sample_gradient(int address, float offset, float gradient_repeat, vec4 frag_coord) {
     // Modulo the offset if the gradient repeats.
     float x = mix(offset, fract(offset), gradient_repeat);
 
@@ -1095,11 +1072,7 @@ vec4 sample_gradient(int address, float offset, float gradient_repeat
     ResourceCacheData2 texels = fetch_from_resource_cache_2(address + lut_offset);
 
     // Finally interpolate and apply dithering
-    return dither(mix(texels.data0, texels.data1, fract(x))
-#if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
-                  , gl_FragCoord
-#endif
-                  );
+    return dither(mix(texels.data0, texels.data1, fract(x)), frag_coord);
 }
 
 //

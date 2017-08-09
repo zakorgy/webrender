@@ -22,11 +22,7 @@ void main(in v2p IN, out p2f OUT) {
     vec3 vLocalPos = IN.vLocalPos;
     vec4 vLocalBounds = IN.vLocalBounds;
 #endif //WR_DX11
-    vec2 pos = init_transform_fs(vLocalPos, alpha
-#ifdef WR_DX11
-                                 , vLocalBounds
-#endif //WR_DX11
-                                 );
+    vec2 pos = init_transform_fs(vLocalPos, vLocalBounds, alpha);
 
     // We clamp the texture coordinate calculation here to the local rectangle boundaries,
     // which makes the edge of the texture stretch instead of repeat.
@@ -39,12 +35,7 @@ void main(in v2p IN, out p2f OUT) {
     vec2 relative_pos_in_rect = vLocalPos;
 #endif //WR_FEATURE_TRANSFORM
 
-    alpha = min(alpha, do_clip(
-#ifdef WR_DX11
-                                 vClipMaskUvBounds
-                               , vClipMaskUv
-#endif //WR_DX11
-                               ));
+    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
 
     // We calculate the particular tile this fragment belongs to, taking into
     // account the spacing in between tiles. We only paint if our fragment does
