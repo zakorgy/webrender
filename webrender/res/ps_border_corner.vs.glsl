@@ -23,7 +23,7 @@ void set_radii(int style,
 #ifdef WR_DX11
                , out vec4 vRadii0
                , out vec4 vRadii1
-#endif
+#endif //WR_DX11
                ) {
     vRadii0.xy = get_radii(radii, 2.0 * widths);
     vRadii0.zw = get_radii(radii - widths, -widths);
@@ -55,7 +55,7 @@ void set_edge_line(vec2 border_width,
                    vec2 gradient_sign
 #ifdef WR_DX11
                    , out vec4 vColorEdgeLine
-#endif
+#endif //WR_DX11
                    ) {
     vec2 gradient = border_width * gradient_sign;
     vColorEdgeLine = vec4(outer_corner, vec2(-gradient.y, gradient.x));
@@ -71,7 +71,7 @@ void write_color(vec4 color0,
                  , out vec4 vColor01
                  , out vec4 vColor10
                  , out vec4 vColor11
-#endif
+#endif //WR_DX11
                  ) {
     vec4 modulate;
 
@@ -146,7 +146,7 @@ void main(in a2v IN, out v2p OUT) {
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
     int gl_VertexID = IN.vertexId;
-#endif
+#endif //WR_DX11
     Primitive prim = load_primitive(aDataA, aDataB);
     Border border = fetch_border(prim.specific_prim_address);
     int sub_part = prim.user_data0;
@@ -182,14 +182,14 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                       , OUT.vRadii0
                       , OUT.vRadii1
-#endif
+#endif //WR_DX11
                       );
             set_edge_line(border.widths.xy,
                           corners.tl_outer,
                           vec2(1.0, 1.0)
 #ifdef WR_DX11
                           , OUT.vColorEdgeLine
-#endif
+#endif //WR_DX11
                           );
             edge_distances = vec4(p0 + adjusted_widths.xy,
                                   p0 + inv_adjusted_widths.xy);
@@ -213,14 +213,14 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                       , OUT.vRadii0
                       , OUT.vRadii1
-#endif
+#endif //WR_DX11
                       );
             set_edge_line(border.widths.zy,
                           corners.tr_outer,
                           vec2(-1.0, 1.0)
 #ifdef WR_DX11
                           , OUT.vColorEdgeLine
-#endif
+#endif //WR_DX11
                           );
             edge_distances = vec4(p1.x - adjusted_widths.z,
                                   p0.y + adjusted_widths.y,
@@ -246,14 +246,14 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                       , OUT.vRadii0
                       , OUT.vRadii1
-#endif
+#endif //WR_DX11
                       );
             set_edge_line(border.widths.zw,
                           corners.br_outer,
                           vec2(-1.0, -1.0)
 #ifdef WR_DX11
                           , OUT.vColorEdgeLine
-#endif
+#endif //WR_DX11
 
                           );
             edge_distances = vec4(p1.x - adjusted_widths.z,
@@ -280,14 +280,14 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                       , OUT.vRadii0
                       , OUT.vRadii1
-#endif
+#endif //WR_DX11
                       );
             set_edge_line(border.widths.xw,
                           corners.bl_outer,
                           vec2(1.0, -1.0)
 #ifdef WR_DX11
                           , OUT.vColorEdgeLine
-#endif
+#endif //WR_DX11
                           );
             edge_distances = vec4(p0.x + adjusted_widths.x,
                                   p1.y - adjusted_widths.w,
@@ -313,14 +313,14 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                       , OUT.vRadii0
                       , OUT.vRadii1
-#endif
+#endif //WR_DX11
                       );
             set_edge_line(border.widths.xy,
                           corners.tl_outer,
                           vec2(1.0, 1.0)
 #ifdef WR_DX11
                           , OUT.vColorEdgeLine
-#endif
+#endif //WR_DX11
                           );
             edge_distances = vec4(p0 + adjusted_widths.xy,
                                   p0 + inv_adjusted_widths.xy);
@@ -367,7 +367,7 @@ void main(in a2v IN, out v2p OUT) {
                 , OUT.vColor01
                 , OUT.vColor10
                 , OUT.vColor11
-#endif
+#endif //WR_DX11
                 );
 
     RectWithSize segment_rect;
@@ -385,7 +385,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                                     , OUT.Position
                                                     , OUT.vLocalBounds
-#endif
+#endif //WR_DX11
                                                     );
 #else
     VertexInfo vi = write_vertex(aPosition,
@@ -397,9 +397,9 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_DX11
                                  );
-#endif
+#endif //WR_FEATURE_TRANSFORM
 
     SHADER_OUT(vLocalPos, vi.local_pos);
     write_clip(vi.screen_pos,
@@ -407,6 +407,6 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                , OUT.vClipMaskUvBounds
                , OUT.vClipMaskUv
-#endif
+#endif //WR_DX11
                );
 }

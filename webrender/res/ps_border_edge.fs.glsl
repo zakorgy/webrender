@@ -17,27 +17,31 @@ void main(in v2p IN, out p2f OUT) {
     vec4 vColor1 = IN.vColor1;
     vec4 vClipParams = IN.vClipParams;
     float vClipSelect = IN.vClipSelect;
-#endif
+#endif //WR_DX11
     float alpha = 1.0;
 #ifdef WR_FEATURE_TRANSFORM
     alpha = 0.0;
-    #ifdef WR_DX11
-        vec3 vLocalPos = IN.vLocalPos;
-    #endif
-    //TODO: fix init_transform_fs
-    vec2 local_pos = init_transform_fs(vLocalPos, alpha);
+#ifdef WR_DX11
+    vec3 vLocalPos = IN.vLocalPos;
+    vec4 vLocalBounds = IN.vLocalBounds;
+#endif //WR_DX11
+    vec2 local_pos = init_transform_fs(vLocalPos, alpha
+#ifdef WR_DX11
+                                        , vLocalBounds
+#endif //WR_DX11
+                                       );
 #else
-    #ifdef WR_DX11
+#ifdef WR_DX11
         vec2 vLocalPos = IN.vLocalPos;
-    #endif
+#endif //WR_DX11
     vec2 local_pos = vLocalPos;
-#endif
+#endif //WR_FEATURE_TRANSFORM
 
     alpha = min(alpha, do_clip(
 #ifdef WR_DX11
                                  vClipMaskUvBounds
                                , vClipMaskUv
-#endif
+#endif //WR_DX11
                                ));
 
     // Find the appropriate distance to apply the step over.

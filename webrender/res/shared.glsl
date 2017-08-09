@@ -20,16 +20,12 @@
     #define uniform
     #define sampler2D Texture2D
     #define sampler2DArray Texture2DArray
-    //#define gl_Position SV_Position
-    //#define gl_FragCoord SV_Position
-    #define gl_InstanceID SV_InstanceID
-    #define gl_VertexID SV_VertexID
     #define point p
-    //#define flat
     #define flat nointerpolation
     #define texelFetchOffset(sampler, loc, index, offset) sampler.Load(vec3(loc, 0.0), offset)
     #define texelFetch(sampler, loc, index) sampler.Load(vec3(loc, 0.0))
     #define texture(sampler, loc) sampler.Sample(sampler##_, vec2(loc))
+    #define textureLod(sampler, loc, level) sampler.SampleLevel(sampler##_, vec2(loc), level)
 
     vec2 textureSize(sampler2D s, int lod) {
         uint width;

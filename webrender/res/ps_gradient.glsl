@@ -5,16 +5,16 @@
 #ifdef WR_DX11
     struct v2p {
         vec4 Position : SV_Position;
-        flat vec4 vClipMaskUvBounds : POSITION0;
-        vec3 vClipMaskUv : POSITION1;
-        vec4 vColor : COLOR0;
+        flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
+        vec4 vColor : vColor;
 
 #ifdef WR_FEATURE_TRANSFORM
-        vec3 vLocalPos : POSITION2;
-        flat vec4 vLocalBounds : POSITION3;
+        vec3 vLocalPos : vLocalPos;
+        flat vec4 vLocalBounds : vLocalBounds;
 #else
-        vec2 vPos : POSITION2;
-#endif
+        vec2 vPos : vPos;
+#endif //WR_FEATURE_TRANSFORM
     };
 #else
 varying vec4 vColor;
@@ -23,5 +23,5 @@ varying vec4 vColor;
 varying vec3 vLocalPos;
 #else
 varying vec2 vPos;
-#endif
-#endif
+#endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11

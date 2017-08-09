@@ -18,7 +18,7 @@ void main(in v2p IN, out p2f OUT) {
     vec2 vTileRepeat = IN.vTileRepeat;
 
     vec2 vPos = IN.vPos;
-#endif
+#endif //WR_DX11
     vec2 pos = mod(vPos, vTileRepeat);
 
     if (pos.x >= vTileSize.x ||
@@ -33,7 +33,7 @@ void main(in v2p IN, out p2f OUT) {
                                  vGradientRepeat
 #if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
                                  , IN.Position
-#endif
+#endif //WR_DX11 && WR_FEATURE_DITHERING
                                  );
     SHADER_OUT(Target0, color);
 }

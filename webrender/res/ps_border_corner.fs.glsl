@@ -29,6 +29,7 @@ void main(in v2p IN, out p2f OUT) {
     float vAlphaSelect = IN.vAlphaSelect;
 #ifdef WR_FEATURE_TRANSFORM
      vec3 vLocalPos = IN.vLocalPos;
+     vec4 vLocalBounds = IN.vLocalBounds;
 #else
      vec2 vLocalPos = IN.vLocalPos;
 #endif
@@ -36,7 +37,11 @@ void main(in v2p IN, out p2f OUT) {
     float alpha = 1.0;
 #ifdef WR_FEATURE_TRANSFORM
     alpha = 0.0;
-    vec2 local_pos = init_transform_fs(vLocalPos, alpha);
+    vec2 local_pos = init_transform_fs(vLocalPos, alpha
+#ifdef WR_DX11
+                                        , vLocalBounds
+#endif //WR_DX11
+                                       );
 #else
     vec2 local_pos = vLocalPos;
 #endif
@@ -45,7 +50,7 @@ void main(in v2p IN, out p2f OUT) {
 #ifdef WR_DX11
                                  vClipMaskUvBounds
                                , vClipMaskUv
-#endif
+#endif //WR_DX11
                                ));
 
     // Find the appropriate distance to apply the AA smoothstep over.

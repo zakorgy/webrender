@@ -5,18 +5,16 @@
 #ifdef WR_DX11
     struct v2p {
         vec4 Position : SV_Position;
-        //flat vec4 vClipMaskUvBounds : POSITION0;
-        //vec3 vClipMaskUv : POSITION1;
-        int vGradientAddress : ADDRESS;
-        float vGradientRepeat : PSIZE;
+        int vGradientAddress : vGradientAddress;
+        float vGradientRepeat : vGradientRepeat;
 
-        vec2 vScaledDir : POSITION2;
-        vec2 vStartPoint : POSITION3;
+        vec2 vScaledDir : vScaledDir;
+        vec2 vStartPoint : vStartPoint;
 
-        vec2 vTileSize : POSITION4;
-        vec2 vTileRepeat : POSITION5;
+        vec2 vTileSize : vTileSize;
+        vec2 vTileRepeat : vTileRepeat;
 
-        vec2 vPos : POSITION6;
+        vec2 vPos : vPos;
     };
 #else
 
@@ -30,4 +28,4 @@ flat varying vec2 vTileSize;
 flat varying vec2 vTileRepeat;
 
 varying vec2 vPos;
-#endif
+#endif //WR_DX11

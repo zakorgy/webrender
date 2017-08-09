@@ -11,7 +11,7 @@ void main(in a2v IN, out v2p OUT) {
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
     int gl_VertexID = IN.vertexId;
-#endif
+#endif //WR_DX11
     Primitive prim = load_primitive(aDataA, aDataB);
     Rectangle rect = fetch_rectangle(prim.specific_prim_address);
     SHADER_OUT(vColor, rect.color);
@@ -26,7 +26,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                                     , OUT.Position
                                                     , OUT.vLocalBounds
-#endif
+#endif //WR_DX11
                                                     );
     SHADER_OUT(vLocalPos, vi.local_pos);
 #else
@@ -39,9 +39,9 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_DX11
                                  );
-#endif
+#endif //WR_FEATURE_TRANSFORM
 
 #ifdef WR_FEATURE_CLIP
     write_clip(vi.screen_pos,
@@ -49,7 +49,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                , OUT.vClipMaskUvBounds
                , OUT.vClipMaskUv
-#endif
+#endif //WR_DX11
                );
-#endif
+#endif //WR_FEATURE_CLIP
 }

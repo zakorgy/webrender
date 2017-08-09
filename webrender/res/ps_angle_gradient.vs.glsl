@@ -23,7 +23,7 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_DX11
                                  );
 
     SHADER_OUT(vPos, vi.local_pos - prim.local_rect.p0);

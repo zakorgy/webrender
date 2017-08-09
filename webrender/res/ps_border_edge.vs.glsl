@@ -12,7 +12,7 @@ void write_edge_distance(float p0,
 #ifdef WR_DX11
                          , out vec2 vEdgeDistance
                          , out float vAxisSelect
-#endif
+#endif //WR_DX11
                          ) {
     switch (int(style)) {
         case BORDER_STYLE_DOUBLE:
@@ -34,7 +34,7 @@ void write_edge_distance(float p0,
 void write_alpha_select(float style
 #ifdef WR_DX11
                         , out float vAlphaSelect
-#endif
+#endif //WR_DX11
                         ) {
     switch (int(style)) {
         case BORDER_STYLE_DOUBLE:
@@ -52,7 +52,7 @@ void write_color(vec4 color,
 #ifdef WR_DX11
                  , out vec4 vColor0
                  , out vec4 vColor1
-#endif
+#endif //WR_DX11
                  ) {
     vec2 modulate;
 
@@ -84,7 +84,7 @@ void write_clip_params(float style,
 #ifdef WR_DX11
                        , out vec4 vClipParams
                        , out float vClipSelect
-#endif
+#endif //WR_DX11
                        ) {
     // x = offset
     // y = dash on + off length
@@ -131,7 +131,7 @@ void main(in a2v IN, out v2p OUT) {
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
     int gl_VertexID = IN.vertexId;
-#endif
+#endif //WR_DX11
     Primitive prim = load_primitive(aDataA, aDataB);
     Border border = fetch_border(prim.specific_prim_address);
     int sub_part = prim.user_data0;
@@ -159,7 +159,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                 , OUT.vEdgeDistance
                                 , OUT.vAxisSelect
-#endif
+#endif //WR_DX11
                                 );
             style = border.style.x;
             color_flip = false;
@@ -171,7 +171,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                               , OUT.vClipParams
                               , OUT.vClipSelect
-#endif
+#endif //WR_DX11
                               );
             break;
         }
@@ -188,7 +188,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                 , OUT.vEdgeDistance
                                 , OUT.vAxisSelect
-#endif
+#endif //WR_DX11
                                 );
             style = border.style.y;
             color_flip = false;
@@ -200,7 +200,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                               , OUT.vClipParams
                               , OUT.vClipSelect
-#endif
+#endif //WR_DX11
                               );
             break;
         }
@@ -217,7 +217,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                 , OUT.vEdgeDistance
                                 , OUT.vAxisSelect
-#endif
+#endif //WR_DX11
                                 );
             style = border.style.z;
             color_flip = true;
@@ -229,7 +229,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                               , OUT.vClipParams
                               , OUT.vClipSelect
-#endif
+#endif //WR_DX11
                               );
             break;
         }
@@ -246,7 +246,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                 , OUT.vEdgeDistance
                                 , OUT.vAxisSelect
-#endif
+#endif //WR_DX11
                                 );
             style = border.style.w;
             color_flip = true;
@@ -258,7 +258,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                               , OUT.vClipParams
                               , OUT.vClipSelect
-#endif
+#endif //WR_DX11
                               );
             break;
         }
@@ -267,7 +267,7 @@ void main(in a2v IN, out v2p OUT) {
     write_alpha_select(style
 #ifdef WR_DX11
                        , OUT.vAlphaSelect
-#endif
+#endif //WR_DX11
                         );
 
     write_color(color,
@@ -276,7 +276,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                 , OUT.vColor0
                 , OUT.vColor1
-#endif
+#endif //WR_DX11
                 );
 
 #ifdef WR_FEATURE_TRANSFORM
@@ -290,7 +290,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                                     , OUT.Position
                                                     , OUT.vLocalBounds
-#endif
+#endif //WR_DX11
                                                     );
 #else
     VertexInfo vi = write_vertex(aPosition,
@@ -302,9 +302,9 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_DX11
                                  );
-#endif
+#endif //WR_FEATURE_TRANSFORM
 
     SHADER_OUT(vLocalPos, vi.local_pos);
     write_clip(vi.screen_pos,
@@ -312,6 +312,6 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                , OUT.vClipMaskUvBounds
                , OUT.vClipMaskUv
-#endif
+#endif //WR_DX11
                );
 }

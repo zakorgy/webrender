@@ -6,32 +6,32 @@
  #ifdef WR_DX11
     struct v2p {
         vec4 Position : SV_Position;
-        flat vec4 vClipMaskUvBounds : POSITION0;
-        vec3 vClipMaskUv : POSITION1;
+        flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
 
         // Edge color transition
-        flat vec4 vColor00 : COLOR0;
-        flat vec4 vColor01 : COLOR1;
-        flat vec4 vColor10 : COLOR2;
-        flat vec4 vColor11 : COLOR3;
-        flat vec4 vColorEdgeLine : POSITION2;
+        flat vec4 vColor00 : vColor00;
+        flat vec4 vColor01 : vColor01;
+        flat vec4 vColor10 : vColor10;
+        flat vec4 vColor11 : vColor11;
+        flat vec4 vColorEdgeLine : vColorEdgeLine;
 
         // Border radius
-        flat vec2 vClipCenter : POSITION3;
-        flat vec4 vRadii0 : POSITION4;
-        flat vec4 vRadii1 : POSITION5;
-        flat vec2 vClipSign : POSITION6;
-        flat vec4 vEdgeDistance : POSITION7;
-        flat float vSDFSelect : PSIZE0;
+        flat vec2 vClipCenter : vClipCenter;
+        flat vec4 vRadii0 : vRadii0;
+        flat vec4 vRadii1 : vRadii1;
+        flat vec2 vClipSign : vClipSign;
+        flat vec4 vEdgeDistance : vEdgeDistance;
+        flat float vSDFSelect : vSDFSelect;
 
         // Border style
-        flat float vAlphaSelect : PSIZE1;
+        flat float vAlphaSelect : vAlphaSelect;
 #ifdef WR_FEATURE_TRANSFORM
-        vec3 vLocalPos : POSITION8;
-        flat vec4 vLocalBounds : POSITION9;
+        vec3 vLocalPos : vLocalPos;
+        flat vec4 vLocalBounds : vLocalBounds;
 #else
-        vec2 vLocalPos : POSITION8;
-#endif
+        vec2 vLocalPos : vLocalPos;
+#endif //WR_FEATURE_TRANSFORM
      };
 #else
 
@@ -57,5 +57,5 @@ flat varying float vAlphaSelect;
 varying vec3 vLocalPos;
 #else
 varying vec2 vLocalPos;
-#endif
-#endif
+#endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11

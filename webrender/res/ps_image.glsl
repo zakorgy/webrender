@@ -5,20 +5,20 @@
 #ifdef WR_DX11
     struct v2p {
         vec4 Position : SV_Position;
-        flat vec4 vClipMaskUvBounds : POSITION0;
-        vec3 vClipMaskUv : POSITION1;
-        flat vec2 vTextureOffset: POSITION2; // Offset of this image into the texture atlas.
-        flat vec2 vTextureSize: POSITION3;   // Size of the image in the texture atlas.
-        flat vec2 vTileSpacing: POSITION4;   // Amount of space between tiled instances of this image.
-        flat vec4 vStRect: POSITION5;        // Rectangle of valid texture rect.
-        flat vec2 vStretchSize: POSITION6;
+        flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
+        flat vec2 vTextureOffset: vTextureOffset; // Offset of this image into the texture atlas.
+        flat vec2 vTextureSize: vTextureSize;   // Size of the image in the texture atlas.
+        flat vec2 vTileSpacing: vTileSpacing;   // Amount of space between tiled instances of this image.
+        flat vec4 vStRect: vStRect;        // Rectangle of valid texture rect.
+        flat vec2 vStretchSize: vStretchSize;
 
 #ifdef WR_FEATURE_TRANSFORM
-        vec3 vLocalPos: POSITION7;
-        flat vec4 vLocalBounds : POSITION8;
+        vec3 vLocalPos: vLocalPos;
+        flat vec4 vLocalBounds : vLocalBounds;
 #else
-        vec2 vLocalPos: POSITION7;
-#endif
+        vec2 vLocalPos: vLocalPos;
+#endif //WR_FEATURE_TRANSFORM
     };
 #else
 
@@ -34,6 +34,6 @@ flat varying vec4 vStRect;        // Rectangle of valid texture rect.
 varying vec3 vLocalPos;
 #else
 varying vec2 vLocalPos;
-#endif
+#endif //WR_FEATURE_TRANSFORM
 flat varying vec2 vStretchSize;
-#endif
+#endif //WR_DX11

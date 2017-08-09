@@ -6,26 +6,33 @@
 void main(void) {
 #else
 void main(in v2p IN, out p2f OUT) {
+#ifdef WR_FEATURE_CLIP
     vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
     vec3 vClipMaskUv = IN.vClipMaskUv;
+#endif //WR_FEATURE_CLIP
     vec4 vColor = IN.vColor;
-#endif
+#endif //WR_DX11
     float alpha = 1.0;
 #ifdef WR_FEATURE_TRANSFORM
     alpha = 0.0;
 #ifdef WR_DX11
     vec3 vLocalPos = IN.vLocalPos;
-#endif
-    init_transform_fs(vLocalPos, alpha);
-#endif
+    vec4 vLocalBounds = IN.vLocalBounds;
+#endif //WR_DX11
+    init_transform_fs(vLocalPos, alpha
+#ifdef WR_DX11
+                      , vLocalBounds
+#endif //WR_DX11
+                      );
+#endif //WR_FEATURE_TRANSFORM
 
 #ifdef WR_FEATURE_CLIP
     alpha = min(alpha, do_clip(
 #ifdef WR_DX11
                                  vClipMaskUvBounds
                                , vClipMaskUv
-#endif
+#endif //WR_DX11
                                ));
-#endif
+#endif //WR_FEATURE_CLIP
     SHADER_OUT(Target0, vColor * vec4(1.0, 1.0, 1.0, alpha));
 }

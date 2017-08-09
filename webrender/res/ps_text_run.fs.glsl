@@ -11,10 +11,11 @@ void main(in v2p IN, out p2f OUT) {
     vec4 vColor = IN.vColor;
     vec2 vUv = IN.vUv;
     vec4 vUvBorder = IN.vUvBorder;
-    #ifdef WR_FEATURE_TRANSFORM
-        vec3 vLocalPos = IN.vLocalPos;
-    #endif
+#ifdef WR_FEATURE_TRANSFORM
+    vec3 vLocalPos = IN.vLocalPos;
+    vec4 vLocalBounds = IN.vLocalBounds;
 #endif
+#endif //WR_DX11
     vec2 tc = clamp(vUv, vUvBorder.xy, vUvBorder.zw);
 #ifdef WR_FEATURE_SUBPIXEL_AA
     //note: the blend mode is not compatible with clipping
@@ -23,16 +24,19 @@ void main(in v2p IN, out p2f OUT) {
     float alpha = texture(sColor0, tc).a;
 #ifdef WR_FEATURE_TRANSFORM
     float a = 0.0;
-    //TODO: fix init_transform_fs
-    init_transform_fs(vLocalPos, a);
+    init_transform_fs(vLocalPos, a
+#ifdef WR_DX11
+                      , vLocalBounds
+#endif //WR_DX11
+                      );
     alpha *= a;
-#endif
+#endif //WR_FEATURE_TRANSFORM
     alpha = min(alpha, do_clip(
 #ifdef WR_DX11
                                  vClipMaskUvBounds
                                , vClipMaskUv
-#endif
+#endif //WR_DX11
                                ));
     SHADER_OUT(Target0, vec4(vColor.rgb, vColor.a * alpha));
-#endif
+#endif //WR_FEATURE_SUBPIXEL_AA
 }

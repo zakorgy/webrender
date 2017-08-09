@@ -57,7 +57,7 @@
 uniform sampler2DArray sCacheA8;
 #ifdef WR_DX11
 SamplerState sCacheA8_;
-#endif
+#endif //WR_DX11
 uniform sampler2DArray sCacheRGBA8;
 
 uniform sampler2D sGradients;
@@ -189,7 +189,7 @@ struct a2v {
 #else
 in ivec4 aDataA;
 in ivec4 aDataB;
-#endif
+#endif //WR_DX11
 
 // get_fetch_uv is a macro to work around a macOS Intel driver parsing bug.
 // TODO: convert back to a function once the driver issues are resolved, if ever.
@@ -630,7 +630,7 @@ vec4 untransform(vec2 ref, vec3 n, vec3 a, mat4 inv_transform) {
     vec4 r = mul(inv_transform, vec4(ref, z, 1.0));
 #else
     vec4 r = inv_transform * vec4(ref, z, 1.0);
-#endif
+#endif //WR_DX11
     return r;
 }
 
@@ -641,7 +641,7 @@ vec4 get_layer_pos(vec2 pos, Layer layer) {
     vec4 ah = mul(layer.transform, vec4(0.0, 0.0, 0.0, 1.0));
 #else
     vec4 ah = layer.transform * vec4(0.0, 0.0, 0.0, 1.0);
-#endif
+#endif //WR_DX11
 
     vec3 a = ah.xyz / ah.w;
     // get the normal to the layer plane
@@ -649,7 +649,7 @@ vec4 get_layer_pos(vec2 pos, Layer layer) {
     vec3 n = mul(transpose(mat3(layer.inv_transform[0].xyz,layer.inv_transform[1].xyz,layer.inv_transform[2].xyz)), vec3(0.0, 0.0, 1.0));
 #else
     vec3 n = transpose(mat3(layer.inv_transform)) * vec3(0.0, 0.0, 1.0);
-#endif
+#endif //WR_DX11
     return untransform(pos, n, a, layer.inv_transform);
 }
 
@@ -674,7 +674,7 @@ vec2 compute_snap_offset(vec2 local_pos,
 #else
   vec4 world_snap_p0 = layer.transform * vec4(snap_rect.p0, 0.0, 1.0);
   vec4 world_snap_p1 = layer.transform * vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0);
-#endif
+#endif //WR_DX11
 
     // Snap bounds in world coordinates, adjusted for pixel ratio. XY = top left, ZW = bottom right
     vec4 world_snap = uDevicePixelRatio * vec4(world_snap_p0.xy, world_snap_p1.xy) /
@@ -702,7 +702,7 @@ VertexInfo write_vertex(vec3 aPosition,
                         RectWithSize snap_rect
 #ifdef WR_DX11
                         , out vec4 vPosition
-#endif
+#endif //WR_DX11
                         ) {
 
     // Select the corner of the local rect that we are processing.
@@ -721,7 +721,7 @@ VertexInfo write_vertex(vec3 aPosition,
     vec4 world_pos = mul(layer.transform, vec4(clamped_local_pos, 0.0, 1.0));
 #else
     vec4 world_pos = layer.transform * vec4(clamped_local_pos, 0.0, 1.0);
-#endif
+#endif //WR_DX11
     // Convert the world positions to device pixel space.
     vec2 device_pos = world_pos.xy / world_pos.w * uDevicePixelRatio;
 
@@ -742,7 +742,7 @@ VertexInfo write_vertex(vec3 aPosition,
     vPosition = out_pos / out_pos.w;
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
-#endif
+#endif //WR_DX11
     VertexInfo vi;
     vi.local_pos = clamped_local_pos;
     vi.screen_pos = device_pos;
@@ -786,7 +786,7 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
 #ifdef WR_DX11
                                            , out vec4 vPosition
                                            , out vec4 vLocalBounds
-#endif
+#endif //WR_DX11
                                            ) {
     RectWithEndpoint local_rect = to_rect_with_endpoint(instance_rect);
 
@@ -832,7 +832,7 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
     vec4 current_world_pos = layer.transform * vec4(current_local_pos, 0.0, 1.0);
     vec4 prev_world_pos = layer.transform * vec4(prev_local_pos, 0.0, 1.0);
     vec4 next_world_pos = layer.transform * vec4(next_local_pos, 0.0, 1.0);
-#endif
+#endif //WR_DX11
 
     // Convert to device space
     vec2 current_device_pos = uDevicePixelRatio * current_world_pos.xy / current_world_pos.w;
@@ -882,7 +882,7 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
     vPosition = out_pos / out_pos.w;
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
-#endif
+#endif //WR_DX11
     TransformVertexInfo tvi;
     tvi.local_pos = layer_pos.xyw;
     tvi.screen_pos = device_pos;
@@ -984,7 +984,7 @@ void write_clip(vec2 global_pos,
 #ifdef WR_DX11
                 , out vec4 vClipMaskUvBounds
                 , out vec3 vClipMaskUv
-#endif
+#endif //WR_DX11
                 ) {
     vec2 texture_size = vec2(textureSize(sCacheA8, 0).xy);
     vec2 uv = global_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
@@ -1002,7 +1002,11 @@ float signed_distance_rect(vec2 pos, vec2 p0, vec2 p1) {
     return length(max(vec2(0.0, 0.0), d)) + min(0.0, max(d.x, d.y));
 }
 
-vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha) {
+vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha
+#ifdef WR_DX11
+                       , vec4 vLocalBounds
+#endif //WR_DX11
+) {
     fragment_alpha = 1.0;
     vec2 pos = local_pos.xy / local_pos.z;
 
@@ -1023,7 +1027,7 @@ float do_clip(
 #ifdef WR_DX11
                 vec4 vClipMaskUvBounds
               , vec3 vClipMaskUv
-#endif
+#endif //WR_DX11
               ) {
     // anything outside of the mask is considered transparent
     bvec4 inside = lessThanEqual(
@@ -1037,14 +1041,14 @@ float do_clip(
 #else
     return vClipMaskUvBounds.xy == vClipMaskUvBounds.zw ? 1.0:
         all(inside) ? textureLod(sCacheA8, vClipMaskUv, 0.0).r : 0.0;
-#endif
+#endif //WR_DX11
 }
 
 #ifdef WR_FEATURE_DITHERING
 vec4 dither(vec4 color
 #ifdef WR_DX11
             , vec4 gl_FragCoord
-#endif
+#endif //WR_DX11
             ) {
     const int matrix_mask = 7;
 
@@ -1063,7 +1067,7 @@ vec4 dither(vec4 color) {
 vec4 sample_gradient(int address, float offset, float gradient_repeat
 #if defined(WR_DX11) && defined(WR_FEATURE_DITHERING)
             , vec4 gl_FragCoord
-#endif
+#endif //WR_DX11 && WR_FEATURE_DITHERING
 ) {
     // Modulo the offset if the gradient repeats.
     float x = mix(offset, fract(offset), gradient_repeat);

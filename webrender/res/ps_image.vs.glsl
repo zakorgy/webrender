@@ -11,7 +11,7 @@ void main(in a2v IN, out v2p OUT) {
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
     int gl_VertexID = IN.vertexId;
-#endif
+#endif //WR_DX11
     Primitive prim = load_primitive(aDataA, aDataB);
     Image image = fetch_image(prim.specific_prim_address);
     ImageResource res = fetch_image_resource(prim.user_data0);
@@ -27,7 +27,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                                     , OUT.Position
                                                     , OUT.vLocalBounds
-#endif
+#endif //WR_DX11
                                                     );
     SHADER_OUT(vLocalPos, vi.local_pos);
 
@@ -41,17 +41,17 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_DX11
                                  );
     SHADER_OUT(vLocalPos, vi.local_pos - prim.local_rect.p0);
-#endif
+#endif //WR_FEATURE_TEXTURE_RECT
 
     write_clip(vi.screen_pos,
                prim.clip_area
 #ifdef WR_DX11
                , OUT.vClipMaskUvBounds
                , OUT.vClipMaskUv
-#endif
+#endif //WR_DX11
                );
 
     // If this is in WR_FEATURE_TEXTURE_RECT mode, the rect and size use
@@ -60,7 +60,7 @@ void main(in a2v IN, out v2p OUT) {
     vec2 texture_size_normalization_factor = vec2(1, 1);
 #else
     vec2 texture_size_normalization_factor = vec2(textureSize(sColor0, 0));
-#endif
+#endif //WR_FEATURE_TEXTURE_RECT
 
     vec2 uv0, uv1;
 

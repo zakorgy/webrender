@@ -11,7 +11,7 @@ void main(in a2v IN, out v2p OUT) {
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
     int gl_VertexID = IN.vertexId;
-#endif
+#endif //WR_DX11
     Primitive prim = load_primitive(aDataA, aDataB);
     Gradient gradient = fetch_gradient(prim.specific_prim_address);
 
@@ -79,7 +79,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                                     , OUT.Position
                                                     , OUT.vLocalBounds
-#endif
+#endif //WR_DX11
                                                     );
     SHADER_OUT(vLocalPos, vi.local_pos);
     vec2 f = (vi.local_pos.xy - prim.local_rect.p0) / prim.local_rect.size;
@@ -93,18 +93,18 @@ void main(in a2v IN, out v2p OUT) {
                                  prim.local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_DX11
                                  );
      vec2 f = (vi.local_pos - segment_rect.p0) / segment_rect.size;
      SHADER_OUT(vPos, vi.local_pos);
-#endif
+#endif //WR_FEATURE_TRANSFORM
 
     write_clip(vi.screen_pos,
                prim.clip_area
-    #ifdef WR_DX11
+#ifdef WR_DX11
                , OUT.vClipMaskUvBounds
                , OUT.vClipMaskUv
-    #endif
+#endif //WR_DX11
                );
 
     SHADER_OUT(vColor, mix(adjusted_color_g0, adjusted_color_g1, dot(f, axis)));

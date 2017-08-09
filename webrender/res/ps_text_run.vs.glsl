@@ -11,7 +11,7 @@ void main(in a2v IN, out v2p OUT) {
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
     int gl_VertexID = IN.vertexId;
-#endif
+#endif //WR_DX11
     Primitive prim = load_primitive(aDataA, aDataB);
     TextRun text = fetch_text_run(prim.specific_prim_address);
 
@@ -27,7 +27,7 @@ void main(in a2v IN, out v2p OUT) {
 #else
     RectWithSize local_rect = RectWithSize(local_pos,
                                            (res.uv_rect.zw - res.uv_rect.xy) / uDevicePixelRatio);
-#endif
+#endif //WR_DX11
 
 #ifdef WR_FEATURE_TRANSFORM
     TransformVertexInfo vi = write_transform_vertex(gl_VertexID,
@@ -40,7 +40,7 @@ void main(in a2v IN, out v2p OUT) {
 #ifdef WR_DX11
                                                     , OUT.Position
                                                     , OUT.vLocalBounds
-#endif
+#endif //WR_DX11
                                                     );
     SHADER_OUT(vLocalPos, vi.local_pos);
     vec2 f = (vi.local_pos.xy / vi.local_pos.z - local_rect.p0) / local_rect.size;
@@ -54,17 +54,17 @@ void main(in a2v IN, out v2p OUT) {
                                  local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif
+#endif //WR_FEATURE_TRANSFORM
                                  );
     vec2 f = (vi.local_pos - local_rect.p0) / local_rect.size;
-#endif
+#endif //WR_DX11
 
     write_clip(vi.screen_pos,
                prim.clip_area
 #ifdef WR_DX11
                , OUT.vClipMaskUvBounds
                , OUT.vClipMaskUv
-#endif
+#endif //WR_DX11
                );
 
     vec2 texture_size = vec2(textureSize(sColor0, 0));
