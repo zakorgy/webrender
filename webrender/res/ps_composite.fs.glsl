@@ -151,23 +151,30 @@ vec3 Luminosity(vec3 Cb, vec3 Cs) {
     return SetLum(Cb, Lum(Cs));
 }
 
-const int MixBlendMode_Multiply    = 1;
-const int MixBlendMode_Screen      = 2;
-const int MixBlendMode_Overlay     = 3;
-const int MixBlendMode_Darken      = 4;
-const int MixBlendMode_Lighten     = 5;
-const int MixBlendMode_ColorDodge  = 6;
-const int MixBlendMode_ColorBurn   = 7;
-const int MixBlendMode_HardLight   = 8;
-const int MixBlendMode_SoftLight   = 9;
-const int MixBlendMode_Difference  = 10;
-const int MixBlendMode_Exclusion   = 11;
-const int MixBlendMode_Hue         = 12;
-const int MixBlendMode_Saturation  = 13;
-const int MixBlendMode_Color       = 14;
-const int MixBlendMode_Luminosity  = 15;
+static const int MixBlendMode_Multiply    = 1;
+static const int MixBlendMode_Screen      = 2;
+static const int MixBlendMode_Overlay     = 3;
+static const int MixBlendMode_Darken      = 4;
+static const int MixBlendMode_Lighten     = 5;
+static const int MixBlendMode_ColorDodge  = 6;
+static const int MixBlendMode_ColorBurn   = 7;
+static const int MixBlendMode_HardLight   = 8;
+static const int MixBlendMode_SoftLight   = 9;
+static const int MixBlendMode_Difference  = 10;
+static const int MixBlendMode_Exclusion   = 11;
+static const int MixBlendMode_Hue         = 12;
+static const int MixBlendMode_Saturation  = 13;
+static const int MixBlendMode_Color       = 14;
+static const int MixBlendMode_Luminosity  = 15;
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec3 vUv0 = IN.vUv0;
+    vec3 vUv1 = IN.vUv1;
+    int vOp = IN.vOp;
+#endif //WR_DX11
     vec4 Cb = texture(sCacheRGBA8, vUv0);
     vec4 Cs = texture(sCacheRGBA8, vUv1);
 
@@ -176,11 +183,11 @@ void main(void) {
     Cs.rgb /= Cs.a;
 
     if (Cb.a == 0.0) {
-        Target0 = Cs;
+        SHADER_OUT(Target0, Cs);
         return;
     }
     if (Cs.a == 0.0) {
-        Target0 = vec4(0.0, 0.0, 0.0, 0.0);
+        SHADER_OUT(Target0, vec4(0.0, 0.0, 0.0, 0.0));
         return;
     }
 
@@ -245,5 +252,5 @@ void main(void) {
     result.rgb = (1.0 - Cb.a) * Cs.rgb + Cb.a * result.rgb;
     result.a = Cs.a;
 
-    Target0 = result;
+    SHADER_OUT(Target0, result);
 }

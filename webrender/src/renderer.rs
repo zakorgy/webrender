@@ -495,8 +495,8 @@ pub struct Renderer {
 
     ps_blend: Program,
     /*ps_hw_composite: Program,
-    ps_split_composite: Program,
-    ps_composite: Program,*/
+    ps_split_composite: Program,*/
+    ps_composite: Program,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
@@ -670,8 +670,8 @@ impl Renderer {
 
         let ps_blend = create_program!(device, "ps_blend");
         /*let ps_hw_composite = create_program!(device, "ps_hardware_composite");
-        let ps_split_composite = create_program!(device, "ps_split_composite");
-        let ps_composite = create_program!(device, "ps_composite");*/
+        let ps_split_composite = create_program!(device, "ps_split_composite");*/
+        let ps_composite = create_program!(device, "ps_composite");
 
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
@@ -783,8 +783,8 @@ impl Renderer {
             ps_cache_image: ProgramPair(ps_cache_image),
             ps_blend: ps_blend,
             /*ps_hw_composite: ps_hw_composite,
-            ps_split_composite: ps_split_composite,
-            ps_composite: ps_composite,*/
+            ps_split_composite: ps_split_composite,*/
+            ps_composite: ps_composite,
             notifier: notifier,
             //debug: debug_renderer,
             render_target_debug: render_target_debug,
@@ -1056,8 +1056,8 @@ impl Renderer {
         self.ps_cache_image.reset_upload_offset();
         self.ps_blend.reset_upload_offset();
         /*self.ps_hw_composite.reset_upload_offset();
-        self.ps_split_composite.reset_upload_offset();
-        self.ps_composite.reset_upload_offset();*/
+        self.ps_split_composite.reset_upload_offset();*/
+        self.ps_composite.reset_upload_offset();
         for mut program in &mut self.ps_yuv_image {
             program.reset_upload_offset();
         }
@@ -1288,8 +1288,8 @@ impl Renderer {
                         self.ps_rectangle.get(transform_kind)
                     }
                 },
-                /*AlphaBatchKind::Composite => &mut self.ps_composite,
-                AlphaBatchKind::SplitComposite => &mut self.ps_split_composite,
+                AlphaBatchKind::Composite => &mut self.ps_composite,
+                /*AlphaBatchKind::SplitComposite => &mut self.ps_split_composite,
                 AlphaBatchKind::HardwareComposite => &mut self.ps_hw_composite,*/
                 AlphaBatchKind::Blend => &mut self.ps_blend,
                 AlphaBatchKind::TextRun => {

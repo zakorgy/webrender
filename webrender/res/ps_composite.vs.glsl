@@ -3,8 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef WR_DX11
 void main(void) {
-    CompositeInstance ci = fetch_composite_instance();
+#else
+void main(in a2v IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+#endif //WR_DX11
+    CompositeInstance ci = fetch_composite_instance(aDataA, aDataB);
     AlphaBatchTask dest_task = fetch_alpha_batch_task(ci.render_task_index);
     ReadbackTask backdrop_task = fetch_readback_task(ci.backdrop_task_index);
     AlphaBatchTask src_task = fetch_alpha_batch_task(ci.src_task_index);
@@ -21,13 +28,25 @@ void main(void) {
 
     vec2 st0 = backdrop_task.render_target_origin / texture_size;
     vec2 st1 = (backdrop_task.render_target_origin + backdrop_task.size) / texture_size;
-    vUv0 = vec3(mix(st0, st1, aPosition.xy), backdrop_task.render_target_layer_index);
+    SHADER_OUT(vUv0, vec3(mix(st0, st1, aPosition.xy), backdrop_task.render_target_layer_index));
 
     st0 = src_task.render_target_origin / texture_size;
     st1 = (src_task.render_target_origin + src_task.size) / texture_size;
-    vUv1 = vec3(mix(st0, st1, aPosition.xy), src_task.render_target_layer_index);
+    SHADER_OUT(vUv1, vec3(mix(st0, st1, aPosition.xy), src_task.render_target_layer_index));
 
-    vOp = ci.user_data0;
+    SHADER_OUT(vOp, ci.user_data0);
 
+#ifdef WR_DX11
+    // In DX11 the z is between 0 and 1
+    float4x4 transform = float4x4(
+        float4(1.0, 0.0, 0.0, 0.0),
+        float4(0.0, 1.0, 0.0, 0.0),
+        float4(0.0, 0.0, 0.5, 0.5),
+        float4(0.0, 0.0, 0.0, 1.0)
+    );
+    vec4 out_pos = mul(transform, mul(uTransform, vec4(local_pos, ci.z, 1.0)));
+    OUT.Position = out_pos / out_pos.w;
+#else
     gl_Position = uTransform * vec4(local_pos, ci.z, 1.0);
+#endif //WR_DX11
 }
