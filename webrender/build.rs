@@ -246,7 +246,8 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
             || file_name.contains("ps_image")
             || file_name.contains("ps_text_run")
             || file_name.contains("ps_yuv")
-            || file_name.contains("ps_box_shadow")) {
+            || file_name.contains("ps_box_shadow")
+            || file_name.contains("ps_cache_image")) {
             continue;
         }
         let file_path = Path::new(&out_dir).join(&file_name);
