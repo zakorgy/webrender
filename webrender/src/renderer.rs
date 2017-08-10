@@ -494,8 +494,8 @@ pub struct Renderer {
     ps_cache_image: ProgramPair,
 
     ps_blend: Program,
-    /*ps_hw_composite: Program,
-    ps_split_composite: Program,*/
+    /*ps_hw_composite: Program,*/
+    ps_split_composite: Program,
     ps_composite: Program,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
@@ -669,8 +669,8 @@ impl Renderer {
         let ps_cache_image = create_programs!(device, "ps_cache_image");
 
         let ps_blend = create_program!(device, "ps_blend");
-        /*let ps_hw_composite = create_program!(device, "ps_hardware_composite");
-        let ps_split_composite = create_program!(device, "ps_split_composite");*/
+        /*let ps_hw_composite = create_program!(device, "ps_hardware_composite");*/
+        let ps_split_composite = create_program!(device, "ps_split_composite");
         let ps_composite = create_program!(device, "ps_composite");
 
         let device_max_size = device.max_texture_size();
@@ -782,8 +782,8 @@ impl Renderer {
             ps_radial_gradient: ProgramPair(ps_radial_gradient),
             ps_cache_image: ProgramPair(ps_cache_image),
             ps_blend: ps_blend,
-            /*ps_hw_composite: ps_hw_composite,
-            ps_split_composite: ps_split_composite,*/
+            /*ps_hw_composite: ps_hw_composite,*/
+            ps_split_composite: ps_split_composite,
             ps_composite: ps_composite,
             notifier: notifier,
             //debug: debug_renderer,
@@ -1055,8 +1055,8 @@ impl Renderer {
         self.ps_box_shadow.reset_upload_offset();
         self.ps_cache_image.reset_upload_offset();
         self.ps_blend.reset_upload_offset();
-        /*self.ps_hw_composite.reset_upload_offset();
-        self.ps_split_composite.reset_upload_offset();*/
+        /*self.ps_hw_composite.reset_upload_offset();*/
+        self.ps_split_composite.reset_upload_offset();
         self.ps_composite.reset_upload_offset();
         for mut program in &mut self.ps_yuv_image {
             program.reset_upload_offset();
@@ -1289,8 +1289,8 @@ impl Renderer {
                     }
                 },
                 AlphaBatchKind::Composite => &mut self.ps_composite,
-                /*AlphaBatchKind::SplitComposite => &mut self.ps_split_composite,
-                AlphaBatchKind::HardwareComposite => &mut self.ps_hw_composite,*/
+                AlphaBatchKind::SplitComposite => &mut self.ps_split_composite,
+                /*AlphaBatchKind::HardwareComposite => &mut self.ps_hw_composite,*/
                 AlphaBatchKind::Blend => &mut self.ps_blend,
                 AlphaBatchKind::TextRun => {
                     match batch.key.blend_mode {
