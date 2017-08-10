@@ -24,7 +24,7 @@
     #define flat nointerpolation
     #define texelFetchOffset(sampler, loc, index, offset) sampler.Load(vec3(loc, 0.0), offset)
     #define texelFetch(sampler, loc, index) sampler.Load(vec3(loc, 0.0))
-    #define texture(sampler, loc) sampler.Sample(sampler##_, vec2(loc))
+    #define texture(sampler, loc) sampler.Sample(sampler##_, loc)
     #define textureLod(sampler, loc, level) sampler.SampleLevel(sampler##_, loc, level)
 
     vec2 textureSize(sampler2D s, int lod) {

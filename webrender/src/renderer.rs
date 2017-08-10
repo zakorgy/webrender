@@ -490,8 +490,8 @@ pub struct Renderer {
     ps_gradient: ProgramPair,
     ps_angle_gradient: ProgramPair,
     ps_radial_gradient: ProgramPair,
-    /*ps_box_shadow: ProgramPair,
-    ps_cache_image: ProgramPair,
+    ps_box_shadow: ProgramPair,
+    /*ps_cache_image: ProgramPair,
 
     ps_blend: Program,
     ps_hw_composite: Program,
@@ -665,8 +665,8 @@ impl Renderer {
                  create_programs!(device, "ps_radial_gradient"))
             };
 
-        /*let ps_box_shadow = create_programs!(device, "ps_box_shadow");
-        let ps_cache_image = create_programs!(device, "ps_cache_image");
+        let ps_box_shadow = create_programs!(device, "ps_box_shadow");
+        /*let ps_cache_image = create_programs!(device, "ps_cache_image");
 
         let ps_blend = create_program!(device, "ps_blend");
         let ps_hw_composite = create_program!(device, "ps_hardware_composite");
@@ -776,7 +776,7 @@ impl Renderer {
             ps_yuv_image: ps_yuv_image,
             ps_border_corner: ProgramPair(ps_border_corner),
             ps_border_edge: ProgramPair(ps_border_edge),
-            //ps_box_shadow: ProgramPair(ps_box_shadow),
+            ps_box_shadow: ProgramPair(ps_box_shadow),
             ps_gradient: ProgramPair(ps_gradient),
             ps_angle_gradient: ProgramPair(ps_angle_gradient),
             ps_radial_gradient: ProgramPair(ps_radial_gradient),
@@ -1052,8 +1052,8 @@ impl Renderer {
         self.ps_gradient.reset_upload_offset();
         self.ps_angle_gradient.reset_upload_offset();
         self.ps_radial_gradient.reset_upload_offset();
-        /*self.ps_box_shadow.reset_upload_offset();
-        self.ps_cache_image.reset_upload_offset();
+        self.ps_box_shadow.reset_upload_offset();
+        /*self.ps_cache_image.reset_upload_offset();
         self.ps_blend.reset_upload_offset();
         self.ps_hw_composite.reset_upload_offset();
         self.ps_split_composite.reset_upload_offset();
@@ -1310,8 +1310,8 @@ impl Renderer {
                 AlphaBatchKind::AlignedGradient => self.ps_gradient.get(transform_kind),
                 AlphaBatchKind::AngleGradient => self.ps_angle_gradient.get(transform_kind),
                 AlphaBatchKind::RadialGradient => self.ps_radial_gradient.get(transform_kind),
-                /*AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
-                AlphaBatchKind::CacheImage => self.ps_cache_image.get(transform_kind),*/
+                AlphaBatchKind::BoxShadow => self.ps_box_shadow.get(transform_kind),
+                /*AlphaBatchKind::CacheImage => self.ps_cache_image.get(transform_kind),*/
                 _ => {
                     println!("TODO {:?}", batch.key.kind);
                     return;

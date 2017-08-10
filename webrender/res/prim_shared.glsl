@@ -55,10 +55,11 @@
 #define EXTEND_MODE_REPEAT 1
 
 uniform sampler2DArray sCacheA8;
+uniform sampler2DArray sCacheRGBA8;
 #ifdef WR_DX11
 SamplerState sCacheA8_;
+SamplerState sCacheRGBA8_;
 #endif //WR_DX11
-uniform sampler2DArray sCacheRGBA8;
 
 uniform sampler2D sGradients;
 
