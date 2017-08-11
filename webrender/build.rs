@@ -104,6 +104,10 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
                     SHADER_VERSION, base_filename, 1024)
         };
 
+        if is_clip_cache {
+            shader_prefix.push_str("#define WR_CLIP_SHADER\n");
+        }
+
         if is_vert {
             shader_prefix.push_str("#define WR_VERTEX_SHADER\n");
         } else {

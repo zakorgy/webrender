@@ -747,6 +747,11 @@ impl Device {
             program.slice.instances = Some((instances.len() as u32, 0));
         }
 
+        let locals = Locals {
+            transform: program.data.transform,
+            device_pixel_ratio: program.data.device_pixel_ratio,
+        };
+        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
         //self.encoder.flush(&mut self.device);
         self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
         //self.encoder.flush(&mut self.device);

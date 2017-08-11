@@ -179,6 +179,7 @@ gfx_defines! {
     }
 
     pipeline clip {
+        locals: gfx::ConstantBuffer<Locals> = "Locals",
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
         vbuf: gfx::VertexBuffer<Position> = (),
@@ -639,6 +640,7 @@ impl Device {
                                                          gfx::TRANSFER_DST).unwrap();
 
         let data = clip::Data {
+            locals: self.factory.create_constant_buffer(1),
             transform: [[0f32; 4]; 4],
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),

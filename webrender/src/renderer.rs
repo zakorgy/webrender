@@ -86,6 +86,22 @@ macro_rules! create_program (
     };
 );
 
+#[cfg(not(feature = "dx11"))]
+macro_rules! create_clip_program (
+    ($device: ident, $shader: expr) => {
+        $device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag")))
+    };
+);
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+macro_rules! create_clip_program (
+    ($device: ident, $shader: expr) => {
+        $device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert.fx")),
+                                    include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag.fx")))
+    };
+);
+
 macro_rules! create_programs (
     ($device: ident, $shader: expr) => {
         (create_program!($device, $shader), create_program!($device, concat!($shader, "_transform")))

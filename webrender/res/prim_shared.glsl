@@ -180,17 +180,17 @@ uniform HIGHP_SAMPLER_FLOAT sampler2D sLayers;
 uniform HIGHP_SAMPLER_FLOAT sampler2D sRenderTasks;
 
 // Instanced attributes
-#ifdef WR_DX11
+#if defined(WR_DX11) && !defined(WR_CLIP_SHADER)
 struct a2v {
     vec3 pos : aPosition;
     ivec4 data0 : aDataA;
     ivec4 data1 : aDataB;
     uint vertexId: SV_VertexId;
 };
-#else
+#elif !defined(WR_DX11)
 in ivec4 aDataA;
 in ivec4 aDataB;
-#endif //WR_DX11
+#endif //WR_DX11 && !WR_CLIP_SHADER
 
 // get_fetch_uv is a macro to work around a macOS Intel driver parsing bug.
 // TODO: convert back to a function once the driver issues are resolved, if ever.
