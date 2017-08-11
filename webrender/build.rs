@@ -238,20 +238,7 @@ fn create_shaders(glsl_files: Vec<PathBuf>, out_dir: String) -> Vec<String> {
 fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
     for mut file_name in file_name_vector {
         let is_vert = file_name.ends_with(".vert");
-        if  !(file_name.contains("ps_rectangle")
-            || file_name.contains("ps_border")
-            || file_name.contains("ps_gradient")
-            || file_name.contains("ps_angle_gradient")
-            || file_name.contains("ps_radial_gradient")
-            || file_name.contains("ps_image")
-            || file_name.contains("ps_text_run")
-            || file_name.contains("ps_yuv")
-            || file_name.contains("ps_box_shadow")
-            || file_name.contains("ps_cache_image")
-            || file_name.contains("ps_blend")
-            || file_name.contains("ps_composite")
-            || file_name.contains("ps_split_composite")
-            || file_name.contains("ps_hardware_composite")) {
+        if  !(file_name.contains("ps_")) || file_name.contains("ps_clear") {
             continue;
         }
         let file_path = Path::new(&out_dir).join(&file_name);
