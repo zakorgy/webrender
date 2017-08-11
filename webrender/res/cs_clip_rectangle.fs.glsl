@@ -15,7 +15,11 @@ float clip_against_ellipse_if_needed(vec2 pos,
                all(lessThan(sign_modifier * pos, sign_modifier * ellipse_center_radius.xy)));
 }
 
-float rounded_rect(vec2 pos) {
+float rounded_rect(vec2 pos,
+                   vec4 vClipCenter_Radius_TL,
+                   vec4 vClipCenter_Radius_TR,
+                   vec4 vClipCenter_Radius_BL,
+                   vec4 vClipCenter_Radius_BR) {
     float current_distance = 0.0;
 
     // Apply AA
@@ -25,7 +29,7 @@ float rounded_rect(vec2 pos) {
     current_distance = clip_against_ellipse_if_needed(pos,
                                                       current_distance,
                                                       vClipCenter_Radius_TL,
-                                                      vec2(1.0),
+                                                      vec2(1.0, 1.0),
                                                       afwidth);
 
     current_distance = clip_against_ellipse_if_needed(pos,
@@ -37,7 +41,7 @@ float rounded_rect(vec2 pos) {
     current_distance = clip_against_ellipse_if_needed(pos,
                                                       current_distance,
                                                       vClipCenter_Radius_BR,
-                                                      vec2(-1.0),
+                                                      vec2(-1.0, -1.0),
                                                       afwidth);
 
     current_distance = clip_against_ellipse_if_needed(pos,
@@ -50,16 +54,31 @@ float rounded_rect(vec2 pos) {
 }
 
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec3 vPos = IN.vPos;
+    vec4 vLocalBounds = IN.vLocalBounds;
+    float vClipMode = IN.vClipMode;
+    vec4 vClipCenter_Radius_TL = IN.vClipCenter_Radius_TL;
+    vec4 vClipCenter_Radius_TR = IN.vClipCenter_Radius_TR;
+    vec4 vClipCenter_Radius_BL = IN.vClipCenter_Radius_BL;
+    vec4 vClipCenter_Radius_BR = IN.vClipCenter_Radius_BR;
+#endif //WR_DX11
     float alpha = 1.f;
-    vec2 local_pos = init_transform_fs(vPos, alpha);
+    vec2 local_pos = init_transform_fs(vPos, vLocalBounds, alpha);
 
-    float clip_alpha = rounded_rect(local_pos);
+    float clip_alpha = rounded_rect(local_pos,
+                                    vClipCenter_Radius_TL,
+                                    vClipCenter_Radius_TR,
+                                    vClipCenter_Radius_BL,
+                                    vClipCenter_Radius_BR);
 
     float combined_alpha = min(alpha, clip_alpha);
 
     // Select alpha or inverse alpha depending on clip in/out.
     float final_alpha = mix(combined_alpha, 1.0 - combined_alpha, vClipMode);
 
-    Target0 = vec4(final_alpha, 0.0, 0.0, 1.0);
+    SHADER_OUT(Target0, vec4(final_alpha, 0.0, 0.0, 1.0));
 }

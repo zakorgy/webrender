@@ -483,7 +483,7 @@ pub struct Renderer {
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    //cs_clip_rectangle: ClipProgram,
+    cs_clip_rectangle: ClipProgram,
     //cs_clip_image: ClipProgram,
     //cs_clip_border: ClipProgram,
 
@@ -646,10 +646,9 @@ impl Renderer {
         let cs_text_run = device.create_cache_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.vert")),
                                                       include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));
         let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
-                                                 include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));
-        let cs_clip_rectangle = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.vert")),
-                                                           include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_rectangle.frag")));
-        let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
+                                                 include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));*/
+        let cs_clip_rectangle = create_clip_program!(device, "cs_clip_rectangle");
+        /*let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
                                                        include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));
         let cs_clip_border = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
                                                         include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.frag")));
@@ -781,7 +780,7 @@ impl Renderer {
             //cs_box_shadow: cs_box_shadow,
             //cs_text_run: cs_text_run,
             //cs_blur: cs_blur,
-            //cs_clip_rectangle: cs_clip_rectangle,
+            cs_clip_rectangle: cs_clip_rectangle,
             //cs_clip_border: cs_clip_border,
             //cs_clip_image: cs_clip_image,
             ps_rectangle: ProgramPair(ps_rectangle),
@@ -1055,7 +1054,7 @@ impl Renderer {
         //self.cs_box_shadow.reset_upload_offset();
         //self.cs_text_run.reset_upload_offset();
         //self.cs_blur.reset_upload_offset();
-        //self.cs_clip_rectangle.reset_upload_offset();
+        self.cs_clip_rectangle.reset_upload_offset();
         //self.cs_clip_image.reset_upload_offset();
         //self.cs_clip_border.reset_upload_offset();
         self.ps_rectangle.reset_upload_offset();
