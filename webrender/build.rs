@@ -250,7 +250,8 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
             || file_name.contains("ps_cache_image")
             || file_name.contains("ps_blend")
             || file_name.contains("ps_composite")
-            || file_name.contains("ps_split_composite")) {
+            || file_name.contains("ps_split_composite")
+            || file_name.contains("ps_hardware_composite")) {
             continue;
         }
         let file_path = Path::new(&out_dir).join(&file_name);
