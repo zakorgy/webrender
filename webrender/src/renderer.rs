@@ -485,7 +485,7 @@ pub struct Renderer {
     /// of these shaders are also used by the primitive shaders.
     cs_clip_rectangle: ClipProgram,
     //cs_clip_image: ClipProgram,
-    //cs_clip_border: ClipProgram,
+    cs_clip_border: ClipProgram,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -649,10 +649,9 @@ impl Renderer {
                                                  include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));*/
         let cs_clip_rectangle = create_clip_program!(device, "cs_clip_rectangle");
         /*let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
-                                                       include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));
-        let cs_clip_border = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.vert")),
-                                                        include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_border.frag")));
-        */
+                                                       include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));*/
+        let cs_clip_border = create_clip_program!(device, "cs_clip_border");
+
         let ps_rectangle = create_programs!(device, "ps_rectangle");
         let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
         let ps_text_run = create_programs!(device, "ps_text_run");
@@ -781,7 +780,7 @@ impl Renderer {
             //cs_text_run: cs_text_run,
             //cs_blur: cs_blur,
             cs_clip_rectangle: cs_clip_rectangle,
-            //cs_clip_border: cs_clip_border,
+            cs_clip_border: cs_clip_border,
             //cs_clip_image: cs_clip_image,
             ps_rectangle: ProgramPair(ps_rectangle),
             ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
@@ -1056,7 +1055,7 @@ impl Renderer {
         //self.cs_blur.reset_upload_offset();
         self.cs_clip_rectangle.reset_upload_offset();
         //self.cs_clip_image.reset_upload_offset();
-        //self.cs_clip_border.reset_upload_offset();
+        self.cs_clip_border.reset_upload_offset();
         self.ps_rectangle.reset_upload_offset();
         self.ps_rectangle_clip.reset_upload_offset();
         self.ps_text_run.reset_upload_offset();
