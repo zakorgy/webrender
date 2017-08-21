@@ -244,7 +244,8 @@ fn compile_fx_files(file_name_vector: Vec<String>, out_dir: String) {
         let is_vert = file_name.ends_with(".vert");
         if  !(file_name.contains("ps_")
             || file_name.contains("cs_clip_rectangle")
-            || file_name.contains("cs_clip_border"))
+            || file_name.contains("cs_clip_border")
+            || file_name.contains("cs_clip_image"))
             || file_name.contains("ps_clear") {
             continue;
         }

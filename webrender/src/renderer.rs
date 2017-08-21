@@ -502,7 +502,7 @@ pub struct Renderer {
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
     cs_clip_rectangle: ClipProgram,
-    //cs_clip_image: ClipProgram,
+    cs_clip_image: ClipProgram,
     cs_clip_border: ClipProgram,
 
     // The are "primitive shaders". These shaders draw and blend
@@ -666,8 +666,7 @@ impl Renderer {
         let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
                                                  include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));*/
         let cs_clip_rectangle = create_clip_program(&mut device, "cs_clip_rectangle");
-        /*let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
-                                                       include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));*/
+        let cs_clip_image = create_clip_program(&mut device, "cs_clip_image");
         let cs_clip_border = create_clip_program(&mut device, "cs_clip_border");
 
         let ps_rectangle = create_programs(&mut device, "ps_rectangle");
@@ -799,7 +798,7 @@ impl Renderer {
             //cs_blur: cs_blur,
             cs_clip_rectangle: cs_clip_rectangle,
             cs_clip_border: cs_clip_border,
-            //cs_clip_image: cs_clip_image,
+            cs_clip_image: cs_clip_image,
             ps_rectangle: ps_rectangle,
             ps_rectangle_clip: ps_rectangle_clip,
             ps_text_run: ps_text_run,
@@ -1072,7 +1071,7 @@ impl Renderer {
         //self.cs_text_run.reset_upload_offset();
         //self.cs_blur.reset_upload_offset();
         self.cs_clip_rectangle.reset_upload_offset();
-        //self.cs_clip_image.reset_upload_offset();
+        self.cs_clip_image.reset_upload_offset();
         self.cs_clip_border.reset_upload_offset();
         self.ps_rectangle.reset_upload_offset();
         self.ps_rectangle_clip.reset_upload_offset();
