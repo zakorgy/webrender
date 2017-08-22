@@ -309,8 +309,6 @@ impl CacheTexture {
         }*/
 
         let is_dirty = self.rows.iter().any(|r| r.is_dirty);
-        println!("is_dirty = {:?}", is_dirty);
-
         if is_dirty {
             let cpu_blocks = &self.cpu_blocks[..];
 
@@ -1293,7 +1291,6 @@ impl Renderer {
         }
 
         {
-            println!("KIND = {:?}", batch.key.kind);
             let mut program = match batch.key.kind {
                 AlphaBatchKind::Rectangle => {
                     if needs_clipping {
