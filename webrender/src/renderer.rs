@@ -35,7 +35,9 @@ use std;
 use std::cmp;
 use std::collections::{HashMap, VecDeque};
 use std::f32;
+use std::fs::File;
 use std::hash::BuildHasherDefault;
+use std::io::Read;
 use std::marker::PhantomData;
 use std::mem;
 use std::path::PathBuf;
@@ -70,43 +72,47 @@ pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
 pub const DITHER_ID: u32 = 4;
 
-#[cfg(not(feature = "dx11"))]
-macro_rules! create_program (
-    ($device: ident, $shader: expr) => {
-        $device.create_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag")))
-    };
-);
-
-#[cfg(all(target_os = "windows", feature="dx11"))]
-macro_rules! create_program (
-    ($device: ident, $shader: expr) => {
-        $device.create_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert.fx")),
-                               include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag.fx")))
-    };
-);
+fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
+    let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
+    let mut file = File::open(path_str).unwrap();
+    let mut shader = Vec::new();
+    file.read_to_end(&mut shader);
+    shader
+}
 
 #[cfg(not(feature = "dx11"))]
-macro_rules! create_clip_program (
-    ($device: ident, $shader: expr) => {
-        $device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag")))
-    };
-);
+fn create_program(device: &mut Device, filename: &str) -> Program {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    device.create_program(vs.as_slice(), ps.as_slice())
+}
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-macro_rules! create_clip_program (
-    ($device: ident, $shader: expr) => {
-        $device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".vert.fx")),
-                                    include_bytes!(concat!(env!("OUT_DIR"), "/", $shader, ".frag.fx")))
-    };
-);
+fn create_program(device: &mut Device, filename: &str) -> Program {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    device.create_program(vs.as_slice(), ps.as_slice())
+}
 
-macro_rules! create_programs (
-    ($device: ident, $shader: expr) => {
-        (create_program!($device, $shader), create_program!($device, concat!($shader, "_transform")))
-    };
-);
+#[cfg(not(feature = "dx11"))]
+fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    device.create_clip_program(vs.as_slice(), ps.as_slice())
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    device.create_clip_program(vs.as_slice(), ps.as_slice())
+}
+
+fn create_programs(device: &mut Device, filename: &str) -> ProgramPair {
+    let program = create_program(device, filename);
+    filename.to_owned().push_str("_transform");
+    ProgramPair((program, create_program(device, filename)))
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GraphicsApi {
@@ -659,45 +665,45 @@ impl Renderer {
                                                       include_bytes!(concat!(env!("OUT_DIR"), "/cs_text_run.frag")));
         let cs_blur = device.create_blur_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.vert")),
                                                  include_bytes!(concat!(env!("OUT_DIR"), "/cs_blur.frag")));*/
-        let cs_clip_rectangle = create_clip_program!(device, "cs_clip_rectangle");
+        let cs_clip_rectangle = create_clip_program(&mut device, "cs_clip_rectangle");
         /*let cs_clip_image = device.create_clip_program(include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.vert")),
                                                        include_bytes!(concat!(env!("OUT_DIR"), "/cs_clip_image.frag")));*/
-        let cs_clip_border = create_clip_program!(device, "cs_clip_border");
+        let cs_clip_border = create_clip_program(&mut device, "cs_clip_border");
 
-        let ps_rectangle = create_programs!(device, "ps_rectangle");
-        let ps_rectangle_clip = create_programs!(device, "ps_rectangle_clip");
-        let ps_text_run = create_programs!(device, "ps_text_run");
-        let ps_text_run_subpixel = create_programs!(device, "ps_text_run_subpixel");
-        let ps_image = create_programs!(device, "ps_image");
+        let ps_rectangle = create_programs(&mut device, "ps_rectangle");
+        let ps_rectangle_clip = create_programs(&mut device, "ps_rectangle_clip");
+        let ps_text_run = create_programs(&mut device, "ps_text_run");
+        let ps_text_run_subpixel = create_programs(&mut device, "ps_text_run_subpixel");
+        let ps_image = create_programs(&mut device, "ps_image");
         let ps_yuv_image =
-            vec![ProgramPair(create_programs!(device, "ps_yuv_image_nv12_601")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_nv12_709")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_planar_601")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_planar_709")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_601")),
-                 ProgramPair(create_programs!(device, "ps_yuv_image_interleaved_709"))];
+            vec![create_programs(&mut device, "ps_yuv_image_nv12_601"),
+                 create_programs(&mut device, "ps_yuv_image_nv12_709"),
+                 create_programs(&mut device, "ps_yuv_image_planar_601"),
+                 create_programs(&mut device, "ps_yuv_image_planar_709"),
+                 create_programs(&mut device, "ps_yuv_image_interleaved_601"),
+                 create_programs(&mut device, "ps_yuv_image_interleaved_709")];
 
-        let ps_border_corner = create_programs!(device, "ps_border_corner");
-        let ps_border_edge = create_programs!(device, "ps_border_edge");
+        let ps_border_corner = create_programs(&mut device, "ps_border_corner");
+        let ps_border_edge = create_programs(&mut device, "ps_border_edge");
 
         let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
             if options.enable_dithering {
-                (create_programs!(device, "ps_gradient_dither"),
-                 create_programs!(device, "ps_angle_gradient_dither"),
-                 create_programs!(device, "ps_radial_gradient_dither"))
+                (create_programs(&mut device, "ps_gradient_dither"),
+                 create_programs(&mut device, "ps_angle_gradient_dither"),
+                 create_programs(&mut device, "ps_radial_gradient_dither"))
             } else {
-                (create_programs!(device, "ps_gradient"),
-                 create_programs!(device, "ps_angle_gradient"),
-                 create_programs!(device, "ps_radial_gradient"))
+                (create_programs(&mut device, "ps_gradient"),
+                 create_programs(&mut device, "ps_angle_gradient"),
+                 create_programs(&mut device, "ps_radial_gradient"))
             };
 
-        let ps_box_shadow = create_programs!(device, "ps_box_shadow");
-        let ps_cache_image = create_programs!(device, "ps_cache_image");
+        let ps_box_shadow = create_programs(&mut device, "ps_box_shadow");
+        let ps_cache_image = create_programs(&mut device, "ps_cache_image");
 
-        let ps_blend = create_program!(device, "ps_blend");
-        let ps_hw_composite = create_program!(device, "ps_hardware_composite");
-        let ps_split_composite = create_program!(device, "ps_split_composite");
-        let ps_composite = create_program!(device, "ps_composite");
+        let ps_blend = create_program(&mut device, "ps_blend");
+        let ps_hw_composite = create_program(&mut device, "ps_hardware_composite");
+        let ps_split_composite = create_program(&mut device, "ps_split_composite");
+        let ps_composite = create_program(&mut device, "ps_composite");
 
         let device_max_size = device.max_texture_size();
         let max_texture_size = cmp::min(device_max_size, options.max_texture_size.unwrap_or(device_max_size));
@@ -794,19 +800,19 @@ impl Renderer {
             cs_clip_rectangle: cs_clip_rectangle,
             cs_clip_border: cs_clip_border,
             //cs_clip_image: cs_clip_image,
-            ps_rectangle: ProgramPair(ps_rectangle),
-            ps_rectangle_clip: ProgramPair(ps_rectangle_clip),
-            ps_text_run: ProgramPair(ps_text_run),
-            ps_text_run_subpixel: ProgramPair(ps_text_run_subpixel),
-            ps_image: ProgramPair(ps_image),
+            ps_rectangle: ps_rectangle,
+            ps_rectangle_clip: ps_rectangle_clip,
+            ps_text_run: ps_text_run,
+            ps_text_run_subpixel: ps_text_run_subpixel,
+            ps_image: ps_image,
             ps_yuv_image: ps_yuv_image,
-            ps_border_corner: ProgramPair(ps_border_corner),
-            ps_border_edge: ProgramPair(ps_border_edge),
-            ps_box_shadow: ProgramPair(ps_box_shadow),
-            ps_gradient: ProgramPair(ps_gradient),
-            ps_angle_gradient: ProgramPair(ps_angle_gradient),
-            ps_radial_gradient: ProgramPair(ps_radial_gradient),
-            ps_cache_image: ProgramPair(ps_cache_image),
+            ps_border_corner: ps_border_corner,
+            ps_border_edge: ps_border_edge,
+            ps_box_shadow: ps_box_shadow,
+            ps_gradient: ps_gradient,
+            ps_angle_gradient: ps_angle_gradient,
+            ps_radial_gradient: ps_radial_gradient,
+            ps_cache_image: ps_cache_image,
             ps_blend: ps_blend,
             ps_hw_composite: ps_hw_composite,
             ps_split_composite: ps_split_composite,
