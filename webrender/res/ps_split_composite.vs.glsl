@@ -45,11 +45,7 @@ void main(in a2v IN, out v2p OUT) {
                             aPosition.y, aPosition.x);
     vec4 final_pos = vec4(world_pos.xy * uDevicePixelRatio, ci.z, 1.0);
 
-#ifdef WR_DX11
-    OUT.Position = mul(final_pos, uTransform);
-#else
-    gl_Position = uTransform * final_pos;
-#endif //WR_DX11
+    SHADER_OUT(gl_Position, mul(final_pos, uTransform));
     vec2 uv_origin = src_task.render_target_origin;
     vec2 uv_pos = uv_origin + world_pos.xy - src_task.screen_space_origin;
     vec2 texture_size = vec2(textureSize(sCacheRGBA8, 0));

@@ -34,11 +34,5 @@ void main(in a2v IN, out v2p OUT) {
 
     SHADER_OUT(vOp, ci.user_data0);
     SHADER_OUT(vAmount, float(ci.user_data1) / 65535.0);
-
-
-#ifdef WR_DX11
-    OUT.Position = mul(vec4(local_pos, ci.z, 1.0), uTransform);
-#else
-    gl_Position = uTransform * vec4(local_pos, ci.z, 1.0);
-#endif //WR_DX11
+    SHADER_OUT(gl_Position, mul(vec4(local_pos, ci.z, 1.0), uTransform));
 }

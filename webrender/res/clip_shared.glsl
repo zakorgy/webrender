@@ -66,7 +66,7 @@ ClipVertexInfo write_clip_tile_vertex(vec3 aPosition,
                                       ClipArea area,
                                       int segment_index
 #ifdef WR_DX11
-                                      , out vec4 vPosition
+                                      , out vec4 gl_Position
                                       , out vec4 vLocalBounds
 #endif //WR_DX11
                                       ) {
@@ -114,12 +114,7 @@ ClipVertexInfo write_clip_tile_vertex(vec3 aPosition,
     // compute the point position in side the layer, in CSS space
     vec2 vertex_pos = actual_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
 
-#ifdef WR_DX11
-    vPosition = mul(vec4(vertex_pos, 0.0, 1.0), uTransform);
-#else
-    gl_Position = uTransform * vec4(vertex_pos, 0.0, 1.0);
-#endif //WR_DX11
-
+    gl_Position = mul(vec4(vertex_pos, 0.0, 1.0), uTransform);
     vLocalBounds = vec4(clipped_local_rect.p0, clipped_local_rect.p0 + clipped_local_rect.size);
     ClipVertexInfo cvi;
     cvi.local_pos = layer_pos.xyw;

@@ -4,7 +4,7 @@
 
 #ifdef WR_DX11
     struct v2p {
-        vec4 Position : SV_Position;
+        vec4 gl_Position : SV_Position;
         vec3 vUv : vUv;
         flat vec4 vUvBounds : vUvBounds;
         flat float vAmount : vAmount;

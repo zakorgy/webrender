@@ -6,7 +6,7 @@
 
 #ifdef WR_DX11
     struct v2p {
-        vec4 Position : SV_Position;
+        vec4 gl_Position : SV_Position;
         vec3 vPos : vPos;
 
         flat vec2 vClipCenter : vClipCenter;

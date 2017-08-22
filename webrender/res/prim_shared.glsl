@@ -682,7 +682,7 @@ VertexInfo write_vertex(vec3 aPosition,
                         AlphaBatchTask task,
                         RectWithSize snap_rect
 #ifdef WR_DX11
-                        , out vec4 vPosition
+                        , out vec4 gl_Position
 #endif //WR_DX11
                         ) {
 
@@ -707,11 +707,7 @@ VertexInfo write_vertex(vec3 aPosition,
                      task.screen_space_origin +
                      task.render_target_origin;
 
-#ifdef WR_DX11
-    vPosition = mul(vec4(final_pos, z, 1.0), uTransform);
-#else
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
-#endif //WR_DX11
+    gl_Position = mul(vec4(final_pos, z, 1.0), uTransform);
     VertexInfo vi;
     vi.local_pos = clamped_local_pos;
     vi.screen_pos = device_pos;
@@ -753,7 +749,7 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
                                            AlphaBatchTask task,
                                            RectWithSize snap_rect
 #ifdef WR_DX11
-                                           , out vec4 vPosition
+                                           , out vec4 gl_Position
                                            , out vec4 vLocalBounds
 #endif //WR_DX11
                                            ) {
@@ -832,11 +828,7 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
                      task.render_target_origin;
 
     vLocalBounds = vec4(local_rect.p0, local_rect.p1);
-#ifdef WR_DX11
-    vPosition = mul(vec4(final_pos, z, 1.0), uTransform);
-#else
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
-#endif //WR_DX11
+    gl_Position = mul(vec4(final_pos, z, 1.0), uTransform);
     TransformVertexInfo tvi;
     tvi.local_pos = layer_pos.xyw;
     tvi.screen_pos = device_pos;

@@ -163,10 +163,5 @@ void main(in a2v IN, out v2p OUT) {
     // Calculate the local space position for this vertex.
     vec4 layer_pos = get_layer_pos(world_pos.xy, layer);
     SHADER_OUT(vPos, layer_pos.xyw);
-
-#ifdef WR_DX11
-    OUT.Position = mul(vec4(final_pos, 0.0, 1.0), uTransform);
-#else
-    gl_Position = uTransform * vec4(final_pos, 0.0, 1.0);
-#endif //WR_DX11
+    SHADER_OUT(gl_Position, mul(vec4(final_pos, 0.0, 1.0), uTransform));
 }
