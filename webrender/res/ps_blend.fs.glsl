@@ -66,11 +66,7 @@ vec4 Grayscale(vec4 Cs, float amount) {
                     vec4(0.7152 - 0.7152 * ia, 0.7152 + 0.2848 * ia, 0.7152 - 0.7152 * ia, 0.0),
                     vec4(0.0722 - 0.0722 * ia, 0.0722 - 0.0722 * ia, 0.0722 + 0.9278 * ia, 0.0),
                     vec4(0.0, 0.0, 0.0, 1.0));
-#ifdef WR_DX11
-    return mul(mat, Cs);
-#else
-    return mat * Cs;
-#endif //WR_DX11
+    return mul(Cs, mat);
 }
 
 vec4 HueRotate(vec4 Cs, float amount) {
@@ -93,11 +89,7 @@ vec4 Sepia(vec4 Cs, float amount) {
                     vec4(0.769 - 0.769 * ia, 0.686 + 0.314 * ia, 0.534 - 0.534 * ia, 0.0),
                     vec4(0.189 - 0.189 * ia, 0.168 - 0.168 * ia, 0.131 + 0.869 * ia, 0.0),
                     vec4(0.0, 0.0, 0.0, 1.0));
-#ifdef WR_DX11
-    return mul(mat, Cs);
-#else
-    return mat * Cs;
-#endif //WR_DX
+    return mul(Cs, mat);
 }
 
 vec4 Brightness(vec4 Cs, float amount) {

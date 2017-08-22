@@ -348,7 +348,6 @@ impl Device {
             42, 26, 38, 22, 41, 25, 37, 21
         ];
         textures.insert(dither_id, TextureData { id: dither_id, data: dither_matrix, stride: A_STRIDE, pitch: 8 * RGBA_STRIDE });
-
         //let (rtv, dsv) = create_main_targets::<ColorFormat, DepthFormat>(&mut factory, w as u16, h as u16).unwrap();
 
         let dev = Device {
@@ -724,7 +723,6 @@ impl Device {
                      texture_id: TextureId) {
         program.data.transform = proj.to_row_arrays();
         let (w, h) = self.color0.get_size();
-
         //let (tex, resource, target) = self.factory.create_render_target::<ColorFormat>(w as u16, h as u16).unwrap();
         //let (tex2, resource2, target2) = self.factory.create_depth_stencil::<DepthFormat>(w as u16, h as u16).unwrap();
         //let mut text_data = self.textures.get_mut(&texture_id).unwrap();

@@ -462,6 +462,20 @@ pub enum ReadPixelsFormat {
     Bgra8,
 }
 
+#[cfg(all(target_os = "windows", feature="dx11"))]
+fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    let transform = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
+                                           0.0, 1.0, 0.0, 0.0,
+                                           0.0, 0.0, 0.5, 0.5,
+                                           0.0, 0.0, 0.0, 1.0);
+    transform.post_mul(&Transform3D::from_array(projection.to_column_major_array()))
+}
+
+#[cfg(not(feature = "dx11"))]
+fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    projection
+}
+
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
 pub struct Renderer {
@@ -1720,6 +1734,7 @@ impl Renderer {
                                                  ORTHO_FAR_PLANE);
                 }
 
+                let projection = transform_projection(projection);
                 self.device.bind_texture(TextureSampler::CacheA8, src_alpha_id);
                 self.device.bind_texture(TextureSampler::CacheRGBA8, src_color_id);
 

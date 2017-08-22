@@ -46,15 +46,7 @@ void main(in a2v IN, out v2p OUT) {
     vec4 final_pos = vec4(world_pos.xy * uDevicePixelRatio, ci.z, 1.0);
 
 #ifdef WR_DX11
-    // In DX11 the z is between 0 and 1
-    float4x4 transform = float4x4(
-        float4(1.0, 0.0, 0.0, 0.0),
-        float4(0.0, 1.0, 0.0, 0.0),
-        float4(0.0, 0.0, 0.5, 0.5),
-        float4(0.0, 0.0, 0.0, 1.0)
-    );
-    vec4 out_pos = mul(transform, mul(uTransform, final_pos));
-    OUT.Position = out_pos / out_pos.w;
+    OUT.Position = mul(final_pos, uTransform);
 #else
     gl_Position = uTransform * final_pos;
 #endif //WR_DX11

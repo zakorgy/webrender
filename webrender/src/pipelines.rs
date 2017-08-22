@@ -662,7 +662,7 @@ impl Device {
     }
 
     pub fn draw_cache(&mut self, program: &mut CacheProgram, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
-       program.data.transform = proj.to_row_arrays();
+        program.data.transform = proj.to_row_arrays();
 
         {
             let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
@@ -680,7 +680,7 @@ impl Device {
     }
 
     pub fn draw_blur(&mut self, program: &mut BlurProgram, proj: &Matrix4D<f32>, blur_commands: &[BlurCommand]) {
-       program.data.transform = proj.to_row_arrays();
+        program.data.transform = proj.to_row_arrays();
 
         {
             let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();

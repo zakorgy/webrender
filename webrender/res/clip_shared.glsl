@@ -115,15 +115,7 @@ ClipVertexInfo write_clip_tile_vertex(vec3 aPosition,
     vec2 vertex_pos = actual_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
 
 #ifdef WR_DX11
-    // In DX11 the z is between 0 and 1
-    float4x4 transform = float4x4(
-        float4(1.0, 0.0, 0.0, 0.0),
-        float4(0.0, 1.0, 0.0, 0.0),
-        float4(0.0, 0.0, 0.5, 0.5),
-        float4(0.0, 0.0, 0.0, 1.0)
-    );
-    vec4 out_pos = mul(transform, mul(uTransform, vec4(vertex_pos, 0.0, 1.0)));
-    vPosition = out_pos / out_pos.w;
+    vPosition = mul(vec4(vertex_pos, 0.0, 1.0), uTransform);
 #else
     gl_Position = uTransform * vec4(vertex_pos, 0.0, 1.0);
 #endif //WR_DX11

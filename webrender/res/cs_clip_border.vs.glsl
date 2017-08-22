@@ -146,7 +146,7 @@ void main(in a2v IN, out v2p OUT) {
 
     // Transform to world pos
 #ifdef WR_DX11
-    vec4 world_pos = mul(layer.transform, vec4(pos, 0.0, 1.0));
+    vec4 world_pos = mul(vec4(pos, 0.0, 1.0), layer.transform);
 #else
     vec4 world_pos = layer.transform * vec4(pos, 0.0, 1.0);
 #endif //WR_DX11
@@ -165,15 +165,7 @@ void main(in a2v IN, out v2p OUT) {
     SHADER_OUT(vPos, layer_pos.xyw);
 
 #ifdef WR_DX11
-    // In DX11 the z is between 0 and 1
-    float4x4 transform = float4x4(
-        float4(1.0, 0.0, 0.0, 0.0),
-        float4(0.0, 1.0, 0.0, 0.0),
-        float4(0.0, 0.0, 0.5, 0.5),
-        float4(0.0, 0.0, 0.0, 1.0)
-    );
-    vec4 out_pos = mul(transform, mul(uTransform, vec4(final_pos, 0.0, 1.0)));
-    OUT.Position = out_pos / out_pos.w;
+    OUT.Position = mul(vec4(final_pos, 0.0, 1.0), uTransform);
 #else
     gl_Position = uTransform * vec4(final_pos, 0.0, 1.0);
 #endif //WR_DX11

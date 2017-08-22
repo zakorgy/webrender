@@ -626,31 +626,16 @@ vec4 untransform(vec2 ref, vec3 n, vec3 a, mat4 inv_transform) {
     // originated from the "ref" point
     ray_plane(n, a, p, d, t);
     float z = p.z + d.z * t; // Z of the visible point on the layer
-
-#ifdef WR_DX11
-    vec4 r = mul(inv_transform, vec4(ref, z, 1.0));
-#else
-    vec4 r = inv_transform * vec4(ref, z, 1.0);
-#endif //WR_DX11
-    return r;
+    return mul(vec4(ref, z, 1.0), inv_transform);
 }
 
 // Given a CSS space position, transform it back into the layer space.
 vec4 get_layer_pos(vec2 pos, Layer layer) {
     // get a point on the layer plane
-#ifdef WR_DX11
-    vec4 ah = mul(layer.transform, vec4(0.0, 0.0, 0.0, 1.0));
-#else
-    vec4 ah = layer.transform * vec4(0.0, 0.0, 0.0, 1.0);
-#endif //WR_DX11
-
+    vec4 ah = mul(vec4(0.0, 0.0, 0.0, 1.0), layer.transform);
     vec3 a = ah.xyz / ah.w;
     // get the normal to the layer plane
-#ifdef WR_DX11
-    vec3 n = mul(transpose(mat3(layer.inv_transform[0].xyz,layer.inv_transform[1].xyz,layer.inv_transform[2].xyz)), vec3(0.0, 0.0, 1.0));
-#else
-    vec3 n = transpose(mat3(layer.inv_transform)) * vec3(0.0, 0.0, 1.0);
-#endif //WR_DX11
+    vec3 n = mul(vec3(0.0, 0.0, 1.0), transpose(mat3(layer.inv_transform[0].xyz,layer.inv_transform[1].xyz,layer.inv_transform[2].xyz)));
     return untransform(pos, n, a, layer.inv_transform);
 }
 
@@ -669,13 +654,8 @@ vec2 compute_snap_offset(vec2 local_pos,
     snap_rect.size = max(snap_rect.size, vec2(1.0 / uDevicePixelRatio, 1.0 / uDevicePixelRatio));
 
     // Transform the snap corners to the world space.
-#ifdef WR_DX11
-  vec4 world_snap_p0 = mul(layer.transform, vec4(snap_rect.p0, 0.0, 1.0));
-  vec4 world_snap_p1 = mul(layer.transform, vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0));
-#else
-  vec4 world_snap_p0 = layer.transform * vec4(snap_rect.p0, 0.0, 1.0);
-  vec4 world_snap_p1 = layer.transform * vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0);
-#endif //WR_DX11
+    vec4 world_snap_p0 = mul(vec4(snap_rect.p0, 0.0, 1.0), layer.transform);
+    vec4 world_snap_p1 = mul(vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0), layer.transform);
 
     // Snap bounds in world coordinates, adjusted for pixel ratio. XY = top left, ZW = bottom right
     vec4 world_snap = uDevicePixelRatio * vec4(world_snap_p0.xy, world_snap_p1.xy) /
@@ -718,11 +698,7 @@ VertexInfo write_vertex(vec3 aPosition,
 
     // Transform the current vertex to the world cpace.
 
-#ifdef WR_DX11
-    vec4 world_pos = mul(layer.transform, vec4(clamped_local_pos, 0.0, 1.0));
-#else
-    vec4 world_pos = layer.transform * vec4(clamped_local_pos, 0.0, 1.0);
-#endif //WR_DX11
+    vec4 world_pos = mul(vec4(clamped_local_pos, 0.0, 1.0), layer.transform);
     // Convert the world positions to device pixel space.
     vec2 device_pos = world_pos.xy / world_pos.w * uDevicePixelRatio;
 
@@ -732,15 +708,7 @@ VertexInfo write_vertex(vec3 aPosition,
                      task.render_target_origin;
 
 #ifdef WR_DX11
-    // In DX11 the z is between 0 and 1
-    float4x4 transform = float4x4(
-        float4(1.0, 0.0, 0.0, 0.0),
-        float4(0.0, 1.0, 0.0, 0.0),
-        float4(0.0, 0.0, 0.5, 0.5),
-        float4(0.0, 0.0, 0.0, 1.0)
-    );
-    vec4 out_pos = mul(transform, mul(uTransform, vec4(final_pos, z, 1.0)));
-    vPosition = out_pos / out_pos.w;
+    vPosition = mul(vec4(final_pos, z, 1.0), uTransform);
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
 #endif //WR_DX11
@@ -824,15 +792,9 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
     }
 
     // Transform them to world space
-#ifdef WR_DX11
-    vec4 current_world_pos = mul(layer.transform, vec4(current_local_pos, 0.0, 1.0));
-    vec4 prev_world_pos = mul(layer.transform, vec4(prev_local_pos, 0.0, 1.0));
-    vec4 next_world_pos = mul(layer.transform, vec4(next_local_pos, 0.0, 1.0));
-#else
-    vec4 current_world_pos = layer.transform * vec4(current_local_pos, 0.0, 1.0);
-    vec4 prev_world_pos = layer.transform * vec4(prev_local_pos, 0.0, 1.0);
-    vec4 next_world_pos = layer.transform * vec4(next_local_pos, 0.0, 1.0);
-#endif //WR_DX11
+    vec4 current_world_pos = mul(vec4(current_local_pos, 0.0, 1.0), layer.transform);
+    vec4 prev_world_pos = mul(vec4(prev_local_pos, 0.0, 1.0), layer.transform);
+    vec4 next_world_pos = mul(vec4(next_local_pos, 0.0, 1.0), layer.transform);
 
     // Convert to device space
     vec2 current_device_pos = uDevicePixelRatio * current_world_pos.xy / current_world_pos.w;
@@ -871,15 +833,7 @@ TransformVertexInfo write_transform_vertex(int vertex_id,
 
     vLocalBounds = vec4(local_rect.p0, local_rect.p1);
 #ifdef WR_DX11
-    // In DX11 the z is between 0 and 1
-    float4x4 transform = float4x4(
-        float4(1.0, 0.0, 0.0, 0.0),
-        float4(0.0, 1.0, 0.0, 0.0),
-        float4(0.0, 0.0, 0.5, 0.5),
-        float4(0.0, 0.0, 0.0, 1.0)
-    );
-    vec4 out_pos = mul(transform, mul(uTransform, vec4(final_pos, z, 1.0)));
-    vPosition = out_pos / out_pos.w;
+    vPosition = mul(vec4(final_pos, z, 1.0), uTransform);
 #else
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
 #endif //WR_DX11

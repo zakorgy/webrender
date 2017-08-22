@@ -45,6 +45,7 @@
 #else
     #define SHADER_OUT(value, expr) value = expr;
     #define static
+    #define mul(vector, matrix) matrix * vector
 #endif
 
 #ifdef WR_FEATURE_TEXTURE_EXTERNAL

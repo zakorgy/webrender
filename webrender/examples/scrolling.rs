@@ -55,7 +55,7 @@ fn body(_api: &RenderApi,
                           clip,
                           ColorF::new(1.0, 1.0, 1.0, 1.0));
         // let's make a 50x50 blue square as a visual reference
-        /*let clip = builder.push_clip_region(&(0, 0).to(50, 50), vec![], None);
+        let clip = builder.push_clip_region(&(0, 0).to(50, 50), vec![], None);
         builder.push_rect((0, 0).to(50, 50),
                           clip,
                           ColorF::new(0.0, 0.0, 1.0, 1.0));
@@ -93,7 +93,7 @@ fn body(_api: &RenderApi,
         builder.push_rect((250, 350).to(300, 400),
                           clip,
                           ColorF::new(0.0, 1.0, 1.0, 1.0));
-        builder.pop_clip_id(); // nested_clip_id*/
+        builder.pop_clip_id(); // nested_clip_id
 
         builder.pop_clip_id(); // clip_id
         builder.pop_stacking_context();

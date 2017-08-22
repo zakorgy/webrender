@@ -29,15 +29,7 @@ void main(in a2v IN, out v2p OUT) {
     SHADER_OUT(vUv, vec3(mix(st0, st1, aPosition.xy), src_task.render_target_layer_index));
 
     #ifdef WR_DX11
-        // In DX11 the z is between 0 and 1
-        float4x4 transform = float4x4(
-            float4(1.0, 0.0, 0.0, 0.0),
-            float4(0.0, 1.0, 0.0, 0.0),
-            float4(0.0, 0.0, 0.5, 0.5),
-            float4(0.0, 0.0, 0.0, 1.0)
-        );
-        vec4 out_pos = mul(transform, mul(uTransform, vec4(local_pos, ci.z, 1.0)));
-        OUT.Position = out_pos / out_pos.w;
+        OUT.Position = mul(vec4(local_pos, ci.z, 1.0), uTransform);
     #else
         gl_Position = uTransform * vec4(local_pos, ci.z, 1.0);
     #endif //WR_DX11
