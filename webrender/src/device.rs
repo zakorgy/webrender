@@ -615,10 +615,14 @@ impl Device {
         return new_data;
     }
 
-    pub fn update_gpu_cache(&mut self, /*row_index: u16,*/ data: &[f32]) {
-        //println!("row_index = {:?}", row_index);
-        //Device::update_gpu_texture(&mut self.encoder, &self.resource_cache, row_index, data);
+    #[cfg(all(target_os = "windows", feature="dx11"))]
+    pub fn update_gpu_cache(&mut self, data: &[f32]) {
         Device::update_texture_surface(&mut self.encoder, &self.resource_cache, data, RGBA_STRIDE);
+    }
+
+    #[cfg(not(feature = "dx11"))]
+    pub fn update_gpu_cache(&mut self, row_index: u16, data: &[f32]) {
+        Device::update_gpu_texture(&mut self.encoder, &self.resource_cache, row_index, data);
     }
 
     pub fn update_sampler_f32(&mut self,
