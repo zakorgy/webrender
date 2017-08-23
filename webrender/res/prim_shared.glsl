@@ -977,6 +977,8 @@ float do_clip(vec4 clip_mask_uv_bounds, vec3 clip_mask_uv) {
 }
 
 #ifdef WR_FEATURE_DITHERING
+uniform sampler2D sDither;
+
 vec4 dither(vec4 color, vec4 frag_coord) {
     const int matrix_mask = 7;
 

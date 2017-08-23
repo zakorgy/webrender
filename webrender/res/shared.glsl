@@ -155,13 +155,6 @@ uniform sampler2D sColor1;
 uniform sampler2D sColor2;
 #endif
 
-#ifdef WR_FEATURE_DITHERING
-uniform sampler2D sDither;
-    #ifdef WR_DX11
-    SamplerState sDither_;
-    #endif
-#endif
-
 #ifdef WR_DX11
 SamplerState sColor0_;
 SamplerState sColor1_;
