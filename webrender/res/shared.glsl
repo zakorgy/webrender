@@ -88,6 +88,10 @@ bool4 lessThanEqual(float4 value, float4 comparison) {
 float mod(float x, float y) {
     return x - y * floor(x/y);
 }
+
+float2 mod(float2 x, float2 y) {
+    return x - y * floor(x/y);
+}
 #endif
 
 //======================================================================================
