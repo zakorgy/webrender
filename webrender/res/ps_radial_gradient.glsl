@@ -7,18 +7,18 @@
         vec4 Position : SV_Position;
         //flat vec4 vClipMaskUvBounds : POSITION0;
         //vec3 vClipMaskUv : POSITION1;
-        flat int vGradientAddress : ADDRESS;
-        flat float vGradientRepeat : PSIZE1;
+        flat int vGradientAddress : vGradientAddress;
+        flat float vGradientRepeat : vGradientRepeat;
 
-        flat vec2 vStartCenter : POSITION2;
-        flat vec2 vEndCenter : POSITION3;
-        flat float vStartRadius : PSIZE2;
-        flat float vEndRadius : PSIZE3;
+        flat vec2 vStartCenter : vStartCenter;
+        flat vec2 vEndCenter : vEndCenter;
+        flat float vStartRadius : vStartRadius;
+        flat float vEndRadius : vEndRadius;
 
-        flat vec2 vTileSize : POSITION4;
-        flat vec2 vTileRepeat : POSITION5;
+        flat vec2 vTileSize : vTileSize;
+        flat vec2 vTileRepeat : vTileRepeat;
 
-        vec2 vPos : POSITION6;
+        vec2 vPos : vPos;
     };
 #else
 flat varying int vGradientAddress;
