@@ -32,6 +32,7 @@ use render_backend::RenderBackend;
 use render_task::RenderTaskData;
 use pipelines::{BlurProgram, CacheProgram, ClipProgram, Program};
 use std;
+use std::boxed::Box;
 use std::cmp;
 use std::collections::{HashMap, VecDeque};
 use std::f32;
@@ -72,6 +73,21 @@ pub const DUMMY_RGBA8_ID: u32 = 2;
 pub const DUMMY_A8_ID: u32 = 3;
 pub const DITHER_ID: u32 = 4;
 
+
+impl ProgramPair {
+    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
+        match transform_kind {
+            TransformedRectKind::AxisAligned => &mut (self.0).0,
+            TransformedRectKind::Complex => &mut (self.0).1,
+        }
+    }
+
+    pub fn reset_upload_offset(&mut self) {
+        (self.0).0.reset_upload_offset();
+        (self.0).1.reset_upload_offset();
+    }
+}
+
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
     let mut file = File::open(path_str).unwrap();
@@ -81,32 +97,34 @@ fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
 }
 
 #[cfg(not(feature = "dx11"))]
-fn create_program(device: &mut Device, filename: &str) -> Program {
+fn create_program(device: &mut Device, filename: &str) -> Box<Program> {
     let vs = get_shader_source(filename, ".vert");
     let ps = get_shader_source(filename, ".frag");
-    device.create_program(vs.as_slice(), ps.as_slice())
+    Box::new(device.create_program(vs.as_slice(), ps.as_slice()))
 }
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-fn create_program(device: &mut Device, filename: &str) -> Program {
+fn create_program(device: &mut Device, filename: &str) -> Box<Program> {
     let vs = get_shader_source(filename, ".vert.fx");
     let ps = get_shader_source(filename, ".frag.fx");
-    device.create_program(vs.as_slice(), ps.as_slice())
+    Box::new(device.create_program(vs.as_slice(), ps.as_slice()))
 }
 
 #[cfg(not(feature = "dx11"))]
-fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
+fn create_clip_program(device: &mut Device, filename: &str) -> Box<ClipProgram> {
     let vs = get_shader_source(filename, ".vert");
     let ps = get_shader_source(filename, ".frag");
-    device.create_clip_program(vs.as_slice(), ps.as_slice())
+    Box::new(device.create_clip_program(vs.as_slice(), ps.as_slice()))
 }
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-fn create_clip_program(device: &mut Device, filename: &str) -> ClipProgram {
+fn create_clip_program(device: &mut Device, filename: &str) -> Box<ClipProgram> {
     let vs = get_shader_source(filename, ".vert.fx");
     let ps = get_shader_source(filename, ".frag.fx");
-    device.create_clip_program(vs.as_slice(), ps.as_slice())
+    Box::new(device.create_clip_program(vs.as_slice(), ps.as_slice()))
 }
+
+struct ProgramPair((Box<Program>, Box<Program>));
 
 fn create_programs(device: &mut Device, filename: &str) -> ProgramPair {
     let program = create_program(device, filename);
@@ -505,9 +523,9 @@ pub struct Renderer {
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    cs_clip_rectangle: ClipProgram,
-    cs_clip_image: ClipProgram,
-    cs_clip_border: ClipProgram,
+    cs_clip_rectangle: Box<ClipProgram>,
+    cs_clip_image: Box<ClipProgram>,
+    cs_clip_border: Box<ClipProgram>,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -517,7 +535,6 @@ pub struct Renderer {
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
     ps_rectangle: ProgramPair,
-
     ps_rectangle_clip: ProgramPair,
     ps_text_run: ProgramPair,
     ps_text_run_subpixel: ProgramPair,
@@ -531,10 +548,10 @@ pub struct Renderer {
     ps_box_shadow: ProgramPair,
     ps_cache_image: ProgramPair,
 
-    ps_blend: Program,
-    ps_hw_composite: Program,
-    ps_split_composite: Program,
-    ps_composite: Program,
+    ps_blend: Box<Program>,
+    ps_hw_composite: Box<Program>,
+    ps_split_composite: Box<Program>,
+    ps_composite: Box<Program>,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
@@ -611,22 +628,6 @@ impl From<ShaderError> for InitError {
 
 impl From<std::io::Error> for InitError {
     fn from(err: std::io::Error) -> Self { InitError::Thread(err) }
-}
-
-struct ProgramPair((Program, Program));
-
-impl ProgramPair {
-    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
-        match transform_kind {
-            TransformedRectKind::AxisAligned => &mut (self.0).0,
-            TransformedRectKind::Complex => &mut (self.0).1,
-        }
-    }
-
-    pub fn reset_upload_offset(&mut self) {
-        (self.0).0.reset_upload_offset();
-        (self.0).1.reset_upload_offset();
-    }
 }
 
 impl Renderer {
