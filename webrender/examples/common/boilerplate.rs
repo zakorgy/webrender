@@ -6,6 +6,7 @@ use gleam::gl;
 use glutin;
 use std::env;
 use std::path::PathBuf;
+use std::rc::Rc;
 use webrender;
 use webrender::api::*;
 
@@ -78,15 +79,15 @@ pub fn main_wrapper(example: &mut Example,
         None
     };
 
-    let window = glutin::WindowBuilder::new()
-                .with_title("WebRender Sample App")
-                .with_multitouch()
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0)
-                })
-                .build()
-                .unwrap();
+    let window = Rc::new(glutin::WindowBuilder::new()
+                         .with_title("WebRender Sample")
+                         .with_multitouch()
+                         .with_gl(glutin::GlRequest::GlThenGles {
+                             opengl_version: (3, 2),
+                             opengles_version: (3, 0)
+                         })
+                         .build()
+                         .unwrap());
 
     unsafe {
         window.make_current().ok();
@@ -111,7 +112,7 @@ pub fn main_wrapper(example: &mut Example,
     };
 
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender) = webrender::Renderer::new(gl, opts).unwrap();
+    let (mut renderer, sender, _) = webrender::Renderer::new(window.clone(), opts).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(size);
 

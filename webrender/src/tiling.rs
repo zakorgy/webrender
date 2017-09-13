@@ -1343,9 +1343,9 @@ fn textures_compatible(t1: SourceTexture, t2: SourceTexture) -> bool {
 // All Packed Primitives below must be 16 byte aligned.
 #[derive(Debug)]
 pub struct BlurCommand {
-    task_id: i32,
-    src_task_id: i32,
-    blur_direction: i32,
+    pub task_id: i32,
+    pub src_task_id: i32,
+    pub blur_direction: i32,
 }
 
 /// A clipping primitive drawn into the clipping mask.
@@ -1354,17 +1354,17 @@ pub struct BlurCommand {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct CacheClipInstance {
-    render_task_address: i32,
-    layer_index: i32,
-    segment: i32,
-    clip_data_address: GpuCacheAddress,
-    resource_address: GpuCacheAddress,
+    pub render_task_address: i32,
+    pub layer_index: i32,
+    pub segment: i32,
+    pub clip_data_address: GpuCacheAddress,
+    pub resource_address: GpuCacheAddress,
 }
 
 // 32 bytes per instance should be enough for anyone!
 #[derive(Debug, Clone)]
 pub struct PrimitiveInstance {
-    data: [i32; 8],
+    pub data: [i32; 8],
 }
 
 struct SimplePrimitiveInstance {

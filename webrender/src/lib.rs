@@ -48,6 +48,13 @@ extern crate log;
 extern crate bitflags;
 #[macro_use]
 extern crate thread_profiler;
+#[macro_use]
+extern crate gfx;
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+extern crate gfx_device_dx11 as backend;
+#[cfg(not(feature = "dx11"))]
+extern crate gfx_device_gl as backend;
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
 extern crate winit as window;
@@ -82,6 +89,7 @@ mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod internal_types;
+mod pipelines;
 mod prim_store;
 mod print_tree;
 mod profiler;
@@ -96,10 +104,6 @@ mod texture_allocator;
 mod texture_cache;
 mod tiling;
 mod util;
-
-mod shader_source {
-    include!(concat!(env!("OUT_DIR"), "/shaders.rs"));
-}
 
 pub use record::{ApiRecordingReceiver, BinaryRecorder, WEBRENDER_RECORDING_HEADER};
 
@@ -146,6 +150,7 @@ extern crate num_traits;
 extern crate time;
 pub extern crate webrender_api;
 extern crate byteorder;
+extern crate rand;
 extern crate rayon;
 extern crate plane_split;
 #[cfg(feature = "debugger")]
@@ -165,6 +170,3 @@ pub use renderer::{CpuProfile, GpuProfile, DebugFlags, RendererKind};
 pub use renderer::{MAX_VERTEX_TEXTURE_WIDTH, PROFILER_DBG, RENDER_TARGET_DBG, TEXTURE_CACHE_DBG};
 
 pub use webrender_api as api;
-
-//#[doc(hidden)]
-//pub use device::build_shader_strings;

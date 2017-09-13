@@ -4,7 +4,6 @@
 
 use euclid::Transform3D;
 use internal_types::RenderTargetMode;
-use super::shader_source;
 use std::fs::File;
 use std::io::Read;
 use std::iter::repeat;
@@ -17,8 +16,53 @@ use std::thread;
 use api::{ColorF, ImageFormat};
 use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintSize};
 
+use rand::Rng;
+use std;
+use gfx;
+use gfx::CombinedError;
+use gfx::Factory;
+use gfx::texture::Kind;
+use gfx::traits::FactoryExt;
+use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
+use gfx::format::{Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureChannel, TextureSurface, Unorm};
+use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32};
+use gfx::handle::Sampler;
+use gfx::memory::Typed;
+use pipelines::{primitive, /*ClipProgram,*/ Position, PrimitiveInstances, Program, Locals};
+use renderer::{BlendMode, /*DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID,*/ MAX_VERTEX_TEXTURE_WIDTH};
+
+use backend;
 use InitWindow;
 use ResultWindow;
+
+use backend::Resources as R;
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub type CB = self::backend::CommandBuffer<backend::DeferredContext>;
+#[cfg(not(feature = "dx11"))]
+pub type CB = self::backend::CommandBuffer;
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub type BackendDevice = backend::Deferred;
+#[cfg(not(feature = "dx11"))]
+pub type BackendDevice = backend::Device;
+#[cfg(all(target_os = "windows", feature="dx11"))]
+use gfx_window_dxgi;
+
+pub type TextureId = u32;
+
+pub const LAYER_TEXTURE_WIDTH: usize = 1017;
+pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023;
+pub const TEXTURE_HEIGTH: usize = 8;
+pub const DEVICE_PIXEL_RATIO: f32 = 1.0;
+pub const MAX_INSTANCE_COUNT: usize = 5000;
+
+pub const A_STRIDE: usize = 1;
+pub const RG_STRIDE: usize = 2;
+pub const RGB_STRIDE: usize = 3;
+pub const RGBA_STRIDE: usize = 4;
+
+// The value of the type GL_FRAMEBUFFER_SRGB from https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_framebuffer_sRGB.txt
+const GL_FRAMEBUFFER_SRGB: u32 = 0x8DB9;
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 pub struct FrameId(usize);
@@ -103,6 +147,48 @@ impl VertexDescriptor {
     }
 }
 
+pub struct DataTexture<T> where T: gfx::format::TextureFormat {
+    pub handle: gfx::handle::Texture<R, T::Surface>,
+    pub srv: gfx::handle::ShaderResourceView<R, T::View>,
+}
+
+impl<T> DataTexture<T> where T: gfx::format::TextureFormat {
+    pub fn create<F>(factory: &mut F, size: [usize; 2]) -> Result<DataTexture<T>, CombinedError>
+        where F: gfx::Factory<R>
+    {
+        let (width, height) = (size[0] as u16, size[1] as u16);
+        let tex_kind = Kind::D2(width, height, gfx::texture::AaMode::Single);
+
+        let (surface, view) = {
+            let surface = <T::Surface as gfx::format::SurfaceTyped>::get_surface_type();
+            let desc = gfx::texture::Info {
+                kind: tex_kind,
+                levels: 1,
+                format: surface,
+                bind: gfx::memory::SHADER_RESOURCE,
+                usage: gfx::memory::Usage::Dynamic,
+            };
+            let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
+            let levels = (0, raw.get_info().levels - 1);
+            let tex = Typed::new(raw);
+            let view = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
+            (tex, view)
+        };
+
+        Ok(DataTexture {
+            handle: surface,
+            srv: view,
+        })
+    }
+
+    #[inline(always)]
+    pub fn get_size(&self) -> (usize, usize) {
+        let (w, h, _, _) = self.handle.get_info().kind.get_dimensions();
+        (w as usize, h as usize)
+    }
+}
+
 pub struct Texture {
     id: u32,
     target: TextureTarget,
@@ -113,6 +199,10 @@ pub struct Texture {
 
     filter: TextureFilter,
     mode: RenderTargetMode,
+
+    handle: Option<gfx::handle::Texture<R, R8_G8_B8_A8>>,
+    rtv: Option<gfx::handle::RenderTargetView<R, Rgba8>>,
+    srv: Option<gfx::handle::ShaderResourceView<R, R8_G8_B8_A8>>,
 }
 
 impl Texture {
@@ -359,6 +449,22 @@ pub enum ShaderError {
 }
 
 pub struct Device {
+    pub device: BackendDevice,
+    pub factory: backend::Factory,
+    pub encoder: gfx::Encoder<R,CB>,
+    pub sampler: (Sampler<R>, Sampler<R>),
+    pub color0: TextureId,
+    pub color1: TextureId,
+    pub color2: TextureId,
+    pub dummy_tex: DataTexture<Rgba8>,
+    pub layers: DataTexture<Rgba32F>,
+    pub render_tasks: DataTexture<Rgba32F>,
+    pub resource_cache: DataTexture<Rgba32F>,
+    pub main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
+    pub main_depth: gfx::handle::DepthStencilView<R, DepthFormat>,
+    pub vertex_buffer: gfx::handle::Buffer<R, Position>,
+    pub slice: gfx::Slice<R>,
+
     // device state
     device_pixel_ratio: f32,
 
@@ -382,7 +488,54 @@ impl Device {
     pub fn new(window: Rc<InitWindow>, resource_override_path: Option<PathBuf>) -> (Device, ResultWindow) {
         let max_texture_size = 1024;
 
-        let device = Device {
+        let (win, device, mut factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
+        
+        #[cfg(all(target_os = "windows", feature="dx11"))]
+        let encoder = factory.create_command_buffer_native().into();
+
+        #[cfg(not(feature = "dx11"))]
+        let encoder = factory.create_command_buffer().into();
+        
+        let (x0, y0, x1, y1) = (0.0, 0.0, 1.0, 1.0);
+        let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
+        let quad_vertices = [
+            Position::new([x0, y0]),
+            Position::new([x1, y0]),
+            Position::new([x0, y1]),
+            Position::new([x1, y1]),
+        ];
+
+        let (vertex_buffer, mut slice) = factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+        slice.instances = Some((MAX_INSTANCE_COUNT as u32, 0));
+
+        let wrap_mode = (gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Tile);
+        let mut sampler_info = gfx::texture::SamplerInfo::new(gfx::texture::FilterMethod::Scale, gfx::texture::WrapMode::Clamp);
+        sampler_info.wrap_mode = wrap_mode;
+        let sampler_nearest = factory.create_sampler(sampler_info);
+        sampler_info.filter = gfx::texture::FilterMethod::Bilinear;
+        let sampler_linear = factory.create_sampler(sampler_info);
+
+        let dummy_tex = DataTexture::create(&mut factory, [1, 1]).unwrap();
+        let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
+        let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
+        let resource_cache_tex = DataTexture::create(&mut factory, [max_texture_size, max_texture_size]).unwrap();
+
+        let dev = Device {
+            device: device,
+            factory: factory,
+            encoder: encoder,
+            sampler: (sampler_nearest, sampler_linear),
+            color0: 0,
+            color1: 0,
+            color2: 0,
+            dummy_tex: dummy_tex,
+            layers: layers_tex,
+            render_tasks: render_tasks_tex,
+            resource_cache: resource_cache_tex,
+            main_color: main_color,
+            main_depth: main_depth,
+            vertex_buffer: vertex_buffer,
+            slice: slice,
             resource_override_path,
             // This is initialized to 1 by default, but it is set
             // every frame by the call to begin_frame().
@@ -393,10 +546,10 @@ impl Device {
                 supports_multisampling: false, //TODO
             },
 
-            max_texture_size,
+            max_texture_size: max_texture_size as u32,
             frame_id: FrameId(0),
         };
-        (device, None)
+        (dev, None)
     }
 
     pub fn max_texture_size(&self) -> u32 {
@@ -442,6 +595,9 @@ impl Device {
             format: ImageFormat::Invalid,
             filter: TextureFilter::Nearest,
             mode: RenderTargetMode::None,
+            handle: None,
+            rtv: None,
+            srv: None,
         }
     }
 
@@ -489,6 +645,23 @@ impl Device {
     pub fn delete_texture(&mut self, mut texture: Texture) {
         self.free_texture_storage(&mut texture);
         texture.id = 0;
+    }
+
+    pub fn update_resource_cache<T>(&mut self, row_index: u16, memory: &[T]) where T: gfx::traits::Pod {
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: 0,
+            yoffset: row_index,
+            zoffset: 0,
+            width: self.max_texture_size as u16,
+            height: 1,
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let data = gfx::memory::cast_slice(memory);
+        //assert!(data.len() == self.max_texture_size as usize * RGBA_STRIDE);
+        self.encoder.update_texture::<_, Rgba32F>(&self.resource_cache.handle, None, img_info, data).unwrap();
     }
 
     pub fn update_pbo_data<T>(&mut self, data: &[T]) {
@@ -574,23 +747,54 @@ impl Device {
         self.frame_id.0 += 1;
     }
 
-    pub fn clear_target(&self,
+    pub fn clear_target(&mut self,
                         color: Option<[f32; 4]>,
                         depth: Option<f32>) {
-        let mut clear_bits = 0;
-
-       /* if let Some(color) = color {
-            self.gl.clear_color(color[0], color[1], color[2], color[3]);
-            clear_bits |= gl::COLOR_BUFFER_BIT;
+       if let Some(color) = color {
+            self.encoder.clear(&self.main_color, [color[0], color[1], color[2], color[3]]);
         }
 
         if let Some(depth) = depth {
-            self.gl.clear_depth(depth as f64);
-            clear_bits |= gl::DEPTH_BUFFER_BIT;
+            self.encoder.clear_depth(&self.main_depth, depth);
         }
-
-        if clear_bits != 0 {
-            self.gl.clear(clear_bits);
-        }*/
     }
+
+    pub fn flush(&mut self) {
+        self.encoder.flush(&mut self.device);
+    }
+}
+
+#[cfg(not(feature = "dx11"))]
+pub fn init_existing<Cf, Df>(window: Rc<InitWindow>) ->
+                            (ResultWindow, BackendDevice, backend::Factory,
+                             gfx::handle::RenderTargetView<R, Cf>, gfx::handle::DepthStencilView<R, Df>)
+where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
+{
+    unsafe { window.make_current().unwrap() };
+    let (mut device, factory) = backend::create(|s|
+        window.get_proc_address(s) as *const std::os::raw::c_void);
+
+    unsafe { device.with_gl(|ref gl| gl.Disable(GL_FRAMEBUFFER_SRGB)); }
+
+    let (width, height) = window.get_inner_size().unwrap();
+    let aa = window.get_pixel_format().multisampling.unwrap_or(0) as gfx::texture::NumSamples;
+    let dim = ((width as f32 * window.hidpi_factor()) as gfx::texture::Size,
+               (height as f32 * window.hidpi_factor()) as gfx::texture::Size,
+               1,
+               aa.into());
+    let (color_view, ds_view) = backend::create_main_targets_raw(dim, Cf::get_format().0, Df::get_format().0);
+    (None, device, factory, Typed::new(color_view), Typed::new(ds_view))
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn init_existing<Cf, Df>(window: Rc<InitWindow>)
+    -> (ResultWindow, BackendDevice, backend::Factory,
+        gfx::handle::RenderTargetView<R, Cf>,
+        gfx::handle::DepthStencilView<R, Df>)
+where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
+{
+    let (mut win, device, mut factory, main_color) = gfx_window_dxgi::init_existing_raw(window, Cf::get_format()).unwrap();
+    let main_depth = factory.create_depth_stencil_view_only(win.size.0, win.size.1).unwrap();
+    let mut device = backend::Deferred::from(device);
+    (win, device, factory, gfx::memory::Typed::new(main_color), main_depth)
 }

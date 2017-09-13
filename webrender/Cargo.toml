@@ -11,6 +11,7 @@ default = ["freetype-lib"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "serde", "serde_derive"]
+dx11 = ["gfx_device_dx11", "gfx_window_dxgi"]
 
 [dependencies]
 app_units = "0.5.6"
@@ -19,7 +20,6 @@ bit-set = "0.4"
 byteorder = "1.0"
 euclid = "0.15.1"
 fxhash = "0.2.1"
-#gleam = "0.4.8"
 lazy_static = "0.2"
 log = "0.3"
 num-traits = "0.1.32"
@@ -34,11 +34,22 @@ ws = { optional = true, version = "0.7.3" }
 serde_json = { optional = true, version = "1.0" }
 serde = { optional = true, version = "1.0" }
 serde_derive = { optional = true, version = "1.0" }
-servo-glutin = "0.11"     # for the example apps
+servo-glutin = "0.11"
+rand = "0.3"
+#gfx = { git = 'https://github.com/gfx-rs/gfx' }
+gfx = { path = '../../gfx/src/render' }
+#gfx_device_gl = { git = 'https://github.com/gfx-rs/gfx' }
+gfx_device_gl = { path = '../../gfx/src/backend/gl' }
+
+[target.'cfg(windows)'.dependencies]
+#gfx_device_dx11 = { git = 'https://github.com/gfx-rs/gfx', optional = true}
+gfx_device_dx11 = { path = '../../gfx/src/backend/dx11', optional = true}
+#gfx_window_dxgi = { git = 'https://github.com/gfx-rs/gfx', optional = true}
+gfx_window_dxgi = { path = '../../gfx/src/window/dxgi', optional = true}
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
-rand = "0.3"                # for the benchmarks
+gleam = "0.4.8"
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }
