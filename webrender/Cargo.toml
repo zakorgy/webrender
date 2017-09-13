@@ -19,7 +19,7 @@ bit-set = "0.4"
 byteorder = "1.0"
 euclid = "0.15.1"
 fxhash = "0.2.1"
-gleam = "0.4.8"
+#gleam = "0.4.8"
 lazy_static = "0.2"
 log = "0.3"
 num-traits = "0.1.32"
@@ -34,11 +34,11 @@ ws = { optional = true, version = "0.7.3" }
 serde_json = { optional = true, version = "1.0" }
 serde = { optional = true, version = "1.0" }
 serde_derive = { optional = true, version = "1.0" }
+servo-glutin = "0.11"     # for the example apps
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 rand = "0.3"                # for the benchmarks
-servo-glutin = "0.11"     # for the example apps
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }

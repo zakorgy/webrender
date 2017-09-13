@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use debug_font_data;
-use device::{Device, GpuMarker, Program, VAO, Texture, TextureSlot, VertexDescriptor};
+use device::{Device, GpuMarker, Texture, TextureSlot, VertexDescriptor};
 use device::{TextureFilter, VertexAttribute, VertexUsageHint, VertexAttributeKind, TextureTarget};
 use euclid::{Transform3D, Point2D, Size2D, Rect};
 use internal_types::{ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE};
@@ -82,21 +82,21 @@ impl DebugColorVertex {
 pub struct DebugRenderer {
     font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
-    font_program: Program,
-    font_vao: VAO,
-    font_texture: Texture,
+    //font_program: Program,
+    //font_vao: VAO,
+    //font_texture: Texture,
 
     tri_vertices: Vec<DebugColorVertex>,
     tri_indices: Vec<u32>,
-    tri_vao: VAO,
+    //tri_vao: VAO,
     line_vertices: Vec<DebugColorVertex>,
-    line_vao: VAO,
-    color_program: Program,
+    //line_vao: VAO,
+    //color_program: Program,
 }
 
 impl DebugRenderer {
     pub fn new(device: &mut Device) -> DebugRenderer {
-        let font_program = device.create_program("debug_font",
+        /*let font_program = device.create_program("debug_font",
                                                  "",
                                                  &DESC_FONT).unwrap();
         device.bind_shader_samplers(&font_program, &[
@@ -119,30 +119,30 @@ impl DebugRenderer {
                             TextureFilter::Linear,
                             RenderTargetMode::None,
                             1,
-                            Some(&debug_font_data::FONT_BITMAP));
+                            Some(&debug_font_data::FONT_BITMAP));*/
 
         DebugRenderer {
             font_vertices: Vec::new(),
             font_indices: Vec::new(),
             line_vertices: Vec::new(),
-            tri_vao,
+            //tri_vao,
             tri_vertices: Vec::new(),
             tri_indices: Vec::new(),
-            font_program,
-            color_program,
-            font_vao,
-            line_vao,
-            font_texture,
+            //font_program,
+            //color_program,
+            //font_vao,
+            //line_vao,
+            //font_texture,
         }
     }
 
     pub fn deinit(self, device: &mut Device) {
-        device.delete_texture(self.font_texture);
+        /*device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
         device.delete_vao(self.tri_vao);
         device.delete_vao(self.line_vao);
-        device.delete_vao(self.font_vao);
+        device.delete_vao(self.font_vao);*/
     }
 
     pub fn line_height(&self) -> f32 {
@@ -242,8 +242,8 @@ impl DebugRenderer {
     pub fn render(&mut self,
                   device: &mut Device,
                   viewport_size: &DeviceUintSize) {
-        let _gm = GpuMarker::new(device.rc_gl(), "debug");
-        device.disable_depth();
+        let _gm = GpuMarker::new("debug");
+        /*device.disable_depth();
         device.set_blend(true);
         device.set_blend_mode_alpha();
 
@@ -292,7 +292,7 @@ impl DebugRenderer {
                                             &self.font_vertices,
                                             VertexUsageHint::Dynamic);
             device.draw_triangles_u32(0, self.font_indices.len() as i32);
-        }
+        }*/
 
         self.font_indices.clear();
         self.font_vertices.clear();

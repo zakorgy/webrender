@@ -49,6 +49,19 @@ extern crate bitflags;
 #[macro_use]
 extern crate thread_profiler;
 
+#[cfg(all(target_os = "windows", feature="dx11"))]
+extern crate winit as window;
+#[cfg(not(feature = "dx11"))]
+extern crate glutin as window;
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+extern crate gfx_window_dxgi as result_window;
+#[cfg(not(feature = "dx11"))]
+extern crate glutin as result_window;
+
+pub type InitWindow = window::Window;
+pub type ResultWindow = Option<result_window::Window>;
+
 mod border;
 mod clip;
 mod clip_scroll_node;
@@ -127,7 +140,7 @@ extern crate app_units;
 extern crate bincode;
 extern crate euclid;
 extern crate fxhash;
-extern crate gleam;
+//extern crate gleam;
 extern crate num_traits;
 //extern crate notify;
 extern crate time;
@@ -153,5 +166,5 @@ pub use renderer::{MAX_VERTEX_TEXTURE_WIDTH, PROFILER_DBG, RENDER_TARGET_DBG, TE
 
 pub use webrender_api as api;
 
-#[doc(hidden)]
-pub use device::build_shader_strings;
+//#[doc(hidden)]
+//pub use device::build_shader_strings;

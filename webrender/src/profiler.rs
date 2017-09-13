@@ -774,7 +774,7 @@ impl Profiler {
         screen_fraction: f32,
         debug_renderer: &mut DebugRenderer,
     ) {
-        let _gm = GpuMarker::new(device.rc_gl(), "profile");
+        let _gm = GpuMarker::new("profile");
         self.x_left = 20.0;
         self.y_left = 40.0;
         self.x_right = 400.0;
