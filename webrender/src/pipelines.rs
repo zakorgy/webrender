@@ -96,15 +96,14 @@ gfx_defines! {
         render_task_index: i32 = "aBlurRenderTaskIndex",
         source_task_index: i32 = "aBlurSourceTaskIndex",
         direction: i32 = "aBlurDirection",
-    }
+    }*/
 
     vertex ClipInstances {
         render_task_index: i32 = "aClipRenderTaskIndex",
         layer_index: i32 = "aClipLayerIndex",
-        data_index: i32 = "aClipDataIndex",
-        segment_index: i32 = "aClipSegmentIndex",
-        resource_address: i32 = "aClipResourceAddress",
-    }*/
+        segment: i32 = "aClipSegment",
+        data_resource_address: [i32; 4] = "aClipDataResourceAddress",
+    }
 
     constant Locals {
         transform: [[f32; 4]; 4] = "uTransform",
@@ -121,9 +120,10 @@ gfx_defines! {
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        //dither: gfx::TextureSampler<f32> = "sDither",
-        //cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
-        //cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
+        dither: gfx::TextureSampler<[f32; 4]> = "sDither",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
+        cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
+        shader_cache_a8: gfx::TextureSampler<[f32; 4]> = "sSharedCacheA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -177,7 +177,7 @@ gfx_defines! {
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
-    }
+    }*/
 
     pipeline clip {
         locals: gfx::ConstantBuffer<Locals> = "Locals",
@@ -189,22 +189,23 @@ gfx_defines! {
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",
+        dither: gfx::TextureSampler<[f32; 4]> = "sDither",
         cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
+        shader_cache_a8: gfx::TextureSampler<[f32; 4]> = "sSharedCacheA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
         resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
-        out_color: gfx::RawRenderTarget = ("Target0",
+        out_color: gfx::RawRenderTarget = ("oFragColor",
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
     
-        vertex DebugColorVertices {
+    /*vertex DebugColorVertices {
         pos: [f32; 2] = "aPosition",
         color: [f32; 4] = "aColor",
     }
@@ -240,8 +241,8 @@ gfx_defines! {
 }
 
 type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
-/*type CachePSO = gfx::PipelineState<R, cache::Meta>;
 type ClipPSO = gfx::PipelineState<R, clip::Meta>;
+/*type CachePSO = gfx::PipelineState<R, cache::Meta>;
 type BlurPSO = gfx::PipelineState<R, blur::Meta>;
 type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
 type DebugFontPSO = gfx::PipelineState<R, debug_font::Meta>;*/
@@ -302,27 +303,28 @@ impl BlurInstances {
         self.source_task_index = blur_command.src_task_id;
         self.direction = blur_command.blur_direction;
     }
-}
+}*/
 
 impl ClipInstances {
     pub fn new() -> ClipInstances {
         ClipInstances {
             render_task_index: 0,
             layer_index: 0,
-            data_index: 0,
-            segment_index: 0,
-            resource_address: 0,
+            segment: 0,
+            data_resource_address: [0; 4],
         }
     }
 
     pub fn update(&mut self, instance: &CacheClipInstance) {
-        self.render_task_index = instance.task_id;
+        self.render_task_index = instance.render_task_address;
         self.layer_index = instance.layer_index;
-        self.data_index = instance.address;
-        self.segment_index = instance.segment;
-        self.resource_address = instance.resource_address;
+        self.segment = instance.segment;
+        self.data_resource_address[0] = instance.clip_data_address.u as i32;
+        self.data_resource_address[1] = instance.clip_data_address.v as i32;
+        self.data_resource_address[2] = instance.resource_address.u as i32;
+        self.data_resource_address[3] = instance.resource_address.v as i32;
     }
-}*/
+}
 
 /*fn update_texture_srv_and_sampler(program_texture_id: &mut TextureId,
                                   device_texture_id: TextureId,
@@ -475,7 +477,7 @@ impl BlurProgram {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
-}
+}*/
 
 #[allow(dead_code)]
 pub struct ClipProgram {
@@ -515,7 +517,7 @@ impl ClipProgram {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
-}*/
+}
 
 impl Device {
     pub fn create_prim_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO) {
@@ -634,7 +636,7 @@ impl Device {
         ).unwrap();
 
         (pso, pso_alpha)
-    }
+    }*/
 
     pub fn create_clip_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (ClipPSO, ClipPSO, ClipPSO) {
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, clip::new()).unwrap();
@@ -643,7 +645,7 @@ impl Device {
             vert_src,
             frag_src,
             clip::Init {
-                out_color: ("Target0",
+                out_color: ("oFragColor",
                             Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(MULTIPLY)),
@@ -655,7 +657,7 @@ impl Device {
             vert_src,
             frag_src,
             clip::Init {
-                out_color: ("Target0",
+                out_color: ("oFragColor",
                             Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                             gfx::state::MASK_ALL,
                             Some(MAX)),
@@ -663,7 +665,7 @@ impl Device {
             }
         ).unwrap();
         (pso, pso_multiply, pso_max)
-    }*/
+    }
 
     pub fn create_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> Program {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
@@ -688,9 +690,10 @@ impl Device {
             color0: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
             color1: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
             color2: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
-            //dither: (self.dither.srv.clone(), self.dither.clone().sampler),
-            //cache_a8: (self.cache_a8.srv.clone(), self.cache_a8.clone().sampler),
-            //cache_rgba8: (self.cache_rgba8.srv.clone(), self.cache_rgba8.clone().sampler),
+            dither: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            shader_cache_a8: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
@@ -764,7 +767,7 @@ impl Device {
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
         BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
-    }
+    }*/
 
     pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
@@ -786,21 +789,22 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: cache_instances,
-            color0: (self.color0.srv.clone(), self.color0.clone().sampler),
-            color1: (self.color1.srv.clone(), self.color1.clone().sampler),
-            color2: (self.color2.srv.clone(), self.color2.clone().sampler),
-            dither: (self.dither.srv.clone(), self.dither.clone().sampler),
-            cache_a8: (self.cache_a8.srv.clone(), self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.srv.clone(), self.cache_rgba8.clone().sampler),
-            layers: (self.layers.srv.clone(), self.layers.clone().sampler),
-            render_tasks: (self.render_tasks.srv.clone(), self.render_tasks.clone().sampler),
-            resource_cache: (self.resource_cache.srv.clone(), self.resource_cache.clone().sampler),
+            color0: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            color1: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            color2: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            dither: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            cache_a8: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            cache_rgba8: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            shader_cache_a8: (self.dummy_tex.srv.clone(), self.sampler.0.clone()),
+            layers: (self.layers.srv.clone(), self.sampler.0.clone()),
+            render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.main_color.raw().clone(),
             out_depth: self.main_depth.clone(),
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
         ClipProgram::new(data, psos, self.slice.clone(), upload)
-    }*/
+    }
 
     /*pub fn draw(&mut self,
                 program: &mut Program,

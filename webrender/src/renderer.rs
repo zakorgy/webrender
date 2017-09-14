@@ -27,7 +27,7 @@ use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 use internal_types::{FastHashMap, CacheTextureId, RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, TextureUpdateList, RenderTargetMode, TextureUpdateSource};
 use internal_types::{BatchTextures, ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, SourceTexture};
-use pipelines::{/*BlurProgram, CacheProgram, ClipProgram,*/ Program};
+use pipelines::{/*BlurProgram, CacheProgram,*/ ClipProgram, Program};
 use profiler::{Profiler, BackendProfileCounters};
 use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
 use record::ApiRecordingReceiver;
@@ -64,6 +64,8 @@ use api::{YUV_COLOR_SPACES, YUV_FORMATS};
 use InitWindow;
 use ResultWindow;
 
+use gfx;
+
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
 const GPU_TAG_CACHE_BOX_SHADOW: GpuProfileTag = GpuProfileTag { label: "C_BoxShadow", color: debug_colors::BLACK };
@@ -93,14 +95,6 @@ const GPU_TAG_BLUR: GpuProfileTag = GpuProfileTag { label: "Blur", color: debug_
 const GPU_SAMPLER_TAG_ALPHA: GpuProfileTag = GpuProfileTag { label: "Alpha Targets", color: debug_colors::BLACK };
 const GPU_SAMPLER_TAG_OPAQUE: GpuProfileTag = GpuProfileTag { label: "Opaque Pass", color: debug_colors::BLACK };
 const GPU_SAMPLER_TAG_TRANSPARENT: GpuProfileTag = GpuProfileTag { label: "Transparent Pass", color: debug_colors::BLACK };
-
-use gfx::memory::Pod;
-
-macro_rules! impl_pod {
-    ( ty = $($ty:ty)* ) => { $( unsafe impl Pod for $ty {} )* };
-}
-
-impl_pod! { ty = GpuBlockData }
 
 #[cfg(feature = "debugger")]
 impl AlphaBatchKind {
@@ -143,7 +137,7 @@ bitflags! {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum TextureSampler {
+pub enum TextureSampler {
     Color0,
     Color1,
     Color2,
@@ -195,7 +189,7 @@ pub struct PackedVertex {
     pub pos: [f32; 2],
 }
 
-const DESC_PRIM_INSTANCES: VertexDescriptor = VertexDescriptor {
+/*const DESC_PRIM_INSTANCES: VertexDescriptor = VertexDescriptor {
     vertex_attributes: &[
         VertexAttribute { name: "aPosition", count: 2, kind: VertexAttributeKind::F32 },
     ],
@@ -236,7 +230,7 @@ const DESC_CACHE_BOX_SHADOW: VertexDescriptor = VertexDescriptor {
         VertexAttribute { name: "aPrimAddress", count: 2, kind: VertexAttributeKind::U16 },
         VertexAttribute { name: "aTaskIndex", count: 1, kind: VertexAttributeKind::I32 },
     ]
-};
+};*/
 
 #[derive(Debug, Copy, Clone)]
 enum VertexArrayKind {
@@ -482,6 +476,8 @@ pub enum BlendMode {
 
     // Use the color of the text itself as a constant color blend factor.
     Subpixel(ColorF),
+    Multiply,
+    Max,
 }
 
 // Tracks the state of each row in the GPU cache texture.
@@ -598,7 +594,8 @@ impl CacheTexture {
                                                0,
                                                None,
                                                0);*/
-                device.update_resource_cache(row_index as u16, cpu_blocks);
+                //device.update_gpu_cache(row_index as u16, cpu_blocks);
+                device.update_data_texture(TextureSampler::ResourceCache, [0, row_index as u16], [MAX_VERTEX_TEXTURE_WIDTH as u16, 1], cpu_blocks);
 
                 row.is_dirty = false;
             }
@@ -607,24 +604,28 @@ impl CacheTexture {
 }
 
 struct VertexDataTexture {
-    texture: Texture,
+    //texture: Texture,
     //pbo: PBO,
+    sampler: TextureSampler,
 }
 
 impl VertexDataTexture {
-    fn new(device: &mut Device) -> VertexDataTexture {
-        let texture = device.create_texture(TextureTarget::Default);
+    fn new(/*device: &mut Device*/sampler: TextureSampler) -> VertexDataTexture {
+        //let texture = device.create_texture(TextureTarget::Default);
         //let pbo = device.create_pbo();
 
         VertexDataTexture {
-            texture,
+            //texture,
             //pbo,
+            sampler: sampler,
         }
     }
 
     fn update<T>(&mut self,
                  device: &mut Device,
-                 data: &mut Vec<T>) {
+                 data: &mut Vec<T>)
+        where T: gfx::traits::Pod
+    {
         if data.is_empty() {
             return;
         }
@@ -646,7 +647,7 @@ impl VertexDataTexture {
         let needed_height = (data.len() / items_per_row) as u32;
 
         // Determine if the texture needs to be resized.
-        let texture_size = self.texture.get_dimensions();
+        /*let texture_size = self.texture.get_dimensions();
 
         if needed_height > texture_size.height {
             let new_height = (needed_height + 127) & !127;
@@ -659,7 +660,7 @@ impl VertexDataTexture {
                                 RenderTargetMode::None,
                                 1,
                                 None);
-        }
+        }*/
 
         // Bind a PBO to do the texture upload.
         // Updating the texture via PBO avoids CPU-side driver stalls.
@@ -673,14 +674,15 @@ impl VertexDataTexture {
                                        0,
                                        None,
                                        0);
-
+    
         // Ensure that other texture updates won't read from this PBO.
         device.bind_pbo(None);*/
+        device.update_data_texture(self.sampler, [0, 0], [width as u16, needed_height as u16], data);
     }
 
     fn deinit(self, device: &mut Device) {
         //device.delete_pbo(self.pbo);
-        device.delete_texture(self.texture);
+        //device.delete_texture(self.texture);
     }
 }
 
@@ -691,7 +693,7 @@ pub enum ReadPixelsFormat {
 }
 
 #[derive(Debug)]
-struct ProgramPair((Program, Program));
+struct ProgramPair((Box<Program>, Box<Program>));
 
 impl ProgramPair {
     fn get(&mut self, transform_kind: TransformedRectKind) -> &mut Program {
@@ -721,17 +723,31 @@ fn create_programs(device: &mut Device, filename: &str) -> ProgramPair {
 }
 
 #[cfg(not(feature = "dx11"))]
-fn create_program(device: &mut Device, filename: &str) -> Program {
+fn create_program(device: &mut Device, filename: &str) -> Box<Program> {
     let vs = get_shader_source(filename, ".vert");
     let ps = get_shader_source(filename, ".frag");
-    device.create_program(vs.as_slice(), ps.as_slice())
+    Box::new(device.create_program(vs.as_slice(), ps.as_slice()))
 }
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-fn create_program(device: &mut Device, filename: &str) -> Program {
+fn create_program(device: &mut Device, filename: &str) -> Box<Program> {
     let vs = get_shader_source(filename, ".vert.fx");
     let ps = get_shader_source(filename, ".frag.fx");
-    device.create_program(vs.as_slice(), ps.as_slice())
+    Box::new(device.create_program(vs.as_slice(), ps.as_slice()))
+}
+
+#[cfg(not(feature = "dx11"))]
+fn create_clip_program(device: &mut Device, filename: &str) -> Box<ClipProgram> {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    Box::new(device.create_clip_program(vs.as_slice(), ps.as_slice()))
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+fn create_clip_program(device: &mut Device, filename: &str) -> Box<ClipProgram> {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    Box::new(device.create_clip_program(vs.as_slice(), ps.as_slice()))
 }
 
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
@@ -765,9 +781,9 @@ pub struct Renderer {
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    //cs_clip_rectangle: LazilyCompiledShader,
-    //cs_clip_image: LazilyCompiledShader,
-    //cs_clip_border: LazilyCompiledShader,
+    cs_clip_rectangle: Box<ClipProgram>,
+    cs_clip_image: Box<ClipProgram>,
+    cs_clip_border: Box<ClipProgram>,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -777,18 +793,18 @@ pub struct Renderer {
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
     ps_rectangle: ProgramPair,
-    //ps_rectangle_clip: PrimitiveShader,
-    //ps_text_run: PrimitiveShader,
-    //ps_text_run_subpixel: PrimitiveShader,
-    //ps_image: Vec<Option<PrimitiveShader>>,
-    //ps_yuv_image: Vec<Option<PrimitiveShader>>,
-    //ps_border_corner: PrimitiveShader,
-    //ps_border_edge: PrimitiveShader,
-    //ps_gradient: PrimitiveShader,
-    //ps_angle_gradient: PrimitiveShader,
-    //ps_radial_gradient: PrimitiveShader,
-    //ps_box_shadow: PrimitiveShader,
-    //ps_cache_image: PrimitiveShader,
+    ps_rectangle_clip: ProgramPair,
+    ps_text_run: ProgramPair,
+    ps_text_run_subpixel: ProgramPair,
+    ps_image: ProgramPair,
+    ps_yuv_image: Vec<ProgramPair>,
+    ps_border_corner: ProgramPair,
+    ps_border_edge: ProgramPair,
+    ps_gradient: ProgramPair,
+    ps_angle_gradient: ProgramPair,
+    ps_radial_gradient: ProgramPair,
+    ps_box_shadow: ProgramPair,
+    ps_cache_image: ProgramPair,
     //ps_line: PrimitiveShader,
 
     //ps_blend: LazilyCompiledShader,
@@ -884,7 +900,39 @@ impl Renderer {
 
         let (mut device, window) = Device::new(window, options.resource_override_path.clone());
 
+        let cs_clip_rectangle = create_clip_program(&mut device, "cs_clip_rectangle");
+        let cs_clip_image = create_clip_program(&mut device, "cs_clip_image");
+        let cs_clip_border = create_clip_program(&mut device, "cs_clip_border");
+
         let ps_rectangle = create_programs(&mut device, "ps_rectangle");
+        let ps_rectangle_clip = create_programs(&mut device, "ps_rectangle_clip");
+        let ps_text_run = create_programs(&mut device, "ps_text_run");
+        let ps_text_run_subpixel = create_programs(&mut device, "ps_text_run_subpixel");
+        let ps_image = create_programs(&mut device, "ps_image");
+        let ps_yuv_image =
+            vec![create_programs(&mut device, "ps_yuv_image_nv12_601"),
+                 create_programs(&mut device, "ps_yuv_image_nv12_709"),
+                 create_programs(&mut device, "ps_yuv_image_planar_601"),
+                 create_programs(&mut device, "ps_yuv_image_planar_709"),
+                 create_programs(&mut device, "ps_yuv_image_interleaved_601"),
+                 create_programs(&mut device, "ps_yuv_image_interleaved_709")];
+
+        let ps_border_corner = create_programs(&mut device, "ps_border_corner");
+        let ps_border_edge = create_programs(&mut device, "ps_border_edge");
+
+        let (ps_gradient, ps_angle_gradient, ps_radial_gradient) =
+            if options.enable_dithering {
+                (create_programs(&mut device, "ps_gradient_dither"),
+                 create_programs(&mut device, "ps_angle_gradient_dither"),
+                 create_programs(&mut device, "ps_radial_gradient_dither"))
+            } else {
+                (create_programs(&mut device, "ps_gradient"),
+                 create_programs(&mut device, "ps_angle_gradient"),
+                 create_programs(&mut device, "ps_radial_gradient"))
+            };
+
+        let ps_box_shadow = create_programs(&mut device, "ps_box_shadow");
+        let ps_cache_image = create_programs(&mut device, "ps_cache_image");
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
@@ -916,8 +964,8 @@ impl Renderer {
 
         let texture_resolver = SourceTextureResolver::new(&mut device);
 
-        let layer_texture = VertexDataTexture::new(&mut device);
-        let render_task_texture = VertexDataTexture::new(&mut device);
+        let layer_texture = VertexDataTexture::new(/*&mut device*/TextureSampler::Layers);
+        let render_task_texture = VertexDataTexture::new(/*&mut device*/TextureSampler::RenderTasks);
 
         device.end_frame();
 
@@ -973,7 +1021,22 @@ impl Renderer {
             debug_server,
             device,
             current_frame: None,
+            cs_clip_rectangle: cs_clip_rectangle,
+            cs_clip_border: cs_clip_border,
+            cs_clip_image: cs_clip_image,
             ps_rectangle: ps_rectangle,
+            ps_rectangle_clip: ps_rectangle_clip,
+            ps_text_run: ps_text_run,
+            ps_text_run_subpixel: ps_text_run_subpixel,
+            ps_image: ps_image,
+            ps_yuv_image: ps_yuv_image,
+            ps_border_corner: ps_border_corner,
+            ps_border_edge: ps_border_edge,
+            ps_box_shadow: ps_box_shadow,
+            ps_gradient: ps_gradient,
+            ps_angle_gradient: ps_angle_gradient,
+            ps_radial_gradient: ps_radial_gradient,
+            ps_cache_image: ps_cache_image,
             pending_texture_updates: Vec::new(),
             pending_gpu_cache_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
@@ -1324,11 +1387,11 @@ impl Renderer {
         //self.cs_box_shadow.reset_upload_offset();
         //self.cs_text_run.reset_upload_offset();
         //self.cs_blur.reset_upload_offset();
-        /*self.cs_clip_rectangle.reset_upload_offset();
+        self.cs_clip_rectangle.reset_upload_offset();
         self.cs_clip_image.reset_upload_offset();
-        self.cs_clip_border.reset_upload_offset();*/
+        self.cs_clip_border.reset_upload_offset();
         self.ps_rectangle.reset_upload_offset();
-        /*self.ps_rectangle_clip.reset_upload_offset();
+        self.ps_rectangle_clip.reset_upload_offset();
         self.ps_text_run.reset_upload_offset();
         self.ps_text_run_subpixel.reset_upload_offset();
         self.ps_image.reset_upload_offset();
@@ -1339,13 +1402,13 @@ impl Renderer {
         self.ps_radial_gradient.reset_upload_offset();
         self.ps_box_shadow.reset_upload_offset();
         self.ps_cache_image.reset_upload_offset();
-        self.ps_blend.reset_upload_offset();
+        /*self.ps_blend.reset_upload_offset();
         self.ps_hw_composite.reset_upload_offset();
         self.ps_split_composite.reset_upload_offset();
-        self.ps_composite.reset_upload_offset();
+        self.ps_composite.reset_upload_offset();*/
         for mut program in &mut self.ps_yuv_image {
             program.reset_upload_offset();
-        }*/
+        }
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
@@ -1512,111 +1575,106 @@ impl Renderer {
                       match key.blend_mode {
                           BlendMode::Alpha |
                           BlendMode::PremultipliedAlpha |
-                          BlendMode::Subpixel(..) => true,
+                          BlendMode::Subpixel(..) |
+                          BlendMode::Max |
+                          BlendMode::Multiply => true,
                           BlendMode::None => false,
                       });
-        println!("program={:?}", key.kind);
+        //println!("program={:?}", key.kind);
         let (mut program, marker) = match key.kind {
+            /*AlphaBatchKind::Composite { .. } => {
+                //self.ps_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
+                (&mut self.ps_composite, GPU_TAG_PRIM_COMPOSITE)
+            }
+            AlphaBatchKind::HardwareComposite => {
+                //self.ps_hw_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
+                (&mut self.ps_hw_composite, GPU_TAG_PRIM_HW_COMPOSITE)
+            }
+            AlphaBatchKind::SplitComposite => {
+                //self.ps_split_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
+                (&mut self.ps_split_composite ,GPU_TAG_PRIM_SPLIT_COMPOSITE)
+            }
+            AlphaBatchKind::Blend => {
+                //self.ps_blend.bind(&mut self.device, projection, &mut self.renderer_errors);
+                (&mut self.ps_blend, GPU_TAG_PRIM_BLEND)
+            }*/
             AlphaBatchKind::Rectangle => {
                 if needs_clipping {
                     //self.ps_rectangle_clip.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                    (&mut self.ps_rectangle, GPU_TAG_PRIM_RECT)
+                    (&mut self.ps_rectangle_clip, GPU_TAG_PRIM_RECT)
                 } else {
-                    //self.ps_rectangle.bind(&mut self.device, transform_kind, projection, instances, &mut self.renderer_errors);
+                    //self.ps_rectangle.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                     (&mut self.ps_rectangle, GPU_TAG_PRIM_RECT)
                 }
-                //(self.ps_rectangle, GPU_TAG_PRIM_RECT)
+                //GPU_TAG_PRIM_RECT
             }
-            _=> return
-        };
-        /*let marker = match key.kind {
-            AlphaBatchKind::Composite { .. } => {
-                self.ps_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_COMPOSITE
-            }
-            AlphaBatchKind::HardwareComposite => {
-                self.ps_hw_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_HW_COMPOSITE
-            }
-            AlphaBatchKind::SplitComposite => {
-                self.ps_split_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_SPLIT_COMPOSITE
-            }
-            AlphaBatchKind::Blend => {
-                self.ps_blend.bind(&mut self.device, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_BLEND
-            }
-            AlphaBatchKind::Rectangle => {
-                if needs_clipping {
-                    self.ps_rectangle_clip.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                } else {
-                    self.ps_rectangle.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                }
-                GPU_TAG_PRIM_RECT
-            }
-            AlphaBatchKind::Line => {
-                self.ps_line.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_LINE
-            }
+            /*AlphaBatchKind::Line => {
+                //self.ps_line.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_line, GPU_TAG_PRIM_LINE)
+            }*/
             AlphaBatchKind::TextRun => {
                 match key.blend_mode {
                     BlendMode::Subpixel(..) => {
-                        self.ps_text_run_subpixel.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                        //self.ps_text_run_subpixel.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                        (&mut self.ps_text_run_subpixel, GPU_TAG_PRIM_TEXT_RUN)
                     }
-                    BlendMode::Alpha |
+                    /*BlendMode::Alpha |
                     BlendMode::PremultipliedAlpha |
-                    BlendMode::None => {
-                        self.ps_text_run.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                    BlendMode::None => {*/
+                    _=> {
+                        //self.ps_text_run.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                        (&mut self.ps_text_run, GPU_TAG_PRIM_TEXT_RUN)
                     }
-                };
-                GPU_TAG_PRIM_TEXT_RUN
+                }//;
+                //GPU_TAG_PRIM_TEXT_RUN
             }
             AlphaBatchKind::Image(image_buffer_kind) => {
-                self.ps_image[image_buffer_kind as usize]
+                /*self.ps_image[image_buffer_kind as usize]
                     .as_mut()
                     .expect("Unsupported image shader kind")
-                    .bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_IMAGE
+                    .bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);*/
+                (&mut self.ps_image, GPU_TAG_PRIM_IMAGE)
             }
             AlphaBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                 let shader_index = Renderer::get_yuv_shader_index(image_buffer_kind,
                                                                   format,
                                                                   color_space);
-                self.ps_yuv_image[shader_index]
+                /*self.ps_yuv_image[shader_index]
                     .as_mut()
                     .expect("Unsupported YUV shader kind")
-                    .bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_YUV_IMAGE
+                    .bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);*/
+                (&mut self.ps_yuv_image[shader_index], GPU_TAG_PRIM_YUV_IMAGE)
             }
             AlphaBatchKind::BorderCorner => {
-                self.ps_border_corner.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_BORDER_CORNER
+                //self.ps_border_corner.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_border_corner, GPU_TAG_PRIM_BORDER_CORNER)
             }
             AlphaBatchKind::BorderEdge => {
-                self.ps_border_edge.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_BORDER_EDGE
+                //self.ps_border_edge.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_border_edge, GPU_TAG_PRIM_BORDER_EDGE)
             }
             AlphaBatchKind::AlignedGradient => {
-                self.ps_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_GRADIENT
+                //self.ps_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_gradient, GPU_TAG_PRIM_GRADIENT)
             }
             AlphaBatchKind::AngleGradient => {
-                self.ps_angle_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_ANGLE_GRADIENT
+                //self.ps_angle_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_angle_gradient, GPU_TAG_PRIM_ANGLE_GRADIENT)
             }
             AlphaBatchKind::RadialGradient => {
-                self.ps_radial_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_RADIAL_GRADIENT
+                //self.ps_radial_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_radial_gradient, GPU_TAG_PRIM_RADIAL_GRADIENT)
             }
             AlphaBatchKind::BoxShadow => {
-                self.ps_box_shadow.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_BOX_SHADOW
+                //self.ps_box_shadow.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_box_shadow, GPU_TAG_PRIM_BOX_SHADOW)
             }
             AlphaBatchKind::CacheImage => {
-                self.ps_cache_image.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
-                GPU_TAG_PRIM_CACHE_IMAGE
+                //self.ps_cache_image.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+                (&mut self.ps_cache_image, GPU_TAG_PRIM_CACHE_IMAGE)
             }
-        };*/
+            _=> return
+        };
 
         // Handle special case readback for composites.
         /*match key.kind {
@@ -1787,7 +1845,7 @@ impl Renderer {
         if !target.alpha_batcher.is_empty() {
             let _gm2 = GpuMarker::new("alpha batches");
             //self.device.set_blend(false);
-            let mut prev_blend_mode = BlendMode::None;
+            //let mut prev_blend_mode = BlendMode::None;
 
             self.gpu_profile.add_sampler(GPU_SAMPLER_TAG_OPAQUE);
 
@@ -1818,7 +1876,7 @@ impl Renderer {
             self.gpu_profile.add_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
             enable_depth_write = false;
             for batch in &target.alpha_batcher.batch_list.alpha_batch_list.batches {
-                if batch.key.blend_mode != prev_blend_mode {
+                /*if batch.key.blend_mode != prev_blend_mode {
                     match batch.key.blend_mode {
                         BlendMode::None => {
                             //self.device.set_blend(false);
@@ -1837,7 +1895,7 @@ impl Renderer {
                         }
                     }
                     prev_blend_mode = batch.key.blend_mode;
-                }
+                }*/
 
                 self.submit_batch(&batch.key,
                                   &batch.instances,

@@ -28,8 +28,8 @@ use gfx::format::{Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureCh
 use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32};
 use gfx::handle::Sampler;
 use gfx::memory::Typed;
-use pipelines::{primitive, /*ClipProgram,*/ Position, PrimitiveInstances, Program, Locals};
-use renderer::{BlendMode, /*DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID,*/ MAX_VERTEX_TEXTURE_WIDTH};
+use pipelines::{primitive, ClipProgram, Position, PrimitiveInstances, Program, Locals};
+use renderer::{BlendMode, /*DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID,*/ MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 
 use backend;
 use InitWindow;
@@ -647,21 +647,26 @@ impl Device {
         texture.id = 0;
     }
 
-    pub fn update_resource_cache<T>(&mut self, row_index: u16, memory: &[T]) where T: gfx::traits::Pod {
+    pub fn update_data_texture<T>(&mut self, sampler: TextureSampler, offset: [u16; 2], size: [u16; 2], memory: &[T]) where T: gfx::traits::Pod {
         let img_info = gfx::texture::ImageInfoCommon {
-            xoffset: 0,
-            yoffset: row_index,
+            xoffset: offset[0],
+            yoffset: offset[1],
             zoffset: 0,
-            width: self.max_texture_size as u16,
-            height: 1,
+            width: size[0],
+            height: size[1],
             depth: 0,
             format: (),
             mipmap: 0,
         };
 
         let data = gfx::memory::cast_slice(memory);
-        //assert!(data.len() == self.max_texture_size as usize * RGBA_STRIDE);
-        self.encoder.update_texture::<_, Rgba32F>(&self.resource_cache.handle, None, img_info, data).unwrap();
+        let tex = match sampler {
+            TextureSampler::ResourceCache => &self.resource_cache.handle,
+            TextureSampler::Layers => &self.layers.handle,
+            TextureSampler::RenderTasks => &self.render_tasks.handle,
+            _=> unreachable!(),
+        };
+        self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
     pub fn update_pbo_data<T>(&mut self, data: &[T]) {

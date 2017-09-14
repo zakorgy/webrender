@@ -27,6 +27,9 @@ use api::{ExternalImageType, FilterOp, FontRenderMode, ImageRendering, LayerRect
 use api::{LayerToWorldTransform, MixBlendMode, PipelineId, PropertyBinding, TransformStyle};
 use api::{TileOffset, WorldToLayerTransform, YuvColorSpace, YuvFormat, LayerVector2D};
 
+use gfx::memory::Pod;
+unsafe impl Pod for PackedLayer {}
+
 // Special sentinel value recognized by the shader. It is considered to be
 // a dummy task that doesn't mask out anything.
 const OPAQUE_TASK_ADDRESS: RenderTaskAddress = RenderTaskAddress(i32::MAX as u32);
@@ -228,7 +231,8 @@ impl BatchList {
             BlendMode::None => {
                 self.opaque_batch_list.get_suitable_batch(key)
             }
-            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::Subpixel(..) => {
+            //BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::Subpixel(..) => {
+            _ => {
                 self.alpha_batch_list.get_suitable_batch(key, item_bounding_rect)
             }
         }
