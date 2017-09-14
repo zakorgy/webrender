@@ -4,6 +4,7 @@
 
 use euclid::Transform3D;
 use internal_types::RenderTargetMode;
+use std::collections::{HashSet, HashMap};
 use std::fs::File;
 use std::io::Read;
 use std::iter::repeat;
@@ -29,7 +30,7 @@ use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32};
 use gfx::handle::Sampler;
 use gfx::memory::Typed;
 use pipelines::{primitive, ClipProgram, Position, PrimitiveInstances, Program, Locals};
-use renderer::{BlendMode, /*DITHER_ID, DUMMY_A8_ID, DUMMY_RGBA8_ID,*/ MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
+use renderer::{BlendMode, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 
 use backend;
 use InitWindow;
@@ -48,8 +49,6 @@ pub type BackendDevice = backend::Device;
 #[cfg(all(target_os = "windows", feature="dx11"))]
 use gfx_window_dxgi;
 
-pub type TextureId = u32;
-
 pub const LAYER_TEXTURE_WIDTH: usize = 1017;
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023;
 pub const TEXTURE_HEIGTH: usize = 8;
@@ -60,6 +59,15 @@ pub const A_STRIDE: usize = 1;
 pub const RG_STRIDE: usize = 2;
 pub const RGB_STRIDE: usize = 3;
 pub const RGBA_STRIDE: usize = 4;
+
+pub type TextureId = u32;
+
+pub const INVALID: TextureId = 0;
+pub const DUMMY_A8: TextureId = 1;
+pub const DUMMY_RGBA8: TextureId = 2;
+pub const DITHER: TextureId = 3;
+
+pub type A8 = (R8, Unorm);
 
 // The value of the type GL_FRAMEBUFFER_SRGB from https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_framebuffer_sRGB.txt
 const GL_FRAMEBUFFER_SRGB: u32 = 0x8DB9;
@@ -189,7 +197,60 @@ impl<T> DataTexture<T> where T: gfx::format::TextureFormat {
     }
 }
 
-pub struct Texture {
+pub struct CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::TextureFormat {
+    //pub id: TextureId,
+    pub handle: gfx::handle::Texture<R, T::Surface>,
+    pub rtv: gfx::handle::RenderTargetView<R, T>,
+    pub srv: gfx::handle::ShaderResourceView<R, T::View>,
+}
+
+impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::TextureFormat {
+    pub fn create<F>(factory: &mut F, size: [usize; 2]) -> Result<CacheTexture<T>, CombinedError>
+        where F: gfx::Factory<R>
+    {
+        let (width, height) = (size[0] as u16, size[1] as u16);
+        let tex_kind = Kind::D2Array(width, height, 1, gfx::texture::AaMode::Single);
+
+        let (surface, rtv, view) = {
+            let surface = <T::Surface as gfx::format::SurfaceTyped>::get_surface_type();
+            let desc = gfx::texture::Info {
+                kind: tex_kind,
+                levels: 1,
+                format: surface,
+                bind: gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET,
+                usage: gfx::memory::Usage::Data,
+            };
+            let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
+            let levels = (0, raw.get_info().levels - 1);
+            let tex = Typed::new(raw);
+            let rtv = try!(factory.view_texture_as_render_target(&tex, 0, None));
+            let view = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
+            (tex, rtv, view)
+        };
+
+        Ok(CacheTexture {
+            handle: surface,
+            rtv: rtv,
+            srv: view,
+        })
+    }
+
+    #[inline(always)]
+    pub fn get_size(&self) -> (usize, usize) {
+        let (w, h, _, _) = self.handle.get_info().kind.get_dimensions();
+        (w as usize, h as usize)
+    }
+}
+
+pub struct ImageTexture<T> where T: gfx::format::TextureFormat {
+    //pub id: TextureId,
+    pub handle: gfx::handle::Texture<R, T::Surface>,
+    pub srv: gfx::handle::ShaderResourceView<R, T::View>,
+    pub filter: TextureFilter,
+}
+
+/*pub struct Texture {
     id: u32,
     target: TextureTarget,
     layer_count: i32,
@@ -230,7 +291,7 @@ impl Drop for Texture {
     fn drop(&mut self) {
         debug_assert!(thread::panicking() || self.id == 0);
     }
-}
+}*/
 
 const MAX_TIMERS_PER_FRAME: usize = 256;
 const MAX_SAMPLERS_PER_FRAME: usize = 16;
@@ -456,7 +517,11 @@ pub struct Device {
     pub color0: TextureId,
     pub color1: TextureId,
     pub color2: TextureId,
-    pub dummy_tex: DataTexture<Rgba8>,
+    pub cache_a8_textures: HashMap<TextureId, CacheTexture<A8>>,
+    pub cache_rgba8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
+    //pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
+    //pub dummy_cache_a8: CacheTexture<A8>,
+    //pub dummy_cache_rgba8: CacheTexture<Rgba8>,
     pub layers: DataTexture<Rgba32F>,
     pub render_tasks: DataTexture<Rgba32F>,
     pub resource_cache: DataTexture<Rgba32F>,
@@ -515,10 +580,16 @@ impl Device {
         sampler_info.filter = gfx::texture::FilterMethod::Bilinear;
         let sampler_linear = factory.create_sampler(sampler_info);
 
-        let dummy_tex = DataTexture::create(&mut factory, [1, 1]).unwrap();
+        let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
+        let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
         let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
         let resource_cache_tex = DataTexture::create(&mut factory, [max_texture_size, max_texture_size]).unwrap();
+
+        let mut cache_a8_textures = HashMap::new();
+        cache_a8_textures.insert(DUMMY_A8, dummy_cache_a8_tex);
+        let mut cache_rgba8_textures = HashMap::new();
+        cache_rgba8_textures.insert(DUMMY_RGBA8, dummy_cache_rgba8_tex);
 
         let dev = Device {
             device: device,
@@ -528,7 +599,10 @@ impl Device {
             color0: 0,
             color1: 0,
             color2: 0,
-            dummy_tex: dummy_tex,
+            cache_a8_textures: cache_a8_textures,
+            cache_rgba8_textures: cache_rgba8_textures,
+            //dummy_cache_a8: dummy_cache_a8_tex,
+            //dummy_cache_rgba8: dummy_cache_rgba8_tex,
             layers: layers_tex,
             render_tasks: render_tasks_tex,
             resource_cache: resource_cache_tex,
@@ -552,6 +626,14 @@ impl Device {
         (dev, None)
     }
 
+    pub fn dummy_cache_a8(&mut self) -> &CacheTexture<A8> {
+        self.cache_a8_textures.get(&DUMMY_A8).unwrap()
+    }
+
+    pub fn dummy_cache_rgba8(&mut self) -> &CacheTexture<Rgba8> {
+        self.cache_rgba8_textures.get(&DUMMY_RGBA8).unwrap()
+    }
+
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size
     }
@@ -572,7 +654,7 @@ impl Device {
 
     pub fn bind_texture<S>(&mut self,
                            sampler: S,
-                           texture: &Texture) where S: Into<TextureSlot> {
+                           texture: &TextureId) where S: Into<TextureSlot> {
         debug_assert!(self.inside_frame);
 
         let sampler_index = sampler.into().0;
@@ -585,8 +667,8 @@ impl Device {
     }
 
 
-    pub fn create_texture(&mut self, target: TextureTarget) -> Texture {
-        Texture {
+    pub fn create_texture(&mut self, target: TextureTarget) -> TextureId {
+        /*Texture {
             id: 0,
             target: target,
             width: 0,
@@ -598,11 +680,12 @@ impl Device {
             handle: None,
             rtv: None,
             srv: None,
-        }
+        }*/
+        0
     }
 
     pub fn init_texture(&mut self,
-                        texture: &mut Texture,
+                        texture: &TextureId,
                         width: u32,
                         height: u32,
                         format: ImageFormat,
@@ -612,7 +695,7 @@ impl Device {
                         pixels: Option<&[u8]>) {
         debug_assert!(self.inside_frame);
 
-        let resized = texture.width != width || texture.height != height;
+        /*let resized = texture.width != width || texture.height != height;
 
         texture.format = format;
         texture.width = width;
@@ -626,26 +709,26 @@ impl Device {
             }
             RenderTargetMode::None => {
             }
-        }
+        }*/
     }
 
-    pub fn free_texture_storage(&mut self, texture: &mut Texture) {
+    pub fn free_texture_storage(&mut self, texture: &TextureId) {
         debug_assert!(self.inside_frame);
 
-        if texture.format == ImageFormat::Invalid {
+        /*if texture.format == ImageFormat::Invalid {
             return;
         }
 
         texture.format = ImageFormat::Invalid;
         texture.width = 0;
         texture.height = 0;
-        texture.layer_count = 0;
+        texture.layer_count = 0;*/
     }
 
-    pub fn delete_texture(&mut self, mut texture: Texture) {
+    /*pub fn delete_texture(&mut self, mut texture: Texture) {
         self.free_texture_storage(&mut texture);
         texture.id = 0;
-    }
+    }*/
 
     pub fn update_data_texture<T>(&mut self, sampler: TextureSampler, offset: [u16; 2], size: [u16; 2], memory: &[T]) where T: gfx::traits::Pod {
         let img_info = gfx::texture::ImageInfoCommon {
@@ -680,7 +763,7 @@ impl Device {
     }
 
     pub fn update_texture_from_pbo(&mut self,
-                                   texture: &Texture,
+                                   texture: &TextureId,
                                    x0: u32,
                                    y0: u32,
                                    width: u32,

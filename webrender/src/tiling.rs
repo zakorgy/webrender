@@ -4,7 +4,7 @@
 
 use border::{BorderCornerInstance, BorderCornerSide};
 use clip::{ClipSource, ClipStore};
-use device::Texture;
+use device::TextureId;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle, GpuCacheUpdateList};
 use gpu_types::BoxShadowCacheInstance;
 use internal_types::BatchTextures;
@@ -1138,8 +1138,8 @@ pub struct RenderPass {
     tasks: Vec<RenderTaskId>,
     pub color_targets: RenderTargetList<ColorRenderTarget>,
     pub alpha_targets: RenderTargetList<AlphaRenderTarget>,
-    pub color_texture: Option<Texture>,
-    pub alpha_texture: Option<Texture>,
+    pub color_texture: Option<TextureId>,
+    pub alpha_texture: Option<TextureId>,
     dynamic_tasks: FastHashMap<RenderTaskKey, DynamicTaskInfo>,
 }
 

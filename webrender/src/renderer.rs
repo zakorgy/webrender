@@ -18,9 +18,10 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{Device, FrameId, Texture, VertexDescriptor, GpuMarker, GpuProfiler};
+use device::{Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
 use device::{GpuTimer, TextureFilter, VertexUsageHint, TextureTarget, ShaderError};
 use device::{TextureSlot, VertexAttribute, VertexAttributeKind};
+use device::{TextureId, DUMMY_A8, DUMMY_RGBA8, DITHER};
 use euclid::{Transform3D, rect};
 use frame_builder::FrameBuilderConfig;
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
@@ -345,7 +346,7 @@ struct SourceTextureResolver {
     /// reuse the TextureId when the texture caches's free
     /// list reuses the texture cache ID. This saves having to
     /// use a hashmap, and allows a flat vector for performance.
-    cache_texture_map: Vec<Texture>,
+    cache_texture_map: Vec<TextureId>,
 
     /// Map of external image IDs to native textures.
     //external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
@@ -353,49 +354,41 @@ struct SourceTextureResolver {
     /// A special 1x1 dummy cache texture used for shaders that expect to work
     /// with the cache but are actually running in the first pass
     /// when no target is yet provided as a cache texture input.
-    dummy_cache_texture: Texture,
+    dummy_cache_rgba8_texture: TextureId,
+    dummy_cache_a8_texture: TextureId,
 
     /// The current cache textures.
-    cache_rgba8_texture: Option<Texture>,
-    cache_a8_texture: Option<Texture>,
+    cache_rgba8_texture: Option<TextureId>,
+    cache_a8_texture: Option<TextureId>,
 }
 
 impl SourceTextureResolver {
-    fn new(device: &mut Device) -> SourceTextureResolver {
-        let mut dummy_cache_texture = device.create_texture(TextureTarget::Array);
-        device.init_texture(&mut dummy_cache_texture,
-                            1,
-                            1,
-                            ImageFormat::BGRA8,
-                            TextureFilter::Linear,
-                            RenderTargetMode::RenderTarget,
-                            1,
-                            None);
-
+    fn new(/*device: &mut Device*/) -> SourceTextureResolver {
         SourceTextureResolver {
             cache_texture_map: Vec::new(),
             //external_images: FastHashMap::default(),
-            dummy_cache_texture,
+            dummy_cache_a8_texture: DUMMY_A8,
+            dummy_cache_rgba8_texture: DUMMY_RGBA8,
             cache_a8_texture: None,
             cache_rgba8_texture: None,
         }
     }
 
     fn deinit(self, device: &mut Device) {
-        device.delete_texture(self.dummy_cache_texture);
+        //device.delete_texture(self.dummy_cache_texture);
 
-        for texture in self.cache_texture_map {
+        /*for texture in self.cache_texture_map {
             device.delete_texture(texture);
-        }
+        }*/
     }
 
     fn end_pass(&mut self,
                 pass_index: usize,
                 pass_count: usize,
-                mut a8_texture: Option<Texture>,
-                mut rgba8_texture: Option<Texture>,
-                a8_pool: &mut Vec<Texture>,
-                rgba8_pool: &mut Vec<Texture>) {
+                mut a8_texture: Option<TextureId>,
+                mut rgba8_texture: Option<TextureId>,
+                a8_pool: &mut Vec<TextureId>,
+                rgba8_pool: &mut Vec<TextureId>) {
         // If we have cache textures from previous pass, return them to the pool.
         rgba8_pool.extend(self.cache_rgba8_texture.take());
         a8_pool.extend(self.cache_a8_texture.take());
@@ -424,11 +417,11 @@ impl SourceTextureResolver {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
-                let texture = self.cache_a8_texture.as_ref().unwrap_or(&self.dummy_cache_texture);
+                let texture = self.cache_a8_texture.as_ref().unwrap_or(&self.dummy_cache_a8_texture);
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::CacheRGBA8 => {
-                let texture = self.cache_rgba8_texture.as_ref().unwrap_or(&self.dummy_cache_texture);
+                let texture = self.cache_rgba8_texture.as_ref().unwrap_or(&self.dummy_cache_rgba8_texture);
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::External(external_image) => {
@@ -447,16 +440,16 @@ impl SourceTextureResolver {
     // Get the real (OpenGL) texture ID for a given source texture.
     // For a texture cache texture, the IDs are stored in a vector
     // map for fast access.
-    fn resolve(&self, texture_id: &SourceTexture) -> Option<&Texture> {
+    fn resolve(&self, texture_id: &SourceTexture) -> Option<&TextureId> {
         match *texture_id {
             SourceTexture::Invalid => {
                 None
             }
             SourceTexture::CacheA8 => {
-                Some(self.cache_a8_texture.as_ref().unwrap_or(&self.dummy_cache_texture))
+                Some(self.cache_a8_texture.as_ref().unwrap_or(&self.dummy_cache_a8_texture))
             }
             SourceTexture::CacheRGBA8 => {
-                Some(self.cache_rgba8_texture.as_ref().unwrap_or(&self.dummy_cache_texture))
+                Some(self.cache_rgba8_texture.as_ref().unwrap_or(&self.dummy_cache_rgba8_texture))
             }
             SourceTexture::External(..) => {
                 panic!("BUG: External textures cannot be resolved, they can only be bound.");
@@ -494,19 +487,19 @@ impl CacheRow {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct CacheTexture {
+struct ResourceCacheTexture {
     //texture: Texture,
     //pbo: PBO,
     rows: Vec<CacheRow>,
     cpu_blocks: Vec<GpuBlockData>,
 }
 
-impl CacheTexture {
-    fn new(device: &mut Device) -> CacheTexture {
+impl ResourceCacheTexture {
+    fn new(device: &mut Device) -> ResourceCacheTexture {
         //let texture = device.create_texture(TextureTarget::Default);
         //let pbo = device.create_pbo();
 
-        CacheTexture {
+        ResourceCacheTexture {
             //texture,
             //pbo,
             rows: Vec::new(),
@@ -828,21 +821,21 @@ pub struct Renderer {
     profiler: Profiler,
     last_time: u64,
 
-    color_render_targets: Vec<Texture>,
-    alpha_render_targets: Vec<Texture>,
+    color_render_targets: Vec<TextureId>,
+    alpha_render_targets: Vec<TextureId>,
 
     gpu_profile: GpuProfiler<GpuProfileTag>,
 
     layer_texture: VertexDataTexture,
     render_task_texture: VertexDataTexture,
-    gpu_cache_texture: CacheTexture,
+    gpu_cache_texture: ResourceCacheTexture,
 
     pipeline_epoch_map: FastHashMap<PipelineId, Epoch>,
 
     // Manages and resolves source textures IDs to real texture IDs.
     texture_resolver: SourceTextureResolver,
 
-    dither_matrix_texture: Option<Texture>,
+    dither_matrix_texture: TextureId,
 
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
@@ -958,11 +951,11 @@ impl Renderer {
 
         let backend_profile_counters = BackendProfileCounters::new();
 
-        let dither_matrix_texture = None;
+        let dither_matrix_texture = DITHER;
 
         let debug_renderer = DebugRenderer::new(&mut device);
 
-        let texture_resolver = SourceTextureResolver::new(&mut device);
+        let texture_resolver = SourceTextureResolver::new(/*&mut device*/);
 
         let layer_texture = VertexDataTexture::new(/*&mut device*/TextureSampler::Layers);
         let render_task_texture = VertexDataTexture::new(/*&mut device*/TextureSampler::RenderTasks);
@@ -1012,7 +1005,7 @@ impl Renderer {
             backend.run(backend_profile_counters);
         })};
 
-        let gpu_cache_texture = CacheTexture::new(&mut device);
+        let gpu_cache_texture = ResourceCacheTexture::new(&mut device);
 
         let gpu_profile = GpuProfiler::new();
 
@@ -1466,7 +1459,7 @@ impl Renderer {
                                 self.device.update_pbo_data(&data[offset as usize..]);
                             }
                             TextureUpdateSource::External { id, channel_index } => {
-                                let handler = self.external_image_handler
+                                /*let handler = self.external_image_handler
                                                   .as_mut()
                                                   .expect("Found external image, but no handler set!");
                                 match handler.lock(id, channel_index).source {
@@ -1485,7 +1478,7 @@ impl Renderer {
                                     }
                                     _ => panic!("No external buffer found"),
                                 };
-                                handler.unlock(id, channel_index);
+                                handler.unlock(id, channel_index);*/
                             }
                         }
 
@@ -1533,9 +1526,9 @@ impl Renderer {
         }
 
         // TODO: this probably isn't the best place for this.
-        if let Some(ref texture) = self.dither_matrix_texture {
+        /*if let Some(ref texture) = self.dither_matrix_texture {
             //self.device.bind_texture(TextureSampler::Dither, texture);
-        }
+        }*/
 
         /*let vao = match vertex_array_kind {
             VertexArrayKind::Primitive => &self.prim_vao,
@@ -1566,7 +1559,7 @@ impl Renderer {
                     instances: &[PrimitiveInstance],
                     projection: &Transform3D<f32>,
                     render_tasks: &RenderTaskTree,
-                    render_target: Option<(&Texture, i32)>,
+                    render_target: Option<(&TextureId, i32)>,
                     target_dimensions: DeviceUintSize,
                     enable_depth_write: bool) {
         let transform_kind = key.flags.transform_kind();
@@ -1751,7 +1744,7 @@ impl Renderer {
     }
 
     fn draw_color_target(&mut self,
-        render_target: Option<(&Texture, i32)>,
+        render_target: Option<(&TextureId, i32)>,
         target: &ColorRenderTarget,
         target_size: DeviceUintSize,
         clear_color: Option<[f32; 4]>,
@@ -1913,7 +1906,7 @@ impl Renderer {
     }
 
     fn draw_alpha_target(&mut self,
-        render_target: (&Texture, i32),
+        render_target: (&TextureId, i32),
         target: &AlphaRenderTarget,
         target_size: DeviceUintSize,
         projection: &Transform3D<f32>,
@@ -2306,7 +2299,7 @@ impl Renderer {
                                   .cache_texture_map
                                   .iter()
                                   .map(|texture| {
-                                      texture.get_layer_count()
+                                      1//texture.get_layer_count()
                                   })
                                   .sum();
 
@@ -2320,7 +2313,7 @@ impl Renderer {
         for texture in &self.texture_resolver.cache_texture_map {
             let y = spacing + if self.debug_flags.contains(RENDER_TARGET_DBG) { 528 } else { 0 };
 
-            let layer_count = texture.get_layer_count();
+            let layer_count = 1;//texture.get_layer_count();
             for layer_index in 0..layer_count {
                 let x = fb_width - (spacing + size) * (i as i32 + 1);
 
@@ -2366,17 +2359,17 @@ impl Renderer {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame(1.0);
         self.gpu_cache_texture.deinit(&mut self.device);
-        if let Some(dither_matrix_texture) = self.dither_matrix_texture {
+        /*if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
-        }
+        }*/
         self.layer_texture.deinit(&mut self.device);
         self.render_task_texture.deinit(&mut self.device);
-        for texture in self.alpha_render_targets {
+        /*for texture in self.alpha_render_targets {
             self.device.delete_texture(texture);
         }
         for texture in self.color_render_targets {
             self.device.delete_texture(texture);
-        }
+        }*/
         //self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
         /*self.device.delete_vao(self.prim_vao);
