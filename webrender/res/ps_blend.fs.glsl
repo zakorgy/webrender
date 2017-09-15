@@ -7,7 +7,7 @@ vec3 rgbToHsv(vec3 c) {
 
     float chroma = value - min(min(c.r, c.g), c.b);
     if (chroma == 0.0) {
-        return vec3(0.0);
+        return vec3(0.0, 0.0, 0.0);
     }
     float saturation = chroma / value;
 
@@ -26,8 +26,8 @@ vec3 rgbToHsv(vec3 c) {
 }
 
 vec3 hsvToRgb(vec3 c) {
-    if (c.s == 0.0) {
-        return vec3(c.z);
+    if (c.y == 0.0) {
+        return vec3(c.z, c.z, c.z);
     }
 
     float hue = c.x * 6.0;
@@ -53,7 +53,7 @@ vec3 hsvToRgb(vec3 c) {
 
 vec4 Blur(float radius, vec2 direction) {
     // TODO(gw): Support blur in WR2!
-    return vec4(1.0);
+    return vec4(1.0, 1.0, 1.0, 1.0);
 }
 
 vec4 Contrast(vec4 Cs, float amount) {
@@ -62,10 +62,11 @@ vec4 Contrast(vec4 Cs, float amount) {
 
 vec4 Grayscale(vec4 Cs, float amount) {
     float ia = 1.0 - amount;
-    return mat4(vec4(0.2126 + 0.7874 * ia, 0.2126 - 0.2126 * ia, 0.2126 - 0.2126 * ia, 0.0),
-                vec4(0.7152 - 0.7152 * ia, 0.7152 + 0.2848 * ia, 0.7152 - 0.7152 * ia, 0.0),
-                vec4(0.0722 - 0.0722 * ia, 0.0722 - 0.0722 * ia, 0.0722 + 0.9278 * ia, 0.0),
-                vec4(0.0, 0.0, 0.0, 1.0)) * Cs;
+    mat4 mat = mat4(vec4(0.2126 + 0.7874 * ia, 0.2126 - 0.2126 * ia, 0.2126 - 0.2126 * ia, 0.0),
+                    vec4(0.7152 - 0.7152 * ia, 0.7152 + 0.2848 * ia, 0.7152 - 0.7152 * ia, 0.0),
+                    vec4(0.0722 - 0.0722 * ia, 0.0722 - 0.0722 * ia, 0.0722 + 0.9278 * ia, 0.0),
+                    vec4(0.0, 0.0, 0.0, 1.0));
+    return mul(Cs, mat);
 }
 
 vec4 HueRotate(vec4 Cs, float amount) {
@@ -79,15 +80,16 @@ vec4 Invert(vec4 Cs, float amount) {
 }
 
 vec4 Saturate(vec4 Cs, float amount) {
-    return vec4(hsvToRgb(min(vec3(1.0, amount, 1.0) * rgbToHsv(Cs.rgb), vec3(1.0))), Cs.a);
+    return vec4(hsvToRgb(min(vec3(1.0, amount, 1.0) * rgbToHsv(Cs.rgb), vec3(1.0, 1.0, 1.0))), Cs.a);
 }
 
 vec4 Sepia(vec4 Cs, float amount) {
     float ia = 1.0 - amount;
-    return mat4(vec4(0.393 + 0.607 * ia, 0.349 - 0.349 * ia, 0.272 - 0.272 * ia, 0.0),
-                vec4(0.769 - 0.769 * ia, 0.686 + 0.314 * ia, 0.534 - 0.534 * ia, 0.0),
-                vec4(0.189 - 0.189 * ia, 0.168 - 0.168 * ia, 0.131 + 0.869 * ia, 0.0),
-                vec4(0.0, 0.0, 0.0, 1.0)) * Cs;
+    mat4 mat = mat4(vec4(0.393 + 0.607 * ia, 0.349 - 0.349 * ia, 0.272 - 0.272 * ia, 0.0),
+                    vec4(0.769 - 0.769 * ia, 0.686 + 0.314 * ia, 0.534 - 0.534 * ia, 0.0),
+                    vec4(0.189 - 0.189 * ia, 0.168 - 0.168 * ia, 0.131 + 0.869 * ia, 0.0),
+                    vec4(0.0, 0.0, 0.0, 1.0));
+    return mul(Cs, mat);
 }
 
 vec4 Brightness(vec4 Cs, float amount) {
@@ -98,7 +100,15 @@ vec4 Opacity(vec4 Cs, float amount) {
     return Cs * amount;
 }
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec3 vUv = IN.vUv;
+    vec4 vUvBounds = IN.vUvBounds;
+    float vAmount = IN.vAmount;
+    int vOp = IN.vOp;
+#endif //WR_DX11
     vec2 uv = clamp(vUv.xy, vUvBounds.xy, vUvBounds.zw);
     vec4 Cs = textureLod(sCacheRGBA8, vec3(uv, vUv.z), 0.0);
 
@@ -109,31 +119,31 @@ void main(void) {
     switch (vOp) {
         case 0:
             // Gaussian blur is specially handled:
-            oFragColor = Cs;// Blur(vAmount, vec2(0,0));
+            SHADER_OUT(Target0, Cs);// Blur(vAmount, vec2(0,0));
             break;
         case 1:
-            oFragColor = Contrast(Cs, vAmount);
+            SHADER_OUT(Target0, Contrast(Cs, vAmount));
             break;
         case 2:
-            oFragColor = Grayscale(Cs, vAmount);
+            SHADER_OUT(Target0, Grayscale(Cs, vAmount));
             break;
         case 3:
-            oFragColor = HueRotate(Cs, vAmount);
+            SHADER_OUT(Target0, HueRotate(Cs, vAmount));
             break;
         case 4:
-            oFragColor = Invert(Cs, vAmount);
+            SHADER_OUT(Target0, Invert(Cs, vAmount));
             break;
         case 5:
-            oFragColor = Saturate(Cs, vAmount);
+            SHADER_OUT(Target0, Saturate(Cs, vAmount));
             break;
         case 6:
-            oFragColor = Sepia(Cs, vAmount);
+            SHADER_OUT(Target0, Sepia(Cs, vAmount));
             break;
         case 7:
-            oFragColor = Brightness(Cs, vAmount);
+            SHADER_OUT(Target0, Brightness(Cs, vAmount));
             break;
         case 8:
-            oFragColor = Opacity(Cs, vAmount);
+            SHADER_OUT(Target0, Opacity(Cs, vAmount));
             break;
     }
 }

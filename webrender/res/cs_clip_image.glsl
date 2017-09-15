@@ -4,7 +4,19 @@
 
 #include shared,prim_shared,clip_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 Position : SV_Position;
+        vec3 vPos : vPos;
+        flat vec4 vLocalBounds : vLocalBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
+        flat vec4 vClipMaskUvRect : vClipMaskUvRect;
+        flat vec4 vClipMaskUvInnerRect : vClipMaskUvInnerRect;
+        flat float vLayer : vLayer;
+    };
+#else
 varying vec3 vPos;
 flat varying vec4 vClipMaskUvRect;
 flat varying vec4 vClipMaskUvInnerRect;
 flat varying float vLayer;
+#endif //WR_DX11

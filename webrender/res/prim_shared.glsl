@@ -20,6 +20,12 @@ uniform sampler2DArray sCacheRGBA8;
 // An A8 target for standalone tasks that is available to all passes.
 uniform sampler2DArray sSharedCacheA8;
 
+#ifdef WR_DX11
+SamplerState sCacheA8_;
+SamplerState sCacheRGBA8_;
+SamplerState sSharedCacheA8_;
+#endif //WR_DX11
+
 uniform sampler2D sGradients;
 
 struct RectWithSize {
@@ -54,7 +60,10 @@ vec2 clamp_rect(vec2 point, RectWithSize rect) {
 
 RectWithSize intersect_rect(RectWithSize a, RectWithSize b) {
     vec4 p = clamp(vec4(a.p0, a.p0 + a.size), b.p0.xyxy, b.p0.xyxy + b.size.xyxy);
-    return RectWithSize(p.xy, max(vec2(0.0), p.zw - p.xy));
+    RectWithSize result;
+    result.p0 = p.xy;
+    result.size = max(vec2(0.0, 0.0), p.zw - p.xy);
+    return result;
 }
 
 float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
@@ -63,10 +72,13 @@ float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
 }
 
 // TODO: convert back to RectWithEndPoint if driver issues are resolved, if ever.
+#ifndef WR_DX11
 flat varying vec4 vClipMaskUvBounds;
 varying vec3 vClipMaskUv;
+
 #ifdef WR_FEATURE_TRANSFORM
     flat varying vec4 vLocalBounds;
+#endif
 #endif
 
 // TODO(gw): This is here temporarily while we have
@@ -83,19 +95,48 @@ ivec2 get_resource_cache_uv(int address) {
 
 uniform HIGHP_SAMPLER_FLOAT sampler2D sResourceCache;
 
-vec4[2] fetch_from_resource_cache_2_direct(ivec2 address) {
-    return vec4[2](
-        texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0))
-    );
+struct ResourceCacheData2 {
+    vec4 data0;
+    vec4 data1;
+};
+
+struct ResourceCacheData3 {
+    vec4 data0;
+    vec4 data1;
+    vec4 data2;
+};
+
+struct ResourceCacheData4 {
+    vec4 data0;
+    vec4 data1;
+    vec4 data2;
+    vec4 data3;
+};
+
+struct ResourceCacheData8 {
+    vec4 data0;
+    vec4 data1;
+    vec4 data2;
+    vec4 data3;
+    vec4 data4;
+    vec4 data5;
+    vec4 data6;
+    vec4 data7;
+};
+
+ResourceCacheData2 fetch_from_resource_cache_2_direct(ivec2 address) {
+    ResourceCacheData2 result;
+    result.data0 = texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0));
+    result.data1 = texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0));
+    return result;
 }
 
-vec4[2] fetch_from_resource_cache_2(int address) {
+ResourceCacheData2 fetch_from_resource_cache_2(int address) {
     ivec2 uv = get_resource_cache_uv(address);
-    return vec4[2](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0))
-    );
+    ResourceCacheData2 result;
+    result.data0 = texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0));
+    result.data1 = texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0));
+    return result;
 }
 
 #ifdef WR_VERTEX_SHADER
@@ -111,8 +152,17 @@ uniform HIGHP_SAMPLER_FLOAT sampler2D sLayers;
 uniform HIGHP_SAMPLER_FLOAT sampler2D sRenderTasks;
 
 // Instanced attributes
-in ivec4 aData0;
-in ivec4 aData1;
+#if defined(WR_DX11) && !defined(WR_CLIP_SHADER)
+struct a2v {
+    vec3 pos : aPosition;
+    ivec4 data0 : aDataA;
+    ivec4 data1 : aDataB;
+    uint vertexId: SV_VertexId;
+};
+#elif !defined(WR_DX11)
+in ivec4 aDataA;
+in ivec4 aDataB;
+#endif //WR_DX11 && !WR_CLIP_SHADER
 
 // get_fetch_uv is a macro to work around a macOS Intel driver parsing bug.
 // TODO: convert back to a function once the driver issues are resolved, if ever.
@@ -121,46 +171,46 @@ in ivec4 aData1;
 #define get_fetch_uv(i, vpi)  ivec2(vpi * (i % (WR_MAX_VERTEX_TEXTURE_WIDTH/vpi)), i / (WR_MAX_VERTEX_TEXTURE_WIDTH/vpi))
 
 
-vec4[8] fetch_from_resource_cache_8(int address) {
+ResourceCacheData8 fetch_from_resource_cache_8(int address) {
     ivec2 uv = get_resource_cache_uv(address);
-    return vec4[8](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(4, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(5, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(6, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(7, 0))
-    );
+    ResourceCacheData8 result;
+    result.data0 = texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0));
+    result.data1 = texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0));
+    result.data2 = texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0));
+    result.data3 = texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0));
+    result.data4 = texelFetchOffset(sResourceCache, uv, 0, ivec2(4, 0));
+    result.data5 = texelFetchOffset(sResourceCache, uv, 0, ivec2(5, 0));
+    result.data6 = texelFetchOffset(sResourceCache, uv, 0, ivec2(6, 0));
+    result.data7 = texelFetchOffset(sResourceCache, uv, 0, ivec2(7, 0));
+    return result;
 }
 
-vec4[3] fetch_from_resource_cache_3(int address) {
+ResourceCacheData3 fetch_from_resource_cache_3(int address) {
     ivec2 uv = get_resource_cache_uv(address);
-    return vec4[3](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0))
-    );
+    ResourceCacheData3 result;
+    result.data0 = texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0));
+    result.data1 = texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0));
+    result.data2 = texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0));
+    return result;
 }
 
-vec4[4] fetch_from_resource_cache_4_direct(ivec2 address) {
-    return vec4[4](
-        texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(2, 0)),
-        texelFetchOffset(sResourceCache, address, 0, ivec2(3, 0))
-    );
+ResourceCacheData4 fetch_from_resource_cache_4_direct(ivec2 address) {
+    ResourceCacheData4 result;
+    result.data0 = texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0));
+    result.data1 = texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0));
+    result.data2 = texelFetchOffset(sResourceCache, address, 0, ivec2(2, 0));
+    result.data3 = texelFetchOffset(sResourceCache, address, 0, ivec2(3, 0));
+    return result;
 }
 
-vec4[4] fetch_from_resource_cache_4(int address) {
+ResourceCacheData4 fetch_from_resource_cache_4(int address) {
     ivec2 uv = get_resource_cache_uv(address);
-    return vec4[4](
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0)),
-        texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0))
-    );
+    ResourceCacheData4 result;
+    result.data0 = texelFetchOffset(sResourceCache, uv, 0, ivec2(0, 0));
+    result.data1 = texelFetchOffset(sResourceCache, uv, 0, ivec2(1, 0));
+    result.data2 = texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0));
+    result.data3 = texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0));
+    return result;
 }
 
 vec4 fetch_from_resource_cache_1_direct(ivec2 address) {
@@ -200,7 +250,10 @@ Layer fetch_layer(int index) {
     layer.inv_transform[3] = texelFetchOffset(sLayers, uv0, 0, ivec2(7, 0));
 
     vec4 clip_rect = texelFetchOffset(sLayers, uv1, 0, ivec2(0, 0));
-    layer.local_clip_rect = RectWithSize(clip_rect.xy, clip_rect.zw);
+    RectWithSize rect;
+    rect.p0 = clip_rect.xy;
+    rect.size = clip_rect.zw;
+    layer.local_clip_rect = rect;
 
     return layer;
 }
@@ -271,7 +324,7 @@ ClipArea fetch_clip_area(int index) {
     if (index == 0x7FFFFFFF) { //special sentinel task index
         area.task_bounds = vec4(0.0, 0.0, 0.0, 0.0);
         area.screen_origin_target_index = vec4(0.0, 0.0, 0.0, 0.0);
-        area.inner_rect = vec4(0.0);
+        area.inner_rect = vec4(0.0, 0.0, 0.0, 0.0);
     } else {
         RenderTaskData task = fetch_render_task(index);
         area.task_bounds = task.data0;
@@ -289,8 +342,12 @@ struct Gradient {
 };
 
 Gradient fetch_gradient(int address) {
-    vec4 data[3] = fetch_from_resource_cache_3(address);
-    return Gradient(data[0], data[1], data[2]);
+    ResourceCacheData3 data = fetch_from_resource_cache_3(address);
+    Gradient result;
+    result.start_end_point = data.data0;
+    result.tile_size_repeat = data.data1;
+    result.extend_mode = data.data2;
+    return result;
 }
 
 struct GradientStop {
@@ -299,8 +356,11 @@ struct GradientStop {
 };
 
 GradientStop fetch_gradient_stop(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return GradientStop(data[0], data[1]);
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    GradientStop result;
+    result.color = data.data0;
+    result.offset = data.data1;
+    return result;
 }
 
 struct RadialGradient {
@@ -310,8 +370,12 @@ struct RadialGradient {
 };
 
 RadialGradient fetch_radial_gradient(int address) {
-    vec4 data[3] = fetch_from_resource_cache_3(address);
-    return RadialGradient(data[0], data[1], data[2]);
+    ResourceCacheData3 data = fetch_from_resource_cache_3(address);
+    RadialGradient result;
+    result.start_end_center = data.data0;
+    result.start_end_radius_ratio_xy_extend_mode = data.data1;
+    result.tile_size_repeat = data.data2;
+    return result;
 }
 
 struct Glyph {
@@ -327,7 +391,7 @@ Glyph fetch_glyph(int specific_prim_address,
                         glyph_index / 2;
     vec4 data = fetch_from_resource_cache_1(glyph_address);
     // Select XY or ZW based on glyph index.
-    vec2 glyph = mix(data.xy, data.zw, bvec2(glyph_index % 2 == 1));
+    vec2 glyph = mix(data.xy, data.zw, bvec2(glyph_index % 2 == 1, glyph_index % 2 == 1));
 
     // In subpixel mode, the subpixel offset has already been
     // accounted for while rasterizing the glyph.
@@ -342,12 +406,17 @@ Glyph fetch_glyph(int specific_prim_address,
             break;
     }
 
-    return Glyph(glyph);
+    Glyph result;
+    result.offset = glyph;
+    return result;
 }
 
 RectWithSize fetch_instance_geometry(int address) {
     vec4 data = fetch_from_resource_cache_1(address);
-    return RectWithSize(data.xy, data.zw);
+    RectWithSize result;
+    result.p0 = data.xy;
+    result.size = data.zw;
+    return result;
 }
 
 struct PrimitiveInstance {
@@ -362,18 +431,18 @@ struct PrimitiveInstance {
     int user_data2;
 };
 
-PrimitiveInstance fetch_prim_instance() {
+PrimitiveInstance fetch_prim_instance(ivec4 aDataA, ivec4 aDataB) {
     PrimitiveInstance pi;
 
-    pi.prim_address = aData0.x;
+    pi.prim_address = aDataA.x;
     pi.specific_prim_address = pi.prim_address + VECS_PER_PRIM_HEADER;
-    pi.render_task_index = aData0.y;
-    pi.clip_task_index = aData0.z;
-    pi.layer_index = aData0.w;
-    pi.z = aData1.x;
-    pi.user_data0 = aData1.y;
-    pi.user_data1 = aData1.z;
-    pi.user_data2 = aData1.w;
+    pi.render_task_index = aDataA.y;
+    pi.clip_task_index = aDataA.z;
+    pi.layer_index = aDataA.w;
+    pi.z = aDataB.x;
+    pi.user_data0 = aDataB.y;
+    pi.user_data1 = aDataB.z;
+    pi.user_data2 = aDataB.w;
 
     return pi;
 }
@@ -387,16 +456,16 @@ struct CompositeInstance {
     float z;
 };
 
-CompositeInstance fetch_composite_instance() {
+CompositeInstance fetch_composite_instance(ivec4 aDataA, ivec4 aDataB) {
     CompositeInstance ci;
 
-    ci.render_task_index = aData0.x;
-    ci.src_task_index = aData0.y;
-    ci.backdrop_task_index = aData0.z;
-    ci.z = float(aData0.w);
+    ci.render_task_index = aDataA.x;
+    ci.src_task_index = aDataA.y;
+    ci.backdrop_task_index = aDataA.z;
+    ci.z = float(aDataA.w);
 
-    ci.user_data0 = aData1.x;
-    ci.user_data1 = aData1.y;
+    ci.user_data0 = aDataB.x;
+    ci.user_data1 = aDataB.y;
 
     return ci;
 }
@@ -420,13 +489,21 @@ struct PrimitiveGeometry {
 };
 
 PrimitiveGeometry fetch_primitive_geometry(int address) {
-    vec4 geom[2] = fetch_from_resource_cache_2(address);
-    return PrimitiveGeometry(RectWithSize(geom[0].xy, geom[0].zw),
-                             RectWithSize(geom[1].xy, geom[1].zw));
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    PrimitiveGeometry result;
+    RectWithSize rect1;
+    rect1.p0 = data.data0.xy;
+    rect1.size = data.data0.zw;
+    result.local_rect = rect1;
+    RectWithSize rect2;
+    rect2.p0 = data.data1.xy;
+    rect2.size = data.data1.zw;
+    result.local_clip_rect = rect2;
+    return result;
 }
 
-Primitive load_primitive() {
-    PrimitiveInstance pi = fetch_prim_instance();
+Primitive load_primitive(ivec4 aDataA, ivec4 aDataB) {
+    PrimitiveInstance pi = fetch_prim_instance(aDataA, aDataB);
 
     Primitive prim;
 
@@ -475,18 +552,16 @@ vec4 untransform(vec2 ref, vec3 n, vec3 a, mat4 inv_transform) {
     // originated from the "ref" point
     ray_plane(n, a, p, d, t);
     float z = p.z + d.z * t; // Z of the visible point on the layer
-
-    vec4 r = inv_transform * vec4(ref, z, 1.0);
-    return r;
+    return mul(vec4(ref, z, 1.0), inv_transform);
 }
 
 // Given a CSS space position, transform it back into the layer space.
 vec4 get_layer_pos(vec2 pos, Layer layer) {
     // get a point on the layer plane
-    vec4 ah = layer.transform * vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 ah = mul(vec4(0.0, 0.0, 0.0, 1.0), layer.transform);
     vec3 a = ah.xyz / ah.w;
     // get the normal to the layer plane
-    vec3 n = transpose(mat3(layer.inv_transform)) * vec3(0.0, 0.0, 1.0);
+    vec3 n = mul(vec3(0.0, 0.0, 1.0), transpose(mat3(layer.inv_transform[0].xyz, layer.inv_transform[1].xyz, layer.inv_transform[2].xyz)));
     return untransform(pos, n, a, layer.inv_transform);
 }
 
@@ -502,11 +577,11 @@ vec2 compute_snap_offset(vec2 local_pos,
     //           is a layer transform with scale present? But it does fix
     //           the test cases we have in Servo that are failing without it
     //           and seem better than not having this at all.
-    snap_rect.size = max(snap_rect.size, vec2(1.0 / uDevicePixelRatio));
+    snap_rect.size = max(snap_rect.size, vec2(1.0 / uDevicePixelRatio, 1.0 / uDevicePixelRatio));
 
     // Transform the snap corners to the world space.
-    vec4 world_snap_p0 = layer.transform * vec4(snap_rect.p0, 0.0, 1.0);
-    vec4 world_snap_p1 = layer.transform * vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0);
+    vec4 world_snap_p0 = mul(vec4(snap_rect.p0, 0.0, 1.0), layer.transform);
+    vec4 world_snap_p1 = mul(vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0), layer.transform);
     // Snap bounds in world coordinates, adjusted for pixel ratio. XY = top left, ZW = bottom right
     vec4 world_snap = uDevicePixelRatio * vec4(world_snap_p0.xy, world_snap_p1.xy) /
                                           vec4(world_snap_p0.ww, world_snap_p1.ww);
@@ -524,12 +599,17 @@ struct VertexInfo {
     vec2 screen_pos;
 };
 
-VertexInfo write_vertex(RectWithSize instance_rect,
+VertexInfo write_vertex(vec3 aPosition,
+                        RectWithSize instance_rect,
                         RectWithSize local_clip_rect,
                         float z,
                         Layer layer,
                         AlphaBatchTask task,
-                        RectWithSize snap_rect) {
+                        RectWithSize snap_rect
+#ifdef WR_DX11
+                        , out vec4 gl_Position
+#endif //WR_DX11
+                        ) {
 
     // Select the corner of the local rect that we are processing.
     vec2 local_pos = instance_rect.p0 + instance_rect.size * aPosition.xy;
@@ -542,7 +622,7 @@ VertexInfo write_vertex(RectWithSize instance_rect,
     vec2 snap_offset = compute_snap_offset(clamped_local_pos, local_clip_rect, layer, snap_rect);
 
     // Transform the current vertex to the world cpace.
-    vec4 world_pos = layer.transform * vec4(clamped_local_pos, 0.0, 1.0);
+    vec4 world_pos = mul(vec4(clamped_local_pos, 0.0, 1.0), layer.transform);
 
     // Convert the world positions to device pixel space.
     vec2 device_pos = world_pos.xy / world_pos.w * uDevicePixelRatio;
@@ -552,9 +632,11 @@ VertexInfo write_vertex(RectWithSize instance_rect,
                      task.screen_space_origin +
                      task.render_target_origin;
 
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
+    gl_Position = mul(vec4(final_pos, z, 1.0), uTransform);
 
-    VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
+    VertexInfo vi;
+    vi.local_pos = clamped_local_pos;
+    vi.screen_pos = device_pos;
     return vi;
 }
 
@@ -584,19 +666,25 @@ vec2 intersect_lines(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     return vec2(nx / d, ny / d);
 }
 
-TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
+TransformVertexInfo write_transform_vertex(int vertex_id,
+                                           RectWithSize instance_rect,
                                            RectWithSize local_clip_rect,
                                            float z,
                                            Layer layer,
                                            AlphaBatchTask task,
-                                           RectWithSize snap_rect) {
+                                           RectWithSize snap_rect
+#ifdef WR_DX11
+                                           , out vec4 gl_Position
+                                           , out vec4 vLocalBounds
+#endif //WR_DX11
+                                           ) {
     RectWithEndpoint local_rect = to_rect_with_endpoint(instance_rect);
 
     vec2 current_local_pos, prev_local_pos, next_local_pos;
 
     // Select the current vertex and the previous/next vertices,
     // based on the vertex ID that is known based on the instance rect.
-    switch (gl_VertexID) {
+    switch (vertex_id) {
         case 0:
             current_local_pos = vec2(local_rect.p0.x, local_rect.p0.y);
             next_local_pos = vec2(local_rect.p0.x, local_rect.p1.y);
@@ -617,12 +705,17 @@ TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
             prev_local_pos = vec2(local_rect.p0.x, local_rect.p1.y);
             next_local_pos = vec2(local_rect.p1.x, local_rect.p0.y);
             break;
+        default:
+            current_local_pos = vec2(local_rect.p0.x, local_rect.p0.y);
+            next_local_pos = vec2(local_rect.p0.x, local_rect.p1.y);
+            prev_local_pos = vec2(local_rect.p1.x, local_rect.p0.y);
+            break;
     }
 
     // Transform them to world space
-    vec4 current_world_pos = layer.transform * vec4(current_local_pos, 0.0, 1.0);
-    vec4 prev_world_pos = layer.transform * vec4(prev_local_pos, 0.0, 1.0);
-    vec4 next_world_pos = layer.transform * vec4(next_local_pos, 0.0, 1.0);
+    vec4 current_world_pos = mul(vec4(current_local_pos, 0.0, 1.0), layer.transform);
+    vec4 prev_world_pos = mul(vec4(prev_local_pos, 0.0, 1.0), layer.transform);
+    vec4 next_world_pos = mul(vec4(next_local_pos, 0.0, 1.0), layer.transform);
 
     // Convert to device space
     vec2 current_device_pos = uDevicePixelRatio * current_world_pos.xy / current_world_pos.w;
@@ -655,11 +748,14 @@ TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
                      task.screen_space_origin +
                      task.render_target_origin;
 
-    gl_Position = uTransform * vec4(final_pos, z, 1.0);
+    gl_Position = mul(vec4(final_pos, z, 1.0), uTransform);
 
     vLocalBounds = vec4(local_rect.p0, local_rect.p1);
 
-    return TransformVertexInfo(layer_pos.xyw, device_pos);
+    TransformVertexInfo tvi;
+    tvi.local_pos = layer_pos.xyw;
+    tvi.screen_pos = device_pos;
+    return tvi;
 }
 
 #endif //WR_FEATURE_TRANSFORM
@@ -671,8 +767,12 @@ struct GlyphResource {
 };
 
 GlyphResource fetch_glyph_resource(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return GlyphResource(data[0], data[1].x, data[1].yz);
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    GlyphResource glyph_res;
+    glyph_res.uv_rect = data.data0;
+    glyph_res.layer = data.data1.x;
+    glyph_res.offset = data.data1.yz;
+    return glyph_res;
 }
 
 struct ImageResource {
@@ -681,13 +781,19 @@ struct ImageResource {
 };
 
 ImageResource fetch_image_resource(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return ImageResource(data[0], data[1].x);
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    ImageResource img_res;
+    img_res.uv_rect = data.data0;
+    img_res.layer = data.data1.x;
+    return img_res;
 }
 
 ImageResource fetch_image_resource_direct(ivec2 address) {
-    vec4 data[2] = fetch_from_resource_cache_2_direct(address);
-    return ImageResource(data[0], data[1].x);
+    ResourceCacheData2 data = fetch_from_resource_cache_2_direct(address);
+    ImageResource img_res;
+    img_res.uv_rect = data.data0;
+    img_res.layer = data.data1.x;
+    return img_res;
 }
 
 struct Rectangle {
@@ -696,7 +802,9 @@ struct Rectangle {
 
 Rectangle fetch_rectangle(int address) {
     vec4 data = fetch_from_resource_cache_1(address);
-    return Rectangle(data);
+    Rectangle rect;
+    rect.color = data;
+    return rect;
 }
 
 struct TextShadow {
@@ -706,8 +814,12 @@ struct TextShadow {
 };
 
 TextShadow fetch_text_shadow(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return TextShadow(data[0], data[1].xy, data[1].z);
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    TextShadow result;
+    result.color = data.data0;
+    result.offset = data.data1.xy;
+    result.blur_radius = data.data1.z;
+    return result;
 }
 
 struct Line {
@@ -717,8 +829,12 @@ struct Line {
 };
 
 Line fetch_line(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return Line(data[0], data[1].x, data[1].y);
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    Line result;
+    result.color = data.data0;
+    result.style = data.data1.x;
+    result.orientation = data.data1.y;
+    return result;
 }
 
 struct TextRun {
@@ -728,8 +844,12 @@ struct TextRun {
 };
 
 TextRun fetch_text_run(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return TextRun(data[0], data[1].xy, int(data[1].z));
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    TextRun result;
+    result.color = data.data0;
+    result.offset = data.data1.xy;
+    result.subpx_dir = int(data.data1.z);
+    return result;
 }
 
 struct Image {
@@ -739,8 +859,11 @@ struct Image {
 };
 
 Image fetch_image(int address) {
-    vec4 data[2] = fetch_from_resource_cache_2(address);
-    return Image(data[0], data[1]);
+    ResourceCacheData2 data = fetch_from_resource_cache_2(address);
+    Image img;
+    img.stretch_size_and_tile_spacing = data.data0;
+    img.sub_rect = data.data1;
+    return img;
 }
 
 struct YuvImage {
@@ -749,7 +872,9 @@ struct YuvImage {
 
 YuvImage fetch_yuv_image(int address) {
     vec4 data = fetch_from_resource_cache_1(address);
-    return YuvImage(data.xy);
+    YuvImage yuv_img;
+    yuv_img.size = data.xy;
+    return yuv_img;
 }
 
 struct BoxShadow {
@@ -760,17 +885,33 @@ struct BoxShadow {
 };
 
 BoxShadow fetch_boxshadow(int address) {
-    vec4 data[4] = fetch_from_resource_cache_4(address);
-    return BoxShadow(data[0], data[1], data[2], data[3]);
+    ResourceCacheData4 data = fetch_from_resource_cache_4(address);
+    BoxShadow box_shadow;
+    box_shadow.src_rect = data.data0;
+    box_shadow.bs_rect = data.data1;
+    box_shadow.color = data.data2;
+    box_shadow.border_radius_edge_size_blur_radius_inverted = data.data3;
+    return box_shadow;
 }
 
 BoxShadow fetch_boxshadow_direct(ivec2 address) {
-    vec4 data[4] = fetch_from_resource_cache_4_direct(address);
-    return BoxShadow(data[0], data[1], data[2], data[3]);
+    ResourceCacheData4 data = fetch_from_resource_cache_4_direct(address);
+    BoxShadow box_shadow;
+    box_shadow.src_rect = data.data0;
+    box_shadow.bs_rect = data.data1;
+    box_shadow.color = data.data2;
+    box_shadow.border_radius_edge_size_blur_radius_inverted = data.data3;
+    return box_shadow;
 }
 
-void write_clip(vec2 global_pos, ClipArea area) {
-    vec2 texture_size = vec2(textureSize(sSharedCacheA8, 0).xy);
+void write_clip(vec2 global_pos,
+                ClipArea area
+#ifdef WR_DX11
+                , out vec4 vClipMaskUvBounds
+                , out vec3 vClipMaskUv
+#endif //WR_DX11
+                ) {
+    vec2 texture_size = vec2(textureSize(sCacheA8, 0).xy);
     vec2 uv = global_pos + area.task_bounds.xy - area.screen_origin_target_index.xy;
     vClipMaskUvBounds = area.task_bounds / texture_size.xyxy;
     vClipMaskUv = vec3(uv / texture_size, area.screen_origin_target_index.z);
@@ -782,10 +923,10 @@ void write_clip(vec2 global_pos, ClipArea area) {
 #ifdef WR_FEATURE_TRANSFORM
 float signed_distance_rect(vec2 pos, vec2 p0, vec2 p1) {
     vec2 d = max(p0 - pos, pos - p1);
-    return length(max(vec2(0.0), d)) + min(0.0, max(d.x, d.y));
+    return length(max(vec2(0.0, 0.0), d)) + min(0.0, max(d.x, d.y));
 }
 
-vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha) {
+vec2 init_transform_fs(vec3 local_pos, vec4 vLocalBounds, out float fragment_alpha) {
     fragment_alpha = 1.0;
     vec2 pos = local_pos.xy / local_pos.z;
 
@@ -802,33 +943,36 @@ vec2 init_transform_fs(vec3 local_pos, out float fragment_alpha) {
 }
 #endif //WR_FEATURE_TRANSFORM
 
-float do_clip() {
+float do_clip(vec4 vClipMaskUvBounds, vec3 vClipMaskUv) {
     // anything outside of the mask is considered transparent
     bvec4 inside = lessThanEqual(
         vec4(vClipMaskUvBounds.xy, vClipMaskUv.xy),
         vec4(vClipMaskUv.xy, vClipMaskUvBounds.zw));
     // check for the dummy bounds, which are given to the opaque objects
-    return vClipMaskUvBounds.xy == vClipMaskUvBounds.zw ? 1.0:
+    return ((vClipMaskUvBounds.x == vClipMaskUvBounds.z)
+            && (vClipMaskUvBounds.y == vClipMaskUvBounds.w)) ? 1.0:
         all(inside) ? textureLod(sSharedCacheA8, vClipMaskUv, 0.0).r : 0.0;
 }
 
 #ifdef WR_FEATURE_DITHERING
-vec4 dither(vec4 color) {
+uniform sampler2D sDither;
+
+vec4 dither(vec4 color, vec4 frag_coord) {
     const int matrix_mask = 7;
 
-    ivec2 pos = ivec2(gl_FragCoord.xy) & ivec2(matrix_mask);
+    ivec2 pos = ivec2(frag_coord.xy) & ivec2(matrix_mask, matrix_mask);
     float noise_normalized = (texelFetch(sDither, pos, 0).r * 255.0 + 0.5) / 64.0;
     float noise = (noise_normalized - 0.5) / 256.0; // scale down to the unit length
 
     return color + vec4(noise, noise, noise, 0);
 }
 #else
-vec4 dither(vec4 color) {
+vec4 dither(vec4 color, vec4 frag_coord) {
     return color;
 }
 #endif //WR_FEATURE_DITHERING
 
-vec4 sample_gradient(int address, float offset, float gradient_repeat) {
+vec4 sample_gradient(int address, float offset, float gradient_repeat, vec4 frag_coord) {
     // Modulo the offset if the gradient repeats.
     float x = mix(offset, fract(offset), gradient_repeat);
 
@@ -852,10 +996,10 @@ vec4 sample_gradient(int address, float offset, float gradient_repeat) {
     lut_offset = clamp(lut_offset, 0, 2 * (GRADIENT_ENTRIES + 1));
 
     // Fetch the start and end color.
-    vec4 texels[2] = fetch_from_resource_cache_2(address + lut_offset);
+    ResourceCacheData2 texels = fetch_from_resource_cache_2(address + lut_offset);
 
     // Finally interpolate and apply dithering
-    return dither(mix(texels[0], texels[1], fract(x)));
+    return dither(mix(texels.data0, texels.data1, fract(x)), frag_coord);
 }
 
 #endif //WR_FRAGMENT_SHADER

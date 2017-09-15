@@ -2,7 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec3 vPos = IN.vPos;
+    vec2 vClipCenter = IN.vClipCenter;
+    vec4 vPoint_Tangent0 = IN.vPoint_Tangent0;
+    vec4 vPoint_Tangent1 = IN.vPoint_Tangent1;
+    vec3 vDotParams = IN.vDotParams;
+    vec2 vAlphaMask = IN.vAlphaMask;
+#endif //WR_DX11
     vec2 local_pos = vPos.xy / vPos.z;
 
     // Get local space position relative to the clip center.
@@ -35,5 +45,5 @@ void main(void) {
     // Completely mask out clip if zero'ing out the rect.
     d = d * vAlphaMask.y;
 
-    oFragColor = vec4(d, 0.0, 0.0, 1.0);
+    SHADER_OUT(Target0, vec4(d, 0.0, 0.0, 1.0));
 }

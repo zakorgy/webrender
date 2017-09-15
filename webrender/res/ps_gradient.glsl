@@ -4,17 +4,41 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 Position : SV_Position;
+        flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
+        vec4 vColor : vColor;
+
+#ifdef WR_FEATURE_TRANSFORM
+        vec3 vLocalPos : vLocalPos;
+        flat vec4 vLocalBounds : vLocalBounds;
+#else
+        vec2 vPos : vPos;
+#endif //WR_FEATURE_TRANSFORM
+    };
+#else
 varying vec4 vColor;
 
 #ifdef WR_FEATURE_TRANSFORM
 varying vec3 vLocalPos;
 #else
 varying vec2 vPos;
-#endif
+#endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11
 
 #ifdef WR_VERTEX_SHADER
+#ifndef WR_DX11
 void main(void) {
-    Primitive prim = load_primitive();
+#else
+void main(in a2v IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+    int gl_VertexID = IN.vertexId;
+#endif //WR_DX11
+    Primitive prim = load_primitive(aDataA, aDataB);
     Gradient gradient = fetch_gradient(prim.specific_prim_address);
 
     vec4 abs_start_end_point = gradient.start_end_point + prim.local_rect.p0.xyxy;
@@ -71,43 +95,74 @@ void main(void) {
     }
 
 #ifdef WR_FEATURE_TRANSFORM
-    TransformVertexInfo vi = write_transform_vertex(segment_rect,
+    TransformVertexInfo vi = write_transform_vertex(gl_VertexID,
+                                                    segment_rect,
                                                     prim.local_clip_rect,
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect);
-    vLocalPos = vi.local_pos;
+                                                    prim.local_rect
+#ifdef WR_DX11
+                                                    , OUT.Position
+                                                    , OUT.vLocalBounds
+#endif //WR_DX11
+                                                    );
+    SHADER_OUT(vLocalPos, vi.local_pos);
     vec2 f = (vi.local_pos.xy - prim.local_rect.p0) / prim.local_rect.size;
 #else
-    VertexInfo vi = write_vertex(segment_rect,
+    VertexInfo vi = write_vertex(aPosition,
+                                 segment_rect,
                                  prim.local_clip_rect,
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect);
+                                 prim.local_rect
+#ifdef WR_DX11
+                                 , OUT.Position
+#endif //WR_DX11
+                                 );
+     vec2 f = (vi.local_pos - segment_rect.p0) / segment_rect.size;
+     SHADER_OUT(vPos, vi.local_pos);
+#endif //WR_FEATURE_TRANSFORM
 
-    vec2 f = (vi.local_pos - segment_rect.p0) / segment_rect.size;
-    vPos = vi.local_pos;
-#endif
+    write_clip(vi.screen_pos,
+               prim.clip_area
+#ifdef WR_DX11
+               , OUT.vClipMaskUvBounds
+               , OUT.vClipMaskUv
+#endif //WR_DX11
+               );
 
-    write_clip(vi.screen_pos, prim.clip_area);
-
-    vColor = mix(adjusted_color_g0, adjusted_color_g1, dot(f, axis));
+    SHADER_OUT(vColor, mix(adjusted_color_g0, adjusted_color_g1, dot(f, axis)));
 }
-#endif
+#endif //WR_VERTEX_SHADER
 
 #ifdef WR_FRAGMENT_SHADER
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
+    vec3 vClipMaskUv = IN.vClipMaskUv;
+    vec4 vColor = IN.vColor;
+    vec4 gl_FragCoord = IN.Position;
+#ifdef WR_FEATURE_TRANSFORM
+    vec3 vLocalPos = IN.vLocalPos;
+    vec4 vLocalBounds = IN.vLocalBounds;
+#else
+    vec2 vPos = IN.vPos;
+#endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11
 #ifdef WR_FEATURE_TRANSFORM
     float alpha = 0.0;
-    vec2 local_pos = init_transform_fs(vLocalPos, alpha);
+    vec2 local_pos = init_transform_fs(vLocalPos, vLocalBounds, alpha);
 #else
     float alpha = 1.0;
     vec2 local_pos = vPos;
-#endif
+#endif //WR_FEATURE_TRANSFORM
 
-    alpha = min(alpha, do_clip());
-    oFragColor = dither(vColor * vec4(1.0, 1.0, 1.0, alpha));
+    alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
+    vec4 color = dither(vColor * vec4(1.0, 1.0, 1.0, alpha), gl_FragCoord);
+    SHADER_OUT(Target0, color);
 }
-#endif
+#endif //WR_FRAGMENT_SHADER

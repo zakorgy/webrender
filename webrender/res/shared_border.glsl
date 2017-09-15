@@ -57,10 +57,17 @@ vec4 get_effective_border_widths(Border border, int style) {
 }
 
 Border fetch_border(int address) {
-    vec4 data[8] = fetch_from_resource_cache_8(address);
-    return Border(data[0], data[1],
-                  vec4[4](data[2], data[3], data[4], data[5]),
-                  vec4[2](data[6], data[7]));
+    ResourceCacheData8 data = fetch_from_resource_cache_8(address);
+    Border result;
+    result.style = data.data0;
+    result.widths = data.data1;
+    result.colors[0] = data.data2;
+    result.colors[1] = data.data3;
+    result.colors[2] = data.data4;
+    result.colors[3] = data.data5;
+    result.radii[0] = data.data6;
+    result.radii[1] = data.data7;
+    return result;
 }
 
 BorderCorners get_border_corners(Border border, RectWithSize local_rect) {
@@ -83,16 +90,16 @@ BorderCorners get_border_corners(Border border, RectWithSize local_rect) {
     vec2 bl_inner = bl_outer + vec2(max(border.radii[1].z, border.widths.x),
                                     -max(border.radii[1].w, border.widths.w));
 
-    return BorderCorners(
-        tl_outer,
-        tl_inner,
-        tr_outer,
-        tr_inner,
-        br_outer,
-        br_inner,
-        bl_outer,
-        bl_inner
-    );
+    BorderCorners result;
+    result.tl_outer = tl_outer;
+    result.tl_inner = tl_inner;
+    result.tr_outer = tr_outer;
+    result.tr_inner = tr_inner;
+    result.br_outer = br_outer;
+    result.br_inner = br_inner;
+    result.bl_outer = bl_outer;
+    result.bl_inner = bl_inner;
+    return result;
 }
 
 #endif

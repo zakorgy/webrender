@@ -4,8 +4,24 @@
 
 #include shared,prim_shared
 
-varying vec4 vColor;
-
+#ifdef WR_DX11
+    struct v2p {
+        vec4 Position : SV_Position;
+#ifdef WR_FEATURE_CLIP
+        flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
+#endif //WR_FEATURE_CLIP
+        vec4 vColor : vColor;
 #ifdef WR_FEATURE_TRANSFORM
-varying vec3 vLocalPos;
-#endif
+        vec3 vLocalPos : vLocalPos;
+        flat vec4 vLocalBounds : vLocalBounds;
+#endif //WR_FEATURE_TRANSFORM
+    };
+#else
+
+    varying vec4 vColor;
+#ifdef WR_FEATURE_TRANSFORM
+    varying vec3 vLocalPos;
+#endif //WR_FEATURE_TRANSFORM
+
+#endif //WR_DX11

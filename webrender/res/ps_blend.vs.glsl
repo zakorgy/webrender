@@ -2,8 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef WR_DX11
 void main(void) {
-    CompositeInstance ci = fetch_composite_instance();
+#else
+void main(in a2v IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+#endif //WR_DX11
+    Primitive prim = load_primitive(aDataA, aDataB);
+    CompositeInstance ci = fetch_composite_instance(aDataA, aDataB);
     AlphaBatchTask dest_task = fetch_alpha_batch_task(ci.render_task_index);
     AlphaBatchTask src_task = fetch_alpha_batch_task(ci.src_task_index);
 
@@ -20,11 +28,10 @@ void main(void) {
     vec2 st1 = src_task.render_target_origin + src_task.size;
 
     vec2 uv = src_task.render_target_origin + aPosition.xy * src_task.size;
-    vUv = vec3(uv / texture_size, src_task.render_target_layer_index);
-    vUvBounds = vec4(st0 + 0.5, st1 - 0.5) / texture_size.xyxy;
+    SHADER_OUT(vUv, vec3(uv / texture_size, src_task.render_target_layer_index));
+    SHADER_OUT(vUvBounds, vec4(st0 + 0.5, st1 - 0.5) / texture_size.xyxy);
 
-    vOp = ci.user_data0;
-    vAmount = float(ci.user_data1) / 65535.0;
-
-    gl_Position = uTransform * vec4(local_pos, ci.z, 1.0);
+    SHADER_OUT(vOp, ci.user_data0);
+    SHADER_OUT(vAmount, float(ci.user_data1) / 65535.0);
+    SHADER_OUT(gl_Position, mul(vec4(local_pos, ci.z, 1.0), uTransform));
 }

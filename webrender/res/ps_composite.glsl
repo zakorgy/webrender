@@ -4,13 +4,29 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 gl_Position : SV_Position;
+        vec3 vUv0 : vUv0;
+        vec3 vUv1 : vUv1;
+        flat int vOp : vOp;
+    };
+#else
 varying vec3 vUv0;
 varying vec3 vUv1;
 flat varying int vOp;
+#endif //WR_DX11
 
 #ifdef WR_VERTEX_SHADER
+#ifndef WR_DX11
 void main(void) {
-    CompositeInstance ci = fetch_composite_instance();
+#else
+void main(in a2v IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+#endif //WR_DX11
+    CompositeInstance ci = fetch_composite_instance(aDataA, aDataB);
     AlphaBatchTask dest_task = fetch_alpha_batch_task(ci.render_task_index);
     ReadbackTask backdrop_task = fetch_readback_task(ci.backdrop_task_index);
     AlphaBatchTask src_task = fetch_alpha_batch_task(ci.src_task_index);
@@ -27,17 +43,16 @@ void main(void) {
 
     vec2 st0 = backdrop_task.render_target_origin / texture_size;
     vec2 st1 = (backdrop_task.render_target_origin + backdrop_task.size) / texture_size;
-    vUv0 = vec3(mix(st0, st1, aPosition.xy), backdrop_task.render_target_layer_index);
+    SHADER_OUT(vUv0, vec3(mix(st0, st1, aPosition.xy), backdrop_task.render_target_layer_index));
 
     st0 = src_task.render_target_origin / texture_size;
     st1 = (src_task.render_target_origin + src_task.size) / texture_size;
-    vUv1 = vec3(mix(st0, st1, aPosition.xy), src_task.render_target_layer_index);
+    SHADER_OUT(vUv1, vec3(mix(st0, st1, aPosition.xy), src_task.render_target_layer_index));
 
-    vOp = ci.user_data0;
-
-    gl_Position = uTransform * vec4(local_pos, ci.z, 1.0);
+    SHADER_OUT(vOp, ci.user_data0);
+    SHADER_OUT(gl_Position, mul(vec4(local_pos, ci.z, 1.0), uTransform));
 }
-#endif
+#endif //WR_VERTEX_SHADER
 
 #ifdef WR_FRAGMENT_SHADER
 float gauss(float x, float sigma) {
@@ -187,23 +202,30 @@ vec3 Luminosity(vec3 Cb, vec3 Cs) {
     return SetLum(Cb, Lum(Cs));
 }
 
-const int MixBlendMode_Multiply    = 1;
-const int MixBlendMode_Screen      = 2;
-const int MixBlendMode_Overlay     = 3;
-const int MixBlendMode_Darken      = 4;
-const int MixBlendMode_Lighten     = 5;
-const int MixBlendMode_ColorDodge  = 6;
-const int MixBlendMode_ColorBurn   = 7;
-const int MixBlendMode_HardLight   = 8;
-const int MixBlendMode_SoftLight   = 9;
-const int MixBlendMode_Difference  = 10;
-const int MixBlendMode_Exclusion   = 11;
-const int MixBlendMode_Hue         = 12;
-const int MixBlendMode_Saturation  = 13;
-const int MixBlendMode_Color       = 14;
-const int MixBlendMode_Luminosity  = 15;
+static const int MixBlendMode_Multiply    = 1;
+static const int MixBlendMode_Screen      = 2;
+static const int MixBlendMode_Overlay     = 3;
+static const int MixBlendMode_Darken      = 4;
+static const int MixBlendMode_Lighten     = 5;
+static const int MixBlendMode_ColorDodge  = 6;
+static const int MixBlendMode_ColorBurn   = 7;
+static const int MixBlendMode_HardLight   = 8;
+static const int MixBlendMode_SoftLight   = 9;
+static const int MixBlendMode_Difference  = 10;
+static const int MixBlendMode_Exclusion   = 11;
+static const int MixBlendMode_Hue         = 12;
+static const int MixBlendMode_Saturation  = 13;
+static const int MixBlendMode_Color       = 14;
+static const int MixBlendMode_Luminosity  = 15;
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec3 vUv0 = IN.vUv0;
+    vec3 vUv1 = IN.vUv1;
+    int vOp = IN.vOp;
+#endif //WR_DX11
     vec4 Cb = texture(sCacheRGBA8, vUv0);
     vec4 Cs = texture(sCacheRGBA8, vUv1);
 
@@ -212,11 +234,11 @@ void main(void) {
     Cs.rgb /= Cs.a;
 
     if (Cb.a == 0.0) {
-        oFragColor = Cs;
+        SHADER_OUT(Target0, Cs);
         return;
     }
     if (Cs.a == 0.0) {
-        oFragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        SHADER_OUT(Target0, vec4(0.0, 0.0, 0.0, 0.0));
         return;
     }
 
@@ -281,6 +303,6 @@ void main(void) {
     result.rgb = (1.0 - Cb.a) * Cs.rgb + Cb.a * result.rgb;
     result.a = Cs.a;
 
-    oFragColor = result;
+    SHADER_OUT(Target0, result);
 }
-#endif
+#endif //WR_FRAGMENT_SHADER

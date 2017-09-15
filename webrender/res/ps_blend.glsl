@@ -4,7 +4,17 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 gl_Position : SV_Position;
+        vec3 vUv : vUv;
+        flat vec4 vUvBounds : vUvBounds;
+        flat float vAmount : vAmount;
+        flat int vOp : vOp;
+    };
+#else
 varying vec3 vUv;
 flat varying vec4 vUvBounds;
 flat varying float vAmount;
 flat varying int vOp;
+#endif //WR_DX11

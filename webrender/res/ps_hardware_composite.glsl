@@ -4,4 +4,11 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 Position : SV_Position;
+        vec3 vUv : vUv;
+    };
+#else
 varying vec3 vUv;
+#endif //WR_DX11

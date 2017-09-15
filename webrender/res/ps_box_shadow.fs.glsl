@@ -2,8 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef WR_DX11
 void main(void) {
-    vec4 clip_scale = vec4(1.0, 1.0, 1.0, do_clip());
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
+    vec3 vClipMaskUv = IN.vClipMaskUv;
+    vec4 vColor = IN.vColor;
+    vec3 vUv = IN.vUv;
+    vec2 vMirrorPoint = IN.vMirrorPoint;
+    vec4 vCacheUvRectCoords = IN.vCacheUvRectCoords;
+    vec4 gl_FragCoord = IN.Position;
+#endif //WR_DX11
+    vec4 clip_scale = vec4(1.0, 1.0, 1.0, do_clip(vClipMaskUvBounds, vClipMaskUv));
 
     // Mirror and stretch the box shadow corner over the entire
     // primitives.
@@ -12,12 +23,11 @@ void main(void) {
     // Ensure that we don't fetch texels outside the box
     // shadow corner. This can happen, for example, when
     // drawing the outer parts of an inset box shadow.
-    uv = clamp(uv, vec2(0.0), vec2(1.0));
+    uv = clamp(uv, vec2(0.0, 0.0), vec2(1.0, 1.0));
 
     // Map the unit UV to the actual UV rect in the cache.
     uv = mix(vCacheUvRectCoords.xy, vCacheUvRectCoords.zw, uv);
 
     // Modulate the box shadow by the color.
-    float mask = texture(sSharedCacheA8, vec3(uv, vUv.z)).r;
-    oFragColor = clip_scale * dither(vColor * vec4(1.0, 1.0, 1.0, mask));
+    SHADER_OUT(Target0, clip_scale * dither(vColor * texture(sCacheRGBA8, vec3(uv, vUv.z)), gl_FragCoord));
 }
