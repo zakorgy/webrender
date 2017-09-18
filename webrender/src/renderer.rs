@@ -802,10 +802,10 @@ pub struct Renderer {
     ps_cache_image: ProgramPair,
     ps_line: ProgramPair,
 
-    //ps_blend: LazilyCompiledShader,
-    //ps_hw_composite: LazilyCompiledShader,
-    //ps_split_composite: LazilyCompiledShader,
-    //ps_composite: LazilyCompiledShader,
+    ps_blend: ProgramPair,
+    ps_hw_composite: ProgramPair,
+    ps_split_composite: ProgramPair,
+    ps_composite: ProgramPair,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
@@ -930,6 +930,11 @@ impl Renderer {
         let ps_cache_image = create_programs(&mut device, "ps_cache_image");
         let ps_line = create_programs(&mut device, "ps_line");
 
+        let ps_blend = create_programs(&mut device, "ps_blend");
+        let ps_hw_composite = create_programs(&mut device, "ps_hardware_composite");
+        let ps_split_composite = create_programs(&mut device, "ps_split_composite");
+        let ps_composite = create_programs(&mut device, "ps_composite");
+
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
         // Broken GL contexts can return a max texture size of zero (See #1260). Better to
@@ -1034,6 +1039,10 @@ impl Renderer {
             ps_radial_gradient: ps_radial_gradient,
             ps_cache_image: ps_cache_image,
             ps_line: ps_line,
+            ps_blend: ps_blend,
+            ps_hw_composite: ps_hw_composite,
+            ps_split_composite: ps_split_composite,
+            ps_composite: ps_composite,
             pending_texture_updates: Vec::new(),
             pending_gpu_cache_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
@@ -1394,10 +1403,10 @@ impl Renderer {
         self.ps_radial_gradient.reset_upload_offset();
         self.ps_box_shadow.reset_upload_offset();
         self.ps_cache_image.reset_upload_offset();
-        /*self.ps_blend.reset_upload_offset();
+        self.ps_blend.reset_upload_offset();
         self.ps_hw_composite.reset_upload_offset();
         self.ps_split_composite.reset_upload_offset();
-        self.ps_composite.reset_upload_offset();*/
+        self.ps_composite.reset_upload_offset();
         for mut program in &mut self.ps_yuv_image {
             program.reset_upload_offset();
         }
@@ -1533,7 +1542,7 @@ impl Renderer {
                       });
         println!("program={:?}", key.kind);
         let (mut program, marker) = match key.kind {
-            /*AlphaBatchKind::Composite { .. } => {
+            AlphaBatchKind::Composite { .. } => {
                 //self.ps_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
                 (&mut self.ps_composite, GPU_TAG_PRIM_COMPOSITE)
             }
@@ -1548,7 +1557,7 @@ impl Renderer {
             AlphaBatchKind::Blend => {
                 //self.ps_blend.bind(&mut self.device, projection, &mut self.renderer_errors);
                 (&mut self.ps_blend, GPU_TAG_PRIM_BLEND)
-            }*/
+            }
             AlphaBatchKind::Rectangle => {
                 if needs_clipping {
                     (&mut self.ps_rectangle_clip, GPU_TAG_PRIM_RECT)
