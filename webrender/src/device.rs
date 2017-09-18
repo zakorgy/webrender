@@ -64,8 +64,8 @@ pub const RGBA_STRIDE: usize = 4;
 pub type TextureId = u32;
 
 //pub const INVALID: TextureId = 0;
-pub const DUMMY_A8: TextureId = 0;
-pub const DUMMY_RGBA8: TextureId = 1;
+pub const DUMMY_ID: TextureId = 0;
+//pub const DUMMY_RGBA8: TextureId = 1;
 pub const DITHER: TextureId = 2;
 const FIRST_UNRESERVED_ID: TextureId = DITHER + 1;
 
@@ -250,50 +250,47 @@ pub struct ImageTexture<T> where T: gfx::format::TextureFormat {
     pub handle: gfx::handle::Texture<R, T::Surface>,
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
     pub filter: TextureFilter,
+    pub format: ImageFormat,
 }
 
-/*pub struct Texture {
-    id: u32,
-    target: TextureTarget,
-    layer_count: i32,
-    format: ImageFormat,
-    width: u32,
-    height: u32,
+impl<T> ImageTexture<T> where T: gfx::format::TextureFormat {
+    pub fn create<F>(factory: &mut F, size: [usize; 2], layer_count: u16, filter: TextureFilter, format: ImageFormat) -> Result<ImageTexture<T>, CombinedError>
+        where F: gfx::Factory<R>
+    {
+        let (width, height) = (size[0] as u16, size[1] as u16);
+        let tex_kind = Kind::D2Array(width, height, layer_count, gfx::texture::AaMode::Single);
 
-    filter: TextureFilter,
-    mode: RenderTargetMode,
+        let (surface, view) = {
+            let surface = <T::Surface as gfx::format::SurfaceTyped>::get_surface_type();
+            let desc = gfx::texture::Info {
+                kind: tex_kind,
+                levels: 1,
+                format: surface,
+                bind: gfx::memory::SHADER_RESOURCE,
+                usage: gfx::memory::Usage::Dynamic,
+            };
+            let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
+            let levels = (0, raw.get_info().levels - 1);
+            let tex = Typed::new(raw);
+            let view = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
+            (tex, view)
+        };
 
-    handle: Option<gfx::handle::Texture<R, R8_G8_B8_A8>>,
-    rtv: Option<gfx::handle::RenderTargetView<R, Rgba8>>,
-    srv: Option<gfx::handle::ShaderResourceView<R, R8_G8_B8_A8>>,
+        Ok(ImageTexture {
+            handle: surface,
+            srv: view,
+            filter: filter,
+            format: format,
+        })
+    }
+
+    #[inline(always)]
+    pub fn get_size(&self) -> (usize, usize) {
+        let (w, h, _, _) = self.handle.get_info().kind.get_dimensions();
+        (w as usize, h as usize)
+    }
 }
-
-impl Texture {
-    pub fn get_dimensions(&self) -> DeviceUintSize {
-        DeviceUintSize::new(self.width, self.height)
-    }
-
-    pub fn get_layer_count(&self) -> i32 {
-        self.layer_count
-    }
-
-    pub fn get_bpp(&self) -> u32 {
-        match self.format {
-            ImageFormat::A8 => 1,
-            ImageFormat::RGB8 => 3,
-            ImageFormat::BGRA8 => 4,
-            ImageFormat::RG8 => 2,
-            ImageFormat::RGBAF32 => 16,
-            ImageFormat::Invalid => unreachable!(),
-        }
-    }
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        debug_assert!(thread::panicking() || self.id == 0);
-    }
-}*/
 
 const MAX_TIMERS_PER_FRAME: usize = 256;
 const MAX_SAMPLERS_PER_FRAME: usize = 16;
@@ -526,15 +523,10 @@ pub struct Device {
     pub factory: backend::Factory,
     pub encoder: gfx::Encoder<R,CB>,
     pub sampler: (Sampler<R>, Sampler<R>),
-    pub color0: TextureId,
-    pub color1: TextureId,
-    pub color2: TextureId,
     pub cache_a8_textures: HashMap<TextureId, CacheTexture<A8>>,
     pub cache_rgba8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
+    pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
     pub bound_textures: BoundTextures,
-    //pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
-    //pub dummy_cache_a8: CacheTexture<A8>,
-    //pub dummy_cache_rgba8: CacheTexture<Rgba8>,
     pub layers: DataTexture<Rgba32F>,
     pub render_tasks: DataTexture<Rgba32F>,
     pub resource_cache: DataTexture<Rgba32F>,
@@ -595,22 +587,25 @@ impl Device {
 
         let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
+        let dummy_image_tex = ImageTexture::create(&mut factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
         let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
         let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
         let resource_cache_tex = DataTexture::create(&mut factory, [max_texture_size, max_texture_size]).unwrap();
 
         let mut cache_a8_textures = HashMap::new();
-        cache_a8_textures.insert(DUMMY_A8, dummy_cache_a8_tex);
+        cache_a8_textures.insert(DUMMY_ID, dummy_cache_a8_tex);
         let mut cache_rgba8_textures = HashMap::new();
-        cache_rgba8_textures.insert(DUMMY_RGBA8, dummy_cache_rgba8_tex);
+        cache_rgba8_textures.insert(DUMMY_ID, dummy_cache_rgba8_tex);
+        let mut image_textures = HashMap::new();
+        image_textures.insert(DUMMY_ID, dummy_image_tex);
 
         let bound_textures = BoundTextures {
-            color0: DUMMY_RGBA8,
-            color1: DUMMY_RGBA8,
-            color2: DUMMY_RGBA8,
-            cache_a8: DUMMY_A8,
-            cache_rgba8: DUMMY_RGBA8,
-            shared_cache_a8: DUMMY_A8,
+            color0: DUMMY_ID,
+            color1: DUMMY_ID,
+            color2: DUMMY_ID,
+            cache_a8: DUMMY_ID,
+            cache_rgba8: DUMMY_ID,
+            shared_cache_a8: DUMMY_ID,
         };
 
         let dev = Device {
@@ -618,11 +613,9 @@ impl Device {
             factory: factory,
             encoder: encoder,
             sampler: (sampler_nearest, sampler_linear),
-            color0: 0,
-            color1: 0,
-            color2: 0,
             cache_a8_textures: cache_a8_textures,
             cache_rgba8_textures: cache_rgba8_textures,
+            image_textures: image_textures,
             bound_textures: bound_textures,
             //dummy_cache_a8: dummy_cache_a8_tex,
             //dummy_cache_rgba8: dummy_cache_rgba8_tex,
@@ -650,11 +643,15 @@ impl Device {
     }
 
     pub fn dummy_cache_a8(&mut self) -> &CacheTexture<A8> {
-        self.cache_a8_textures.get(&DUMMY_A8).unwrap()
+        self.cache_a8_textures.get(&DUMMY_ID).unwrap()
     }
 
     pub fn dummy_cache_rgba8(&mut self) -> &CacheTexture<Rgba8> {
-        self.cache_rgba8_textures.get(&DUMMY_RGBA8).unwrap()
+        self.cache_rgba8_textures.get(&DUMMY_ID).unwrap()
+    }
+
+    pub fn dummy_image(&mut self) -> &ImageTexture<Rgba8> {
+        self.image_textures.get(&DUMMY_ID).unwrap()
     }
 
     pub fn max_texture_size(&self) -> u32 {
@@ -697,7 +694,8 @@ impl Device {
         let mut rng = OsRng::new().unwrap();
         let mut texture_id = FIRST_UNRESERVED_ID;
         while self.cache_a8_textures.contains_key(&texture_id) ||
-              self.cache_rgba8_textures.contains_key(&texture_id) {
+              self.cache_rgba8_textures.contains_key(&texture_id) ||
+              self.image_textures.contains_key(&texture_id) {
             texture_id = rng.gen_range(FIRST_UNRESERVED_ID, u32::max_value());
         }
         texture_id
@@ -720,68 +718,17 @@ impl Device {
         id
     }
 
-    pub fn create_texture(&mut self, target: TextureTarget) -> TextureId {
-        /*Texture {
-            id: 0,
-            target: target,
-            width: 0,
-            height: 0,
-            layer_count: 0,
-            format: ImageFormat::Invalid,
-            filter: TextureFilter::Nearest,
-            mode: RenderTargetMode::None,
-            handle: None,
-            rtv: None,
-            srv: None,
-        }*/
-        0
-    }
-
-    pub fn init_texture(&mut self,
-                        texture: &TextureId,
-                        width: u32,
-                        height: u32,
-                        format: ImageFormat,
-                        filter: TextureFilter,
-                        mode: RenderTargetMode,
-                        layer_count: i32,
-                        pixels: Option<&[u8]>) {
-        debug_assert!(self.inside_frame);
-
-        /*let resized = texture.width != width || texture.height != height;
-
-        texture.format = format;
-        texture.width = width;
-        texture.height = height;
-        texture.filter = filter;
-        texture.layer_count = layer_count;
-        texture.mode = mode;
-
-        match mode {
-            RenderTargetMode::RenderTarget => {
-            }
-            RenderTargetMode::None => {
-            }
-        }*/
+    pub fn create_image_texture(&mut self, width: u32, height: u32, layer_count: i32, filter: TextureFilter, format: ImageFormat) -> TextureId {
+        let id = self.generate_texture_id();
+        println!("create_image_texture={:?}", id);
+        let tex = ImageTexture::create(&mut self.factory, [width as usize, height as usize], layer_count as u16, filter, format).unwrap();
+        self.image_textures.insert(id, tex);
+        id
     }
 
     pub fn free_texture_storage(&mut self, texture: &TextureId) {
         debug_assert!(self.inside_frame);
-
-        /*if texture.format == ImageFormat::Invalid {
-            return;
-        }
-
-        texture.format = ImageFormat::Invalid;
-        texture.width = 0;
-        texture.height = 0;
-        texture.layer_count = 0;*/
     }
-
-    /*pub fn delete_texture(&mut self, mut texture: Texture) {
-        self.free_texture_storage(&mut texture);
-        texture.id = 0;
-    }*/
 
     pub fn update_data_texture<T>(&mut self, sampler: TextureSampler, offset: [u16; 2], size: [u16; 2], memory: &[T]) where T: gfx::traits::Pod {
         let img_info = gfx::texture::ImageInfoCommon {
@@ -805,7 +752,56 @@ impl Device {
         self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
-    pub fn update_pbo_data<T>(&mut self, data: &[T]) {
+    pub fn update_image_data(
+        &mut self, pixels: &[u8],
+        texture_id: &TextureId,
+        x0: u32,
+        y0: u32,
+        width: u32,
+        height: u32,
+        layer_index: i32,
+        stride: Option<u32>,
+        offset: usize)
+    {
+        println!("update_image_data={:?}", texture_id);
+        let data = {
+            let texture = self.image_textures.get(texture_id).unwrap();
+            match texture.format {
+                ImageFormat::A8 => convert_data_to_rgba8(width as usize, height as usize, pixels, A_STRIDE),
+                ImageFormat::RG8 => convert_data_to_rgba8(width as usize, height as usize, pixels, RG_STRIDE),
+                ImageFormat::RGB8 => convert_data_to_rgba8(width as usize, height as usize, pixels, RGB_STRIDE),
+                ImageFormat::BGRA8 => {
+                    let row_length = match stride {
+                        Some(value) => value as usize / RGBA_STRIDE,
+                        None => width as usize,
+                    };
+                    let data_pitch = row_length * RGBA_STRIDE;
+                    convert_data_to_bgra8(width as usize, height as usize, data_pitch, pixels)
+                }
+                _ => unimplemented!(),
+            }
+        };
+        self.update_image_texture(texture_id, [x0 as u16, y0 as u16], [width as u16, height as u16], data.as_slice());
+    }
+
+    pub fn update_image_texture(&mut self, texture_id: &TextureId, offset: [u16; 2], size: [u16; 2], memory: &[u8]) {
+        let img_info = gfx::texture::ImageInfoCommon {
+            xoffset: offset[0],
+            yoffset: offset[1],
+            zoffset: 0,
+            width: size[0],
+            height: size[1],
+            depth: 0,
+            format: (),
+            mipmap: 0,
+        };
+
+        let data = gfx::memory::cast_slice(memory);
+        let texture = self.image_textures.get(texture_id).unwrap();
+        self.encoder.update_texture::<_, Rgba8>(&texture.handle, None, img_info, data).unwrap();
+    }
+
+    /*pub fn update_pbo_data<T>(&mut self, data: &[T]) {
         debug_assert!(self.inside_frame);
         //debug_assert_ne!(self.bound_pbo, 0);
 
@@ -880,7 +876,7 @@ impl Device {
         if let Some(..) = stride {
             self.gl.pixel_store_i(gl::UNPACK_ROW_LENGTH, 0 as gl::GLint);
         }*/
-    }
+    }*/
 
     pub fn end_frame(&mut self) {
         debug_assert!(self.inside_frame);
@@ -907,6 +903,35 @@ impl Device {
     pub fn flush(&mut self) {
         self.encoder.flush(&mut self.device);
     }
+}
+
+fn convert_data_to_rgba8(width: usize, height: usize, data: &[u8], orig_stride: usize) -> Vec<u8> {
+    let mut new_data = vec![0u8; width * height * RGBA_STRIDE];
+    for s in 0..orig_stride {
+        for h in 0..height {
+            for w in 0..width {
+                new_data[s+(w*RGBA_STRIDE)+h*width*RGBA_STRIDE] = data[s+(w*orig_stride)+h*width*orig_stride];
+            }
+        }
+    }
+    return new_data;
+}
+
+fn convert_data_to_bgra8(width: usize, height: usize, data_pitch: usize, data: &[u8]) -> Vec<u8> {
+    let mut new_data = vec![0u8; width * height * RGBA_STRIDE];
+    for j in 0..height {
+        for i in 0..width {
+            let offset = i*RGBA_STRIDE + j*RGBA_STRIDE*width;
+            let src = &data[j * data_pitch + i * RGBA_STRIDE ..];
+            assert!(offset + 3 < new_data.len()); // optimization
+            // convert from BGRA
+            new_data[offset + 0] = src[2];
+            new_data[offset + 1] = src[1];
+            new_data[offset + 2] = src[0];
+            new_data[offset + 3] = src[3];
+        }
+    }
+    return new_data;
 }
 
 #[cfg(not(feature = "dx11"))]

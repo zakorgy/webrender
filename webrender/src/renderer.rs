@@ -21,7 +21,7 @@ use debug_server::{self, DebugServer};
 use device::{Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
 use device::{GpuTimer, TextureFilter, VertexUsageHint, TextureTarget, ShaderError};
 use device::{TextureSlot, VertexAttribute, VertexAttributeKind};
-use device::{TextureId, DUMMY_A8, DUMMY_RGBA8, DITHER};
+use device::{TextureId, DUMMY_ID, DITHER};
 use euclid::{Transform3D, rect};
 use frame_builder::FrameBuilderConfig;
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
@@ -367,8 +367,8 @@ impl SourceTextureResolver {
         SourceTextureResolver {
             cache_texture_map: Vec::new(),
             //external_images: FastHashMap::default(),
-            dummy_cache_a8_texture: DUMMY_A8,
-            dummy_cache_rgba8_texture: DUMMY_RGBA8,
+            dummy_cache_a8_texture: DUMMY_ID,
+            dummy_cache_rgba8_texture: DUMMY_ID,
             cache_a8_texture: None,
             cache_rgba8_texture: None,
         }
@@ -1428,21 +1428,21 @@ impl Renderer {
                         let CacheTextureId(cache_texture_index) = update.id;
                         if self.texture_resolver.cache_texture_map.len() == cache_texture_index {
                             // Create a new native texture, as requested by the texture cache.
-                            let texture = self.device.create_texture(TextureTarget::Array);
+                            let texture = self.device.create_image_texture(width, height, layer_count, filter, format);
                             self.texture_resolver.cache_texture_map.push(texture);
                         }
-                        let texture = &mut self.texture_resolver.cache_texture_map[cache_texture_index];
+                        //let texture = &mut self.texture_resolver.cache_texture_map[cache_texture_index];
 
                         // Ensure no PBO is bound when creating the texture storage,
                         // or GL will attempt to read data from there.
-                        self.device.init_texture(texture,
+                        /*self.device.init_texture(texture,
                                                  width,
                                                  height,
                                                  format,
                                                  filter,
                                                  mode,
                                                  layer_count,
-                                                 None);
+                                                 None);*/
                     }
                     TextureUpdateOp::Update { rect, source, stride, layer_index, offset } => {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
@@ -1453,7 +1453,17 @@ impl Renderer {
 
                         match source {
                             TextureUpdateSource::Bytes { data }  => {
-                                self.device.update_pbo_data(&data[offset as usize..]);
+                                //self.device.update_pbo_data(&data[offset as usize..]);
+                                self.device.update_image_data(
+                                    &data[offset as usize..],
+                                    texture,
+                                    rect.origin.x,
+                                    rect.origin.y,
+                                    rect.size.width,
+                                    rect.size.height,
+                                    layer_index,
+                                    stride,
+                                    0);
                             }
                             TextureUpdateSource::External { id, channel_index } => {
                                 /*let handler = self.external_image_handler
@@ -1479,14 +1489,14 @@ impl Renderer {
                             }
                         }
 
-                        self.device.update_texture_from_pbo(texture,
+                        /*self.device.update_texture_from_pbo(texture,
                                                             rect.origin.x,
                                                             rect.origin.y,
                                                             rect.size.width,
                                                             rect.size.height,
                                                             layer_index,
                                                             stride,
-                                                            0);
+                                                            0);*/
 
                         // Ensure that other texture updates won't read from this PBO.
                         //self.device.bind_pbo(None);
@@ -1863,8 +1873,8 @@ impl Renderer {
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
                 let _gm2 = GpuMarker::new("clip images");
+                self.texture_resolver.bind(&mask_texture_id, TextureSampler::Color0, &mut self.device);
                 self.cs_clip_image.bind(&mut self.device, projection, &items, render_target.0, &mut self.renderer_errors);
-                //TODO bind color0 sampler with mask_texture_id.clone()
                 self.profile_counters.vertices.add(6 * &items.len());
                 self.cs_clip_image.draw(&mut self.device, &blend_mode);
             }
