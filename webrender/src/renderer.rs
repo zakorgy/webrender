@@ -1303,11 +1303,6 @@ impl Renderer {
                         let frame_id = self.device.begin_frame(frame.device_pixel_ratio);
                         self.gpu_profile.begin_frame(frame_id);
 
-                        //self.device.disable_scissor();
-                        //self.device.disable_depth();
-                        //self.device.set_blend(false);
-                        //self.update_shaders();
-
                         self.update_texture_cache();
 
                         self.update_gpu_cache(frame);
@@ -1503,57 +1498,6 @@ impl Renderer {
         }
     }
 
-    /*fn draw_primitive_batch(
-        &mut self,
-        program: &mut ProgramPair,
-        transform_kind: TransformedRectKind,
-        textures: &BatchTextures,
-        blendmode: &BlendMode,
-        enable_depth_write: bool)
-    {
-        for i in 0..textures.colors.len() {
-            self.texture_resolver.bind(&textures.colors[i], TextureSampler::color(i), &mut self.device);
-        }
-        program.get(transform_kind).draw(&mut self.device, blendmode, enable_depth_write);
-    }*/
-
-    fn draw_instanced_batch<T>(&mut self,
-                               data: &[T],
-                               vertex_array_kind: VertexArrayKind,
-                               textures: &BatchTextures) {
-        for i in 0..textures.colors.len() {
-            self.texture_resolver.bind(&textures.colors[i], TextureSampler::color(i), &mut self.device);
-        }
-
-        // TODO: this probably isn't the best place for this.
-        /*if let Some(ref texture) = self.dither_matrix_texture {
-            //self.device.bind_texture(TextureSampler::Dither, texture);
-        }*/
-
-        /*let vao = match vertex_array_kind {
-            VertexArrayKind::Primitive => &self.prim_vao,
-            VertexArrayKind::Clip => &self.clip_vao,
-            VertexArrayKind::Blur => &self.blur_vao,
-            VertexArrayKind::CacheBoxShadow => &self.box_shadow_vao,
-        };*/
-
-        //self.device.bind_vao(vao);
-
-        /*if self.enable_batcher {
-            self.device.update_vao_instances(vao, data, VertexUsageHint::Stream);
-            self.device.draw_indexed_triangles_instanced_u16(6, data.len() as i32);
-            self.profile_counters.draw_calls.inc();
-        } else {
-            for i in 0 .. data.len() {
-                self.device.update_vao_instances(vao, &data[i..i+1], VertexUsageHint::Stream);
-                self.device.draw_triangles_u16(0, 6);
-                self.profile_counters.draw_calls.inc();
-            }
-        }*/
-
-        self.profile_counters.vertices.add(6 * data.len());
-    }
-
     fn submit_batch(&mut self,
                     key: &AlphaBatchKey,
                     instances: &[PrimitiveInstance],
@@ -1573,7 +1517,6 @@ impl Renderer {
                           BlendMode::Multiply => true,
                           BlendMode::None => false,
                       });
-        //println!("program={:?}", key.kind);
         let (mut program, marker) = match key.kind {
             /*AlphaBatchKind::Composite { .. } => {
                 //self.ps_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
@@ -1593,13 +1536,10 @@ impl Renderer {
             }*/
             AlphaBatchKind::Rectangle => {
                 if needs_clipping {
-                    //self.ps_rectangle_clip.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                     (&mut self.ps_rectangle_clip, GPU_TAG_PRIM_RECT)
                 } else {
-                    //self.ps_rectangle.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                     (&mut self.ps_rectangle, GPU_TAG_PRIM_RECT)
                 }
-                //GPU_TAG_PRIM_RECT
             }
             /*AlphaBatchKind::Line => {
                 //self.ps_line.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
@@ -1608,62 +1548,41 @@ impl Renderer {
             AlphaBatchKind::TextRun => {
                 match key.blend_mode {
                     BlendMode::Subpixel(..) => {
-                        //self.ps_text_run_subpixel.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                         (&mut self.ps_text_run_subpixel, GPU_TAG_PRIM_TEXT_RUN)
                     }
-                    /*BlendMode::Alpha |
-                    BlendMode::PremultipliedAlpha |
-                    BlendMode::None => {*/
                     _=> {
-                        //self.ps_text_run.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                         (&mut self.ps_text_run, GPU_TAG_PRIM_TEXT_RUN)
                     }
-                }//;
-                //GPU_TAG_PRIM_TEXT_RUN
+                }
             }
             AlphaBatchKind::Image(image_buffer_kind) => {
-                /*self.ps_image[image_buffer_kind as usize]
-                    .as_mut()
-                    .expect("Unsupported image shader kind")
-                    .bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);*/
                 (&mut self.ps_image, GPU_TAG_PRIM_IMAGE)
             }
             AlphaBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                 let shader_index = Renderer::get_yuv_shader_index(image_buffer_kind,
                                                                   format,
                                                                   color_space);
-                /*self.ps_yuv_image[shader_index]
-                    .as_mut()
-                    .expect("Unsupported YUV shader kind")
-                    .bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);*/
                 (&mut self.ps_yuv_image[shader_index], GPU_TAG_PRIM_YUV_IMAGE)
             }
             AlphaBatchKind::BorderCorner => {
-                //self.ps_border_corner.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_border_corner, GPU_TAG_PRIM_BORDER_CORNER)
             }
             AlphaBatchKind::BorderEdge => {
-                //self.ps_border_edge.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_border_edge, GPU_TAG_PRIM_BORDER_EDGE)
             }
             AlphaBatchKind::AlignedGradient => {
-                //self.ps_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_gradient, GPU_TAG_PRIM_GRADIENT)
             }
             AlphaBatchKind::AngleGradient => {
-                //self.ps_angle_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_angle_gradient, GPU_TAG_PRIM_ANGLE_GRADIENT)
             }
             AlphaBatchKind::RadialGradient => {
-                //self.ps_radial_gradient.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_radial_gradient, GPU_TAG_PRIM_RADIAL_GRADIENT)
             }
             AlphaBatchKind::BoxShadow => {
-                //self.ps_box_shadow.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_box_shadow, GPU_TAG_PRIM_BOX_SHADOW)
             }
             AlphaBatchKind::CacheImage => {
-                //self.ps_cache_image.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
                 (&mut self.ps_cache_image, GPU_TAG_PRIM_CACHE_IMAGE)
             }
             _=> return
@@ -1729,14 +1648,9 @@ impl Renderer {
             }
             _ => {}
         }*/
-        //println!("program={:?}", program);
         program.bind(&mut self.device, transform_kind, projection, instances, &mut self.renderer_errors);
         self.profile_counters.vertices.add(6 * instances.len());
         let _gm = self.gpu_profile.add_marker(marker);
-        /*self.draw_instanced_batch(instances,
-                                  VertexArrayKind::Primitive,
-                                  &key.textures);*/
-        //self.draw_primitive_batch(&mut program, transform_kind, &key.textures, &key.blend_mode, enable_depth_write);
         for i in 0..key.textures.colors.len() {
             self.texture_resolver.bind(&key.textures.colors[i], TextureSampler::color(i), &mut self.device);
         }
@@ -1787,18 +1701,19 @@ impl Renderer {
             let _gm = self.gpu_profile.add_marker(GPU_TAG_BLUR);
 
             //self.device.set_blend(false);
-            //self.cs_blur.bind(&mut self.device, projection, &mut self.renderer_errors);
-
             if !target.vertical_blurs.is_empty() {
-                self.draw_instanced_batch(&target.vertical_blurs,
+                //self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, render_target.0, &mut self.renderer_errors);
+                /*self.draw_instanced_batch(&target.vertical_blurs,
                                           VertexArrayKind::Blur,
-                                          &BatchTextures::no_texture());
+                                          &BatchTextures::no_texture());*/
+                
             }
 
             if !target.horizontal_blurs.is_empty() {
-                self.draw_instanced_batch(&target.horizontal_blurs,
+                /*self.draw_instanced_batch(&target.horizontal_blurs,
                                           VertexArrayKind::Blur,
-                                          &BatchTextures::no_texture());
+                                          &BatchTextures::no_texture());*/
+                //self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, render_target.0, &mut self.renderer_errors);
             }
         }
 
@@ -1815,9 +1730,10 @@ impl Renderer {
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_TEXT_RUN);
             //self.cs_text_run.bind(&mut self.device, projection, &mut self.renderer_errors);
             for (texture_id, instances) in &target.text_run_cache_prims {
-                self.draw_instanced_batch(instances,
+                /*self.draw_instanced_batch(instances,
                                           VertexArrayKind::Primitive,
                                           &BatchTextures::color(*texture_id));
+                self.cs_text_run.bind(&mut self.device, projection, &instances, render_target.0, &mut self.renderer_errors);*/
             }
         }
         if !target.line_cache_prims.is_empty() {
@@ -1828,25 +1744,19 @@ impl Renderer {
 
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_LINE);
             //self.cs_line.bind(&mut self.device, projection, &mut self.renderer_errors);
-            self.draw_instanced_batch(&target.line_cache_prims,
+            /*self.draw_instanced_batch(&target.line_cache_prims,
                                       VertexArrayKind::Primitive,
-                                      &BatchTextures::no_texture());
+                                      &BatchTextures::no_texture());*/
         }
 
         //TODO: record the pixel count for cached primitives
 
         if !target.alpha_batcher.is_empty() {
             let _gm2 = GpuMarker::new("alpha batches");
-            //self.device.set_blend(false);
-            //let mut prev_blend_mode = BlendMode::None;
 
             self.gpu_profile.add_sampler(GPU_SAMPLER_TAG_OPAQUE);
 
             //Note: depth equality is needed for split planes
-            //self.device.set_depth_func(DepthFunction::LessEqual);
-            //self.device.enable_depth();
-            //self.device.enable_depth_write();
-
             // Draw opaque batches front-to-back for maximum
             // z-buffer efficiency!
             let mut enable_depth_write = true;
@@ -1865,31 +1775,9 @@ impl Renderer {
                                   enable_depth_write);
             }
 
-            //self.device.disable_depth_write();
             self.gpu_profile.add_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
             enable_depth_write = false;
             for batch in &target.alpha_batcher.batch_list.alpha_batch_list.batches {
-                /*if batch.key.blend_mode != prev_blend_mode {
-                    match batch.key.blend_mode {
-                        BlendMode::None => {
-                            //self.device.set_blend(false);
-                        }
-                        BlendMode::Alpha => {
-                            //self.device.set_blend(true);
-                            //self.device.set_blend_mode_alpha();
-                        }
-                        BlendMode::PremultipliedAlpha => {
-                            //self.device.set_blend(true);
-                            //self.device.set_blend_mode_premultiplied_alpha();
-                        }
-                        BlendMode::Subpixel(color) => {
-                            //self.device.set_blend(true);
-                            //self.device.set_blend_mode_subpixel(color);
-                        }
-                    }
-                    prev_blend_mode = batch.key.blend_mode;
-                }*/
-
                 self.submit_batch(&batch.key,
                                   &batch.instances,
                                   &projection,
@@ -1899,8 +1787,6 @@ impl Renderer {
                                   enable_depth_write);
             }
 
-            //self.device.disable_depth();
-            //self.device.set_blend(false);
             self.gpu_profile.done_sampler();
         }
     }
@@ -1915,9 +1801,6 @@ impl Renderer {
 
         {
             let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
-            //self.device.bind_draw_target(Some(render_target), Some(target_size));
-            //self.device.disable_depth();
-            //self.device.disable_depth_write();
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -1936,9 +1819,6 @@ impl Renderer {
             //self.device.set_blend(false);
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_BOX_SHADOW);
             //self.cs_box_shadow.bind(&mut self.device, projection, &mut self.renderer_errors);
-            self.draw_instanced_batch(&target.box_shadow_cache_prims,
-                                      VertexArrayKind::CacheBoxShadow,
-                                      &BatchTextures::no_texture());
         }
 
         // Draw the clip items into the tiled alpha mask.
@@ -1950,11 +1830,9 @@ impl Renderer {
             // in regions below.
             if !target.clip_batcher.border_clears.is_empty() {
                 let _gm2 = GpuMarker::new("clip borders [clear]");
-                //self.device.set_blend(false);
-                //self.cs_clip_border.bind(&mut self.device, projection, &mut self.renderer_errors);
-                self.draw_instanced_batch(&target.clip_batcher.border_clears,
-                                          VertexArrayKind::Clip,
-                                          &BatchTextures::no_texture());
+                self.cs_clip_border.bind(&mut self.device, projection, &target.clip_batcher.border_clears, render_target.0, &mut self.renderer_errors);
+                self.profile_counters.vertices.add(6 * &target.clip_batcher.border_clears.len());
+                self.cs_clip_border.draw(&mut self.device, &BlendMode::None);
             }
 
             // Draw any dots or dashes for border corners.
@@ -1964,40 +1842,28 @@ impl Renderer {
                 // Blend mode is set to max to allow drawing multiple dots.
                 // The individual dots and dashes in a border never overlap, so using
                 // a max blend mode here is fine.
-                //self.device.set_blend(true);
-                //self.device.set_blend_mode_max();
-                //self.cs_clip_border.bind(&mut self.device, projection, &mut self.renderer_errors);
-                self.draw_instanced_batch(&target.clip_batcher.borders,
-                                          VertexArrayKind::Clip,
-                                          &BatchTextures::no_texture());
+                self.cs_clip_border.bind(&mut self.device, projection, &target.clip_batcher.borders, render_target.0, &mut self.renderer_errors);
+                self.profile_counters.vertices.add(6 * &target.clip_batcher.borders.len());
+                self.cs_clip_border.draw(&mut self.device, &BlendMode::Max);
             }
 
             // switch to multiplicative blending
-            //self.device.set_blend(true);
-            //self.device.set_blend_mode_multiply();
+            let blend_mode = BlendMode::Multiply;
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
                 let _gm2 = GpuMarker::new("clip rectangles");
-                //self.cs_clip_rectangle.bind(&mut self.device, projection, &mut self.renderer_errors);
-                self.draw_instanced_batch(&target.clip_batcher.rectangles,
-                                          VertexArrayKind::Clip,
-                                          &BatchTextures::no_texture());
+                self.cs_clip_rectangle.bind(&mut self.device, projection, &target.clip_batcher.rectangles, render_target.0, &mut self.renderer_errors);
+                self.profile_counters.vertices.add(6 * &target.clip_batcher.rectangles.len());
+                self.cs_clip_rectangle.draw(&mut self.device, &blend_mode);
             }
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
                 let _gm2 = GpuMarker::new("clip images");
-                let textures = BatchTextures {
-                    colors: [
-                        mask_texture_id.clone(),
-                        SourceTexture::Invalid,
-                        SourceTexture::Invalid,
-                    ]
-                };
-                //self.cs_clip_image.bind(&mut self.device, projection, &mut self.renderer_errors);
-                self.draw_instanced_batch(items,
-                                          VertexArrayKind::Clip,
-                                          &textures);
+                self.cs_clip_image.bind(&mut self.device, projection, &items, render_target.0, &mut self.renderer_errors);
+                //TODO bind color0 sampler with mask_texture_id.clone()
+                self.profile_counters.vertices.add(6 * &items.len());
+                self.cs_clip_image.draw(&mut self.device, &blend_mode);
             }
         }
 
@@ -2076,6 +1942,8 @@ impl Renderer {
     fn start_frame(&mut self, frame: &mut Frame) {
         let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_DATA);
 
+        let width = frame.cache_size.width as u32;
+        let height = frame.cache_size.height as u32;
         // Assign render targets to the passes.
         for pass in &mut frame.passes {
             debug_assert!(pass.color_texture.is_none());
@@ -2086,7 +1954,10 @@ impl Renderer {
                                               .pop()
                                               .unwrap_or_else(|| {
                                                   self.device
-                                                      .create_texture(TextureTarget::Array)
+                                                      .create_cache_texture(
+                                                          width,
+                                                          height,
+                                                          RenderTargetKind::Color)
                                                }));
             }
 
@@ -2095,14 +1966,17 @@ impl Renderer {
                                               .pop()
                                               .unwrap_or_else(|| {
                                                   self.device
-                                                      .create_texture(TextureTarget::Array)
+                                                      .create_cache_texture(
+                                                          width,
+                                                          height,
+                                                          RenderTargetKind::Alpha)
                                                }));
             }
         }
 
 
         // Init textures and render targets to match this scene.
-        for pass in &mut frame.passes {
+        /*for pass in &mut frame.passes {
             let color_target_count = pass.required_target_count(RenderTargetKind::Color);
             let alpha_target_count = pass.required_target_count(RenderTargetKind::Alpha);
 
@@ -2126,7 +2000,7 @@ impl Renderer {
                                          alpha_target_count as i32,
                                          None);
             }
-        }
+        }*/
 
         self.layer_texture.update(&mut self.device, &mut frame.layer_texture_data);
         self.render_task_texture.update(&mut self.device, &mut frame.render_tasks.task_data);
@@ -2148,10 +2022,6 @@ impl Renderer {
         // TODO(gw): Find a better solution for this?
         let needs_clear = frame.window_size.width < framebuffer_size.width ||
                           frame.window_size.height < framebuffer_size.height;
-
-        //self.device.disable_depth_write();
-        //self.device.disable_stencil();
-        //self.device.set_blend(false);
 
         if frame.passes.is_empty() {
             self.device.clear_target(Some(self.clear_color.to_array()), Some(1.0));

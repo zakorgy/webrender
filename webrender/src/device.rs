@@ -29,6 +29,7 @@ use gfx::format::{Formatted, R8, Rgba8, Rgba32F, Srgba8, SurfaceTyped, TextureCh
 use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32};
 use gfx::handle::Sampler;
 use gfx::memory::Typed;
+use tiling::RenderTargetKind;
 use pipelines::{primitive, ClipProgram, Position, PrimitiveInstances, Program, Locals};
 use renderer::{BlendMode, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 
@@ -66,6 +67,7 @@ pub const INVALID: TextureId = 0;
 pub const DUMMY_A8: TextureId = 1;
 pub const DUMMY_RGBA8: TextureId = 2;
 pub const DITHER: TextureId = 3;
+const FIRST_UNRESERVED_ID: TextureId = DITHER + 1;
 
 pub type A8 = (R8, Unorm);
 
@@ -666,6 +668,33 @@ impl Device {
         }*/
     }
 
+    pub fn generate_texture_id(&mut self) -> TextureId {
+        use rand::OsRng;
+
+        let mut rng = OsRng::new().unwrap();
+        let mut texture_id = INVALID;
+        while self.cache_a8_textures.contains_key(&texture_id) ||
+              self.cache_rgba8_textures.contains_key(&texture_id) {
+            texture_id = rng.gen_range(FIRST_UNRESERVED_ID, u32::max_value());
+        }
+        texture_id
+    }
+
+    pub fn create_cache_texture(&mut self, width: u32, height: u32, kind: RenderTargetKind) -> TextureId
+    {
+        let id = self.generate_texture_id();
+        match kind {
+            RenderTargetKind::Alpha => {
+                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
+                self.cache_a8_textures.insert(id, tex);
+            }
+            RenderTargetKind::Color => {
+                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
+                self.cache_rgba8_textures.insert(id, tex);
+            }
+        }
+        id
+    }
 
     pub fn create_texture(&mut self, target: TextureTarget) -> TextureId {
         /*Texture {

@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use device::{Device, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT};
+use device::{Device, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT, TextureId};
 use euclid::{Matrix4D, Transform3D};
 use gfx;
 use gfx::state::{Blend, BlendChannel, BlendValue, Comparison, Depth, Equation, Factor};
@@ -199,10 +199,10 @@ gfx_defines! {
         resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("Target0",
-                                           Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
+                                           Format(gfx::format::SurfaceType::R8, gfx::format::ChannelType::Unorm),
                                            gfx::state::MASK_ALL,
                                            None),
-        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
+        //out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
     
     /*vertex DebugColorVertices {
@@ -517,6 +517,34 @@ impl ClipProgram {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
+
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[CacheClipInstance], render_target: &TextureId, renderer_errors: &mut Vec<RendererError>) {
+        self.data.transform = projection.to_row_arrays();
+        let locals = Locals {
+            transform: self.data.transform,
+            device_pixel_ratio: self.data.device_pixel_ratio,
+        };
+        device.encoder.update_buffer(&self.data.locals, &[locals], 0).unwrap();
+
+        {
+            let mut writer = device.factory.write_mapping(&self.upload.0).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i + self.upload.1].update(inst);
+            }
+        }
+
+        {
+            self.slice.instances = Some((instances.len() as u32, 0));
+        }
+        device.encoder.copy_buffer(&self.upload.0, &self.data.ibuf, self.upload.1, 0, instances.len()).unwrap();
+        self.upload.1 += instances.len();
+        self.data.out_color = device.cache_a8_textures.get(&render_target).unwrap().rtv.raw().clone();
+    }
+
+    pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode)
+    {
+        device.encoder.draw(&self.slice, &self.get_pso(blendmode), &self.data);
+    }
 }
 
 impl Device {
@@ -646,7 +674,7 @@ impl Device {
             frag_src,
             clip::Init {
                 out_color: ("Target0",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
+                            Format(gfx::format::SurfaceType::R8, gfx::format::ChannelType::Unorm),
                             gfx::state::MASK_ALL,
                             Some(MULTIPLY)),
                 .. clip::new()
@@ -658,7 +686,7 @@ impl Device {
             frag_src,
             clip::Init {
                 out_color: ("Target0",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
+                            Format(gfx::format::SurfaceType::R8, gfx::format::ChannelType::Unorm),
                             gfx::state::MASK_ALL,
                             Some(MAX)),
                 .. clip::new()
@@ -799,8 +827,8 @@ impl Device {
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
-            out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
+            out_color: self.dummy_cache_a8().rtv.raw().clone(),
+            //out_depth: self.main_depth.clone(),
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
         ClipProgram::new(data, psos, self.slice.clone(), upload)
