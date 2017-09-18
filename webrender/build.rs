@@ -87,6 +87,7 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<Str
         if (is_vert || is_frag) || !(is_prim || is_cache || is_debug) {
             continue;
         }
+        let is_clip_cache = filename.starts_with("cs_clip");
         let is_ps_rect = filename.starts_with("ps_rectangle");
         let is_ps_text_run = filename.starts_with("ps_text_run");
         let is_ps_blend = filename.starts_with("ps_blend");
@@ -99,19 +100,23 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<Str
         let is_ps_yuv = filename.starts_with("ps_yuv");
 
         let base_filename = filename.splitn(2, '.').next().unwrap();
-        let shader_prefix = if cfg!(target_os = "windows") && cfg!(feature = "dx11") {
+        let mut shader_prefix = if cfg!(target_os = "windows") && cfg!(feature = "dx11") {
             format!("// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n#define WR_DX11\n",
                     base_filename, 1024)
         } else {
             format!("{}\n// Base shader: {}\n#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
                     SHADER_VERSION, base_filename, 1024)
         };
+        if is_clip_cache {
+            shader_prefix.push_str("#define WR_CLIP_SHADER\n");
+        }
 
         let mut build_configs = vec!["#define WR_FEATURE_TRANSFORM\n"];
         if is_prim {
             // the transform feature may be disabled for the prim shaders
             build_configs.push("// WR_FEATURE_TRANSFORM disabled\n");
         }
+
 
         if is_ps_rect {
             build_configs.push("#define WR_FEATURE_TRANSFORM\n#define WR_FEATURE_CLIP\n");

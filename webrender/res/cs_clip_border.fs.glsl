@@ -45,5 +45,6 @@ void main(in v2p IN, out p2f OUT) {
     // Completely mask out clip if zero'ing out the rect.
     d = d * vAlphaMask.y;
 
-    SHADER_OUT(Target0, vec4(d, 0.0, 0.0, 1.0));
+    //SHADER_OUT(Target0, vec4(d, 0.0, 0.0, 1.0));
+    SHADER_OUT(Target0, d);
 }

@@ -23,5 +23,6 @@ void main(in v2p IN, out p2f OUT) {
         vClipMaskUvInnerRect.xy, vClipMaskUvInnerRect.zw);
     float clip_alpha = texture(sColor0, vec3(source_uv, vLayer)).r; //careful: texture has type A8
 
-    SHADER_OUT(Target0, vec4(min(alpha, clip_alpha), 1.0, 1.0, 1.0));
+    //SHADER_OUT(Target0, vec4(min(alpha, clip_alpha), 1.0, 1.0, 1.0));
+    SHADER_OUT(Target0, min(alpha, clip_alpha));
 }

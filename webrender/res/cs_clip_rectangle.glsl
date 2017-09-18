@@ -208,6 +208,7 @@ void main(in v2p IN, out p2f OUT) {
     // Select alpha or inverse alpha depending on clip in/out.
     float final_alpha = mix(combined_alpha, 1.0 - combined_alpha, vClipMode);
 
-    SHADER_OUT(Target0, vec4(final_alpha, 0.0, 0.0, 1.0));
+    //SHADER_OUT(Target0, vec4(final_alpha, 0.0, 0.0, 1.0));
+    SHADER_OUT(Target0, final_alpha);
 }
 #endif //WR_FRAGMENT_SHADER

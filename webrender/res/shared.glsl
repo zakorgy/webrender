@@ -138,6 +138,8 @@ float2 mod(float2 x, float2 y) {
     struct p2f {
         vec4 Target0 : SV_Target;
     };
+#elif defined(WR_CLIP_SHADER)
+    out float Target0;
 #else
     out vec4 Target0;
 #endif
