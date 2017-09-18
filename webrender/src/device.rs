@@ -900,6 +900,10 @@ impl Device {
         }
     }
 
+    pub fn clear_render_target(&mut self, texture_id: &TextureId, color: f32) {
+        self.encoder.clear(&self.cache_a8_textures.get(texture_id).unwrap().rtv.clone(), color);
+    }
+
     pub fn flush(&mut self) {
         self.encoder.flush(&mut self.device);
     }

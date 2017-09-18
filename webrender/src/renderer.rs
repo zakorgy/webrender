@@ -1809,11 +1809,12 @@ impl Renderer {
             // GPUs that I have tested with. It's possible it may be a
             // performance penalty on other GPU types - we should test this
             // and consider different code paths.
-            let clear_color = [1.0, 1.0, 1.0, 0.0];
+            let clear_color = [1.0];
             /*self.device.clear_target_rect(Some(clear_color),
                                           None,
                                           target.used_rect());*/
-            self.device.clear_target(Some(clear_color), None);
+            //self.device.clear_target(Some(clear_color), None);
+            self.device.clear_render_target(render_target.0, clear_color[0]);
         }
 
         // Draw any box-shadow caches for this target.
