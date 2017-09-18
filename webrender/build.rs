@@ -7,6 +7,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::io::prelude::*;
 use std::fs::{canonicalize, read_dir, File};
+#[cfg(all(target_os = "windows", feature="dx11"))]
 use std::process::{self, Command, Stdio};
 
 #[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
@@ -243,7 +244,7 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<Str
     file_names
 }
 
-#[cfg(any(target_os = "windows"))]
+#[cfg(all(target_os = "windows", feature="dx11"))]
 fn compile_fx_files(file_names: Vec<String>, out_dir: String) {
     for mut file_name in file_names {
         //TODO: Remove SUPPORTED_SHADERS when all shader conversion is done.
@@ -303,7 +304,7 @@ fn main() {
     glsl_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
     let shader_map = write_shaders(glsl_files, &shaders_file);
-    let file_names = create_shaders(out_dir.clone(), &shader_map);
+    let _file_names = create_shaders(out_dir.clone(), &shader_map);
     #[cfg(all(target_os = "windows", feature = "dx11"))]
-    compile_fx_files(file_names, out_dir);
+    compile_fx_files(_file_names, out_dir);
 }
