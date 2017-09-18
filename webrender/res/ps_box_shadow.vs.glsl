@@ -39,7 +39,7 @@ void main(in a2v IN, out v2p OUT) {
     SHADER_OUT(vUv.xy, (vi.local_pos - prim.local_rect.p0) / patch_size);
     SHADER_OUT(vMirrorPoint, 0.5 * prim.local_rect.size / patch_size);
 
-    vec2 texture_size = vec2(textureSize(sCacheRGBA8, 0));
+    vec2 texture_size = vec2(textureSize(sSharedCacheA8, 0));
     SHADER_OUT(vCacheUvRectCoords, vec4(patch_origin, patch_origin + patch_size_device_pixels) / texture_size.xyxy);
 
     SHADER_OUT(vColor, bs.color);

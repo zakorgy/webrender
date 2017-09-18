@@ -29,5 +29,6 @@ void main(in v2p IN, out p2f OUT) {
     uv = mix(vCacheUvRectCoords.xy, vCacheUvRectCoords.zw, uv);
 
     // Modulate the box shadow by the color.
-    SHADER_OUT(Target0, clip_scale * dither(vColor * texture(sCacheRGBA8, vec3(uv, vUv.z)), gl_FragCoord));
+    float mask = texture(sSharedCacheA8, vec3(uv, vUv.z)).r;
+    SHADER_OUT(Target0, clip_scale * dither(vColor * vec4(1.0, 1.0, 1.0, mask), gl_FragCoord));
 }
