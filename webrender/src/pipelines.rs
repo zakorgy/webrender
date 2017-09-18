@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use device::{Device, DEVICE_PIXEL_RATIO, INVALID, MAX_INSTANCE_COUNT, TextureId};
+use device::{Device, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT, TextureId};
 use euclid::{Matrix4D, Transform3D};
 use gfx;
 use gfx::state::{Blend, BlendChannel, BlendValue, Comparison, Depth, Equation, Factor};
@@ -408,15 +408,9 @@ impl Program {
         self.upload.1 += instances.len();
 
         println!("bind={:?}", device.bound_textures);
-        if device.bound_textures.cache_a8 != INVALID {
-            self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
-        }
-        if device.bound_textures.cache_rgba8 != INVALID {
-            self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
-        }
-        if device.bound_textures.shared_cache_a8 != INVALID {
-            self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
-        }
+        self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
+        self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
+        self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode, enable_depth_write: bool)
@@ -551,15 +545,9 @@ impl ClipProgram {
         self.upload.1 += instances.len();
         self.data.out_color = device.cache_a8_textures.get(&render_target).unwrap().rtv.raw().clone();
         println!("bind={:?}", device.bound_textures);
-        if device.bound_textures.cache_a8 != INVALID {
-            self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
-        }
-        if device.bound_textures.cache_rgba8 != INVALID {
-            self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
-        }
-        if device.bound_textures.shared_cache_a8 != INVALID {
-            self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
-        }
+        self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
+        self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
+        self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode)

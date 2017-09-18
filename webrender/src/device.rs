@@ -63,10 +63,10 @@ pub const RGBA_STRIDE: usize = 4;
 
 pub type TextureId = u32;
 
-pub const INVALID: TextureId = 0;
-pub const DUMMY_A8: TextureId = 1;
-pub const DUMMY_RGBA8: TextureId = 2;
-pub const DITHER: TextureId = 3;
+//pub const INVALID: TextureId = 0;
+pub const DUMMY_A8: TextureId = 0;
+pub const DUMMY_RGBA8: TextureId = 1;
+pub const DITHER: TextureId = 2;
 const FIRST_UNRESERVED_ID: TextureId = DITHER + 1;
 
 pub type A8 = (R8, Unorm);
@@ -605,12 +605,12 @@ impl Device {
         cache_rgba8_textures.insert(DUMMY_RGBA8, dummy_cache_rgba8_tex);
 
         let bound_textures = BoundTextures {
-            color0: INVALID,
-            color1: INVALID,
-            color2: INVALID,
-            cache_a8: INVALID,
-            cache_rgba8: INVALID,
-            shared_cache_a8: INVALID,
+            color0: DUMMY_RGBA8,
+            color1: DUMMY_RGBA8,
+            color2: DUMMY_RGBA8,
+            cache_a8: DUMMY_A8,
+            cache_rgba8: DUMMY_RGBA8,
+            shared_cache_a8: DUMMY_A8,
         };
 
         let dev = Device {
