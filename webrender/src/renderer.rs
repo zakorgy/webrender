@@ -800,7 +800,7 @@ pub struct Renderer {
     ps_radial_gradient: ProgramPair,
     ps_box_shadow: ProgramPair,
     ps_cache_image: ProgramPair,
-    //ps_line: PrimitiveShader,
+    ps_line: ProgramPair,
 
     //ps_blend: LazilyCompiledShader,
     //ps_hw_composite: LazilyCompiledShader,
@@ -928,6 +928,7 @@ impl Renderer {
 
         let ps_box_shadow = create_programs(&mut device, "ps_box_shadow");
         let ps_cache_image = create_programs(&mut device, "ps_cache_image");
+        let ps_line = create_programs(&mut device, "ps_line");
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
@@ -1032,6 +1033,7 @@ impl Renderer {
             ps_angle_gradient: ps_angle_gradient,
             ps_radial_gradient: ps_radial_gradient,
             ps_cache_image: ps_cache_image,
+            ps_line: ps_line,
             pending_texture_updates: Vec::new(),
             pending_gpu_cache_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
@@ -1554,10 +1556,9 @@ impl Renderer {
                     (&mut self.ps_rectangle, GPU_TAG_PRIM_RECT)
                 }
             }
-            /*AlphaBatchKind::Line => {
-                //self.ps_line.bind(&mut self.device, transform_kind, projection, &mut self.renderer_errors);
+            AlphaBatchKind::Line => {
                 (&mut self.ps_line, GPU_TAG_PRIM_LINE)
-            }*/
+            }
             AlphaBatchKind::TextRun => {
                 match key.blend_mode {
                     BlendMode::Subpixel(..) => {

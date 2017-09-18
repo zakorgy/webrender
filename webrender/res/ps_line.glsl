@@ -4,6 +4,24 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+     struct v2p {
+        vec4 Position : SV_Position;
+        flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
+        vec3 vClipMaskUv : vClipMaskUv;
+        vec4 vColor : vColor;
+        flat int vStyle : vStyle;
+        flat float vAxisSelect : vAxisSelect;
+        flat vec4 vParams : vParams;
+        flat vec2 vLocalOrigin : vLocalOrigin;
+        #ifdef WR_FEATURE_TRANSFORM
+        vec3 vLocalPos : vLocalPos;
+        flat vec4 vLocalBounds : vLocalBounds;
+        #else
+        vec2 vLocalPos : vLocalPos;
+        #endif //WR_FEATURE_TRANSFORM
+     };
+#else
 varying vec4 vColor;
 flat varying int vStyle;
 flat varying float vAxisSelect;
@@ -14,35 +32,49 @@ flat varying vec2 vLocalOrigin;
 varying vec3 vLocalPos;
 #else
 varying vec2 vLocalPos;
-#endif
+#endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11
 
 #ifdef WR_VERTEX_SHADER
 #define LINE_ORIENTATION_VERTICAL       0
 #define LINE_ORIENTATION_HORIZONTAL     1
 
+#ifndef WR_DX11
 void main(void) {
-    Primitive prim = load_primitive();
-    Line line = fetch_line(prim.specific_prim_address);
+#else
+void main(in a2v IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+    int gl_VertexID = IN.vertexId;
+#endif //WR_DX11
+    Primitive prim = load_primitive(aDataA, aDataB);
+    Line line_ = fetch_line(prim.specific_prim_address);
 
     vec2 pos, size;
 
-    switch (int(line.orientation)) {
+    switch (int(line_.orientation)) {
         case LINE_ORIENTATION_HORIZONTAL:
-            vAxisSelect = 0.0;
+            SHADER_OUT(vAxisSelect, 0.0);
             pos = prim.local_rect.p0;
             size = prim.local_rect.size;
             break;
         case LINE_ORIENTATION_VERTICAL:
-            vAxisSelect = 1.0;
+            SHADER_OUT(vAxisSelect, 1.0);
             pos = prim.local_rect.p0.yx;
             size = prim.local_rect.size.yx;
             break;
+        default:
+            SHADER_OUT(vAxisSelect, 0.0);
+            pos = prim.local_rect.p0;
+            size = prim.local_rect.size;
+            break;
     }
 
-    vLocalOrigin = pos;
-    vStyle = int(line.style);
+    SHADER_OUT(vLocalOrigin, pos);
+    SHADER_OUT(vStyle, int(line_.style));
 
-    switch (vStyle) {
+    switch (int(line_.style)) {
         case LINE_STYLE_SOLID: {
             break;
         }
@@ -54,10 +86,7 @@ void main(void) {
             // Consider half total length since there is an equal on/off for each dash.
             float dash_count = 1.0 + ceil(size.x / desired_dash_length);
             float dash_length = size.x / dash_count;
-            vParams = vec4(2.0 * dash_length,
-                           dash_length,
-                           0.0,
-                           0.0);
+            SHADER_OUT(vParams, vec4(2.0 * dash_length, dash_length, 0.0, 0.0));
             break;
         }
         case LINE_STYLE_DOTTED: {
@@ -67,10 +96,7 @@ void main(void) {
             float empty_space = size.x - dot_count * diameter;
             float distance_between_centers = diameter + empty_space / dot_count;
             float center_line = pos.y + 0.5 * size.y;
-            vParams = vec4(distance_between_centers,
-                           radius,
-                           center_line,
-                           0.0);
+            SHADER_OUT(vParams, vec4(distance_between_centers, radius, center_line, 0.0));
             break;
         }
         case LINE_STYLE_WAVY: {
@@ -78,10 +104,10 @@ void main(void) {
             // wave period etc.
             // TODO(gw): Tune these to get closer to what Gecko uses.
             float thickness = 0.15 * size.y;
-            vParams = vec4(thickness,
-                           size.y * 0.5,
-                           size.y * 0.75,
-                           size.y * 0.5);
+            SHADER_OUT(vParams, vec4(thickness, size.y * 0.5, size.y * 0.75, size.y * 0.5));
+            break;
+        }
+        default: {
             break;
         }
     }
@@ -99,33 +125,50 @@ void main(void) {
                           device_origin + device_size,
                           aPosition.xy);
 
-    vColor = shadow.color;
+    SHADER_OUT(vColor, shadow.color);
     vLocalPos = mix(prim.local_rect.p0,
                     prim.local_rect.p0 + prim.local_rect.size,
                     aPosition.xy);
 
     gl_Position = uTransform * vec4(device_pos, 0.0, 1.0);
 #else
-    vColor = line.color;
+    SHADER_OUT(vColor, line_.color);
 
     #ifdef WR_FEATURE_TRANSFORM
-        TransformVertexInfo vi = write_transform_vertex(prim.local_rect,
+        TransformVertexInfo vi = write_transform_vertex(gl_VertexID,
+                                                        prim.local_rect,
                                                         prim.local_clip_rect,
                                                         prim.z,
                                                         prim.layer,
                                                         prim.task,
-                                                        prim.local_rect);
+                                                        prim.local_rect
+#ifdef WR_DX11
+                                                    , OUT.Position
+                                                    , OUT.vLocalBounds
+#endif //WR_DX11
+                                                        );
     #else
-        VertexInfo vi = write_vertex(prim.local_rect,
+        VertexInfo vi = write_vertex(aPosition,
+                                     prim.local_rect,
                                      prim.local_clip_rect,
                                      prim.z,
                                      prim.layer,
                                      prim.task,
-                                     prim.local_rect);
-    #endif
+                                     prim.local_rect
+#ifdef WR_DX11
+                                 , OUT.Position
+#endif //WR_DX11
+                                     );
+    #endif //WR_FEATURE_TRANSFORM
 
-    vLocalPos = vi.local_pos;
-    write_clip(vi.screen_pos, prim.clip_area);
+    SHADER_OUT(vLocalPos, vi.local_pos);
+    write_clip(vi.screen_pos,
+               prim.clip_area
+#ifdef WR_DX11
+               , OUT.vClipMaskUvBounds
+               , OUT.vClipMaskUv
+#endif //WR_DX11
+               );
 #endif
 }
 #endif
@@ -162,7 +205,24 @@ float approx_distance(vec2 p, vec2 b0, vec2 b1, vec2 b2) {
     return length(get_distance_vector(b0 - p, b1 - p, b2 - p));
 }
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+        vec4 vClipMaskUvBounds = IN.vClipMaskUvBounds;
+        vec3 vClipMaskUv = IN.vClipMaskUv;
+        vec4 vColor = IN.vColor;
+        int vStyle = IN.vStyle;
+        float vAxisSelect = IN.vAxisSelect;
+        vec4 vParams = IN.vParams;
+        vec2 vLocalOrigin = IN.vLocalOrigin;
+        #ifdef WR_FEATURE_TRANSFORM
+        vec3 vLocalPos = IN.vLocalPos;
+        vec4 vLocalBounds = IN.vLocalBounds;
+        #else
+        vec2 vLocalPos = IN.vLocalPos;
+        #endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11
     float alpha = 1.0;
 
 #ifdef WR_FEATURE_CACHE
@@ -170,12 +230,12 @@ void main(void) {
 #else
     #ifdef WR_FEATURE_TRANSFORM
         alpha = 0.0;
-        vec2 local_pos = init_transform_fs(vLocalPos, alpha);
+        vec2 local_pos = init_transform_fs(vLocalPos, vLocalBounds, alpha);
     #else
         vec2 local_pos = vLocalPos;
     #endif
 
-        alpha = min(alpha, do_clip());
+        alpha = min(alpha, do_clip(vClipMaskUvBounds, vClipMaskUv));
 #endif
 
     // Find the appropriate distance to apply the step over.
@@ -247,6 +307,6 @@ void main(void) {
         }
     }
 
-    oFragColor = vColor * vec4(1.0, 1.0, 1.0, alpha);
+    SHADER_OUT(Target0, vColor * vec4(1.0, 1.0, 1.0, alpha));
 }
 #endif
