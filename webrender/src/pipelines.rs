@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use device::{Device, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT, TextureId};
+use device::{Device, DEVICE_PIXEL_RATIO, INVALID, MAX_INSTANCE_COUNT, TextureId};
 use euclid::{Matrix4D, Transform3D};
 use gfx;
 use gfx::state::{Blend, BlendChannel, BlendValue, Comparison, Depth, Equation, Factor};
@@ -123,7 +123,7 @@ gfx_defines! {
         dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-        shader_cache_a8: gfx::TextureSampler<f32> = "sSharedCacheA8",
+        shared_cache_a8: gfx::TextureSampler<f32> = "sSharedCacheA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -192,7 +192,7 @@ gfx_defines! {
         dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-        shader_cache_a8: gfx::TextureSampler<f32> = "sSharedCacheA8",
+        shared_cache_a8: gfx::TextureSampler<f32> = "sSharedCacheA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -406,6 +406,17 @@ impl Program {
         }
         device.encoder.copy_buffer(&self.upload.0, &self.data.ibuf, self.upload.1, 0, instances.len()).unwrap();
         self.upload.1 += instances.len();
+
+        println!("bind={:?}", device.bound_textures);
+        if device.bound_textures.cache_a8 != INVALID {
+            self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
+        }
+        if device.bound_textures.cache_rgba8 != INVALID {
+            self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
+        }
+        if device.bound_textures.shared_cache_a8 != INVALID {
+            self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
+        }
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode, enable_depth_write: bool)
@@ -539,6 +550,16 @@ impl ClipProgram {
         device.encoder.copy_buffer(&self.upload.0, &self.data.ibuf, self.upload.1, 0, instances.len()).unwrap();
         self.upload.1 += instances.len();
         self.data.out_color = device.cache_a8_textures.get(&render_target).unwrap().rtv.raw().clone();
+        println!("bind={:?}", device.bound_textures);
+        if device.bound_textures.cache_a8 != INVALID {
+            self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
+        }
+        if device.bound_textures.cache_rgba8 != INVALID {
+            self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
+        }
+        if device.bound_textures.shared_cache_a8 != INVALID {
+            self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
+        }
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode)
@@ -721,7 +742,7 @@ impl Device {
             dither: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
-            shader_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
+            shared_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
@@ -823,7 +844,7 @@ impl Device {
             dither: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
-            shader_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
+            shared_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),

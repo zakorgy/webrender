@@ -417,11 +417,13 @@ impl SourceTextureResolver {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
-                let texture = self.cache_a8_texture.as_ref().unwrap_or(&self.dummy_cache_a8_texture);
+                println!("cache_a8_texture={:?}", self.cache_a8_texture);
+                let texture = self.cache_a8_texture.unwrap_or(self.dummy_cache_a8_texture);
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::CacheRGBA8 => {
-                let texture = self.cache_rgba8_texture.as_ref().unwrap_or(&self.dummy_cache_rgba8_texture);
+                println!("cache_rgba8_texture={:?}", self.cache_rgba8_texture);
+                let texture = self.cache_rgba8_texture.unwrap_or(self.dummy_cache_rgba8_texture);
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::External(external_image) => {
@@ -431,7 +433,7 @@ impl SourceTextureResolver {
                 device.bind_external_texture(sampler, texture);*/
             }
             SourceTexture::TextureCache(index) => {
-                let texture = &self.cache_texture_map[index.0];
+                let texture = self.cache_texture_map[index.0];
                 device.bind_texture(sampler, texture);
             }
         }
@@ -440,22 +442,22 @@ impl SourceTextureResolver {
     // Get the real (OpenGL) texture ID for a given source texture.
     // For a texture cache texture, the IDs are stored in a vector
     // map for fast access.
-    fn resolve(&self, texture_id: &SourceTexture) -> Option<&TextureId> {
+    fn resolve(&self, texture_id: &SourceTexture) -> Option<TextureId> {
         match *texture_id {
             SourceTexture::Invalid => {
                 None
             }
             SourceTexture::CacheA8 => {
-                Some(self.cache_a8_texture.as_ref().unwrap_or(&self.dummy_cache_a8_texture))
+                Some(self.cache_a8_texture.unwrap_or(self.dummy_cache_a8_texture))
             }
             SourceTexture::CacheRGBA8 => {
-                Some(self.cache_rgba8_texture.as_ref().unwrap_or(&self.dummy_cache_rgba8_texture))
+                Some(self.cache_rgba8_texture.unwrap_or(self.dummy_cache_rgba8_texture))
             }
             SourceTexture::External(..) => {
                 panic!("BUG: External textures cannot be resolved, they can only be bound.");
             }
             SourceTexture::TextureCache(index) => {
-                Some(&self.cache_texture_map[index.0])
+                Some(self.cache_texture_map[index.0])
             }
         }
     }
@@ -2060,6 +2062,7 @@ impl Renderer {
                                                  ORTHO_FAR_PLANE);
                 }
 
+                println!("bind cache");
                 self.texture_resolver.bind(&SourceTexture::CacheA8, TextureSampler::CacheA8, &mut self.device);
                 self.texture_resolver.bind(&SourceTexture::CacheRGBA8, TextureSampler::CacheRGBA8, &mut self.device);
 
@@ -2094,7 +2097,7 @@ impl Renderer {
                 // input to any subsequent passes.
                 if pass_index == 0 {
                     if let Some(shared_alpha_texture) = self.texture_resolver.resolve(&SourceTexture::CacheA8) {
-                        //self.device.bind_texture(TextureSampler::SharedCacheA8, shared_alpha_texture);
+                        self.device.bind_texture(TextureSampler::SharedCacheA8, shared_alpha_texture);
                     }
                 }
             }

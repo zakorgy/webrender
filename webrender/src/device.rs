@@ -511,6 +511,16 @@ pub enum ShaderError {
     Link(String, String), // name, error message
 }
 
+#[derive(Debug)]
+pub struct BoundTextures {
+    pub color0: TextureId,
+    pub color1: TextureId,
+    pub color2: TextureId,
+    pub cache_a8: TextureId,
+    pub cache_rgba8: TextureId,
+    pub shared_cache_a8: TextureId,
+}
+
 pub struct Device {
     pub device: BackendDevice,
     pub factory: backend::Factory,
@@ -521,6 +531,7 @@ pub struct Device {
     pub color2: TextureId,
     pub cache_a8_textures: HashMap<TextureId, CacheTexture<A8>>,
     pub cache_rgba8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
+    pub bound_textures: BoundTextures,
     //pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
     //pub dummy_cache_a8: CacheTexture<A8>,
     //pub dummy_cache_rgba8: CacheTexture<Rgba8>,
@@ -593,6 +604,15 @@ impl Device {
         let mut cache_rgba8_textures = HashMap::new();
         cache_rgba8_textures.insert(DUMMY_RGBA8, dummy_cache_rgba8_tex);
 
+        let bound_textures = BoundTextures {
+            color0: INVALID,
+            color1: INVALID,
+            color2: INVALID,
+            cache_a8: INVALID,
+            cache_rgba8: INVALID,
+            shared_cache_a8: INVALID,
+        };
+
         let dev = Device {
             device: device,
             factory: factory,
@@ -603,6 +623,7 @@ impl Device {
             color2: 0,
             cache_a8_textures: cache_a8_textures,
             cache_rgba8_textures: cache_rgba8_textures,
+            bound_textures: bound_textures,
             //dummy_cache_a8: dummy_cache_a8_tex,
             //dummy_cache_rgba8: dummy_cache_rgba8_tex,
             layers: layers_tex,
@@ -654,25 +675,27 @@ impl Device {
         self.frame_id
     }
 
-    pub fn bind_texture<S>(&mut self,
-                           sampler: S,
-                           texture: &TextureId) where S: Into<TextureSlot> {
+    pub fn bind_texture(&mut self,
+                        sampler: TextureSampler,
+                        texture: TextureId) {
         debug_assert!(self.inside_frame);
 
-        let sampler_index = sampler.into().0;
-        /*if self.bound_textures[sampler_index] != texture.id {
-            self.bound_textures[sampler_index] = texture.id;
-            self.gl.active_texture(gl::TEXTURE0 + sampler_index as gl::GLuint);
-            self.gl.bind_texture(texture.target, texture.id);
-            self.gl.active_texture(gl::TEXTURE0);
-        }*/
+        match sampler {
+            TextureSampler::Color0 => self.bound_textures.color0 = texture,
+            TextureSampler::Color1 => self.bound_textures.color1 = texture,
+            TextureSampler::Color2 => self.bound_textures.color2 = texture,
+            TextureSampler::CacheA8 => self.bound_textures.cache_a8 = texture,
+            TextureSampler::CacheRGBA8 => self.bound_textures.cache_rgba8 = texture,
+            TextureSampler::SharedCacheA8 => self.bound_textures.shared_cache_a8 = texture,
+            _ => return
+        }
     }
 
     pub fn generate_texture_id(&mut self) -> TextureId {
         use rand::OsRng;
 
         let mut rng = OsRng::new().unwrap();
-        let mut texture_id = INVALID;
+        let mut texture_id = FIRST_UNRESERVED_ID;
         while self.cache_a8_textures.contains_key(&texture_id) ||
               self.cache_rgba8_textures.contains_key(&texture_id) {
             texture_id = rng.gen_range(FIRST_UNRESERVED_ID, u32::max_value());
@@ -683,6 +706,7 @@ impl Device {
     pub fn create_cache_texture(&mut self, width: u32, height: u32, kind: RenderTargetKind) -> TextureId
     {
         let id = self.generate_texture_id();
+        println!("create_cache_texture={:?}", id);
         match kind {
             RenderTargetKind::Alpha => {
                 let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
