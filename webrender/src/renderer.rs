@@ -1081,8 +1081,8 @@ impl Renderer {
         }
     }
 
-    fn get_yuv_shader_index(buffer_kind: ImageBufferKind, format: YuvFormat, color_space: YuvColorSpace) -> usize {
-        ((buffer_kind as usize) * YUV_FORMATS.len() + (format as usize)) * YUV_COLOR_SPACES.len() + (color_space as usize)
+    fn get_yuv_shader_index(buffer_kind: ImageBufferKind, format: YuvFormat, color_space: YuvColorSpace, modulo: usize) -> usize {
+        (((buffer_kind as usize) * YUV_FORMATS.len() + (format as usize)) * YUV_COLOR_SPACES.len() + (color_space as usize)) % modulo
     }
 
     /// Sets the new RenderNotifier.
@@ -1575,7 +1575,8 @@ impl Renderer {
             AlphaBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                 let shader_index = Renderer::get_yuv_shader_index(image_buffer_kind,
                                                                   format,
-                                                                  color_space);
+                                                                  color_space,
+                                                                  self.ps_yuv_image.len());
                 (&mut self.ps_yuv_image[shader_index], GPU_TAG_PRIM_YUV_IMAGE)
             }
             AlphaBatchKind::BorderCorner => {
