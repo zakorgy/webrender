@@ -781,17 +781,17 @@ impl Device {
                 _ => unimplemented!(),
             }
         };
-        self.update_image_texture(texture_id, [x0 as u16, y0 as u16], [width as u16, height as u16], data.as_slice());
+        self.update_image_texture(texture_id, [x0 as u16, y0 as u16], [width as u16, height as u16], data.as_slice(), layer_index);
     }
 
-    pub fn update_image_texture(&mut self, texture_id: &TextureId, offset: [u16; 2], size: [u16; 2], memory: &[u8]) {
+    fn update_image_texture(&mut self, texture_id: &TextureId, offset: [u16; 2], size: [u16; 2], memory: &[u8], layer_index: i32) {
         let img_info = gfx::texture::ImageInfoCommon {
             xoffset: offset[0],
             yoffset: offset[1],
-            zoffset: 0,
+            zoffset: layer_index as u16,
             width: size[0],
             height: size[1],
-            depth: 0,
+            depth: 1,
             format: (),
             mipmap: 0,
         };
