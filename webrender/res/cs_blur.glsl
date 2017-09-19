@@ -4,11 +4,22 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 gl_Position : SV_Position;
+        vec3 vUv: vUv;
+        flat vec4 vUvRect : vUvRect;
+        flat vec2 vOffsetScale : vOffsetScale;
+        flat float vSigma : vSigma;
+        flat int vBlurRadius : vBlurRadius;
+    };
+#else
 varying vec3 vUv;
 flat varying vec4 vUvRect;
 flat varying vec2 vOffsetScale;
 flat varying float vSigma;
 flat varying int vBlurRadius;
+#endif //WR_DX11
 
 #ifdef WR_VERTEX_SHADER
 // Applies a separable gaussian blur in one direction, as specified
@@ -17,9 +28,18 @@ flat varying int vBlurRadius;
 #define DIR_HORIZONTAL  0
 #define DIR_VERTICAL    1
 
+#ifdef WR_DX11
+    struct a2v_cs {
+        vec3 pos : aPosition;
+        int aBlurRenderTaskIndex : aBlurRenderTaskIndex;
+        int aBlurSourceTaskIndex : aBlurSourceTaskIndex;
+        int aBlurDirection : aBlurDirection;
+    };
+#else
 in int aBlurRenderTaskIndex;
 in int aBlurSourceTaskIndex;
 in int aBlurDirection;
+#endif
 
 struct BlurCommand {
     int task_id;
@@ -27,7 +47,7 @@ struct BlurCommand {
     int dir;
 };
 
-BlurCommand fetch_blur() {
+BlurCommand fetch_blur(int aBlurRenderTaskIndex, int aBlurSourceTaskIndex, int aBlurDirection) {
     BlurCommand blur;
 
     blur.task_id = aBlurRenderTaskIndex;
@@ -37,8 +57,16 @@ BlurCommand fetch_blur() {
     return blur;
 }
 
+#ifndef WR_DX11
 void main(void) {
-    BlurCommand cmd = fetch_blur();
+#else
+void main(in a2v_cs IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    int aBlurRenderTaskIndex = IN.aBlurRenderTaskIndex;
+    int aBlurSourceTaskIndex = IN.aBlurSourceTaskIndex;
+    int aBlurDirection = IN.aBlurDirection;
+#endif //WR_DX11
+    BlurCommand cmd = fetch_blur(aBlurRenderTaskIndex, aBlurSourceTaskIndex, aBlurDirection);
     RenderTaskData task = fetch_render_task(cmd.task_id);
     RenderTaskData src_task = fetch_render_task(cmd.src_task_id);
 
@@ -49,28 +77,31 @@ void main(void) {
                    aPosition.xy);
 
     vec2 texture_size = vec2(textureSize(sCacheRGBA8, 0).xy);
-    vUv.z = src_task.data1.x;
-    vBlurRadius = int(task.data1.y);
-    vSigma = task.data1.y * 0.5;
+    SHADER_OUT(vUv.z, src_task.data1.x);
+    SHADER_OUT(vBlurRadius, int(task.data1.y));
+    SHADER_OUT(vSigma, task.data1.y * 0.5);
 
     switch (cmd.dir) {
         case DIR_HORIZONTAL:
-            vOffsetScale = vec2(1.0 / texture_size.x, 0.0);
+            SHADER_OUT(vOffsetScale, vec2(1.0 / texture_size.x, 0.0));
             break;
         case DIR_VERTICAL:
-            vOffsetScale = vec2(0.0, 1.0 / texture_size.y);
+            SHADER_OUT(vOffsetScale, vec2(0.0, 1.0 / texture_size.y));
+            break;
+        default:
+            SHADER_OUT(vOffsetScale, vec2(1.0 / texture_size.x, 0.0));
             break;
     }
 
-    vUvRect = vec4(src_task.data0.xy + vec2(0.5),
-                   src_task.data0.xy + src_task.data0.zw - vec2(0.5));
-    vUvRect /= texture_size.xyxy;
+    vec4 uv_rect = vec4(src_task.data0.xy + vec2(0.5, 0.5),
+                        src_task.data0.xy + src_task.data0.zw - vec2(0.5, 0.5));
+    SHADER_OUT(vUvRect, uv_rect / texture_size.xyxy);
 
     vec2 uv0 = src_task.data0.xy / texture_size;
     vec2 uv1 = (src_task.data0.xy + src_task.data0.zw) / texture_size;
-    vUv.xy = mix(uv0, uv1, aPosition.xy);
+    SHADER_OUT(vUv.xy, mix(uv0, uv1, aPosition.xy));
 
-    gl_Position = uTransform * vec4(pos, 0.0, 1.0);
+    SHADER_OUT(gl_Position, mul(vec4(pos, 0.0, 1.0), uTransform));
 }
 #endif
 
@@ -86,21 +117,31 @@ float gauss(float x, float sigma) {
     return (1.0 / sqrt(6.283185307179586 * sigma * sigma)) * exp(-(x * x) / (2.0 * sigma * sigma));
 }
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+        vec3 vUv = IN.vUv;
+        vec4 vUvRect = IN.vUvRect;
+        vec2 vOffsetScale = IN.vOffsetScale;
+        float vSigma = IN.vSigma;
+        int vBlurRadius = IN.vBlurRadius;
+        vec4 gl_FragCoord = IN.gl_Position;
+#endif //WR_DX11
     vec4 cache_sample = texture(sCacheRGBA8, vUv);
 
     // TODO(gw): The gauss function gets NaNs when blur radius
     //           is zero. In the future, detect this earlier
     //           and skip the blur passes completely.
     if (vBlurRadius == 0) {
-        oFragColor = cache_sample;
+        SHADER_OUT(Target0, cache_sample);
         return;
     }
 
     vec4 color = vec4(cache_sample.rgb, 1.0) * (cache_sample.a * gauss(0.0, vSigma));
 
     for (int i=1 ; i < vBlurRadius ; ++i) {
-        vec2 offset = vec2(float(i)) * vOffsetScale;
+        vec2 offset = vec2(float(i), float(i)) * vOffsetScale;
 
         vec2 st0 = clamp(vUv.xy + offset, vUvRect.xy, vUvRect.zw);
         vec4 color0 = texture(sCacheRGBA8, vec3(st0, vUv.z));
@@ -116,7 +157,6 @@ void main(void) {
 
     // Unpremultiply the alpha.
     color.rgb /= color.a;
-
-    oFragColor = dither(color);
+    SHADER_OUT(Target0, dither(color, gl_FragCoord));
 }
 #endif
