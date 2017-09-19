@@ -1529,6 +1529,7 @@ impl Renderer {
                           BlendMode::Multiply => true,
                           BlendMode::None => false,
                       });
+        println!("program={:?}", key.kind);
         let (mut program, marker) = match key.kind {
             /*AlphaBatchKind::Composite { .. } => {
                 //self.ps_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
@@ -1660,12 +1661,12 @@ impl Renderer {
             }
             _ => {}
         }*/
-        program.bind(&mut self.device, transform_kind, projection, instances, &mut self.renderer_errors);
-        self.profile_counters.vertices.add(6 * instances.len());
         let _gm = self.gpu_profile.add_marker(marker);
         for i in 0..key.textures.colors.len() {
             self.texture_resolver.bind(&key.textures.colors[i], TextureSampler::color(i), &mut self.device);
         }
+        program.bind(&mut self.device, transform_kind, projection, instances, &mut self.renderer_errors);
+        self.profile_counters.vertices.add(6 * instances.len());
         program.get(transform_kind).draw(&mut self.device, &key.blend_mode, enable_depth_write);
     }
 
