@@ -48,7 +48,7 @@ pub type BackendDevice = backend::Deferred;
 #[cfg(not(feature = "dx11"))]
 pub type BackendDevice = backend::Device;
 #[cfg(all(target_os = "windows", feature="dx11"))]
-use gfx_window_dxgi;
+use result_window;
 
 pub const LAYER_TEXTURE_WIDTH: usize = 1017;
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023;
@@ -251,6 +251,8 @@ pub struct ImageTexture<T> where T: gfx::format::TextureFormat {
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
     pub filter: TextureFilter,
     pub format: ImageFormat,
+    // Only used on dx11
+    pub data: Vec<u8>,
 }
 
 impl<T> ImageTexture<T> where T: gfx::format::TextureFormat {
@@ -270,18 +272,24 @@ impl<T> ImageTexture<T> where T: gfx::format::TextureFormat {
                 usage: gfx::memory::Usage::Dynamic,
             };
             let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
-            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
+            let raw = factory.create_texture_raw(desc, Some(cty), None).unwrap();
             let levels = (0, raw.get_info().levels - 1);
             let tex = Typed::new(raw);
-            let view = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
+            let view = factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()).unwrap();
             (tex, view)
         };
+
+        #[cfg(all(target_os = "windows", feature="dx11"))]
+        let data = vec![0u8; size[0] * size[1] * RGBA_STRIDE];
+        #[cfg(not(feature = "dx11"))]
+        let data = vec![];
 
         Ok(ImageTexture {
             handle: surface,
             srv: view,
             filter: filter,
             format: format,
+            data: data,
         })
     }
 
@@ -534,6 +542,8 @@ pub struct Device {
     pub main_depth: gfx::handle::DepthStencilView<R, DepthFormat>,
     pub vertex_buffer: gfx::handle::Buffer<R, Position>,
     pub slice: gfx::Slice<R>,
+    // Only used on dx11
+    image_batch_set: HashSet<TextureId>,
 
     // device state
     device_pixel_ratio: f32,
@@ -626,6 +636,7 @@ impl Device {
             main_depth: main_depth,
             vertex_buffer: vertex_buffer,
             slice: slice,
+            image_batch_set: HashSet::new(),
             resource_override_path,
             // This is initialized to 1 by default, but it is set
             // every frame by the call to begin_frame().
@@ -639,7 +650,7 @@ impl Device {
             max_texture_size: max_texture_size as u32,
             frame_id: FrameId(0),
         };
-        (dev, None)
+        (dev, win)
     }
 
     pub fn dummy_cache_a8(&mut self) -> &CacheTexture<A8> {
@@ -752,6 +763,7 @@ impl Device {
         self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
     }
 
+    #[cfg(not(feature = "dx11"))]
     pub fn update_image_data(
         &mut self, pixels: &[u8],
         texture_id: &TextureId,
@@ -782,6 +794,45 @@ impl Device {
             }
         };
         self.update_image_texture(texture_id, [x0 as u16, y0 as u16], [width as u16, height as u16], data.as_slice(), layer_index);
+    }
+
+    #[cfg(all(target_os = "windows", feature="dx11"))]
+    pub fn update_image_data(
+        &mut self, pixels: &[u8],
+        texture_id: &TextureId,
+        x0: u32,
+        y0: u32,
+        width: u32,
+        height: u32,
+        layer_index: i32,
+        stride: Option<u32>,
+        offset: usize)
+    {
+        println!("update_image_data={:?}", texture_id);
+        let mut texture = self.image_textures.get_mut(texture_id).unwrap();
+        let data = {
+            match texture.format {
+                ImageFormat::A8 => convert_data_to_rgba8(width as usize, height as usize, pixels, A_STRIDE),
+                ImageFormat::RG8 => convert_data_to_rgba8(width as usize, height as usize, pixels, RG_STRIDE),
+                ImageFormat::RGB8 => convert_data_to_rgba8(width as usize, height as usize, pixels, RGB_STRIDE),
+                ImageFormat::BGRA8 => {
+                    let row_length = match stride {
+                        Some(value) => value as usize / RGBA_STRIDE,
+                        None => width as usize,
+                    };
+                    let data_pitch = row_length * RGBA_STRIDE;
+                    convert_data_to_bgra8(width as usize, height as usize, data_pitch, pixels)
+                }
+                _ => unimplemented!(),
+            }
+        };
+        let row_length = match stride {
+            Some(value) => value as usize / RGBA_STRIDE,
+            None => texture.get_size().0 as usize,
+        };
+        let data_pitch = row_length * RGBA_STRIDE;
+        batch_image_texture_data(&mut texture, x0 as usize, y0 as usize, width as usize, height as usize, data_pitch, data.as_slice());
+        self.image_batch_set.insert(texture_id.clone());
     }
 
     fn update_image_texture(&mut self, texture_id: &TextureId, offset: [u16; 2], size: [u16; 2], memory: &[u8], layer_index: i32) {
@@ -900,7 +951,22 @@ impl Device {
         self.encoder.clear(&self.cache_a8_textures.get(texture_id).unwrap().rtv.clone(), color);
     }
 
+    #[cfg(not(feature = "dx11"))]
     pub fn flush(&mut self) {
+        self.encoder.flush(&mut self.device);
+    }
+    #[cfg(all(target_os = "windows", feature="dx11"))]
+    pub fn flush(&mut self) {
+        for texture_id in self.image_batch_set.clone() {
+            println!("flush batched image {:?}", texture_id);
+            let (width, height, data) = {
+                let texture = self.image_textures.get(&texture_id).expect("Didn't find texture!");
+                let (w, h) = texture.get_size();
+                (w, h, &texture.data.clone())
+            };
+            self.update_image_texture(&texture_id, [0, 0], [width as u16, height as u16], data.as_slice(), 0);
+        }
+        self.image_batch_set.clear();
         self.encoder.flush(&mut self.device);
     }
 }
@@ -934,6 +1000,27 @@ fn convert_data_to_bgra8(width: usize, height: usize, data_pitch: usize, data: &
     return new_data;
 }
 
+fn batch_image_texture_data(texture: &mut ImageTexture<Rgba8>,
+    x_offset: usize, y_offset: usize,
+    width: usize, height: usize,
+    data_pitch: usize, new_data: &[u8])
+{
+    println!("batch_texture_data");
+    println!("x0={:?} y0={:?} width={:?} height={:?} data_pitch={:?} new_data.len={:?}",
+              x_offset, y_offset, width, height, data_pitch, new_data.len());
+    for j in 0..height {
+        for i in 0..width {
+            let offset = (j+y_offset)*data_pitch + (i + x_offset)*RGBA_STRIDE;
+            let src = &new_data[j * RGBA_STRIDE*width + i * RGBA_STRIDE .. (j * RGBA_STRIDE*width + i * RGBA_STRIDE)+4];
+            assert!(offset + 3 < texture.data.len());
+            texture.data[offset + 0] = src[0];
+            texture.data[offset + 1] = src[1];
+            texture.data[offset + 2] = src[2];
+            texture.data[offset + 3] = src[3];
+        }
+    }
+}
+
 #[cfg(not(feature = "dx11"))]
 pub fn init_existing<Cf, Df>(window: Rc<InitWindow>) ->
                             (ResultWindow, BackendDevice, backend::Factory,
@@ -961,10 +1048,14 @@ pub fn init_existing<Cf, Df>(window: Rc<InitWindow>)
     -> (ResultWindow, BackendDevice, backend::Factory,
         gfx::handle::RenderTargetView<R, Cf>,
         gfx::handle::DepthStencilView<R, Df>)
-where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
+
+where Cf: gfx::format::RenderFormat,
+      Df: gfx::format::DepthFormat,
+      <Df as gfx::format::Formatted>::Surface: gfx::format::TextureSurface,
+      <Df as gfx::format::Formatted>::Channel: gfx::format::TextureChannel
 {
-    let (mut win, device, mut factory, main_color) = gfx_window_dxgi::init_existing_raw(window, Cf::get_format()).unwrap();
+    let (mut win, device, mut factory, main_color) = result_window::init_existing_raw(window, Cf::get_format()).unwrap();
     let main_depth = factory.create_depth_stencil_view_only(win.size.0, win.size.1).unwrap();
     let mut device = backend::Deferred::from(device);
-    (win, device, factory, gfx::memory::Typed::new(main_color), main_depth)
+    (Some(win), device, factory, gfx::memory::Typed::new(main_color), main_depth)
 }

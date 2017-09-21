@@ -575,6 +575,21 @@ impl ResourceCacheTexture {
         }
     }
 
+    #[cfg(all(target_os = "windows", feature="dx11"))]
+    fn flush(&mut self, device: &mut Device) {
+        let is_dirty = self.rows.iter().any(|r| r.is_dirty);
+        if is_dirty {
+            let cpu_blocks = &self.cpu_blocks[..];
+
+            device.update_data_texture(TextureSampler::ResourceCache, [0, 0], [MAX_VERTEX_TEXTURE_WIDTH as u16, self.rows.len() as u16], cpu_blocks);
+
+            for row in self.rows.iter_mut() {
+                row.is_dirty = false;
+            }
+        }
+    }
+
+    #[cfg(not(feature = "dx11"))]
     fn flush(&mut self, device: &mut Device) {
         for (row_index, row) in self.rows.iter_mut().enumerate() {
             if row.is_dirty {
@@ -752,6 +767,34 @@ fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     let mut shader = Vec::new();
     file.read_to_end(&mut shader);
     shader
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    let transform = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
+                                           0.0, 1.0, 0.0, 0.0,
+                                           0.0, 0.0, 0.5, 0.5,
+                                           0.0, 0.0, 0.0, 1.0);
+    transform.post_mul(&Transform3D::from_array(projection.to_column_major_array()))
+}
+
+#[cfg(not(feature = "dx11"))]
+pub fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    projection
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn alpha_transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    let transform = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
+                                           0.0,-1.0, 0.0, 0.0,
+                                           0.0, 0.0, 1.0, 1.0,
+                                           0.0, 0.0, 0.0, 1.0);
+    transform.post_mul(&Transform3D::from_array(projection.to_column_major_array()))
+}
+
+#[cfg(not(feature = "dx11"))]
+pub fn alpha_transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
+    projection
 }
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
@@ -2085,6 +2128,7 @@ impl Renderer {
                                                  ORTHO_FAR_PLANE);
                 }
 
+                let alpha_projection = alpha_transform_projection(projection);
                 println!("bind cache");
                 self.texture_resolver.bind(&SourceTexture::CacheA8, TextureSampler::CacheA8, &mut self.device);
                 self.texture_resolver.bind(&SourceTexture::CacheRGBA8, TextureSampler::CacheRGBA8, &mut self.device);
@@ -2096,6 +2140,7 @@ impl Renderer {
                                            &projection);
                 }
 
+                let projection = transform_projection(projection);
                 for (target_index, target) in pass.color_targets.targets.iter().enumerate() {
                     let render_target = pass.color_texture.as_ref().map(|texture| {
                         (texture, target_index as i32)

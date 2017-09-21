@@ -18,7 +18,11 @@ use api::{ImageDescriptor};
 
 // The fixed number of layers for the shared texture cache.
 // There is one array texture per image format, allocated lazily.
+#[cfg(not(feature = "dx11"))]
 const TEXTURE_ARRAY_LAYERS: i32 = 4;
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+const TEXTURE_ARRAY_LAYERS: i32 = 1;
 
 // The dimensions of each layer in the texture cache.
 const TEXTURE_LAYER_DIMENSIONS: u32 = 2048;
