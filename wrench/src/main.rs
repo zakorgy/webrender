@@ -164,7 +164,7 @@ impl HeadlessContext {
 }
 
 pub enum WindowWrapper {
-    Window(glutin::Window, Rc<gl::Gl>),
+    Window(Rc<glutin::Window>, Rc<gl::Gl>),
     Headless(HeadlessContext, Rc<gl::Gl>),
 }
 
@@ -219,6 +219,15 @@ impl WindowWrapper {
             WindowWrapper::Headless(_, ref gl) => gl.clone(),
         }
     }
+
+    fn get_window(&self) -> Rc<glutin::Window> {
+        match *self {
+            WindowWrapper::Window(ref window, _) => window.clone(),
+            WindowWrapper::Headless(_, _) => {
+                unreachable!()
+            }
+        }
+    }
 }
 
 fn make_window(size: DeviceUintSize,
@@ -245,7 +254,7 @@ fn make_window(size: DeviceUintSize,
             })
             .with_dimensions(size.width, size.height);
         window.opengl.vsync = vsync;
-        let window = window.build().unwrap();
+        let window = Rc::new(window.build().unwrap());
         unsafe {
             window.make_current().expect("unable to make context current!");
         }
