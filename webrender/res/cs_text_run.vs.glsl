@@ -6,8 +6,16 @@
 // drawn un-transformed. These are used for effects such
 // as text-shadow.
 
+#ifndef WR_DX11
 void main(void) {
-    Primitive prim = load_primitive();
+#else
+void main(in a2v_clip IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec4 aDataA = IN.data0;
+    ivec4 aDataB = IN.data1;
+#endif //WR_DX11
+
+    Primitive prim = load_primitive(aDataA, aDataB);
     TextRun text = fetch_text_run(prim.specific_prim_address);
 
     int glyph_index = prim.user_data0;
@@ -46,8 +54,8 @@ void main(void) {
                    local_rect.xy + local_rect.zw,
                    aPosition.xy);
 
-    vUv = vec3(mix(st0, st1, aPosition.xy), res.layer);
-    vColor = shadow.color;
+    SHADER_OUT(vUv, vec3(mix(st0, st1, aPosition.xy), res.layer));
+    SHADER_OUT(vColor, shadow.color);
 
-    gl_Position = uTransform * vec4(pos, 0.0, 1.0);
+    SHADER_OUT(gl_Position, mul(vec4(pos, 0.0, 1.0), uTransform));
 }

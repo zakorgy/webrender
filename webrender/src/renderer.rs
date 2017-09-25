@@ -840,8 +840,8 @@ pub struct Renderer {
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
     cs_box_shadow: Box<BoxShadowProgram>,
-    //cs_text_run: LazilyCompiledShader,
-    //cs_line: LazilyCompiledShader,
+    cs_text_run: Box<Program>,
+    cs_line: Box<Program>,
     cs_blur: Box<BlurProgram>,
 
     /// These are "cache clip shaders". These shaders are used to
@@ -967,6 +967,8 @@ impl Renderer {
         let (mut device, window) = Device::new(window, options.resource_override_path.clone());
 
         let cs_box_shadow = create_box_shadow_program(&mut device, "cs_box_shadow");
+        let cs_text_run = create_program(&mut device, "cs_text_run");
+        let cs_line = create_program(&mut device, "ps_line");
 
         let cs_blur = create_blur_program(&mut device, "cs_blur");
 
@@ -1098,6 +1100,8 @@ impl Renderer {
             device,
             current_frame: None,
             cs_box_shadow: cs_box_shadow,
+            cs_text_run: cs_text_run,
+            cs_line: cs_line,
             cs_blur: cs_blur,
             cs_clip_rectangle: cs_clip_rectangle,
             cs_clip_border: cs_clip_border,
@@ -1463,7 +1467,8 @@ impl Renderer {
     fn flush(&mut self) {
         self.device.flush();
         self.cs_box_shadow.reset_upload_offset();
-        //self.cs_text_run.reset_upload_offset();
+        self.cs_text_run.reset_upload_offset();
+        self.cs_line.reset_upload_offset();
         self.cs_blur.reset_upload_offset();
         self.cs_clip_rectangle.reset_upload_offset();
         self.cs_clip_image.reset_upload_offset();
@@ -1824,12 +1829,11 @@ impl Renderer {
             //self.device.set_blend_mode_alpha();
 
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_TEXT_RUN);
-            //self.cs_text_run.bind(&mut self.device, projection, &mut self.renderer_errors);
+
             for (texture_id, instances) in &target.text_run_cache_prims {
-                /*self.draw_instanced_batch(instances,
-                                          VertexArrayKind::Primitive,
-                                          &BatchTextures::color(*texture_id));
-                self.cs_text_run.bind(&mut self.device, projection, &instances, render_target.0, &mut self.renderer_errors);*/
+                self.texture_resolver.bind(&texture_id, TextureSampler::Color0, &mut self.device);
+                self.cs_text_run.bind(&mut self.device, projection, &instances, &mut self.renderer_errors);
+                self.cs_text_run.draw(&mut self.device, &BlendMode::Alpha, false);
             }
         }
         if !target.line_cache_prims.is_empty() {
@@ -1843,6 +1847,8 @@ impl Renderer {
             /*self.draw_instanced_batch(&target.line_cache_prims,
                                       VertexArrayKind::Primitive,
                                       &BatchTextures::no_texture());*/
+            self.cs_line.bind(&mut self.device, projection, &target.line_cache_prims, &mut self.renderer_errors);
+            self.cs_line.draw(&mut self.device, &BlendMode::Alpha, false);
         }
 
         //TODO: record the pixel count for cached primitives

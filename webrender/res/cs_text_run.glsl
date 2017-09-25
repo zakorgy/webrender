@@ -4,5 +4,13 @@
 
 #include shared,prim_shared
 
+#ifdef WR_DX11
+    struct v2p {
+        vec4 gl_Position : SV_Position;
+        vec3 vUv : vUv;
+        flat vec4 vColor : vColor;
+    };
+#else
 varying vec3 vUv;
 flat varying vec4 vColor;
+#endif //WR_DX11
