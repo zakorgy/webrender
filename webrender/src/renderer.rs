@@ -28,7 +28,7 @@ use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 use internal_types::{FastHashMap, CacheTextureId, RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, TextureUpdateList, RenderTargetMode, TextureUpdateSource};
 use internal_types::{BatchTextures, ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, SourceTexture};
-use pipelines::{/*BlurProgram, CacheProgram,*/ ClipProgram, Program};
+use pipelines::{BlurProgram, /*CacheProgram,*/ ClipProgram, Program};
 use profiler::{Profiler, BackendProfileCounters};
 use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
 use record::ApiRecordingReceiver;
@@ -760,6 +760,20 @@ fn create_clip_program(device: &mut Device, filename: &str) -> Box<ClipProgram> 
     Box::new(device.create_clip_program(vs.as_slice(), ps.as_slice()))
 }
 
+#[cfg(not(feature = "dx11"))]
+fn create_blur_program(device: &mut Device, filename: &str) -> Box<BlurProgram> {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    Box::new(device.create_blur_program(vs.as_slice(), ps.as_slice()))
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+fn create_blur_program(device: &mut Device, filename: &str) -> Box<BlurProgram> {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    Box::new(device.create_blur_program(vs.as_slice(), ps.as_slice()))
+}
+
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
@@ -814,7 +828,7 @@ pub struct Renderer {
     //cs_box_shadow: LazilyCompiledShader,
     //cs_text_run: LazilyCompiledShader,
     //cs_line: LazilyCompiledShader,
-    //cs_blur: LazilyCompiledShader,
+    cs_blur: Box<BlurProgram>,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
@@ -937,6 +951,8 @@ impl Renderer {
         let debug_server = DebugServer::new(api_tx.clone());
 
         let (mut device, window) = Device::new(window, options.resource_override_path.clone());
+
+        let cs_blur = create_blur_program(&mut device, "cs_blur");
 
         let cs_clip_rectangle = create_clip_program(&mut device, "cs_clip_rectangle");
         let cs_clip_image = create_clip_program(&mut device, "cs_clip_image");
@@ -1065,6 +1081,7 @@ impl Renderer {
             debug_server,
             device,
             current_frame: None,
+            cs_blur: cs_blur,
             cs_clip_rectangle: cs_clip_rectangle,
             cs_clip_border: cs_clip_border,
             cs_clip_image: cs_clip_image,
@@ -1430,7 +1447,7 @@ impl Renderer {
         self.device.flush();
         //self.cs_box_shadow.reset_upload_offset();
         //self.cs_text_run.reset_upload_offset();
-        //self.cs_blur.reset_upload_offset();
+        self.cs_blur.reset_upload_offset();
         self.cs_clip_rectangle.reset_upload_offset();
         self.cs_clip_image.reset_upload_offset();
         self.cs_clip_border.reset_upload_offset();
@@ -1769,18 +1786,13 @@ impl Renderer {
 
             //self.device.set_blend(false);
             if !target.vertical_blurs.is_empty() {
-                //self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, render_target.0, &mut self.renderer_errors);
-                /*self.draw_instanced_batch(&target.vertical_blurs,
-                                          VertexArrayKind::Blur,
-                                          &BatchTextures::no_texture());*/
-                
+                self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, &mut self.renderer_errors);
+                self.cs_blur.draw(&mut self.device);
             }
 
             if !target.horizontal_blurs.is_empty() {
-                /*self.draw_instanced_batch(&target.horizontal_blurs,
-                                          VertexArrayKind::Blur,
-                                          &BatchTextures::no_texture());*/
-                //self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, render_target.0, &mut self.renderer_errors);
+                self.cs_blur.bind(&mut self.device, projection, &target.horizontal_blurs, &mut self.renderer_errors);
+                self.cs_blur.draw(&mut self.device);
             }
         }
 

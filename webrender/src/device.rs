@@ -30,7 +30,7 @@ use gfx::format::{R8_G8_B8_A8, R32_G32_B32_A32};
 use gfx::handle::Sampler;
 use gfx::memory::Typed;
 use tiling::RenderTargetKind;
-use pipelines::{primitive, ClipProgram, Position, PrimitiveInstances, Program, Locals};
+use pipelines::{Position};
 use renderer::{BlendMode, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 
 use backend;

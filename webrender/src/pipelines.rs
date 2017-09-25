@@ -92,11 +92,11 @@ gfx_defines! {
             data1: [i32; 4] = "aDataB",
     }
 
-    /*vertex BlurInstances {
+    vertex BlurInstances {
         render_task_index: i32 = "aBlurRenderTaskIndex",
         source_task_index: i32 = "aBlurSourceTaskIndex",
         direction: i32 = "aBlurDirection",
-    }*/
+    }
 
     vertex ClipInstances {
         render_task_index: i32 = "aClipRenderTaskIndex",
@@ -159,13 +159,12 @@ gfx_defines! {
     }
 
     pipeline blur {
+        locals: gfx::ConstantBuffer<Locals> = "Locals",
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
         vbuf: gfx::VertexBuffer<Position> = (),
         ibuf: gfx::InstanceBuffer<BlurInstances> = (),
 
-        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
@@ -176,8 +175,8 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
-    }*/
+        //out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
+    }
 
     pipeline clip {
         locals: gfx::ConstantBuffer<Locals> = "Locals",
@@ -242,8 +241,8 @@ gfx_defines! {
 
 type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
 type ClipPSO = gfx::PipelineState<R, clip::Meta>;
-/*type CachePSO = gfx::PipelineState<R, cache::Meta>;
 type BlurPSO = gfx::PipelineState<R, blur::Meta>;
+/*type CachePSO = gfx::PipelineState<R, cache::Meta>;
 type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
 type DebugFontPSO = gfx::PipelineState<R, debug_font::Meta>;*/
 
@@ -287,7 +286,7 @@ impl DebugFontVertices {
             tex_coord: tex_coord,
         }
     }
-}
+}*/
 
 impl BlurInstances {
     pub fn new() -> BlurInstances {
@@ -303,7 +302,7 @@ impl BlurInstances {
         self.source_task_index = blur_command.src_task_id;
         self.direction = blur_command.blur_direction;
     }
-}*/
+}
 
 impl ClipInstances {
     pub fn new() -> ClipInstances {
@@ -457,7 +456,7 @@ impl CacheProgram {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
-}
+}*/
 
 #[allow(dead_code)]
 pub struct BlurProgram {
@@ -485,7 +484,37 @@ impl BlurProgram {
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
-}*/
+
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[BlurCommand], renderer_errors: &mut Vec<RendererError>) {
+        self.data.transform = projection.to_row_arrays();
+        let locals = Locals {
+            transform: self.data.transform,
+            device_pixel_ratio: self.data.device_pixel_ratio,
+        };
+        device.encoder.update_buffer(&self.data.locals, &[locals], 0).unwrap();
+
+        {
+            let mut writer = device.factory.write_mapping(&self.upload.0).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i + self.upload.1].update(inst);
+            }
+        }
+
+        {
+            self.slice.instances = Some((instances.len() as u32, 0));
+        }
+        device.encoder.copy_buffer(&self.upload.0, &self.data.ibuf, self.upload.1, 0, instances.len()).unwrap();
+        self.upload.1 += instances.len();
+
+        println!("bind={:?}", device.bound_textures);
+        self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
+    }
+
+    pub fn draw(&mut self, device: &mut Device)
+    {
+        device.encoder.draw(&self.slice, &self.pso, &self.data);
+    }
+}
 
 #[allow(dead_code)]
 pub struct ClipProgram {
@@ -778,7 +807,7 @@ impl Device {
         };
         let psos = self.create_cache_psos(vert_src, frag_src);
         CacheProgram::new(data, psos, self.slice.clone(), upload)
-    }
+    }*/
 
     pub fn create_blur_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> BlurProgram {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
@@ -795,22 +824,23 @@ impl Device {
                                                         gfx::TRANSFER_DST).unwrap();
 
         let data = blur::Data {
+            locals: self.factory.create_constant_buffer(1),
             transform: [[0f32; 4]; 4],
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: blur_instances,
-            color0: (self.color0.srv.clone(), self.color0.clone().sampler),
-            cache_a8: (self.cache_a8.srv.clone(), self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.srv.clone(), self.cache_rgba8.clone().sampler),
-            layers: (self.layers.srv.clone(), self.layers.clone().sampler),
-            render_tasks: (self.render_tasks.srv.clone(), self.render_tasks.clone().sampler),
-            resource_cache: (self.resource_cache.srv.clone(), self.resource_cache.clone().sampler),
+            //color0: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
+            //cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
+            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
+            layers: (self.layers.srv.clone(), self.sampler.0.clone()),
+            render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
+            //out_depth: self.main_depth.clone(),
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
         BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
-    }*/
+    }
 
     pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
