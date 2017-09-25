@@ -51,6 +51,7 @@ winit = "0.7.5"
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 gleam = "0.4.8"
+winit = "0.7.5"
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }
