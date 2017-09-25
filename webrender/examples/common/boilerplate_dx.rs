@@ -92,6 +92,7 @@ pub fn main_wrapper(example: &mut Example,
         debug: true,
         precache_shaders: true,
         device_pixel_ratio: window.hidpi_factor(),
+        enable_dithering: true,
         .. options.unwrap_or(webrender::RendererOptions::default())
     };
 

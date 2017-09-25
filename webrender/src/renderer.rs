@@ -21,7 +21,7 @@ use debug_server::{self, DebugServer};
 use device::{Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
 use device::{GpuTimer, TextureFilter, VertexUsageHint, TextureTarget, ShaderError};
 use device::{TextureSlot, TextureStorage, VertexAttribute, VertexAttributeKind};
-use device::{TextureId, DUMMY_ID, DITHER};
+use device::{TextureId, DUMMY_ID};
 use euclid::{Transform3D, rect};
 use frame_builder::FrameBuilderConfig;
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
@@ -861,8 +861,6 @@ pub struct Renderer {
     // Manages and resolves source textures IDs to real texture IDs.
     texture_resolver: SourceTextureResolver,
 
-    dither_matrix_texture: TextureId,
-
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
     external_image_handler: Option<Box<ExternalImageHandler>>,
@@ -986,15 +984,9 @@ impl Renderer {
 
         let texture_cache = TextureCache::new(max_device_size);
         let max_texture_size = texture_cache.max_texture_size();
-
         let backend_profile_counters = BackendProfileCounters::new();
-
-        let dither_matrix_texture = DITHER;
-
         let debug_renderer = DebugRenderer::new(&mut device);
-
         let texture_resolver = SourceTextureResolver::new();
-
         let layer_texture = VertexDataTexture::new(TextureSampler::Layers);
         let render_task_texture = VertexDataTexture::new(TextureSampler::RenderTasks);
 
@@ -1099,7 +1091,6 @@ impl Renderer {
             layer_texture,
             render_task_texture,
             pipeline_epoch_map: FastHashMap::default(),
-            dither_matrix_texture,
             external_image_handler: None,
             cpu_profiles: VecDeque::new(),
             gpu_profiles: VecDeque::new(),

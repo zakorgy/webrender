@@ -66,8 +66,7 @@ pub type TextureId = u32;
 //pub const INVALID: TextureId = 0;
 pub const DUMMY_ID: TextureId = 0;
 //pub const DUMMY_RGBA8: TextureId = 1;
-pub const DITHER: TextureId = 2;
-const FIRST_UNRESERVED_ID: TextureId = DITHER + 1;
+const FIRST_UNRESERVED_ID: TextureId = DUMMY_ID + 1;
 
 pub type A8 = (R8, Unorm);
 
@@ -214,7 +213,7 @@ pub struct CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Tex
 }
 
 impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::TextureFormat {
-    pub fn create<F>(factory: &mut F, size: [usize; 2]) -> Result<CacheTexture<T>, CombinedError>
+    pub fn create<F>(factory: &mut F, size: [usize; 2], data: Option<&[&[u8]]>) -> Result<CacheTexture<T>, CombinedError>
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
@@ -230,7 +229,7 @@ impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Textur
                 usage: gfx::memory::Usage::Data,
             };
             let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
-            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), data));
             let levels = (0, raw.get_info().levels - 1);
             let tex = Typed::new(raw);
             let rtv = try!(factory.view_texture_as_render_target(&tex, 0, None));
@@ -603,9 +602,19 @@ impl Device {
         sampler_info.filter = gfx::texture::FilterMethod::Bilinear;
         let sampler_linear = factory.create_sampler(sampler_info);
 
-        let dummy_dither_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
-        let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
-        let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
+        let dither_matrix: [u8; 64] = [
+            00, 48, 12, 60, 03, 51, 15, 63,
+            32, 16, 44, 28, 35, 19, 47, 31,
+            08, 56, 04, 52, 11, 59, 07, 55,
+            40, 24, 36, 20, 43, 27, 39, 23,
+            02, 50, 14, 62, 01, 49, 13, 61,
+            34, 18, 46, 30, 33, 17, 45, 29,
+            10, 58, 06, 54, 09, 57, 05, 53,
+            42, 26, 38, 22, 41, 25, 37, 21
+        ];
+        let dither_tex = CacheTexture::create(&mut factory, [8, 8], Some(&[&dither_matrix])).unwrap();
+        let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1], None).unwrap();
+        let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1], None).unwrap();
         let dummy_image_tex = ImageTexture::create(&mut factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
         let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
         let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
@@ -632,7 +641,7 @@ impl Device {
             factory: factory,
             encoder: encoder,
             sampler: (sampler_nearest, sampler_linear),
-            dither: dummy_dither_tex,
+            dither: dither_tex,
             cache_a8_textures: cache_a8_textures,
             cache_rgba8_textures: cache_rgba8_textures,
             image_textures: image_textures,
@@ -799,11 +808,11 @@ impl Device {
         println!("create_cache_texture={:?}", id);
         match kind {
             RenderTargetKind::Alpha => {
-                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
+                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize], None).unwrap();
                 self.cache_a8_textures.insert(id, tex);
             }
             RenderTargetKind::Color => {
-                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
+                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize], None).unwrap();
                 self.cache_rgba8_textures.insert(id, tex);
             }
         }
@@ -834,14 +843,13 @@ impl Device {
             mipmap: 0,
         };
 
-        let data = gfx::memory::cast_slice(memory);
         let tex = match sampler {
             TextureSampler::ResourceCache => &self.resource_cache.handle,
             TextureSampler::Layers => &self.layers.handle,
             TextureSampler::RenderTasks => &self.render_tasks.handle,
             _=> unreachable!(),
         };
-        self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, data).unwrap();
+        self.encoder.update_texture::<_, Rgba32F>(tex, None, img_info, gfx::memory::cast_slice(memory)).unwrap();
     }
 
     #[cfg(not(feature = "dx11"))]
@@ -916,7 +924,7 @@ impl Device {
         self.image_batch_set.insert(texture_id.clone());
     }
 
-    fn update_image_texture(&mut self, texture_id: &TextureId, offset: [u16; 2], size: [u16; 2], memory: &[u8], layer_index: i32) {
+    pub fn update_image_texture(&mut self, texture_id: &TextureId, offset: [u16; 2], size: [u16; 2], memory: &[u8], layer_index: i32) {
         let img_info = gfx::texture::ImageInfoCommon {
             xoffset: offset[0],
             yoffset: offset[1],
@@ -975,7 +983,7 @@ impl Device {
     }
 }
 
-fn convert_data_to_rgba8(width: usize, height: usize, data: &[u8], orig_stride: usize) -> Vec<u8> {
+pub fn convert_data_to_rgba8(width: usize, height: usize, data: &[u8], orig_stride: usize) -> Vec<u8> {
     let mut new_data = vec![0u8; width * height * RGBA_STRIDE];
     for s in 0..orig_stride {
         for h in 0..height {
