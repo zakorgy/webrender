@@ -8,7 +8,7 @@ use render_task::RenderTaskAddress;
 // Contains type that must exactly match the same structures declared in GLSL.
 
 // Instance structure for box shadows being drawn into target cache.
-#[derive(Debug)]
+#[derive(Copy, Debug, Clone)]
 #[repr(C)]
 pub struct BoxShadowCacheInstance {
     pub prim_address: GpuCacheAddress,

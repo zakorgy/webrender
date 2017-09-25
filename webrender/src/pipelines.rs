@@ -13,6 +13,7 @@ use gfx::traits::FactoryExt;
 use gfx::format::DepthStencil as DepthFormat;
 use backend::Resources as R;
 use gfx::format::Format;
+use gpu_types::{BoxShadowCacheInstance};
 use tiling::{BlurCommand, CacheClipInstance, PrimitiveInstance};
 use renderer::BlendMode;
 use renderer::RendererError;
@@ -105,6 +106,11 @@ gfx_defines! {
         data_resource_address: [i32; 4] = "aClipDataResourceAddress",
     }
 
+    vertex BoxShadowInstances {
+        prim_address: [i32; 2] = "aPrimAddress",
+        task_index: i32 = "aTaskIndex",
+    }
+
     constant Locals {
         transform: [[f32; 4]; 4] = "uTransform",
         device_pixel_ratio: f32 = "uDevicePixelRatio",
@@ -137,15 +143,17 @@ gfx_defines! {
         blend_value: gfx::BlendRef = (),
     }
 
-    /*pipeline cache {
+    pipeline boxshadow {
+        locals: gfx::ConstantBuffer<Locals> = "Locals",
         transform: gfx::Global<[[f32; 4]; 4]> = "uTransform",
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
         vbuf: gfx::VertexBuffer<Position> = (),
-        ibuf: gfx::InstanceBuffer<PrimitiveInstances> = (),
+        ibuf: gfx::InstanceBuffer<BoxShadowInstances> = (),
 
-        color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
-        cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
+        //color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
+        //cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
+        //cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
+        //TODO check dither
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -155,7 +163,7 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
+        //out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
     }
 
     pipeline blur {
@@ -242,8 +250,8 @@ gfx_defines! {
 type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
 type ClipPSO = gfx::PipelineState<R, clip::Meta>;
 type BlurPSO = gfx::PipelineState<R, blur::Meta>;
-/*type CachePSO = gfx::PipelineState<R, cache::Meta>;
-type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
+type BoxShadowPSO = gfx::PipelineState<R, boxshadow::Meta>;
+/*type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
 type DebugFontPSO = gfx::PipelineState<R, debug_font::Meta>;*/
 
 impl Position {
@@ -322,6 +330,21 @@ impl ClipInstances {
         self.data_resource_address[1] = instance.clip_data_address.v as i32;
         self.data_resource_address[2] = instance.resource_address.u as i32;
         self.data_resource_address[3] = instance.resource_address.v as i32;
+    }
+}
+
+impl BoxShadowInstances {
+    pub fn new() -> BoxShadowInstances {
+        BoxShadowInstances {
+            prim_address: [0; 2],
+            task_index: 0,
+        }
+    }
+
+    pub fn update(&mut self, instance: &BoxShadowCacheInstance) {
+        self.prim_address[0] = instance.prim_address.u as i32;
+        self.prim_address[0] = instance.prim_address.v as i32;
+        self.task_index = instance.task_index.0 as i32;
     }
 }
 
@@ -421,42 +444,58 @@ impl Program {
     }
 }
 
-/*#[allow(dead_code)]
-pub struct CacheProgram {
-    pub data: cache::Data<R>,
-    pub pso: CachePSO,
-    pub pso_alpha: CachePSO,
+pub struct BoxShadowProgram {
+    pub data: boxshadow::Data<R>,
+    pub pso: BoxShadowPSO,
     pub slice: gfx::Slice<R>,
-    pub upload: (gfx::handle::Buffer<R, PrimitiveInstances>, usize),
+    pub upload: (gfx::handle::Buffer<R, BoxShadowInstances>, usize),
 }
 
-#[allow(dead_code)]
-impl CacheProgram {
-    pub fn new(data: cache::Data<R>,
-           psos: (CachePSO, CachePSO),
+impl BoxShadowProgram {
+    pub fn new(data: boxshadow::Data<R>,
+           pso: BoxShadowPSO,
            slice: gfx::Slice<R>,
-           upload: gfx::handle::Buffer<R, PrimitiveInstances>)
-           -> CacheProgram {
-        CacheProgram {
+           upload: gfx::handle::Buffer<R, BoxShadowInstances>)
+           -> BoxShadowProgram {
+        BoxShadowProgram {
             data: data,
-            pso: psos.0,
-            pso_alpha: psos.1,
+            pso: pso,
             slice: slice,
             upload: (upload, 0),
-        }
-    }
-
-    pub fn get_pso(&self, blend: &BlendMode) -> &CachePSO {
-        match *blend {
-            BlendMode::Alpha => &self.pso_alpha,
-            _ => &self.pso,
         }
     }
 
     pub fn reset_upload_offset(&mut self) {
         self.upload.1 = 0;
     }
-}*/
+
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[BoxShadowCacheInstance], renderer_errors: &mut Vec<RendererError>) {
+        self.data.transform = projection.to_row_arrays();
+        let locals = Locals {
+            transform: self.data.transform,
+            device_pixel_ratio: self.data.device_pixel_ratio,
+        };
+        device.encoder.update_buffer(&self.data.locals, &[locals], 0).unwrap();
+
+        {
+            let mut writer = device.factory.write_mapping(&self.upload.0).unwrap();
+            for (i, inst) in instances.iter().enumerate() {
+                writer[i + self.upload.1].update(inst);
+            }
+        }
+
+        {
+            self.slice.instances = Some((instances.len() as u32, 0));
+        }
+        device.encoder.copy_buffer(&self.upload.0, &self.data.ibuf, self.upload.1, 0, instances.len()).unwrap();
+        self.upload.1 += instances.len();
+    }
+
+    pub fn draw(&mut self, device: &mut Device)
+    {
+        device.encoder.draw(&self.slice, &self.pso, &self.data);
+    }
+}
 
 #[allow(dead_code)]
 pub struct BlurProgram {
@@ -687,29 +726,6 @@ impl Device {
          pso_prem_alpha, pso_subpixel_depth_write, pso_subpixel)
     }
 
-    /*pub fn create_cache_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (CachePSO, CachePSO) {
-        let pso = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            cache::new()
-        ).unwrap();
-
-
-        let pso_alpha = self.factory.create_pipeline_simple(
-            vert_src,
-            frag_src,
-            cache::Init {
-                out_color: ("Target0",
-                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
-                            gfx::state::MASK_ALL,
-                            Some(ALPHA)),
-                .. cache::new()
-            }
-        ).unwrap();
-
-        (pso, pso_alpha)
-    }*/
-
     pub fn create_clip_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (ClipPSO, ClipPSO, ClipPSO) {
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, clip::new()).unwrap();
 
@@ -777,38 +793,6 @@ impl Device {
         Program::new(data, psos, self.slice.clone(), upload)
     }
 
-    /*pub fn create_cache_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> CacheProgram {
-        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
-        {
-            let mut writer = self.factory.write_mapping(&upload).unwrap();
-            for i in 0..MAX_INSTANCE_COUNT {
-                writer[i] = PrimitiveInstances::new();
-            }
-        }
-
-        let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
-                                                   gfx::buffer::Role::Vertex,
-                                                   gfx::memory::Usage::Data,
-                                                   gfx::TRANSFER_DST).unwrap();
-
-        let data = cache::Data {
-            transform: [[0f32; 4]; 4],
-            device_pixel_ratio: DEVICE_PIXEL_RATIO,
-            vbuf: self.vertex_buffer.clone(),
-            ibuf: instances,
-            color0: (self.color0.srv.clone(), self.color0.clone().sampler),
-            cache_a8: (self.cache_a8.srv.clone(), self.cache_a8.clone().sampler),
-            cache_rgba8: (self.cache_rgba8.srv.clone(), self.cache_rgba8.clone().sampler),
-            layers: (self.layers.srv.clone(), self.layers.clone().sampler),
-            render_tasks: (self.render_tasks.srv.clone(), self.render_tasks.clone().sampler),
-            resource_cache: (self.resource_cache.srv.clone(), self.resource_cache.clone().sampler),
-            out_color: self.main_color.raw().clone(),
-            out_depth: self.main_depth.clone(),
-        };
-        let psos = self.create_cache_psos(vert_src, frag_src);
-        CacheProgram::new(data, psos, self.slice.clone(), upload)
-    }*/
-
     pub fn create_blur_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> BlurProgram {
         let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
         {
@@ -840,6 +824,35 @@ impl Device {
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
         BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
+    }
+
+    pub fn create_box_shadow_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> BoxShadowProgram {
+        let upload = self.factory.create_upload_buffer(MAX_INSTANCE_COUNT).unwrap();
+        {
+            let mut writer = self.factory.write_mapping(&upload).unwrap();
+            for i in 0..MAX_INSTANCE_COUNT {
+                writer[i] = BoxShadowInstances::new();
+            }
+        }
+
+        let instances = self.factory.create_buffer(MAX_INSTANCE_COUNT,
+                                                        gfx::buffer::Role::Vertex,
+                                                        gfx::memory::Usage::Data,
+                                                        gfx::TRANSFER_DST).unwrap();
+
+        let data = boxshadow::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: self.vertex_buffer.clone(),
+            ibuf: instances,
+            layers: (self.layers.srv.clone(), self.sampler.0.clone()),
+            render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
+            out_color: self.main_color.raw().clone(),
+        };
+        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, boxshadow::new()).unwrap();
+        BoxShadowProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
     }
 
     pub fn create_clip_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> ClipProgram {

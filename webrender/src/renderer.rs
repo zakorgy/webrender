@@ -28,7 +28,7 @@ use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 use internal_types::{FastHashMap, CacheTextureId, RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, TextureUpdateList, RenderTargetMode, TextureUpdateSource};
 use internal_types::{BatchTextures, ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, SourceTexture};
-use pipelines::{BlurProgram, /*CacheProgram,*/ ClipProgram, Program};
+use pipelines::{BlurProgram, BoxShadowProgram, ClipProgram, Program};
 use profiler::{Profiler, BackendProfileCounters};
 use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
 use record::ApiRecordingReceiver;
@@ -774,6 +774,20 @@ fn create_blur_program(device: &mut Device, filename: &str) -> Box<BlurProgram> 
     Box::new(device.create_blur_program(vs.as_slice(), ps.as_slice()))
 }
 
+#[cfg(not(feature = "dx11"))]
+fn create_box_shadow_program(device: &mut Device, filename: &str) -> Box<BoxShadowProgram> {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    Box::new(device.create_box_shadow_program(vs.as_slice(), ps.as_slice()))
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+fn create_box_shadow_program(device: &mut Device, filename: &str) -> Box<BoxShadowProgram> {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    Box::new(device.create_box_shadow_program(vs.as_slice(), ps.as_slice()))
+}
+
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
@@ -825,7 +839,7 @@ pub struct Renderer {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    //cs_box_shadow: LazilyCompiledShader,
+    cs_box_shadow: Box<BoxShadowProgram>,
     //cs_text_run: LazilyCompiledShader,
     //cs_line: LazilyCompiledShader,
     cs_blur: Box<BlurProgram>,
@@ -951,6 +965,8 @@ impl Renderer {
         let debug_server = DebugServer::new(api_tx.clone());
 
         let (mut device, window) = Device::new(window, options.resource_override_path.clone());
+
+        let cs_box_shadow = create_box_shadow_program(&mut device, "cs_box_shadow");
 
         let cs_blur = create_blur_program(&mut device, "cs_blur");
 
@@ -1081,6 +1097,7 @@ impl Renderer {
             debug_server,
             device,
             current_frame: None,
+            cs_box_shadow: cs_box_shadow,
             cs_blur: cs_blur,
             cs_clip_rectangle: cs_clip_rectangle,
             cs_clip_border: cs_clip_border,
@@ -1445,7 +1462,7 @@ impl Renderer {
 
     fn flush(&mut self) {
         self.device.flush();
-        //self.cs_box_shadow.reset_upload_offset();
+        self.cs_box_shadow.reset_upload_offset();
         //self.cs_text_run.reset_upload_offset();
         self.cs_blur.reset_upload_offset();
         self.cs_clip_rectangle.reset_upload_offset();
@@ -1898,7 +1915,8 @@ impl Renderer {
         if !target.box_shadow_cache_prims.is_empty() {
             //self.device.set_blend(false);
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_BOX_SHADOW);
-            //self.cs_box_shadow.bind(&mut self.device, projection, &mut self.renderer_errors);
+            self.cs_box_shadow.bind(&mut self.device, projection, &target.box_shadow_cache_prims, &mut self.renderer_errors);
+            self.cs_box_shadow.draw(&mut self.device);
         }
 
         // Draw the clip items into the tiled alpha mask.
