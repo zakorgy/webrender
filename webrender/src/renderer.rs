@@ -417,12 +417,12 @@ impl SourceTextureResolver {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
-                println!("cache_a8_texture={:?}", self.cache_a8_texture);
+                println!("cache_a8_texture={:?} sampler={:?}", self.cache_a8_texture, sampler);
                 let texture = self.cache_a8_texture.unwrap_or(self.dummy_cache_a8_texture);
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::CacheRGBA8 => {
-                println!("cache_rgba8_texture={:?}", self.cache_rgba8_texture);
+                println!("cache_rgba8_texture={:?} sampler={:?}", self.cache_rgba8_texture, sampler);
                 let texture = self.cache_rgba8_texture.unwrap_or(self.dummy_cache_rgba8_texture);
                 device.bind_texture(sampler, texture);
             }
@@ -433,6 +433,7 @@ impl SourceTextureResolver {
                 device.bind_external_texture(sampler, texture);*/
             }
             SourceTexture::TextureCache(index) => {
+                println!("cache_texture_map={:?} sampler={:?}", self.cache_texture_map[index.0], sampler);
                 let texture = self.cache_texture_map[index.0];
                 device.bind_texture(sampler, texture);
             }
@@ -490,28 +491,16 @@ impl CacheRow {
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
 struct ResourceCacheTexture {
-    //texture: Texture,
-    //pbo: PBO,
     rows: Vec<CacheRow>,
     cpu_blocks: Vec<GpuBlockData>,
 }
 
 impl ResourceCacheTexture {
     fn new(device: &mut Device) -> ResourceCacheTexture {
-        //let texture = device.create_texture(TextureTarget::Default);
-        //let pbo = device.create_pbo();
-
         ResourceCacheTexture {
-            //texture,
-            //pbo,
             rows: Vec::new(),
             cpu_blocks: Vec::new(),
         }
-    }
-
-    fn deinit(self, device: &mut Device) {
-        //device.delete_pbo(self.pbo);
-        //device.delete_texture(self.texture);
     }
 
     fn apply_patch(&mut self,
@@ -596,15 +585,6 @@ impl ResourceCacheTexture {
                 let block_index = row_index * MAX_VERTEX_TEXTURE_WIDTH;
                 let cpu_blocks = &self.cpu_blocks[block_index..(block_index + MAX_VERTEX_TEXTURE_WIDTH)];
                 
-                /*device.update_texture_from_pbo(&self.texture,
-                                               0,
-                                               row_index as u32,
-                                               MAX_VERTEX_TEXTURE_WIDTH as u32,
-                                               1,
-                                               0,
-                                               None,
-                                               0);*/
-                //device.update_gpu_cache(row_index as u16, cpu_blocks);
                 device.update_data_texture(TextureSampler::ResourceCache, [0, row_index as u16], [MAX_VERTEX_TEXTURE_WIDTH as u16, 1], cpu_blocks);
 
                 row.is_dirty = false;
@@ -614,19 +594,12 @@ impl ResourceCacheTexture {
 }
 
 struct VertexDataTexture {
-    //texture: Texture,
-    //pbo: PBO,
     sampler: TextureSampler,
 }
 
 impl VertexDataTexture {
-    fn new(/*device: &mut Device*/sampler: TextureSampler) -> VertexDataTexture {
-        //let texture = device.create_texture(TextureTarget::Default);
-        //let pbo = device.create_pbo();
-
+    fn new(sampler: TextureSampler) -> VertexDataTexture {
         VertexDataTexture {
-            //texture,
-            //pbo,
             sampler: sampler,
         }
     }
@@ -672,27 +645,7 @@ impl VertexDataTexture {
                                 None);
         }*/
 
-        // Bind a PBO to do the texture upload.
-        // Updating the texture via PBO avoids CPU-side driver stalls.
-        /*device.bind_pbo(Some(&self.pbo));
-        device.update_pbo_data(data);
-        device.update_texture_from_pbo(&self.texture,
-                                       0,
-                                       0,
-                                       width,
-                                       needed_height,
-                                       0,
-                                       None,
-                                       0);
-    
-        // Ensure that other texture updates won't read from this PBO.
-        device.bind_pbo(None);*/
         device.update_data_texture(self.sampler, [0, 0], [width as u16, needed_height as u16], data);
-    }
-
-    fn deinit(self, device: &mut Device) {
-        //device.delete_pbo(self.pbo);
-        //device.delete_texture(self.texture);
     }
 }
 
@@ -1040,10 +993,10 @@ impl Renderer {
 
         let debug_renderer = DebugRenderer::new(&mut device);
 
-        let texture_resolver = SourceTextureResolver::new(/*&mut device*/);
+        let texture_resolver = SourceTextureResolver::new();
 
-        let layer_texture = VertexDataTexture::new(/*&mut device*/TextureSampler::Layers);
-        let render_task_texture = VertexDataTexture::new(/*&mut device*/TextureSampler::RenderTasks);
+        let layer_texture = VertexDataTexture::new(TextureSampler::Layers);
+        let render_task_texture = VertexDataTexture::new(TextureSampler::RenderTasks);
 
         device.end_frame();
 
@@ -1401,8 +1354,6 @@ impl Renderer {
 
                         self.update_gpu_cache(frame);
 
-                        //self.device.bind_texture(TextureSampler::ResourceCache, &self.gpu_cache_texture.texture);
-
                         frame_id
                     };
 
@@ -1524,29 +1475,12 @@ impl Renderer {
                             let texture = self.device.create_image_texture(width, height, layer_count, filter, format);
                             self.texture_resolver.cache_texture_map.push(texture);
                         }
-                        //let texture = &mut self.texture_resolver.cache_texture_map[cache_texture_index];
-
-                        // Ensure no PBO is bound when creating the texture storage,
-                        // or GL will attempt to read data from there.
-                        /*self.device.init_texture(texture,
-                                                 width,
-                                                 height,
-                                                 format,
-                                                 filter,
-                                                 mode,
-                                                 layer_count,
-                                                 None);*/
                     }
                     TextureUpdateOp::Update { rect, source, stride, layer_index, offset } => {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
 
-                        // Bind a PBO to do the texture upload.
-                        // Updating the texture via PBO avoids CPU-side driver stalls.
-                        //self.device.bind_pbo(Some(&self.texture_cache_upload_pbo));
-
                         match source {
                             TextureUpdateSource::Bytes { data }  => {
-                                //self.device.update_pbo_data(&data[offset as usize..]);
                                 self.device.update_image_data(
                                     &data[offset as usize..],
                                     texture,
@@ -1581,18 +1515,6 @@ impl Renderer {
                                 handler.unlock(id, channel_index);*/
                             }
                         }
-
-                        /*self.device.update_texture_from_pbo(texture,
-                                                            rect.origin.x,
-                                                            rect.origin.y,
-                                                            rect.size.width,
-                                                            rect.size.height,
-                                                            layer_index,
-                                                            stride,
-                                                            0);*/
-
-                        // Ensure that other texture updates won't read from this PBO.
-                        //self.device.bind_pbo(None);
                     }
                     TextureUpdateOp::Free => {
                         let texture = &mut self.texture_resolver.cache_texture_map[update.id.0];
@@ -1625,19 +1547,15 @@ impl Renderer {
         println!("program={:?}", key.kind);
         let (mut program, marker) = match key.kind {
             AlphaBatchKind::Composite { .. } => {
-                //self.ps_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
                 (&mut self.ps_composite, GPU_TAG_PRIM_COMPOSITE)
             }
             AlphaBatchKind::HardwareComposite => {
-                //self.ps_hw_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
                 (&mut self.ps_hw_composite, GPU_TAG_PRIM_HW_COMPOSITE)
             }
             AlphaBatchKind::SplitComposite => {
-                //self.ps_split_composite.bind(&mut self.device, projection, &mut self.renderer_errors);
                 (&mut self.ps_split_composite ,GPU_TAG_PRIM_SPLIT_COMPOSITE)
             }
             AlphaBatchKind::Blend => {
-                //self.ps_blend.bind(&mut self.device, projection, &mut self.renderer_errors);
                 (&mut self.ps_blend, GPU_TAG_PRIM_BLEND)
             }
             AlphaBatchKind::Rectangle => {
@@ -1774,10 +1692,6 @@ impl Renderer {
         {
             let _gm = self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
             ////self.device.bind_draw_target(render_target, Some(target_size));
-            //self.device.disable_depth();
-            //self.device.enable_depth_write();
-            //self.device.set_blend(false);
-            //self.device.set_blend_mode_alpha();
             match render_target {
                 /*Some(..) if self.enable_clear_scissor => {
                     // TODO(gw): Applying a scissor rect and minimal clear here
@@ -1793,8 +1707,6 @@ impl Renderer {
                     self.device.clear_target(clear_color, Some(1.0));
                 }
             }
-
-            //self.device.disable_depth_write();
         }
 
         // Draw any blurs for this target.
@@ -1805,8 +1717,7 @@ impl Renderer {
         //           blur radii with fixed weights.
         if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
             let _gm = self.gpu_profile.add_marker(GPU_TAG_BLUR);
-
-            //self.device.set_blend(false);
+            println!("cs_blur");
             if !target.vertical_blurs.is_empty() {
                 self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, &mut self.renderer_errors);
                 self.cs_blur.draw(&mut self.device);
@@ -1825,12 +1736,11 @@ impl Renderer {
         // it removes the overhead of submitting many small glyphs
         // to multiple tiles in the normal text run case.
         if !target.text_run_cache_prims.is_empty() {
-            //self.device.set_blend(true);
-            //self.device.set_blend_mode_alpha();
-
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_TEXT_RUN);
+            println!("cs_text_run");
 
             for (texture_id, instances) in &target.text_run_cache_prims {
+                println!("cs_text_run texture_id={:?}", texture_id);
                 self.texture_resolver.bind(&texture_id, TextureSampler::Color0, &mut self.device);
                 self.cs_text_run.bind(&mut self.device, projection, &instances, &mut self.renderer_errors);
                 self.cs_text_run.draw(&mut self.device, &BlendMode::Alpha, false);
@@ -1839,14 +1749,8 @@ impl Renderer {
         if !target.line_cache_prims.is_empty() {
             // TODO(gw): Technically, we don't need blend for solid
             //           lines. We could check that here?
-            //self.device.set_blend(true);
-            //self.device.set_blend_mode_alpha();
-
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_LINE);
-            //self.cs_line.bind(&mut self.device, projection, &mut self.renderer_errors);
-            /*self.draw_instanced_batch(&target.line_cache_prims,
-                                      VertexArrayKind::Primitive,
-                                      &BatchTextures::no_texture());*/
+            println!("cs_line");
             self.cs_line.bind(&mut self.device, projection, &target.line_cache_prims, &mut self.renderer_errors);
             self.cs_line.draw(&mut self.device, &BlendMode::Alpha, false);
         }
@@ -1855,6 +1759,7 @@ impl Renderer {
 
         if !target.alpha_batcher.is_empty() {
             let _gm2 = GpuMarker::new("alpha batches");
+            println!("alpha batches");
 
             self.gpu_profile.add_sampler(GPU_SAMPLER_TAG_OPAQUE);
 
@@ -1910,16 +1815,11 @@ impl Renderer {
             // performance penalty on other GPU types - we should test this
             // and consider different code paths.
             let clear_color = [1.0];
-            /*self.device.clear_target_rect(Some(clear_color),
-                                          None,
-                                          target.used_rect());*/
-            //self.device.clear_target(Some(clear_color), None);
             self.device.clear_render_target(render_target.0, clear_color[0]);
         }
 
         // Draw any box-shadow caches for this target.
         if !target.box_shadow_cache_prims.is_empty() {
-            //self.device.set_blend(false);
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_BOX_SHADOW);
             println!("cs_box_shadow");
             self.cs_box_shadow.bind(&mut self.device, projection, &target.box_shadow_cache_prims, render_target.0, &mut self.renderer_errors);
@@ -1935,6 +1835,7 @@ impl Renderer {
             // in regions below.
             if !target.clip_batcher.border_clears.is_empty() {
                 let _gm2 = GpuMarker::new("clip borders [clear]");
+                println!("cs_clip_border clears");
                 self.cs_clip_border.bind(&mut self.device, projection, &target.clip_batcher.border_clears, render_target.0, &mut self.renderer_errors);
                 self.profile_counters.vertices.add(6 * &target.clip_batcher.border_clears.len());
                 self.cs_clip_border.draw(&mut self.device, &BlendMode::None);
@@ -1943,6 +1844,7 @@ impl Renderer {
             // Draw any dots or dashes for border corners.
             if !target.clip_batcher.borders.is_empty() {
                 let _gm2 = GpuMarker::new("clip borders");
+                println!("cs_clip_border");
                 // We are masking in parts of the corner (dots or dashes) here.
                 // Blend mode is set to max to allow drawing multiple dots.
                 // The individual dots and dashes in a border never overlap, so using
@@ -1958,6 +1860,7 @@ impl Renderer {
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
                 let _gm2 = GpuMarker::new("clip rectangles");
+                println!("clip rectangles");
                 self.cs_clip_rectangle.bind(&mut self.device, projection, &target.clip_batcher.rectangles, render_target.0, &mut self.renderer_errors);
                 self.profile_counters.vertices.add(6 * &target.clip_batcher.rectangles.len());
                 self.cs_clip_rectangle.draw(&mut self.device, &blend_mode);
@@ -1965,6 +1868,7 @@ impl Renderer {
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
                 let _gm2 = GpuMarker::new("clip images");
+                println!("clip images");
                 self.texture_resolver.bind(&mask_texture_id, TextureSampler::Color0, &mut self.device);
                 self.cs_clip_image.bind(&mut self.device, projection, &items, render_target.0, &mut self.renderer_errors);
                 self.profile_counters.vertices.add(6 * &items.len());
@@ -2079,39 +1983,8 @@ impl Renderer {
             }
         }
 
-
-        // Init textures and render targets to match this scene.
-        /*for pass in &mut frame.passes {
-            let color_target_count = pass.required_target_count(RenderTargetKind::Color);
-            let alpha_target_count = pass.required_target_count(RenderTargetKind::Alpha);
-
-            if let Some(texture) = pass.color_texture.as_mut() {
-                self.device.init_texture(texture,
-                                         frame.cache_size.width as u32,
-                                         frame.cache_size.height as u32,
-                                         ImageFormat::BGRA8,
-                                         TextureFilter::Linear,
-                                         RenderTargetMode::RenderTarget,
-                                         color_target_count as i32,
-                                         None);
-            }
-            if let Some(texture) = pass.alpha_texture.as_mut() {
-                self.device.init_texture(texture,
-                                         frame.cache_size.width as u32,
-                                         frame.cache_size.height as u32,
-                                         ImageFormat::A8,
-                                         TextureFilter::Nearest,
-                                         RenderTargetMode::RenderTarget,
-                                         alpha_target_count as i32,
-                                         None);
-            }
-        }*/
-
         self.layer_texture.update(&mut self.device, &mut frame.layer_texture_data);
         self.render_task_texture.update(&mut self.device, &mut frame.render_tasks.task_data);
-
-        //self.device.bind_texture(TextureSampler::Layers, &self.layer_texture.texture);
-        //self.device.bind_texture(TextureSampler::RenderTasks, &self.render_task_texture.texture);
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
         debug_assert!(self.texture_resolver.cache_rgba8_texture.is_none());
@@ -2169,7 +2042,7 @@ impl Renderer {
                 println!("bind cache");
                 self.texture_resolver.bind(&SourceTexture::CacheA8, TextureSampler::CacheA8, &mut self.device);
                 self.texture_resolver.bind(&SourceTexture::CacheRGBA8, TextureSampler::CacheRGBA8, &mut self.device);
-
+                println!("draw_alpha_target");
                 for (target_index, target) in pass.alpha_targets.targets.iter().enumerate() {
                     self.draw_alpha_target((pass.alpha_texture.as_ref().unwrap(), target_index as i32),
                                            target,
@@ -2178,6 +2051,7 @@ impl Renderer {
                 }
 
                 let projection = transform_projection(projection);
+                println!("draw_color_target");
                 for (target_index, target) in pass.color_targets.targets.iter().enumerate() {
                     let render_target = pass.color_texture.as_ref().map(|texture| {
                         (texture, target_index as i32)
@@ -2336,58 +2210,8 @@ impl Renderer {
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame(1.0);
-        self.gpu_cache_texture.deinit(&mut self.device);
-        /*if let Some(dither_matrix_texture) = self.dither_matrix_texture {
-            self.device.delete_texture(dither_matrix_texture);
-        }*/
-        self.layer_texture.deinit(&mut self.device);
-        self.render_task_texture.deinit(&mut self.device);
-        /*for texture in self.alpha_render_targets {
-            self.device.delete_texture(texture);
-        }
-        for texture in self.color_render_targets {
-            self.device.delete_texture(texture);
-        }*/
-        //self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
-        /*self.device.delete_vao(self.prim_vao);
-        self.device.delete_vao(self.clip_vao);
-        self.device.delete_vao(self.blur_vao);
-        self.device.delete_vao(self.box_shadow_vao);*/
         self.debug.deinit(&mut self.device);
-        /*self.cs_box_shadow.deinit(&mut self.device);
-        self.cs_text_run.deinit(&mut self.device);
-        self.cs_line.deinit(&mut self.device);
-        self.cs_blur.deinit(&mut self.device);
-        self.cs_clip_rectangle.deinit(&mut self.device);
-        self.cs_clip_image.deinit(&mut self.device);
-        self.cs_clip_border.deinit(&mut self.device);
-        self.ps_rectangle.deinit(&mut self.device);
-        self.ps_rectangle_clip.deinit(&mut self.device);
-        self.ps_text_run.deinit(&mut self.device);
-        self.ps_text_run_subpixel.deinit(&mut self.device);
-        for shader in self.ps_image {
-            if let Some(shader) = shader {
-                shader.deinit(&mut self.device);
-            }
-        }
-        for shader in self.ps_yuv_image {
-            if let Some(shader) = shader {
-                shader.deinit(&mut self.device);
-            }
-        }
-        self.ps_border_corner.deinit(&mut self.device);
-        self.ps_border_edge.deinit(&mut self.device);
-        self.ps_gradient.deinit(&mut self.device);
-        self.ps_angle_gradient.deinit(&mut self.device);
-        self.ps_radial_gradient.deinit(&mut self.device);
-        self.ps_box_shadow.deinit(&mut self.device);
-        self.ps_cache_image.deinit(&mut self.device);
-        self.ps_line.deinit(&mut self.device);
-        self.ps_blend.deinit(&mut self.device);
-        self.ps_hw_composite.deinit(&mut self.device);
-        self.ps_split_composite.deinit(&mut self.device);
-        self.ps_composite.deinit(&mut self.device);*/
         self.device.end_frame();
     }
 }

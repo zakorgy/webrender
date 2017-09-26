@@ -149,10 +149,7 @@ gfx_defines! {
         device_pixel_ratio: gfx::Global<f32> = "uDevicePixelRatio",
         vbuf: gfx::VertexBuffer<Position> = (),
         ibuf: gfx::InstanceBuffer<BoxShadowInstances> = (),
-
-        //color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
-        //cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
-        //cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
+        
         //TODO check dither
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
@@ -163,7 +160,6 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        //out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
     }
 
     pipeline blur {
@@ -183,7 +179,6 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            None),
-        //out_depth: gfx::DepthTarget<DepthFormat> = Depth{fun: Comparison::Never , write: false},
     }
 
     pipeline clip {
@@ -209,7 +204,6 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8, gfx::format::ChannelType::Unorm),
                                            gfx::state::MASK_ALL,
                                            None),
-        //out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
     
     /*vertex DebugColorVertices {
@@ -499,7 +493,6 @@ impl BoxShadowProgram {
     }
 }
 
-#[allow(dead_code)]
 pub struct BlurProgram {
     pub data: blur::Data<R>,
     pub pso: BlurPSO,
@@ -507,7 +500,6 @@ pub struct BlurProgram {
     pub upload: (gfx::handle::Buffer<R, BlurInstances>, usize),
 }
 
-#[allow(dead_code)]
 impl BlurProgram {
     pub fn new(data: blur::Data<R>,
            pso: BlurPSO,
@@ -557,7 +549,6 @@ impl BlurProgram {
     }
 }
 
-#[allow(dead_code)]
 pub struct ClipProgram {
     pub data: clip::Data<R>,
     pub pso: ClipPSO,
@@ -567,7 +558,6 @@ pub struct ClipProgram {
     pub upload: (gfx::handle::Buffer<R, ClipInstances>, usize),
 }
 
-#[allow(dead_code)]
 impl ClipProgram {
     pub fn new(data: clip::Data<R>,
            psos: (ClipPSO, ClipPSO, ClipPSO),
@@ -815,14 +805,11 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: blur_instances,
-            //color0: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
-            //cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.main_color.raw().clone(),
-            //out_depth: self.main_depth.clone(),
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
         BlurProgram {data: data, pso: pso, slice: self.slice.clone(), upload:(upload,0)}
@@ -888,107 +875,8 @@ impl Device {
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.dummy_cache_a8().rtv.raw().clone(),
-            //out_depth: self.main_depth.clone(),
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
         ClipProgram::new(data, psos, self.slice.clone(), upload)
     }
-
-    /*pub fn draw(&mut self,
-                program: &mut Program,
-                proj: &Transform3D<f32>,
-                instances: &[PrimitiveInstance],
-                blendmode: &BlendMode,
-                enable_depth_write: bool) {
-        //program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
-            for (i, inst) in instances.iter().enumerate() {
-                writer[i + program.upload.1].update(inst);
-            }
-        }
-
-        {
-            program.slice.instances = Some((instances.len() as u32, 0));
-        }
-
-        if let &BlendMode::Subpixel(ref color) = blendmode {
-            program.data.blend_value = [color.r, color.g, color.b, color.a];
-        }
-
-        /*let locals = Locals {
-            transform: program.data.transform,
-            device_pixel_ratio: program.data.device_pixel_ratio,
-        };
-        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();*/
-        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.get_pso(blendmode, enable_depth_write), &program.data);
-        program.upload.1 += instances.len();
-    }*/
-
-    /*pub fn draw_clip(&mut self,
-                     program: &mut ClipProgram,
-                     proj: &Transform3D<f32>,
-                     instances: &[CacheClipInstance],
-                     blendmode: &BlendMode,
-                     texture_id: TextureId) {
-        program.data.transform = proj.to_row_arrays();
-        let (w, h) = self.color0.get_size();
-        {
-            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
-            for (i, inst) in instances.iter().enumerate() {
-                writer[i + program.upload.1].update(inst);
-            }
-        }
-
-        {
-            program.slice.instances = Some((instances.len() as u32, 0));
-        }
-
-        let locals = Locals {
-            transform: program.data.transform,
-            device_pixel_ratio: program.data.device_pixel_ratio,
-        };
-        self.encoder.update_buffer(&program.data.locals, &[locals], 0).unwrap();
-        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
-        program.upload.1 += instances.len();
-    }
-
-    pub fn draw_cache(&mut self, program: &mut CacheProgram, proj: &Matrix4D<f32>, instances: &[PrimitiveInstance], blendmode: &BlendMode) {
-        program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
-            for (i, inst) in instances.iter().enumerate() {
-                writer[i].update(inst);
-            }
-        }
-
-        {
-            program.slice.instances = Some((instances.len() as u32, 0));
-        }
-
-        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, instances.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.get_pso(blendmode), &program.data);
-    }
-
-    pub fn draw_blur(&mut self, program: &mut BlurProgram, proj: &Matrix4D<f32>, blur_commands: &[BlurCommand]) {
-        program.data.transform = proj.to_row_arrays();
-
-        {
-            let mut writer = self.factory.write_mapping(&program.upload.0).unwrap();
-            for (i, blur_command) in blur_commands.iter().enumerate() {
-                writer[i].update(blur_command);
-            }
-        }
-
-        {
-            program.slice.instances = Some((blur_commands.len() as u32, 0));
-        }
-
-        self.encoder.copy_buffer(&program.upload.0, &program.data.ibuf, program.upload.1, 0, blur_commands.len()).unwrap();
-        self.encoder.draw(&program.slice, &program.pso, &program.data);
-    }*/
 }
