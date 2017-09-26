@@ -1921,7 +1921,8 @@ impl Renderer {
         if !target.box_shadow_cache_prims.is_empty() {
             //self.device.set_blend(false);
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_BOX_SHADOW);
-            self.cs_box_shadow.bind(&mut self.device, projection, &target.box_shadow_cache_prims, &mut self.renderer_errors);
+            println!("cs_box_shadow");
+            self.cs_box_shadow.bind(&mut self.device, projection, &target.box_shadow_cache_prims, render_target.0, &mut self.renderer_errors);
             self.cs_box_shadow.draw(&mut self.device);
         }
 

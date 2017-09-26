@@ -469,7 +469,7 @@ impl BoxShadowProgram {
         self.upload.1 = 0;
     }
 
-    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[BoxShadowCacheInstance], renderer_errors: &mut Vec<RendererError>) {
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[BoxShadowCacheInstance], render_target: &TextureId, renderer_errors: &mut Vec<RendererError>) {
         self.data.transform = projection.to_row_arrays();
         let locals = Locals {
             transform: self.data.transform,
@@ -489,6 +489,8 @@ impl BoxShadowProgram {
         }
         device.encoder.copy_buffer(&self.upload.0, &self.data.ibuf, self.upload.1, 0, instances.len()).unwrap();
         self.upload.1 += instances.len();
+
+        self.data.out_color = device.cache_a8_textures.get(&render_target).unwrap().rtv.raw().clone();
     }
 
     pub fn draw(&mut self, device: &mut Device)
