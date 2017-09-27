@@ -54,7 +54,7 @@ pub const LAYER_TEXTURE_WIDTH: usize = 1017;
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023;
 pub const TEXTURE_HEIGTH: usize = 8;
 pub const DEVICE_PIXEL_RATIO: f32 = 1.0;
-pub const MAX_INSTANCE_COUNT: usize = 5000;
+pub const MAX_INSTANCE_COUNT: usize = 8192;
 
 pub const A_STRIDE: usize = 1;
 pub const RG_STRIDE: usize = 2;
