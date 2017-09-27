@@ -531,6 +531,7 @@ pub struct Device {
     pub factory: backend::Factory,
     pub encoder: gfx::Encoder<R,CB>,
     pub sampler: (Sampler<R>, Sampler<R>),
+    pub dither: CacheTexture<A8>,
     pub cache_a8_textures: HashMap<TextureId, CacheTexture<A8>>,
     pub cache_rgba8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
     pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
@@ -595,6 +596,7 @@ impl Device {
         sampler_info.filter = gfx::texture::FilterMethod::Bilinear;
         let sampler_linear = factory.create_sampler(sampler_info);
 
+        let dummy_dither_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_image_tex = ImageTexture::create(&mut factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
@@ -623,6 +625,7 @@ impl Device {
             factory: factory,
             encoder: encoder,
             sampler: (sampler_nearest, sampler_linear),
+            dither: dummy_dither_tex,
             cache_a8_textures: cache_a8_textures,
             cache_rgba8_textures: cache_rgba8_textures,
             image_textures: image_textures,
@@ -651,6 +654,10 @@ impl Device {
             frame_id: FrameId(0),
         };
         (dev, win)
+    }
+
+    pub fn dither(&mut self) -> &CacheTexture<A8> {
+        &self.dither
     }
 
     pub fn dummy_cache_a8(&mut self) -> &CacheTexture<A8> {
