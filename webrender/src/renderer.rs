@@ -2181,29 +2181,23 @@ impl Renderer {
         }
     }
 
-    pub fn read_pixels_rgba8(&self, rect: DeviceUintRect) -> Vec<u8> {
+    pub fn read_pixels_rgba8(&mut self, rect: DeviceUintRect) -> Vec<u8> {
         let mut pixels = vec![0u8; (4 * rect.size.width * rect.size.height) as usize];
         self.read_pixels_into(rect, ReadPixelsFormat::Rgba8, &mut pixels);
         pixels
     }
 
-    pub fn read_pixels_into(&self,
+    pub fn read_pixels_into(&mut self,
                             rect: DeviceUintRect,
-                            format: ReadPixelsFormat,
+                            _format: ReadPixelsFormat,
                             output: &mut [u8]) {
-        /*let (gl_format, gl_type, size) = match format {
-            ReadPixelsFormat::Rgba8 => (gl::RGBA, gl::UNSIGNED_BYTE, 4),
-            ReadPixelsFormat::Bgra8 => (get_gl_format_bgra(self.device.gl()), gl::UNSIGNED_BYTE, 4),
-        };
-        assert_eq!(output.len(), (size * rect.size.width * rect.size.height) as usize);
-        self.device.gl().flush();
-        self.device.gl().read_pixels_into_buffer(rect.origin.x as gl::GLint,
-                                                 rect.origin.y as gl::GLint,
-                                                 rect.size.width as gl::GLsizei,
-                                                 rect.size.height as gl::GLsizei,
-                                                 gl_format,
-                                                 gl_type,
-                                                 output);*/
+        /*let stride = match format {
+            ReadPixelsFormat::Rgba8 => RGBA_STRIDE,
+            ReadPixelsFormat::Bgra8 => RGBA_STRIDE,
+        };*/
+        assert_eq!(output.len(), 4 * (rect.size.width * rect.size.height) as usize);
+        self.device.flush();
+        self.device.read_pixels(rect, output);
     }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.

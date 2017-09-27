@@ -15,7 +15,7 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread;
 use api::{ColorF, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintSize};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintRect, DeviceUintSize};
 
 use rand::Rng;
 use std;
@@ -670,6 +670,34 @@ impl Device {
 
     pub fn dummy_image(&mut self) -> &ImageTexture<Rgba8> {
         self.image_textures.get(&DUMMY_ID).unwrap()
+    }
+
+    pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
+        // TODO add bgra flag
+        self.encoder.flush(&mut self.device);
+        let tex = self.main_color.raw().get_texture();
+        let tex_info = tex.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0);
+        let (w, h, _, _) = self.main_color.get_dimensions();
+        let buf = self.factory.create_buffer::<u8>(w as usize * h as usize * RGBA_STRIDE,
+                                                   gfx::buffer::Role::Vertex,
+                                                   gfx::memory::Usage::Download,
+                                                   gfx::TRANSFER_DST).unwrap();
+        self.encoder.copy_texture_to_buffer_raw(tex, None, tex_info, buf.raw(), 0).unwrap();
+        self.encoder.flush(&mut self.device);
+        {
+            let reader = self.factory.read_mapping(&buf).unwrap();
+            let data = &*reader;
+            for j in 0..rect.size.height as usize {
+                for i in 0..rect.size.width as usize {
+                    let offset = i * RGBA_STRIDE + j * rect.size.width as usize * RGBA_STRIDE;
+                    let src = &data[(j + rect.origin.y as usize) * w as usize * RGBA_STRIDE + (i + rect.origin.x as usize) * RGBA_STRIDE ..];
+                    output[offset + 0] = src[0];
+                    output[offset + 1] = src[1];
+                    output[offset + 2] = src[2];
+                    output[offset + 3] = src[3];
+                }
+            }
+        }
     }
 
     pub fn max_texture_size(&self) -> u32 {
