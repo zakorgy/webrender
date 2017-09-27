@@ -4,17 +4,43 @@
 
 #include shared,prim_shared
 
-varying vec2 vPos;
-flat varying vec2 vBorderRadii;
-flat varying float vBlurRadius;
-flat varying vec4 vBoxShadowRect;
-flat varying float vInverted;
+#ifdef WR_DX11
+    struct v2p {
+        vec4 gl_Position : SV_Position;
+        vec2 vPos : vPos;
+        flat vec2 vBorderRadii : vBorderRadii;
+        flat float vBlurRadius : vBlurRadius;
+        flat vec4 vBoxShadowRect : vBoxShadowRect;
+        flat float vInverted : vInverted;
+    };
+#else
+    varying vec2 vPos;
+    flat varying vec2 vBorderRadii;
+    flat varying float vBlurRadius;
+    flat varying vec4 vBoxShadowRect;
+    flat varying float vInverted;
+#endif //WR_DX11
 
 #ifdef WR_VERTEX_SHADER
+#ifdef WR_DX11
+    struct a2v_cs {
+        vec3 pos : aPosition;
+        ivec2 aPrimAddress : aPrimAddress;
+        int aTaskIndex : aTaskIndex;
+    };
+#else
 in ivec2 aPrimAddress;
 in int aTaskIndex;
+#endif //WR_DX11
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in a2v_cs IN, out v2p OUT) {
+    vec3 aPosition = IN.pos;
+    ivec2 aPrimAddress = IN.aPrimAddress;
+    int aTaskIndex = IN.aTaskIndex;
+#endif //WR_DX11
     RenderTaskData task = fetch_render_task(aTaskIndex);
     BoxShadow bs = fetch_boxshadow_direct(ivec2(aPrimAddress.x + VECS_PER_PRIM_HEADER, aPrimAddress.y));
 
@@ -23,10 +49,11 @@ void main(void) {
 
     vec2 pos = mix(p0, p1, aPosition.xy);
 
-    vBorderRadii = bs.border_radius_edge_size_blur_radius_inverted.xx;
-    vBlurRadius = bs.border_radius_edge_size_blur_radius_inverted.z;
-    vInverted = bs.border_radius_edge_size_blur_radius_inverted.w;
-    vBoxShadowRect = vec4(bs.bs_rect.xy, bs.bs_rect.xy + bs.bs_rect.zw);
+    SHADER_OUT(vBorderRadii, bs.border_radius_edge_size_blur_radius_inverted.xx);
+    float blur_radius = bs.border_radius_edge_size_blur_radius_inverted.z;
+    SHADER_OUT(vBlurRadius, blur_radius);
+    SHADER_OUT(vInverted, bs.border_radius_edge_size_blur_radius_inverted.w);
+    SHADER_OUT(vBoxShadowRect, vec4(bs.bs_rect.xy, bs.bs_rect.xy + bs.bs_rect.zw));
 
     // The fragment shader expects logical units, beginning at where the
     // blur radius begins.
@@ -35,9 +62,9 @@ void main(void) {
     // bilinear offset). Then we add the start position of the
     // box shadow rect and subtract the blur radius to get the
     // virtual coordinates that the FS expects.
-    vPos = (pos - 1.0 - p0) / uDevicePixelRatio + bs.bs_rect.xy - vec2(2.0 * vBlurRadius);
+    SHADER_OUT(vPos, (pos - 1.0 - p0) / uDevicePixelRatio + bs.bs_rect.xy - vec2(2.0 * blur_radius, 2.0 * blur_radius));
 
-    gl_Position = uTransform * vec4(pos, 0.0, 1.0);
+    SHADER_OUT(gl_Position, mul(vec4(pos, 0.0, 1.0), uTransform));
 }
 #endif
 
@@ -175,7 +202,17 @@ float color(vec2 pos, vec2 p0Rect, vec2 p1Rect, vec2 radii, float sigma) {
     return cRect - (cCutoutTop + cCutoutBottom);
 }
 
+#ifndef WR_DX11
 void main(void) {
+#else
+void main(in v2p IN, out p2f OUT) {
+    vec4 gl_FragCoord = IN.gl_Position;
+    vec2 vPos = IN.vPos;
+    vec2 vBorderRadii = IN.vBorderRadii;
+    float vBlurRadius = IN.vBlurRadius;
+    vec4 vBoxShadowRect = IN.vBoxShadowRect;
+    float vInverted = IN.vInverted;
+#endif //WR_DX11
     vec2 pos = vPos.xy;
     vec2 p0Rect = vBoxShadowRect.xy, p1Rect = vBoxShadowRect.zw;
     vec2 radii = vBorderRadii.xy;
@@ -183,6 +220,7 @@ void main(void) {
     float value = color(pos, p0Rect, p1Rect, radii, sigma);
 
     value = max(value, 0.0);
-    Target0 = dither(vec4(vInverted == 1.0 ? 1.0 - value : value), gl_FragCoord);
+    float b = vInverted == 1.0 ? 1.0 - value : value;
+    SHADER_OUT(Target0, dither(vec4(b, b, b, b), gl_FragCoord));
 }
 #endif
