@@ -9,7 +9,7 @@
 #ifndef WR_DX11
 void main(void) {
 #else
-void main(in a2v_clip IN, out v2p OUT) {
+void main(in a2v IN, out v2p OUT) {
     vec3 aPosition = IN.pos;
     ivec4 aDataA = IN.data0;
     ivec4 aDataB = IN.data1;
