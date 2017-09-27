@@ -767,8 +767,8 @@ pub fn transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
 #[cfg(all(target_os = "windows", feature="dx11"))]
 pub fn alpha_transform_projection(projection: Transform3D<f32>) -> Transform3D<f32> {
     let transform = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
-                                           0.0,-1.0, 0.0, 0.0,
-                                           0.0, 0.0, 1.0, 1.0,
+                                           0.0, -1.0, 0.0, 0.0,
+                                           0.0, 0.0, 1.0, 0.0,
                                            0.0, 0.0, 0.0, 1.0);
     transform.post_mul(&Transform3D::from_array(projection.to_column_major_array()))
 }
@@ -2038,7 +2038,7 @@ impl Renderer {
                     self.draw_alpha_target((pass.alpha_texture.as_ref().unwrap(), target_index as i32),
                                            target,
                                            *size,
-                                           &projection);
+                                           &alpha_projection);
                 }
 
                 let projection = transform_projection(projection);
