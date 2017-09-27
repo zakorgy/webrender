@@ -143,11 +143,7 @@ void main(in a2v_clip IN, out v2p OUT) {
     vec2 pos = corner.rect.p0 + aPosition.xy * corner.rect.size;
 
     // Transform to world pos
-#ifdef WR_DX11
     vec4 world_pos = mul(vec4(pos, 0.0, 1.0), layer.transform);
-#else
-    vec4 world_pos = layer.transform * vec4(pos, 0.0, 1.0);
-#endif //WR_DX11
     world_pos.xyz /= world_pos.w;
 
     // Scale into device pixels.

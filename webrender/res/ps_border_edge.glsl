@@ -84,12 +84,14 @@ void write_alpha_select(float style
     }
 }
 
-void write_color(vec4 color,
+// write_color function is duplicated to work around a Mali-T880 GPU driver program link error.
+// See https://github.com/servo/webrender/issues/1403 for more info.
+// TODO: convert back to a single function once the driver issues are resolved, if ever.
+void write_color0(vec4 color,
                  float style,
                  bool flip
 #ifdef WR_DX11
                  , out vec4 vColor0
-                 , out vec4 vColor1
 #endif //WR_DX11
                  ) {
     vec2 modulate;
@@ -111,6 +113,33 @@ void write_color(vec4 color,
     }
 
     vColor0 = vec4(color.rgb * modulate.x, color.a);
+}
+
+void write_color1(vec4 color,
+                 float style,
+                 bool flip
+#ifdef WR_DX11
+                 , out vec4 vColor1
+#endif //WR_DX11
+                 ) {
+    vec2 modulate;
+
+    switch (int(style)) {
+        case BORDER_STYLE_GROOVE:
+        {
+            modulate = flip ? vec2(1.3, 0.7) : vec2(0.7, 1.3);
+            break;
+        }
+        case BORDER_STYLE_RIDGE:
+        {
+            modulate = flip ? vec2(0.7, 1.3) : vec2(1.3, 0.7);
+            break;
+        }
+        default:
+            modulate = vec2(1.0, 1.0);
+            break;
+    }
+
     vColor1 = vec4(color.rgb * modulate.y, color.a);
 }
 
@@ -308,11 +337,18 @@ void main(in a2v IN, out v2p OUT) {
 #endif //WR_DX11
                         );
 
-    write_color(color,
+    write_color0(color,
                 style,
                 color_flip
 #ifdef WR_DX11
                 , OUT.vColor0
+#endif //WR_DX11
+                );
+
+    write_color1(color,
+                style,
+                color_flip
+#ifdef WR_DX11
                 , OUT.vColor1
 #endif //WR_DX11
                 );
