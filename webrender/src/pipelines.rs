@@ -15,8 +15,7 @@ use backend::Resources as R;
 use gfx::format::Format;
 use gpu_types::{BoxShadowCacheInstance};
 use tiling::{BlurCommand, CacheClipInstance, PrimitiveInstance};
-use renderer::BlendMode;
-use renderer::RendererError;
+use renderer::{BlendMode, RendererError, TextureSampler};
 
 const ALPHA: Blend = Blend {
     color: BlendChannel {
@@ -127,9 +126,9 @@ gfx_defines! {
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
         dither: gfx::TextureSampler<f32> = "sDither",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-        shared_cache_a8: gfx::TextureSampler<f32> = "sSharedCacheA8",
+        shared_cache_a8: gfx::TextureSampler<[f32; 4]> = "sSharedCacheA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -192,9 +191,9 @@ gfx_defines! {
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
         dither: gfx::TextureSampler<f32> = "sDither",
-        cache_a8: gfx::TextureSampler<f32> = "sCacheA8",
+        cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
-        shared_cache_a8: gfx::TextureSampler<f32> = "sSharedCacheA8",
+        shared_cache_a8: gfx::TextureSampler<[f32; 4]> = "sSharedCacheA8",
 
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
@@ -424,12 +423,18 @@ impl Program {
         self.upload.1 += instances.len();
 
         println!("bind={:?}", device.bound_textures);
-        self.data.color0.0 = device.image_textures.get(&device.bound_textures.color0).unwrap().srv.clone();
+        /*self.data.color0.0 = device.image_textures.get(&device.bound_textures.color0).unwrap().srv.clone();
         self.data.color1.0 = device.image_textures.get(&device.bound_textures.color1).unwrap().srv.clone();
         self.data.color2.0 = device.image_textures.get(&device.bound_textures.color2).unwrap().srv.clone();
         self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
         self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
-        self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
+        self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();*/
+        self.data.color0.0 = device.get_texture_srv(TextureSampler::Color0);
+        self.data.color1.0 = device.get_texture_srv(TextureSampler::Color1);
+        self.data.color2.0 = device.get_texture_srv(TextureSampler::Color2);
+        self.data.cache_a8.0 = device.get_texture_srv(TextureSampler::CacheA8);
+        self.data.cache_rgba8.0 = device.get_texture_srv(TextureSampler::CacheRGBA8);
+        self.data.shared_cache_a8.0 = device.get_texture_srv(TextureSampler::SharedCacheA8);
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode, enable_depth_write: bool)
@@ -540,7 +545,7 @@ impl BlurProgram {
         self.upload.1 += instances.len();
 
         println!("bind={:?}", device.bound_textures);
-        self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
+        self.data.cache_rgba8.0 = device.get_texture_srv(TextureSampler::CacheRGBA8);
     }
 
     pub fn draw(&mut self, device: &mut Device)
@@ -608,12 +613,12 @@ impl ClipProgram {
         self.upload.1 += instances.len();
         self.data.out_color = device.cache_a8_textures.get(&render_target).unwrap().rtv.raw().clone();
         println!("bind={:?}", device.bound_textures);
-        self.data.color0.0 = device.image_textures.get(&device.bound_textures.color0).unwrap().srv.clone();
-        self.data.color1.0 = device.image_textures.get(&device.bound_textures.color1).unwrap().srv.clone();
-        self.data.color2.0 = device.image_textures.get(&device.bound_textures.color2).unwrap().srv.clone();
-        self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
-        self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
-        self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();
+        self.data.color0.0 = device.get_texture_srv(TextureSampler::Color0);
+        self.data.color1.0 = device.get_texture_srv(TextureSampler::Color1);
+        self.data.color2.0 = device.get_texture_srv(TextureSampler::Color2);
+        self.data.cache_a8.0 = device.get_texture_srv(TextureSampler::CacheA8);
+        self.data.cache_rgba8.0 = device.get_texture_srv(TextureSampler::CacheRGBA8);
+        self.data.shared_cache_a8.0 = device.get_texture_srv(TextureSampler::SharedCacheA8);
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode)

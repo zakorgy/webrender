@@ -104,6 +104,13 @@ pub enum TextureTarget {
     External,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TextureStorage {
+    CacheA8,
+    CacheRGBA8,
+    Image,
+    //TODO External
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureFilter {
@@ -518,12 +525,12 @@ pub enum ShaderError {
 
 #[derive(Debug)]
 pub struct BoundTextures {
-    pub color0: TextureId,
-    pub color1: TextureId,
-    pub color2: TextureId,
-    pub cache_a8: TextureId,
-    pub cache_rgba8: TextureId,
-    pub shared_cache_a8: TextureId,
+    pub color0: (TextureId, TextureStorage),
+    pub color1: (TextureId, TextureStorage),
+    pub color2: (TextureId, TextureStorage),
+    pub cache_a8: (TextureId, TextureStorage),
+    pub cache_rgba8: (TextureId, TextureStorage),
+    pub shared_cache_a8: (TextureId, TextureStorage),
 }
 
 pub struct Device {
@@ -532,7 +539,7 @@ pub struct Device {
     pub encoder: gfx::Encoder<R,CB>,
     pub sampler: (Sampler<R>, Sampler<R>),
     pub dither: CacheTexture<A8>,
-    pub cache_a8_textures: HashMap<TextureId, CacheTexture<A8>>,
+    pub cache_a8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
     pub cache_rgba8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
     pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
     pub bound_textures: BoundTextures,
@@ -612,12 +619,12 @@ impl Device {
         image_textures.insert(DUMMY_ID, dummy_image_tex);
 
         let bound_textures = BoundTextures {
-            color0: DUMMY_ID,
-            color1: DUMMY_ID,
-            color2: DUMMY_ID,
-            cache_a8: DUMMY_ID,
-            cache_rgba8: DUMMY_ID,
-            shared_cache_a8: DUMMY_ID,
+            color0: (DUMMY_ID, TextureStorage::Image),
+            color1: (DUMMY_ID, TextureStorage::Image),
+            color2: (DUMMY_ID, TextureStorage::Image),
+            cache_a8: (DUMMY_ID, TextureStorage::CacheA8),
+            cache_rgba8: (DUMMY_ID, TextureStorage::CacheRGBA8),
+            shared_cache_a8: (DUMMY_ID, TextureStorage::CacheA8),
         };
 
         let dev = Device {
@@ -660,7 +667,7 @@ impl Device {
         &self.dither
     }
 
-    pub fn dummy_cache_a8(&mut self) -> &CacheTexture<A8> {
+    pub fn dummy_cache_a8(&mut self) -> &CacheTexture<Rgba8> {
         self.cache_a8_textures.get(&DUMMY_ID).unwrap()
     }
 
@@ -670,6 +677,44 @@ impl Device {
 
     pub fn dummy_image(&mut self) -> &ImageTexture<Rgba8> {
         self.image_textures.get(&DUMMY_ID).unwrap()
+    }
+
+    pub fn get_texture_srv(&mut self, sampler: TextureSampler)
+        -> gfx::handle::ShaderResourceView<R, [f32; 4]>
+    {
+        let (id, storage) = match sampler {
+            TextureSampler::Color0 => self.bound_textures.color0,
+            TextureSampler::Color1 => self.bound_textures.color1,
+            TextureSampler::Color2 => self.bound_textures.color2,
+            TextureSampler::CacheA8 => self.bound_textures.cache_a8,
+            TextureSampler::CacheRGBA8 => self.bound_textures.cache_rgba8,
+            TextureSampler::SharedCacheA8 => self.bound_textures.shared_cache_a8,
+            _ => unreachable!(),
+        };
+        match storage {
+            TextureStorage::CacheA8 => self.cache_a8_textures.get(&id).unwrap().srv.clone(),
+            TextureStorage::CacheRGBA8 => self.cache_rgba8_textures.get(&id).unwrap().srv.clone(),
+            TextureStorage::Image => self.image_textures.get(&id).unwrap().srv.clone(),
+        }
+    }
+
+    pub fn get_texture_rtv(&mut self, sampler: TextureSampler)
+        -> gfx::handle::RenderTargetView<R, Rgba8>
+    {
+        let (id, storage) = match sampler {
+            TextureSampler::Color0 => self.bound_textures.color0,
+            TextureSampler::Color1 => self.bound_textures.color1,
+            TextureSampler::Color2 => self.bound_textures.color2,
+            TextureSampler::CacheA8 => self.bound_textures.cache_a8,
+            TextureSampler::CacheRGBA8 => self.bound_textures.cache_rgba8,
+            TextureSampler::SharedCacheA8 => self.bound_textures.shared_cache_a8,
+            _ => unreachable!(),
+        };
+        match storage {
+            TextureStorage::CacheA8 => self.cache_a8_textures.get(&id).unwrap().rtv.clone(),
+            TextureStorage::CacheRGBA8 => self.cache_rgba8_textures.get(&id).unwrap().rtv.clone(),
+            TextureStorage::Image => unreachable!(),
+        }
     }
 
     pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
@@ -720,16 +765,17 @@ impl Device {
 
     pub fn bind_texture(&mut self,
                         sampler: TextureSampler,
-                        texture: TextureId) {
+                        texture: TextureId,
+                        storage: TextureStorage) {
         debug_assert!(self.inside_frame);
 
         match sampler {
-            TextureSampler::Color0 => self.bound_textures.color0 = texture,
-            TextureSampler::Color1 => self.bound_textures.color1 = texture,
-            TextureSampler::Color2 => self.bound_textures.color2 = texture,
-            TextureSampler::CacheA8 => self.bound_textures.cache_a8 = texture,
-            TextureSampler::CacheRGBA8 => self.bound_textures.cache_rgba8 = texture,
-            TextureSampler::SharedCacheA8 => self.bound_textures.shared_cache_a8 = texture,
+            TextureSampler::Color0 => self.bound_textures.color0 = (texture, storage),
+            TextureSampler::Color1 => self.bound_textures.color1 = (texture, storage),
+            TextureSampler::Color2 => self.bound_textures.color2 = (texture, storage),
+            TextureSampler::CacheA8 => self.bound_textures.cache_a8 = (texture, storage),
+            TextureSampler::CacheRGBA8 => self.bound_textures.cache_rgba8 = (texture, storage),
+            TextureSampler::SharedCacheA8 => self.bound_textures.shared_cache_a8 = (texture, storage),
             _ => return
         }
     }
@@ -905,7 +951,7 @@ impl Device {
         }
     }
 
-    pub fn clear_render_target(&mut self, texture_id: &TextureId, color: f32) {
+    pub fn clear_render_target(&mut self, texture_id: &TextureId, color: [f32; 4]) {
         self.encoder.clear(&self.cache_a8_textures.get(texture_id).unwrap().rtv.clone(), color);
     }
 

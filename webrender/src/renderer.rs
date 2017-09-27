@@ -20,7 +20,7 @@ use debug_render::DebugRenderer;
 use debug_server::{self, DebugServer};
 use device::{Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
 use device::{GpuTimer, TextureFilter, VertexUsageHint, TextureTarget, ShaderError};
-use device::{TextureSlot, VertexAttribute, VertexAttributeKind};
+use device::{TextureSlot, TextureStorage, VertexAttribute, VertexAttributeKind};
 use device::{TextureId, DUMMY_ID, DITHER};
 use euclid::{Transform3D, rect};
 use frame_builder::FrameBuilderConfig;
@@ -419,12 +419,12 @@ impl SourceTextureResolver {
             SourceTexture::CacheA8 => {
                 println!("cache_a8_texture={:?} sampler={:?}", self.cache_a8_texture, sampler);
                 let texture = self.cache_a8_texture.unwrap_or(self.dummy_cache_a8_texture);
-                device.bind_texture(sampler, texture);
+                device.bind_texture(sampler, texture, TextureStorage::CacheA8);
             }
             SourceTexture::CacheRGBA8 => {
                 println!("cache_rgba8_texture={:?} sampler={:?}", self.cache_rgba8_texture, sampler);
                 let texture = self.cache_rgba8_texture.unwrap_or(self.dummy_cache_rgba8_texture);
-                device.bind_texture(sampler, texture);
+                device.bind_texture(sampler, texture, TextureStorage::CacheRGBA8);
             }
             SourceTexture::External(external_image) => {
                 /*let texture = self.external_images
@@ -435,7 +435,7 @@ impl SourceTextureResolver {
             SourceTexture::TextureCache(index) => {
                 println!("cache_texture_map={:?} sampler={:?}", self.cache_texture_map[index.0], sampler);
                 let texture = self.cache_texture_map[index.0];
-                device.bind_texture(sampler, texture);
+                device.bind_texture(sampler, texture, TextureStorage::Image);
             }
         }
     }
@@ -1814,8 +1814,8 @@ impl Renderer {
             // GPUs that I have tested with. It's possible it may be a
             // performance penalty on other GPU types - we should test this
             // and consider different code paths.
-            let clear_color = [1.0];
-            self.device.clear_render_target(render_target.0, clear_color[0]);
+            let clear_color = [1.0, 1.0, 1.0, 1.0];
+            self.device.clear_render_target(render_target.0, clear_color);
         }
 
         // Draw any box-shadow caches for this target.
@@ -2076,7 +2076,7 @@ impl Renderer {
                 // input to any subsequent passes.
                 if pass_index == 0 {
                     if let Some(shared_alpha_texture) = self.texture_resolver.resolve(&SourceTexture::CacheA8) {
-                        self.device.bind_texture(TextureSampler::SharedCacheA8, shared_alpha_texture);
+                        self.device.bind_texture(TextureSampler::SharedCacheA8, shared_alpha_texture, TextureStorage::CacheA8);
                     }
                 }
             }
