@@ -439,6 +439,9 @@ impl Program {
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode, enable_depth_write: bool)
     {
+        if let &BlendMode::Subpixel(ref color) = blendmode {
+            self.data.blend_value = [color.r, color.g, color.b, color.a];
+        }
         device.encoder.draw(&self.slice, &self.get_pso(blendmode, enable_depth_write), &self.data);
     }
 }
