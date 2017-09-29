@@ -15,7 +15,7 @@ void main(in a2v IN, out v2p OUT) {
     TextRun text = fetch_text_run(prim.specific_prim_address);
 
     int glyph_index = prim.user_data0;
-    int resource_address = prim.user_data2;
+    int resource_address = prim.user_data1;
     Glyph glyph = fetch_glyph(prim.specific_prim_address,
                               glyph_index,
                               text.subpx_dir);
@@ -57,10 +57,10 @@ void main(in a2v IN, out v2p OUT) {
                                  local_rect
 #ifdef WR_DX11
                                  , OUT.Position
-#endif //WR_FEATURE_TRANSFORM
+#endif //WR_DX11
                                  );
     vec2 f = (vi.local_pos - local_rect.p0) / local_rect.size;
-#endif //WR_DX11
+#endif //WR_FEATURE_TRANSFORM
 
     write_clip(vi.screen_pos,
                prim.clip_area
