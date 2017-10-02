@@ -169,7 +169,7 @@ float rounded_rect(vec2 pos,
     current_distance = clip_against_ellipse_if_needed(pos,
                                                       current_distance,
                                                       vClipCenter_Radius_BR,
-                                                      vec2(-1.0, 1.0),
+                                                      vec2(-1.0, -1.0),
                                                       afwidth);
 
     current_distance = clip_against_ellipse_if_needed(pos,
