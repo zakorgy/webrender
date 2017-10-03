@@ -125,14 +125,14 @@ gfx_defines! {
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
         shared_cache_a8: gfx::TextureSampler<[f32; 4]> = "sSharedCacheA8",
 
+        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
+        dither: gfx::TextureSampler<f32> = "sDither",
 
         out_color: gfx::RawRenderTarget = ("Target0",
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
@@ -151,9 +151,9 @@ gfx_defines! {
         
         //TODO check dither
 
+        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("Target0",
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
@@ -170,9 +170,9 @@ gfx_defines! {
 
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
 
+        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
 
         out_color: gfx::RawRenderTarget = ("Target0",
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
@@ -190,14 +190,14 @@ gfx_defines! {
         color0: gfx::TextureSampler<[f32; 4]> = "sColor0",
         color1: gfx::TextureSampler<[f32; 4]> = "sColor1",
         color2: gfx::TextureSampler<[f32; 4]> = "sColor2",
-        dither: gfx::TextureSampler<f32> = "sDither",
         cache_a8: gfx::TextureSampler<[f32; 4]> = "sCacheA8",
         cache_rgba8: gfx::TextureSampler<[f32; 4]> = "sCacheRGBA8",
         shared_cache_a8: gfx::TextureSampler<[f32; 4]> = "sSharedCacheA8",
 
+        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
         layers: gfx::TextureSampler<[f32; 4]> = "sLayers",
         render_tasks: gfx::TextureSampler<[f32; 4]> = "sRenderTasks",
-        resource_cache: gfx::TextureSampler<[f32; 4]> = "sResourceCache",
+        dither: gfx::TextureSampler<f32> = "sDither",
 
         out_color: gfx::RawRenderTarget = ("Target0",
                                            Format(gfx::format::SurfaceType::R8, gfx::format::ChannelType::Unorm),
@@ -778,13 +778,13 @@ impl Device {
             color0: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
             color1: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
             color2: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
-            dither: (self.dither().srv.clone(), self.sampler.0.clone()),
             cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.1.clone()),
             shared_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
-            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
+            dither: (self.dither().srv.clone(), self.sampler.0.clone()),
             out_color: self.main_color.raw().clone(),
             out_depth: self.main_depth.clone(),
             blend_value: [0.0, 0.0, 0.0, 0.0]
@@ -814,9 +814,9 @@ impl Device {
             vbuf: self.vertex_buffer.clone(),
             ibuf: blur_instances,
             cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.1.clone()),
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
-            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.main_color.raw().clone(),
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, blur::new()).unwrap();
@@ -843,9 +843,9 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: instances,
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
-            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.main_color.raw().clone(),
         };
         let pso = self.factory.create_pipeline_simple(vert_src, frag_src, boxshadow::new()).unwrap();
@@ -879,9 +879,9 @@ impl Device {
             cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.1.clone()),
             shared_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
+            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
-            resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
             out_color: self.dummy_cache_a8().rtv.raw().clone(),
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
