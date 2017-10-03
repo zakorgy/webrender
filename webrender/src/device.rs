@@ -688,8 +688,8 @@ impl Device {
         self.image_textures.get(&DUMMY_ID).unwrap()
     }
 
-    pub fn get_texture_srv(&mut self, sampler: TextureSampler)
-        -> gfx::handle::ShaderResourceView<R, [f32; 4]>
+    pub fn get_texture_srv_and_sampler(&mut self, sampler: TextureSampler)
+        -> (gfx::handle::ShaderResourceView<R, [f32; 4]>, gfx::handle::Sampler<R>)
     {
         let (id, storage) = match sampler {
             TextureSampler::Color0 => self.bound_textures.color0,
@@ -701,9 +701,16 @@ impl Device {
             _ => unreachable!(),
         };
         match storage {
-            TextureStorage::CacheA8 => self.cache_a8_textures.get(&id).unwrap().srv.clone(),
-            TextureStorage::CacheRGBA8 => self.cache_rgba8_textures.get(&id).unwrap().srv.clone(),
-            TextureStorage::Image => self.image_textures.get(&id).unwrap().srv.clone(),
+            TextureStorage::Image => {
+                let tex = self.image_textures.get(&id).unwrap();
+                let sampler = match tex.filter {
+                    TextureFilter::Nearest => self.sampler.0.clone(),
+                    TextureFilter::Linear => self.sampler.1.clone(),
+                };
+                (tex.srv.clone(), sampler)
+            },
+            TextureStorage::CacheRGBA8 => (self.cache_rgba8_textures.get(&id).unwrap().srv.clone(), self.sampler.0.clone()),
+            TextureStorage::CacheA8 => (self.cache_a8_textures.get(&id).unwrap().srv.clone(), self.sampler.0.clone()),
         }
     }
 

@@ -429,12 +429,12 @@ impl Program {
         self.data.cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.cache_a8).unwrap().srv.clone();
         self.data.cache_rgba8.0 = device.cache_rgba8_textures.get(&device.bound_textures.cache_rgba8).unwrap().srv.clone();
         self.data.shared_cache_a8.0 = device.cache_a8_textures.get(&device.bound_textures.shared_cache_a8).unwrap().srv.clone();*/
-        self.data.color0.0 = device.get_texture_srv(TextureSampler::Color0);
-        self.data.color1.0 = device.get_texture_srv(TextureSampler::Color1);
-        self.data.color2.0 = device.get_texture_srv(TextureSampler::Color2);
-        self.data.cache_a8.0 = device.get_texture_srv(TextureSampler::CacheA8);
-        self.data.cache_rgba8.0 = device.get_texture_srv(TextureSampler::CacheRGBA8);
-        self.data.shared_cache_a8.0 = device.get_texture_srv(TextureSampler::SharedCacheA8);
+        self.data.color0 = device.get_texture_srv_and_sampler(TextureSampler::Color0);
+        self.data.color1 = device.get_texture_srv_and_sampler(TextureSampler::Color1);
+        self.data.color2 = device.get_texture_srv_and_sampler(TextureSampler::Color2);
+        self.data.cache_a8.0 = device.get_texture_srv_and_sampler(TextureSampler::CacheA8).0;
+        self.data.cache_rgba8.0 = device.get_texture_srv_and_sampler(TextureSampler::CacheRGBA8).0;
+        self.data.shared_cache_a8.0 = device.get_texture_srv_and_sampler(TextureSampler::SharedCacheA8).0;
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode, enable_depth_write: bool)
@@ -548,7 +548,7 @@ impl BlurProgram {
         self.upload.1 += instances.len();
 
         println!("bind={:?}", device.bound_textures);
-        self.data.cache_rgba8.0 = device.get_texture_srv(TextureSampler::CacheRGBA8);
+        self.data.cache_rgba8.0 = device.get_texture_srv_and_sampler(TextureSampler::CacheRGBA8).0;
     }
 
     pub fn draw(&mut self, device: &mut Device)
@@ -616,12 +616,12 @@ impl ClipProgram {
         self.upload.1 += instances.len();
         self.data.out_color = device.cache_a8_textures.get(&render_target).unwrap().rtv.raw().clone();
         println!("bind={:?}", device.bound_textures);
-        self.data.color0.0 = device.get_texture_srv(TextureSampler::Color0);
-        self.data.color1.0 = device.get_texture_srv(TextureSampler::Color1);
-        self.data.color2.0 = device.get_texture_srv(TextureSampler::Color2);
-        self.data.cache_a8.0 = device.get_texture_srv(TextureSampler::CacheA8);
-        self.data.cache_rgba8.0 = device.get_texture_srv(TextureSampler::CacheRGBA8);
-        self.data.shared_cache_a8.0 = device.get_texture_srv(TextureSampler::SharedCacheA8);
+        self.data.color0 = device.get_texture_srv_and_sampler(TextureSampler::Color0);
+        self.data.color1 = device.get_texture_srv_and_sampler(TextureSampler::Color1);
+        self.data.color2 = device.get_texture_srv_and_sampler(TextureSampler::Color2);
+        self.data.cache_a8.0 = device.get_texture_srv_and_sampler(TextureSampler::CacheA8).0;
+        self.data.cache_rgba8.0 = device.get_texture_srv_and_sampler(TextureSampler::CacheRGBA8).0;
+        self.data.shared_cache_a8.0 = device.get_texture_srv_and_sampler(TextureSampler::SharedCacheA8).0;
     }
 
     pub fn draw(&mut self, device: &mut Device, blendmode: &BlendMode)
@@ -780,7 +780,7 @@ impl Device {
             color2: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
             dither: (self.dither().srv.clone(), self.sampler.0.clone()),
             cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
-            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
+            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.1.clone()),
             shared_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
@@ -813,7 +813,7 @@ impl Device {
             device_pixel_ratio: DEVICE_PIXEL_RATIO,
             vbuf: self.vertex_buffer.clone(),
             ibuf: blur_instances,
-            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
+            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.1.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
             resource_cache: (self.resource_cache.srv.clone(), self.sampler.0.clone()),
@@ -877,7 +877,7 @@ impl Device {
             color2: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
             dither: (self.dither().srv.clone(), self.sampler.0.clone()),
             cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
-            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.0.clone()),
+            cache_rgba8: (self.dummy_cache_rgba8().srv.clone(), self.sampler.1.clone()),
             shared_cache_a8: (self.dummy_cache_a8().srv.clone(), self.sampler.0.clone()),
             layers: (self.layers.srv.clone(), self.sampler.0.clone()),
             render_tasks: (self.render_tasks.srv.clone(), self.sampler.0.clone()),
