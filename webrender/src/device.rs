@@ -169,7 +169,7 @@ pub struct DataTexture<T> where T: gfx::format::TextureFormat {
 }
 
 impl<T> DataTexture<T> where T: gfx::format::TextureFormat {
-    pub fn create<F>(factory: &mut F, size: [usize; 2]) -> Result<DataTexture<T>, CombinedError>
+    pub fn create<F>(factory: &mut F, size: [usize; 2], data: Option<&[&[u8]]>) -> Result<DataTexture<T>, CombinedError>
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
@@ -185,7 +185,7 @@ impl<T> DataTexture<T> where T: gfx::format::TextureFormat {
                 usage: gfx::memory::Usage::Dynamic,
             };
             let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
-            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), data));
             let levels = (0, raw.get_info().levels - 1);
             let tex = Typed::new(raw);
             let view = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
@@ -213,7 +213,7 @@ pub struct CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Tex
 }
 
 impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::TextureFormat {
-    pub fn create<F>(factory: &mut F, size: [usize; 2], data: Option<&[&[u8]]>) -> Result<CacheTexture<T>, CombinedError>
+    pub fn create<F>(factory: &mut F, size: [usize; 2]) -> Result<CacheTexture<T>, CombinedError>
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
@@ -229,7 +229,7 @@ impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Textur
                 usage: gfx::memory::Usage::Data,
             };
             let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
-            let raw = try!(factory.create_texture_raw(desc, Some(cty), data));
+            let raw = try!(factory.create_texture_raw(desc, Some(cty), None));
             let levels = (0, raw.get_info().levels - 1);
             let tex = Typed::new(raw);
             let rtv = try!(factory.view_texture_as_render_target(&tex, 0, None));
@@ -537,7 +537,7 @@ pub struct Device {
     pub factory: backend::Factory,
     pub encoder: gfx::Encoder<R,CB>,
     pub sampler: (Sampler<R>, Sampler<R>),
-    pub dither: CacheTexture<A8>,
+    pub dither: DataTexture<A8>,
     pub cache_a8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
     pub cache_rgba8_textures: HashMap<TextureId, CacheTexture<Rgba8>>,
     pub image_textures: HashMap<TextureId, ImageTexture<Rgba8>>,
@@ -612,13 +612,13 @@ impl Device {
             10, 58, 06, 54, 09, 57, 05, 53,
             42, 26, 38, 22, 41, 25, 37, 21
         ];
-        let dither_tex = CacheTexture::create(&mut factory, [8, 8], Some(&[&dither_matrix])).unwrap();
-        let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1], None).unwrap();
-        let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1], None).unwrap();
+        let dither_tex = DataTexture::create(&mut factory, [8, 8], Some(&[&dither_matrix])).unwrap();
+        let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
+        let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_image_tex = ImageTexture::create(&mut factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
-        let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64]).unwrap();
-        let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH]).unwrap();
-        let resource_cache_tex = DataTexture::create(&mut factory, [max_texture_size, max_texture_size]).unwrap();
+        let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64], None).unwrap();
+        let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH], None).unwrap();
+        let resource_cache_tex = DataTexture::create(&mut factory, [max_texture_size, max_texture_size], None).unwrap();
 
         let mut cache_a8_textures = HashMap::new();
         cache_a8_textures.insert(DUMMY_ID, dummy_cache_a8_tex);
@@ -672,7 +672,7 @@ impl Device {
         (dev, win)
     }
 
-    pub fn dither(&mut self) -> &CacheTexture<A8> {
+    pub fn dither(&mut self) -> &DataTexture<A8> {
         &self.dither
     }
 
@@ -815,11 +815,11 @@ impl Device {
         println!("create_cache_texture={:?}", id);
         match kind {
             RenderTargetKind::Alpha => {
-                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize], None).unwrap();
+                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
                 self.cache_a8_textures.insert(id, tex);
             }
             RenderTargetKind::Color => {
-                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize], None).unwrap();
+                let tex = CacheTexture::create(&mut self.factory, [width as usize, height as usize]).unwrap();
                 self.cache_rgba8_textures.insert(id, tex);
             }
         }
