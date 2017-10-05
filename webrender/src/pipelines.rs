@@ -336,7 +336,7 @@ impl BoxShadowInstances {
 
     pub fn update(&mut self, instance: &BoxShadowCacheInstance) {
         self.prim_address[0] = instance.prim_address.u as i32;
-        self.prim_address[0] = instance.prim_address.v as i32;
+        self.prim_address[1] = instance.prim_address.v as i32;
         self.task_index = instance.task_index.0 as i32;
     }
 }
