@@ -922,11 +922,7 @@ impl Device {
                 _ => unimplemented!(),
             }
         };
-        let row_length = match stride {
-            Some(value) => value as usize / RGBA_STRIDE,
-            None => texture.get_size().0 as usize,
-        };
-        let data_pitch = row_length * RGBA_STRIDE;
+        let data_pitch = texture.get_size().0 as usize * RGBA_STRIDE;
         batch_image_texture_data(&mut texture, x0 as usize, y0 as usize, width as usize, height as usize, data_pitch, data.as_slice());
         self.image_batch_set.insert(texture_id.clone());
     }
