@@ -169,7 +169,7 @@ pub struct DataTexture<T> where T: gfx::format::TextureFormat {
 }
 
 impl<T> DataTexture<T> where T: gfx::format::TextureFormat {
-    pub fn create<F>(factory: &mut F, size: [usize; 2], data: Option<&[&[u8]]>) -> Result<DataTexture<T>, CombinedError>
+    pub fn create<F>(factory: &mut F, size: [usize; 2], data: Option<(&[&[u8]], gfx::texture::Mipmap)>) -> Result<DataTexture<T>, CombinedError>
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
@@ -210,6 +210,7 @@ pub struct CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Tex
     pub handle: gfx::handle::Texture<R, T::Surface>,
     pub rtv: gfx::handle::RenderTargetView<R, T>,
     pub srv: gfx::handle::ShaderResourceView<R, T::View>,
+    pub dsv: gfx::handle::DepthStencilView<R, DepthFormat>,
 }
 
 impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::TextureFormat {
@@ -219,13 +220,13 @@ impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Textur
         let (width, height) = (size[0] as u16, size[1] as u16);
         let tex_kind = Kind::D2Array(width, height, 1, gfx::texture::AaMode::Single);
 
-        let (surface, rtv, view) = {
+        let (surface, rtv, view, dsv) = {
             let surface = <T::Surface as gfx::format::SurfaceTyped>::get_surface_type();
             let desc = gfx::texture::Info {
                 kind: tex_kind,
                 levels: 1,
                 format: surface,
-                bind: gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET,
+                bind: gfx::memory::SHADER_RESOURCE | gfx::memory::RENDER_TARGET | gfx::TRANSFER_SRC | gfx::TRANSFER_DST,
                 usage: gfx::memory::Usage::Data,
             };
             let cty = <T::Channel as gfx::format::ChannelTyped>::get_channel_type();
@@ -234,13 +235,16 @@ impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Textur
             let tex = Typed::new(raw);
             let rtv = try!(factory.view_texture_as_render_target(&tex, 0, None));
             let view = try!(factory.view_texture_as_shader_resource::<T>(&tex, levels, gfx::format::Swizzle::new()));
-            (tex, rtv, view)
+            let tex_dsv = try!(factory.create_texture(tex_kind, 1, gfx::memory::SHADER_RESOURCE | gfx::memory::DEPTH_STENCIL, gfx::memory::Usage::Data, Some(gfx::format::ChannelType::Unorm)));
+            let dsv = try!(factory.view_texture_as_depth_stencil_trivial(&tex_dsv));
+            (tex, rtv, view, dsv)
         };
 
         Ok(CacheTexture {
             handle: surface,
             rtv: rtv,
             srv: view,
+            dsv: dsv,
         })
     }
 
@@ -612,7 +616,7 @@ impl Device {
             10, 58, 06, 54, 09, 57, 05, 53,
             42, 26, 38, 22, 41, 25, 37, 21
         ];
-        let dither_tex = DataTexture::create(&mut factory, [8, 8], Some(&[&dither_matrix])).unwrap();
+        let dither_tex = DataTexture::create(&mut factory, [8, 8], Some((&[&dither_matrix], gfx::texture::Mipmap::Provided))).unwrap();
         let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
         let dummy_image_tex = ImageTexture::create(&mut factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
@@ -950,10 +954,64 @@ impl Device {
         self.frame_id.0 += 1;
     }
 
+    pub fn copy_texture(
+        &mut self,
+        src: Option<(&TextureId, i32)>, dst_id: &TextureId,
+        src_rect: Option<DeviceIntRect>, dest_rect: DeviceIntRect)
+    {
+        let src_tex = match src {
+            Some((src_id, _)) => self.cache_rgba8_textures.get(&src_id).unwrap().handle.raw(),
+            None => self.main_color.raw().get_texture(),
+        };
+        let dst_tex = self.cache_rgba8_textures.get(&dst_id).unwrap().handle.raw();
+        let src_rect = src_rect.unwrap_or_else(|| {
+            let (w, h, _, _) = src_tex.get_info().kind.get_dimensions();
+            DeviceIntRect::new(DeviceIntPoint::zero(), DeviceIntSize::new(w as i32, h as i32))
+        });
+        let src_info = gfx::texture::RawImageInfo {
+            xoffset: src_rect.origin.x as u16,
+            yoffset: src_rect.origin.y as u16,
+            zoffset: 0,
+            width: src_rect.size.width as u16,
+            height: src_rect.size.height as u16,
+            depth: 0,
+            format: ColorFormat::get_format(),
+            mipmap: 0,
+        };
+        /*let src = gfx::texture::TextureCopyRegion {
+            texture: src_tex.handle.clone(),
+            kind: src_tex.handle.get_info().kind,
+            cube_face: None,
+            info: src_info,
+        };*/
+
+        let dst_info = gfx::texture::RawImageInfo {
+            xoffset: dest_rect.origin.x as u16,
+            yoffset: dest_rect.origin.y as u16,
+            zoffset: 0,
+            width: dest_rect.size.width as u16,
+            height: dest_rect.size.height as u16,
+            depth: 0,
+            format: ColorFormat::get_format(),
+            mipmap: 0,
+        };
+        /*let dst = gfx::texture::TextureCopyRegion {
+            texture: dst_tex.handle.clone(),
+            kind: dst_tex.handle.get_info().kind,
+            cube_face: None,
+            info: dst_info,
+        };*/
+        println!("src_id={:?} src_info={:?}", src, src_info);
+        println!("dst_id={:?} dst_info={:?}", dst_id, dst_info);
+        self.encoder.copy_texture_to_texture_raw(
+            &src_tex, None, src_info,
+            &dst_tex, None, dst_info).unwrap();
+    }
+
     pub fn clear_target(&mut self,
                         color: Option<[f32; 4]>,
                         depth: Option<f32>) {
-       if let Some(color) = color {
+        if let Some(color) = color {
             self.encoder.clear(&self.main_color, [color[0], color[1], color[2], color[3]]);
         }
 
@@ -962,8 +1020,16 @@ impl Device {
         }
     }
 
-    pub fn clear_render_target(&mut self, texture_id: &TextureId, color: [f32; 4]) {
+    pub fn clear_render_target_alpha(&mut self, texture_id: &TextureId, color: [f32; 4]) {
         self.encoder.clear(&self.cache_a8_textures.get(texture_id).unwrap().rtv.clone(), color);
+    }
+
+    pub fn clear_render_target_color(&mut self, texture_id: &TextureId, color: Option<[f32; 4]>, depth: f32) {
+        let tex = self.cache_rgba8_textures.get(texture_id).unwrap();
+        if let Some(color) = color {
+            self.encoder.clear(&tex.rtv.clone(), color);
+        }
+        self.encoder.clear_depth(&tex.dsv.clone(), depth);
     }
 
     #[cfg(not(feature = "dx11"))]

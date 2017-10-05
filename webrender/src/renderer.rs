@@ -673,9 +673,9 @@ impl ProgramPair {
 
     pub fn bind(&mut self, device: &mut Device, transform_kind: TransformedRectKind,
                 projection: &Transform3D<f32>, instances: &[PrimitiveInstance],
-                renderer_errors: &mut Vec<RendererError>)
+                render_target: Option<(&TextureId, i32)>, renderer_errors: &mut Vec<RendererError>)
     {
-        self.get(transform_kind).bind(device, projection, instances, renderer_errors);
+        self.get(transform_kind).bind(device, projection, instances, render_target, renderer_errors);
     }
 }
 
@@ -1535,7 +1535,80 @@ impl Renderer {
                           BlendMode::Multiply => true,
                           BlendMode::None => false,
                       });
-        println!("program={:?}", key.kind);
+        println!("program={:?} blend_mode={:?} render_target={:?}", key.kind, key.blend_mode, render_target);
+        // Handle special case readback for composites.
+        match key.kind {
+            AlphaBatchKind::Composite { task_id, source_id, backdrop_id } => {
+                println!("###################");
+                println!("#####COMPOSITE#####");
+                println!("###################");
+                // composites can't be grouped together because
+                // they may overlap and affect each other.
+                debug_assert!(instances.len() == 1);
+                let cache_texture = self.texture_resolver.resolve(&SourceTexture::CacheRGBA8).unwrap();
+
+                // Before submitting the composite batch, do the
+                // framebuffer readbacks that are needed for each
+                // composite operation in this batch.
+                //let cache_texture_dimensions = cache_texture.get_dimensions();
+
+                let source = render_tasks.get(source_id);
+                let backdrop = render_tasks.get(task_id);
+                let readback = render_tasks.get(backdrop_id);
+                println!("source={:?} backdrop={:?} readback={:?}", source, backdrop, readback);
+                let (readback_rect, readback_layer) = readback.get_target_rect();
+                let (backdrop_rect, _) = backdrop.get_target_rect();
+                let backdrop_screen_origin = backdrop.as_alpha_batch().screen_origin;
+                let source_screen_origin = source.as_alpha_batch().screen_origin;
+
+                // Bind the FBO to blit the backdrop to.
+                // Called per-instance in case the layer (and therefore FBO)
+                // changes. The device will skip the GL call if the requested
+                // target is already bound.
+                let cache_draw_target = (cache_texture, readback_layer.0 as i32);
+                //self.device.bind_draw_target(Some(cache_draw_target), Some(cache_texture_dimensions));
+
+                let src_x = backdrop_rect.origin.x - backdrop_screen_origin.x + source_screen_origin.x;
+                let src_y = backdrop_rect.origin.y - backdrop_screen_origin.y + source_screen_origin.y;
+
+                let dest_x = readback_rect.origin.x;
+                let dest_y = readback_rect.origin.y;
+
+                let width = readback_rect.size.width;
+                let height = readback_rect.size.height;
+
+                let mut src = DeviceIntRect::new(DeviceIntPoint::new(src_x as i32, src_y as i32),
+                                                 DeviceIntSize::new(width as i32, height as i32));
+                let mut dest = DeviceIntRect::new(DeviceIntPoint::new(dest_x as i32, dest_y as i32),
+                                                  DeviceIntSize::new(width as i32, height as i32));
+
+                // Need to invert the y coordinates and flip the image vertically when
+                // reading back from the framebuffer.
+                if render_target.is_none() {
+                    src.origin.y = target_dimensions.height as i32 - src.size.height - src.origin.y;
+                    //dest.origin.y += dest.size.height;
+                    //dest.size.height = -dest.size.height;
+                    //src.origin.x = 0;
+                    //src.origin.y = 0;
+                    //dest.origin.x = 0;
+                    //dest.origin.y = 0;
+                }
+
+                //self.device.blit_render_target(render_target,
+                //                               Some(src),
+                //                               dest);
+
+                // Restore draw target to current pass render target + layer.
+                //self.device.bind_draw_target(render_target, Some(target_dimensions));
+                self.device.copy_texture(render_target, &cache_texture, Some(src), dest);
+                println!("src={:?}", src);
+                println!("dest={:?}", dest);
+                //self.flush();
+                println!("###################");
+            }
+            _ => {}
+        }
+
         let (mut program, marker) = match key.kind {
             AlphaBatchKind::Composite { .. } => {
                 (&mut self.ps_composite, GPU_TAG_PRIM_COMPOSITE)
@@ -1569,7 +1642,7 @@ impl Renderer {
                     }
                 }
             }
-            AlphaBatchKind::Image(image_buffer_kind) => {
+            AlphaBatchKind::Image(_) => {
                 (&mut self.ps_image, GPU_TAG_PRIM_IMAGE)
             }
             AlphaBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
@@ -1603,71 +1676,11 @@ impl Renderer {
             _=> return
         };
 
-        // Handle special case readback for composites.
-        /*match key.kind {
-            AlphaBatchKind::Composite { task_id, source_id, backdrop_id } => {
-                // composites can't be grouped together because
-                // they may overlap and affect each other.
-                debug_assert!(instances.len() == 1);
-                let cache_texture = self.texture_resolver.resolve(&SourceTexture::CacheRGBA8).unwrap();
-
-                // Before submitting the composite batch, do the
-                // framebuffer readbacks that are needed for each
-                // composite operation in this batch.
-                let cache_texture_dimensions = cache_texture.get_dimensions();
-
-                let source = render_tasks.get(source_id);
-                let backdrop = render_tasks.get(task_id);
-                let readback = render_tasks.get(backdrop_id);
-
-                let (readback_rect, readback_layer) = readback.get_target_rect();
-                let (backdrop_rect, _) = backdrop.get_target_rect();
-                let backdrop_screen_origin = backdrop.as_alpha_batch().screen_origin;
-                let source_screen_origin = source.as_alpha_batch().screen_origin;
-
-                // Bind the FBO to blit the backdrop to.
-                // Called per-instance in case the layer (and therefore FBO)
-                // changes. The device will skip the GL call if the requested
-                // target is already bound.
-                let cache_draw_target = (cache_texture, readback_layer.0 as i32);
-                //self.device.bind_draw_target(Some(cache_draw_target), Some(cache_texture_dimensions));
-
-                let src_x = backdrop_rect.origin.x - backdrop_screen_origin.x + source_screen_origin.x;
-                let src_y = backdrop_rect.origin.y - backdrop_screen_origin.y + source_screen_origin.y;
-
-                let dest_x = readback_rect.origin.x;
-                let dest_y = readback_rect.origin.y;
-
-                let width = readback_rect.size.width;
-                let height = readback_rect.size.height;
-
-                let mut src = DeviceIntRect::new(DeviceIntPoint::new(src_x as i32, src_y as i32),
-                                                 DeviceIntSize::new(width as i32, height as i32));
-                let mut dest = DeviceIntRect::new(DeviceIntPoint::new(dest_x as i32, dest_y as i32),
-                                                  DeviceIntSize::new(width as i32, height as i32));
-
-                // Need to invert the y coordinates and flip the image vertically when
-                // reading back from the framebuffer.
-                if render_target.is_none() {
-                    src.origin.y = target_dimensions.height as i32 - src.size.height - src.origin.y;
-                    dest.origin.y += dest.size.height;
-                    dest.size.height = -dest.size.height;
-                }
-
-                self.device.blit_render_target(render_target,
-                                               Some(src),
-                                               dest);
-
-                // Restore draw target to current pass render target + layer.
-                //self.device.bind_draw_target(render_target, Some(target_dimensions));
-            }
-            _ => {}
-        }*/
         let _gm = self.gpu_profile.add_marker(marker);
         for i in 0..key.textures.colors.len() {
             self.texture_resolver.bind(&key.textures.colors[i], TextureSampler::color(i), &mut self.device);
         }
-        program.bind(&mut self.device, transform_kind, projection, instances, &mut self.renderer_errors);
+        program.bind(&mut self.device, transform_kind, projection, instances, render_target, &mut self.renderer_errors);
         self.profile_counters.vertices.add(6 * instances.len());
         program.get(transform_kind).draw(&mut self.device, &key.blend_mode, enable_depth_write);
     }
@@ -1694,6 +1707,10 @@ impl Renderer {
                                                   Some(1.0),
                                                   target.used_rect());
                 }*/
+                //let clear_color = [1.0, 1.0, 1.0, 1.0];
+                Some((tex_id, _)) => {
+                    self.device.clear_render_target_color(&tex_id, clear_color, 1.0);
+                }
                 _ => {
                     self.device.clear_target(clear_color, Some(1.0));
                 }
@@ -1733,7 +1750,7 @@ impl Renderer {
             for (texture_id, instances) in &target.text_run_cache_prims {
                 println!("cs_text_run texture_id={:?}", texture_id);
                 self.texture_resolver.bind(&texture_id, TextureSampler::Color0, &mut self.device);
-                self.cs_text_run.bind(&mut self.device, projection, &instances, &mut self.renderer_errors);
+                self.cs_text_run.bind(&mut self.device, projection, &instances, render_target, &mut self.renderer_errors);
                 self.cs_text_run.draw(&mut self.device, &BlendMode::Alpha, false);
             }
         }
@@ -1742,7 +1759,7 @@ impl Renderer {
             //           lines. We could check that here?
             let _gm = self.gpu_profile.add_marker(GPU_TAG_CACHE_LINE);
             println!("cs_line");
-            self.cs_line.bind(&mut self.device, projection, &target.line_cache_prims, &mut self.renderer_errors);
+            self.cs_line.bind(&mut self.device, projection, &target.line_cache_prims, render_target, &mut self.renderer_errors);
             self.cs_line.draw(&mut self.device, &BlendMode::Alpha, false);
         }
 
@@ -1806,7 +1823,7 @@ impl Renderer {
             // performance penalty on other GPU types - we should test this
             // and consider different code paths.
             let clear_color = [1.0, 1.0, 1.0, 1.0];
-            self.device.clear_render_target(render_target.0, clear_color);
+            self.device.clear_render_target_alpha(render_target.0, clear_color);
         }
 
         // Draw any box-shadow caches for this target.
