@@ -45,7 +45,7 @@
 #else
     #define SHADER_OUT(value, expr) value = expr
     #define static
-    #define mul(vector, matrix) matrix * vector
+    #define mul(vector, matrix) (matrix) * (vector)
 #endif
 
 #ifdef WR_FEATURE_TEXTURE_EXTERNAL
@@ -171,26 +171,16 @@ float2 mod(float2 x, float2 y) {
 
 #ifdef WR_FEATURE_TEXTURE_2D
 uniform sampler2D sColor0;
-uniform sampler2D sColor1;
-uniform sampler2D sColor2;
 #elif defined WR_FEATURE_TEXTURE_RECT
 uniform sampler2DRect sColor0;
-uniform sampler2DRect sColor1;
-uniform sampler2DRect sColor2;
 #elif defined WR_FEATURE_TEXTURE_EXTERNAL
 uniform samplerExternalOES sColor0;
-uniform samplerExternalOES sColor1;
-uniform samplerExternalOES sColor2;
 #else
 uniform sampler2DArray sColor0;
-uniform sampler2DArray sColor1;
-uniform sampler2DArray sColor2;
 #endif
 
 #ifdef WR_DX11
 SamplerState sColor0_;
-SamplerState sColor1_;
-SamplerState sColor2_;
 #endif //WR_DX11
 
 //======================================================================================

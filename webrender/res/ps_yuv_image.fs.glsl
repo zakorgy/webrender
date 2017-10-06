@@ -107,6 +107,7 @@ void main(in v2p IN, out p2f OUT) {
 #endif
 
     // See the YuvColorMatrix definition for an explanation of where the constants come from.
-    vec3 rgb = mul(yuv_value - vec3(0.06275, 0.50196, 0.50196), YuvColorMatrix);
+    vec3 yuv_val = yuv_value - vec3(0.06275, 0.50196, 0.50196);
+    vec3 rgb = mul(yuv_val, YuvColorMatrix);
     SHADER_OUT(Target0, vec4(rgb, alpha));
 }
