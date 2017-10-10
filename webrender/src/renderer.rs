@@ -28,7 +28,7 @@ use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 use internal_types::{FastHashMap, CacheTextureId, RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, TextureUpdateList, RenderTargetMode, TextureUpdateSource};
 use internal_types::{BatchTextures, ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, SourceTexture};
-use pipelines::{BlurProgram, BoxShadowProgram, ClipProgram, Program};
+use pipelines::{BlurProgram, BoxShadowProgram, ClipProgram, DebugColorProgram, DebugFontProgram, Program};
 use profiler::{Profiler, BackendProfileCounters};
 use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
 use record::ApiRecordingReceiver;
@@ -741,6 +741,34 @@ fn create_box_shadow_program(device: &mut Device, filename: &str) -> Box<BoxShad
     Box::new(device.create_box_shadow_program(vs.as_slice(), ps.as_slice()))
 }
 
+#[cfg(not(feature = "dx11"))]
+pub fn create_debug_color_program(device: &mut Device, filename: &str) -> DebugColorProgram {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    device.create_debug_color_program(vs.as_slice(), ps.as_slice())
+}
+
+#[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn create_debug_color_program(device: &mut Device, filename: &str) -> DebugColorProgram {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    device.create_debug_color_program(vs.as_slice(), ps.as_slice())
+}
+
+#[cfg(not(feature = "dx11"))]
+pub fn create_debug_font_program(device: &mut Device, filename: &str) -> DebugFontProgram {
+    let vs = get_shader_source(filename, ".vert");
+    let ps = get_shader_source(filename, ".frag");
+    device.create_debug_font_program(vs.as_slice(), ps.as_slice())
+}
+
+ #[cfg(all(target_os = "windows", feature="dx11"))]
+pub fn create_debug_font_program(device: &mut Device, filename: &str) -> DebugFontProgram {
+    let vs = get_shader_source(filename, ".vert.fx");
+    let ps = get_shader_source(filename, ".frag.fx");
+    device.create_debug_font_program(vs.as_slice(), ps.as_slice())
+ }
+
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
@@ -1389,6 +1417,7 @@ impl Renderer {
                 let debug_size = DeviceUintSize::new(framebuffer_size.width as u32,
                                                      framebuffer_size.height as u32);
                 self.debug.render(&mut self.device, &debug_size);
+                self.flush();
                 {
                     let _gm = GpuMarker::new("end frame");
                     self.device.end_frame();

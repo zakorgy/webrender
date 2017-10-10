@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
+use api::ColorF;
+use debug_render::{DebugFontVertex, DebugColorVertex};
 use device::{Device, DEVICE_PIXEL_RATIO, MAX_INSTANCE_COUNT, TextureId};
 use euclid::{Matrix4D, Transform3D};
 use gfx;
@@ -205,7 +206,7 @@ gfx_defines! {
                                            None),
     }
     
-    /*vertex DebugColorVertices {
+    vertex DebugColorVertices {
         pos: [f32; 2] = "aPosition",
         color: [f32; 4] = "aColor",
     }
@@ -237,15 +238,15 @@ gfx_defines! {
                                            Format(gfx::format::SurfaceType::R8_G8_B8_A8, gfx::format::ChannelType::Srgb),
                                            gfx::state::MASK_ALL,
                                            Some(ALPHA)),
-    }*/
+    }
 }
 
 type PrimPSO = gfx::PipelineState<R, primitive::Meta>;
 type ClipPSO = gfx::PipelineState<R, clip::Meta>;
 type BlurPSO = gfx::PipelineState<R, blur::Meta>;
 type BoxShadowPSO = gfx::PipelineState<R, boxshadow::Meta>;
-/*type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
-type DebugFontPSO = gfx::PipelineState<R, debug_font::Meta>;*/
+type DebugColorPSO = gfx::PipelineState<R, debug_color::Meta>;
+type DebugFontPSO = gfx::PipelineState<R, debug_font::Meta>;
 
 impl Position {
     pub fn new(p: [f32; 2]) -> Position {
@@ -269,7 +270,7 @@ impl PrimitiveInstances {
     }
 }
 
-/*
+
 impl DebugColorVertices {
     pub fn new(pos: [f32; 2], color: [f32; 4]) -> DebugColorVertices {
         DebugColorVertices {
@@ -287,7 +288,7 @@ impl DebugFontVertices {
             tex_coord: tex_coord,
         }
     }
-}*/
+}
 
 impl BlurInstances {
     pub fn new() -> BlurInstances {
@@ -639,6 +640,82 @@ impl ClipProgram {
     }
 }
 
+pub struct DebugColorProgram {
+    pub data: debug_color::Data<R>,
+    pub pso: DebugColorPSO,
+    pub slice: gfx::Slice<R>,
+}
+
+impl DebugColorProgram {
+    pub fn new(data: debug_color::Data<R>, pso: DebugColorPSO, slice: gfx::Slice<R>) -> DebugColorProgram {
+        DebugColorProgram {
+            data,
+            pso,
+            slice
+        }
+    }
+
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, indices: &[u32], vertices: &[DebugColorVertex]) {
+        self.data.transform = projection.to_row_arrays();
+        let quad_vertices: Vec<DebugColorVertices> = vertices.iter().map(|v| DebugColorVertices::new([v.x, v.y], ColorF::from(v.color).to_array())).collect();
+        let (vbuf, slice) = device.factory.create_vertex_buffer_with_slice(&quad_vertices, indices);
+
+        {
+            self.data.vbuf = vbuf;
+            self.slice = slice;
+        }
+
+        let locals = Locals {
+            transform: self.data.transform,
+            device_pixel_ratio: self.data.device_pixel_ratio,
+        };
+        device.encoder.update_buffer(&self.data.locals, &[locals], 0).unwrap();
+    }
+
+    pub fn draw(&mut self, device: &mut Device) {
+        device.encoder.draw(&self.slice, &self.pso, &self.data);
+    }
+}
+
+pub struct DebugFontProgram {
+    pub data: debug_font::Data<R>,
+    pub pso: DebugFontPSO,
+    pub slice: gfx::Slice<R>,
+}
+
+impl DebugFontProgram {
+    pub fn new(data: debug_font::Data<R>, pso: DebugFontPSO, slice: gfx::Slice<R>) -> DebugFontProgram {
+        DebugFontProgram {
+            data,
+            pso,
+            slice
+        }
+    }
+
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, indices: &[u32], vertices: &[DebugFontVertex]) {
+        self.data.transform = projection.to_row_arrays();
+        let quad_vertices: Vec<DebugFontVertices> = vertices.iter().map(|v| DebugFontVertices::new([v.x, v.y], ColorF::from(v.color).to_array(), [v.u, v.v])).collect();
+        let (vbuf, slice) = device.factory.create_vertex_buffer_with_slice(&quad_vertices, indices);
+
+        {
+            self.data.vbuf = vbuf;
+            self.slice = slice;
+        }
+
+        self.data.color0 = device.get_texture_srv_and_sampler(TextureSampler::Color0);
+
+        let locals = Locals {
+            transform: self.data.transform,
+            device_pixel_ratio: self.data.device_pixel_ratio,
+        };
+        device.encoder.update_buffer(&self.data.locals, &[locals], 0).unwrap();
+    }
+
+    pub fn draw(&mut self, device: &mut Device) {
+        device.encoder.draw(&self.slice, &self.pso, &self.data);
+    }
+}
+
 impl Device {
     pub fn create_prim_psos(&mut self, vert_src: &[u8],frag_src: &[u8]) -> (PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO, PrimPSO) {
         let pso_depth_write = self.factory.create_pipeline_simple(
@@ -895,5 +972,40 @@ impl Device {
         };
         let psos = self.create_clip_psos(vert_src, frag_src);
         ClipProgram::new(data, psos, self.slice.clone(), upload)
+    }
+
+    pub fn create_debug_color_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugColorProgram {
+        // Creating a dummy vertexbuffer here. This is replaced in the draw_debug_color call.
+        let quad_indices: &[u16] = &[0];
+        let quad_vertices = [DebugColorVertices::new([0.0, 0.0], [0.0, 0.0, 0.0, 0.0])];
+        let (vertex_buffer, mut slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+
+        let data = debug_color::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: vertex_buffer,
+            out_color: self.main_color.raw().clone(),
+        };
+        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug_color::new()).unwrap();
+        DebugColorProgram::new(data, pso, self.slice.clone())
+    }
+
+    pub fn create_debug_font_program(&mut self, vert_src: &[u8], frag_src: &[u8]) -> DebugFontProgram {
+        // Creating a dummy vertexbuffer here. This is replaced in the draw_debug_font call.
+        let quad_indices: &[u16] = &[ 0,];
+        let quad_vertices = [DebugFontVertices::new([0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0])];
+        let (vertex_buffer, mut slice) = self.factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+
+        let data = debug_font::Data {
+            locals: self.factory.create_constant_buffer(1),
+            transform: [[0f32; 4]; 4],
+            device_pixel_ratio: DEVICE_PIXEL_RATIO,
+            vbuf: vertex_buffer,
+            color0: (self.dummy_image().srv.clone(), self.sampler.0.clone()),
+            out_color: self.main_color.raw().clone(),
+        };
+        let pso = self.factory.create_pipeline_simple(vert_src, frag_src, debug_font::new()).unwrap();
+        DebugFontProgram::new(data, pso, slice)
     }
 }
