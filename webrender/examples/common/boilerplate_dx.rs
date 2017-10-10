@@ -135,6 +135,50 @@ pub fn main_wrapper(example: &mut Example,
             winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => {
                 winit::ControlFlow::Break
             },
+
+            /*glutin::Event::KeyboardInput(_, _, Some(glutin::VirtualKeyCode::Escape)) |
+            glutin::Event::KeyboardInput(_, _, Some(glutin::VirtualKeyCode::Q)) => break 'outer,*/
+
+            winit::Event::WindowEvent {
+                window_id,
+                event: winit::WindowEvent::KeyboardInput {
+                    device_id,
+                    input: winit::KeyboardInput {
+                        scancode,
+                        state: winit::ElementState::Pressed,
+                        virtual_keycode: Some(winit::VirtualKeyCode::P),
+                        modifiers
+                    }
+                },
+            } => {
+                let mut flags = renderer.get_debug_flags();
+                flags.toggle(webrender::PROFILER_DBG);
+                renderer.set_debug_flags(flags);
+                winit::ControlFlow::Continue
+            },
+
+            /*glutin::Event::KeyboardInput(glutin::ElementState::Pressed,pp
+                                         _, Some(glutin::VirtualKeyCode::P)) => {
+                let mut flags = renderer.get_debug_flags();
+                flags.toggle(webrender::PROFILER_DBG);
+                renderer.set_debug_flags(flags);
+            }
+            glutin::Event::KeyboardInput(glutin::ElementState::Pressed,
+                                         _, Some(glutin::VirtualKeyCode::O)) => {
+                let mut flags = renderer.get_debug_flags();
+                flags.toggle(webrender::RENDER_TARGET_DBG);
+                renderer.set_debug_flags(flags);
+            }
+            glutin::Event::KeyboardInput(glutin::ElementState::Pressed,
+                                         _, Some(glutin::VirtualKeyCode::I)) => {
+                let mut flags = renderer.get_debug_flags();
+                flags.toggle(webrender::TEXTURE_CACHE_DBG);
+                renderer.set_debug_flags(flags);
+            }
+            glutin::Event::KeyboardInput(glutin::ElementState::Pressed,
+                                         _, Some(glutin::VirtualKeyCode::M)) => {
+                api.notify_memory_pressure();
+            }*/
             _ => {
                 if example.on_event(event, &api, document_id) {
                     let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
