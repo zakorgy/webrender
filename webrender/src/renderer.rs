@@ -1756,12 +1756,12 @@ impl Renderer {
             let _gm = self.gpu_profile.add_marker(GPU_TAG_BLUR);
             println!("cs_blur");
             if !target.vertical_blurs.is_empty() {
-                self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, &mut self.renderer_errors);
+                self.cs_blur.bind(&mut self.device, projection, &target.vertical_blurs, render_target, &mut self.renderer_errors);
                 self.cs_blur.draw(&mut self.device);
             }
 
             if !target.horizontal_blurs.is_empty() {
-                self.cs_blur.bind(&mut self.device, projection, &target.horizontal_blurs, &mut self.renderer_errors);
+                self.cs_blur.bind(&mut self.device, projection, &target.horizontal_blurs, render_target, &mut self.renderer_errors);
                 self.cs_blur.draw(&mut self.device);
             }
         }

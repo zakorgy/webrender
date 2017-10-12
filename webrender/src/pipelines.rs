@@ -536,7 +536,7 @@ impl BlurProgram {
         self.upload.1 = 0;
     }
 
-    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[BlurCommand], renderer_errors: &mut Vec<RendererError>) {
+    pub fn bind(&mut self, device: &mut Device, projection: &Transform3D<f32>, instances: &[BlurCommand], render_target: Option<(&TextureId, i32)>, renderer_errors: &mut Vec<RendererError>) {
         self.data.transform = projection.to_row_arrays();
         let locals = Locals {
             transform: self.data.transform,
@@ -559,6 +559,15 @@ impl BlurProgram {
 
         println!("bind={:?}", device.bound_textures);
         self.data.cache_rgba8.0 = device.get_texture_srv_and_sampler(TextureSampler::CacheRGBA8).0;
+
+        if render_target.is_some() {
+            let tex = device.cache_rgba8_textures.get(&render_target.unwrap().0).unwrap();
+            self.data.out_color = tex.rtv.raw().clone();
+            //self.data.out_depth = tex.dsv.clone();
+        } else {
+            self.data.out_color = device.main_color.raw().clone();
+            //self.data.out_depth = device.main_depth.clone();
+        }
     }
 
     pub fn draw(&mut self, device: &mut Device)
