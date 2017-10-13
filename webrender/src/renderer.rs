@@ -947,7 +947,7 @@ impl Renderer {
 
         let cs_box_shadow = create_box_shadow_program(&mut device, "cs_box_shadow");
         let cs_text_run = create_program(&mut device, "cs_text_run");
-        let cs_line = create_program(&mut device, "ps_line");
+        let cs_line = create_program(&mut device, "ps_line_cache");
 
         let cs_blur = create_blur_program(&mut device, "cs_blur");
 

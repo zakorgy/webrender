@@ -90,6 +90,7 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<Str
         }
         let is_clip_cache = filename.starts_with("cs_clip");
         let is_ps_rect = filename.starts_with("ps_rectangle");
+        let is_line = filename.starts_with("ps_line");
         let is_ps_text_run = filename.starts_with("ps_text_run");
         let is_ps_blend = filename.starts_with("ps_blend");
         let is_ps_hw_composite = filename.starts_with("ps_hardware_composite");
@@ -122,6 +123,10 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<Str
         if is_ps_rect {
             build_configs.push("#define WR_FEATURE_TRANSFORM\n#define WR_FEATURE_CLIP\n");
             build_configs.push("// WR_FEATURE_TRANSFORM disabled\n#define WR_FEATURE_CLIP\n");
+        }
+
+        if is_line {
+            build_configs.push("#define WR_FEATURE_CACHE\n");
         }
 
         if is_ps_text_run {
@@ -198,6 +203,9 @@ fn create_shaders(out_dir: String, shaders: &HashMap<String, String>) -> Vec<Str
                         }
                         if use_dither {
                             out_file_name.push_str("_dither_transform");
+                        }
+                        if is_line {
+                            out_file_name.push_str("_cache");
                         }
                     },
                     3 => {
