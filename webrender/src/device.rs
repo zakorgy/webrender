@@ -713,7 +713,7 @@ impl Device {
                 };
                 (tex.srv.clone(), sampler)
             },
-            TextureStorage::CacheRGBA8 => (self.cache_rgba8_textures.get(&id).unwrap().srv.clone(), self.sampler.0.clone()),
+            TextureStorage::CacheRGBA8 => (self.cache_rgba8_textures.get(&id).unwrap().srv.clone(), self.sampler.1.clone()),
             TextureStorage::CacheA8 => (self.cache_a8_textures.get(&id).unwrap().srv.clone(), self.sampler.0.clone()),
         }
     }
