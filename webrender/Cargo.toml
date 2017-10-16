@@ -36,22 +36,22 @@ serde = { optional = true, version = "1.0" }
 serde_derive = { optional = true, version = "1.0" }
 servo-glutin = "0.11"
 rand = "0.3"
-gfx = { git = 'https://github.com/szeged/gfx', branch = 'szeged' }
-#gfx = { path = '../../gfx/src/render' }
-gfx_device_gl = { git = 'https://github.com/szeged/gfx', branch = 'szeged' }
-#gfx_device_gl = { path = '../../gfx/src/backend/gl' }
+#gfx = { git = 'https://github.com/szeged/gfx', branch = 'szeged' }
+gfx = { path = '../../gfx/src/render' }
+#gfx_device_gl = { git = 'https://github.com/szeged/gfx', branch = 'szeged' }
+gfx_device_gl = { path = '../../gfx/src/backend/gl' }
 
 [target.'cfg(windows)'.dependencies]
-gfx_device_dx11 = { git = 'https://github.com/szeged/gfx', branch = 'szeged', optional = true}
-#gfx_device_dx11 = { path = '../../gfx/src/backend/dx11', optional = true}
-gfx_window_dxgi = { git = 'https://github.com/szeged/gfx', branch = 'szeged', optional = true}
-#gfx_window_dxgi = { path = '../../gfx/src/window/dxgi', optional = true}
-winit = "0.7"
+#gfx_device_dx11 = { git = 'https://github.com/szeged/gfx', branch = 'szeged', optional = true}
+gfx_device_dx11 = { path = '../../gfx/src/backend/dx11', optional = true}
+#gfx_window_dxgi = { git = 'https://github.com/szeged/gfx', branch = 'szeged', optional = true}
+gfx_window_dxgi = { path = '../../gfx/src/window/dxgi', optional = true}
+winit = "0.8"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 gleam = "0.4.8"
-winit = "0.7"
+winit = "0.8"
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }

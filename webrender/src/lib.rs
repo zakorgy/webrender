@@ -57,17 +57,12 @@ extern crate gfx_device_dx11 as backend;
 extern crate gfx_device_gl as backend;
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-extern crate winit as window;
+extern crate gfx_window_dxgi as backend_window;
 #[cfg(not(feature = "dx11"))]
-extern crate glutin as window;
+extern crate glutin as backend_window;
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
-extern crate gfx_window_dxgi as result_window;
-#[cfg(not(feature = "dx11"))]
-extern crate glutin as result_window;
-
-pub type InitWindow = window::Window;
-pub type ResultWindow = Option<result_window::Window>;
+extern crate winit;
 
 mod border;
 mod clip;
@@ -104,6 +99,7 @@ mod texture_allocator;
 mod texture_cache;
 mod tiling;
 mod util;
+mod window;
 
 pub use record::{ApiRecordingReceiver, BinaryRecorder, WEBRENDER_RECORDING_HEADER};
 
@@ -170,3 +166,9 @@ pub use renderer::{CpuProfile, GpuProfile, DebugFlags, RendererKind};
 pub use renderer::{MAX_VERTEX_TEXTURE_WIDTH, PROFILER_DBG, RENDER_TARGET_DBG, TEXTURE_CACHE_DBG};
 
 pub use webrender_api as api;
+pub use window::create_rgba8_window;
+pub use backend_window::Window;
+pub use device::BackendDevice;
+pub use backend::Factory;
+pub type RTV = gfx::handle::RenderTargetView<backend::Resources, gfx::format::Rgba8>;
+pub type DSV = gfx::handle::DepthStencilView<backend::Resources, gfx::format::DepthStencil>;

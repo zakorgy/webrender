@@ -18,7 +18,7 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
+use device::{BackendDevice, Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
 use device::{GpuTimer, TextureFilter, VertexUsageHint, TextureTarget, ShaderError};
 use device::{TextureSlot, TextureStorage, VertexAttribute, VertexAttributeKind};
 use device::{TextureId, DUMMY_ID};
@@ -62,10 +62,10 @@ use api::{BlobImageRenderer, channel, FontRenderMode};
 use api::{YuvColorSpace, YuvFormat};
 use api::{YUV_COLOR_SPACES, YUV_FORMATS};
 
-use InitWindow;
-use ResultWindow;
-
+use backend::{self, Resources as R};
 use gfx;
+use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
+use window::ExistingWindow;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
@@ -934,8 +934,13 @@ impl Renderer {
     /// let (renderer, sender) = Renderer::new(opts);
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
-    pub fn new(window: Rc<InitWindow>, mut options: RendererOptions) -> Result<(Renderer, RenderApiSender, ResultWindow), RendererError> {
-
+    pub fn new(mut options: RendererOptions,
+               device: BackendDevice,
+               mut factory: backend::Factory,
+               main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
+               main_depth: gfx::handle::DepthStencilView<R, DepthFormat>)
+        -> Result<(Renderer, RenderApiSender), RendererError>
+    {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
         let (payload_tx, payload_rx) = try!{ channel::payload_channel() };
         let (result_tx, result_rx) = channel();
@@ -943,7 +948,7 @@ impl Renderer {
         let notifier = Arc::new(Mutex::new(None));
         let debug_server = DebugServer::new(api_tx.clone());
 
-        let (mut device, window) = Device::new(window, options.resource_override_path.clone());
+        let mut device = Device::new(options.resource_override_path.clone(), device, factory, main_color, main_depth);
 
         let cs_box_shadow = create_box_shadow_program(&mut device, "cs_box_shadow");
         let cs_text_run = create_program(&mut device, "cs_text_run");
@@ -1128,7 +1133,7 @@ impl Renderer {
         };
 
         let sender = RenderApiSender::new(api_tx, payload_tx);
-        Ok((renderer, sender, window))
+        Ok((renderer, sender))
     }
 
     pub fn get_max_texture_size(&self) -> u32 {

@@ -79,26 +79,26 @@ pub fn main_wrapper(example: &mut Example,
     };
 
     let mut events_loop = winit::EventsLoop::new();
-    let window = Rc::new(winit::WindowBuilder::new()
-                         .with_title("WebRender Sample D3D11")
-                         .build(&events_loop)
-                         .unwrap());
+    let winit_window = winit::WindowBuilder::new()
+                       .with_title("WebRender Sample D3D11")
+                       .build(&events_loop)
+                       .unwrap();
     println!("Shader resource path: {:?}", res_path);
 
-    let (width, height) = window.get_inner_size_pixels().unwrap();
+    let (width, height) = winit_window.get_inner_size_pixels().unwrap();
 
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
         debug: true,
         precache_shaders: true,
-        device_pixel_ratio: window.hidpi_factor(),
+        device_pixel_ratio: winit_window.hidpi_factor(),
         enable_dithering: true,
         .. options.unwrap_or(webrender::RendererOptions::default())
     };
 
+    let (window, device, mut factory, main_color, main_depth) = webrender::create_rgba8_window(winit_window);
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender, result_window) = webrender::Renderer::new(window.clone(), opts).unwrap();
-    let gfx_window = result_window.unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(opts, device, factory, main_color, main_depth).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(size);
 
@@ -198,7 +198,7 @@ pub fn main_wrapper(example: &mut Example,
                 }
                 renderer.update();
                 renderer.render(DeviceUintSize::new(width, height)).unwrap();
-                gfx_window.swap_buffers(1);
+                window.swap_buffers(1);
                 winit::ControlFlow::Continue
             },
         }

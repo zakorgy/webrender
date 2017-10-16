@@ -34,9 +34,6 @@ use pipelines::{Position};
 use renderer::{BlendMode, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 
 use backend;
-use InitWindow;
-use ResultWindow;
-
 use backend::Resources as R;
 #[cfg(all(target_os = "windows", feature="dx11"))]
 pub type CB = self::backend::CommandBuffer<backend::DeferredContext>;
@@ -47,8 +44,6 @@ pub type CB = self::backend::CommandBuffer;
 pub type BackendDevice = backend::Deferred;
 #[cfg(not(feature = "dx11"))]
 pub type BackendDevice = backend::Device;
-#[cfg(all(target_os = "windows", feature="dx11"))]
-use result_window;
 
 pub const LAYER_TEXTURE_WIDTH: usize = 1017;
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023;
@@ -69,9 +64,6 @@ pub const DUMMY_ID: TextureId = 0;
 const FIRST_UNRESERVED_ID: TextureId = DUMMY_ID + 1;
 
 pub type A8 = (R8, Unorm);
-
-// The value of the type GL_FRAMEBUFFER_SRGB from https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_framebuffer_sRGB.txt
-const GL_FRAMEBUFFER_SRGB: u32 = 0x8DB9;
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 pub struct FrameId(usize);
@@ -576,11 +568,13 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(window: Rc<InitWindow>, resource_override_path: Option<PathBuf>) -> (Device, ResultWindow) {
+    pub fn new(resource_override_path: Option<PathBuf>,
+               device: BackendDevice,
+               mut factory: backend::Factory,
+               main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
+               main_depth: gfx::handle::DepthStencilView<R, DepthFormat>) -> Device
+    {
         let max_texture_size = 1024;
-
-        let (win, device, mut factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
-        
         #[cfg(all(target_os = "windows", feature="dx11"))]
         let encoder = factory.create_command_buffer_native().into();
 
@@ -673,7 +667,7 @@ impl Device {
             max_texture_size: max_texture_size as u32,
             frame_id: FrameId(0),
         };
-        (dev, win)
+        dev
     }
 
     pub fn dither(&mut self) -> &DataTexture<A8> {
@@ -1100,43 +1094,4 @@ fn batch_image_texture_data(texture: &mut ImageTexture<Rgba8>,
             texture.data[offset + 3] = src[3];
         }
     }
-}
-
-#[cfg(not(feature = "dx11"))]
-pub fn init_existing<Cf, Df>(window: Rc<InitWindow>) ->
-                            (ResultWindow, BackendDevice, backend::Factory,
-                             gfx::handle::RenderTargetView<R, Cf>, gfx::handle::DepthStencilView<R, Df>)
-where Cf: gfx::format::RenderFormat, Df: gfx::format::DepthFormat,
-{
-    unsafe { window.make_current().unwrap() };
-    let (mut device, factory) = backend::create(|s|
-        window.get_proc_address(s) as *const std::os::raw::c_void);
-
-    unsafe { device.with_gl(|ref gl| gl.Disable(GL_FRAMEBUFFER_SRGB)); }
-
-    let (width, height) = window.get_inner_size().unwrap();
-    let aa = window.get_pixel_format().multisampling.unwrap_or(0) as gfx::texture::NumSamples;
-    let dim = ((width as f32 * window.hidpi_factor()) as gfx::texture::Size,
-               (height as f32 * window.hidpi_factor()) as gfx::texture::Size,
-               1,
-               aa.into());
-    let (color_view, ds_view) = backend::create_main_targets_raw(dim, Cf::get_format().0, Df::get_format().0);
-    (None, device, factory, Typed::new(color_view), Typed::new(ds_view))
-}
-
-#[cfg(all(target_os = "windows", feature="dx11"))]
-pub fn init_existing<Cf, Df>(window: Rc<InitWindow>)
-    -> (ResultWindow, BackendDevice, backend::Factory,
-        gfx::handle::RenderTargetView<R, Cf>,
-        gfx::handle::DepthStencilView<R, Df>)
-
-where Cf: gfx::format::RenderFormat,
-      Df: gfx::format::DepthFormat,
-      <Df as gfx::format::Formatted>::Surface: gfx::format::TextureSurface,
-      <Df as gfx::format::Formatted>::Channel: gfx::format::TextureChannel
-{
-    let (mut win, device, mut factory, main_color) = result_window::init_existing_raw(window, Cf::get_format()).unwrap();
-    let main_depth = factory.create_depth_stencil_view_only(win.size.0, win.size.1).unwrap();
-    let mut device = backend::Deferred::from(device);
-    (Some(win), device, factory, gfx::memory::Typed::new(main_color), main_depth)
 }

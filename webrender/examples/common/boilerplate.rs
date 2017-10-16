@@ -79,41 +79,42 @@ pub fn main_wrapper(example: &mut Example,
         None
     };
 
-    let window = Rc::new(glutin::WindowBuilder::new()
-                         .with_title("WebRender Sample")
-                         .with_multitouch()
-                         .with_gl(glutin::GlRequest::GlThenGles {
-                             opengl_version: (3, 2),
-                             opengles_version: (3, 0)
-                         })
-                         .build()
-                         .unwrap());
+    let glutin_window = glutin::WindowBuilder::new()
+                        .with_title("WebRender Sample")
+                        .with_multitouch()
+                        .with_gl(glutin::GlRequest::GlThenGles {
+                            opengl_version: (3, 2),
+                            opengles_version: (3, 0)
+                        })
+                        .build()
+                        .unwrap();
 
     unsafe {
-        window.make_current().ok();
+        glutin_window.make_current().ok();
     }
 
     let gl = match gl::GlType::default() {
-        gl::GlType::Gl => unsafe { gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _) },
-        gl::GlType::Gles => unsafe { gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _) },
+        gl::GlType::Gl => unsafe { gl::GlFns::load_with(|symbol| glutin_window.get_proc_address(symbol) as *const _) },
+        gl::GlType::Gles => unsafe { gl::GlesFns::load_with(|symbol| glutin_window.get_proc_address(symbol) as *const _) },
     };
 
     println!("OpenGL version {}", gl.get_string(gl::VERSION));
     println!("Shader resource path: {:?}", res_path);
 
-    let (width, height) = window.get_inner_size_pixels().unwrap();
+    let (width, height) = glutin_window.get_inner_size_pixels().unwrap();
 
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
         debug: true,
         precache_shaders: true,
-        device_pixel_ratio: window.hidpi_factor(),
+        device_pixel_ratio: glutin_window.hidpi_factor(),
         enable_dithering: true,
         .. options.unwrap_or(webrender::RendererOptions::default())
     };
 
+    let (window, device, mut factory, main_color, main_depth) = webrender::create_rgba8_window(glutin_window);
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender, _) = webrender::Renderer::new(window.clone(), opts).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(opts, device, factory, main_color, main_depth).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(size);
 
