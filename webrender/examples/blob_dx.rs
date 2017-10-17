@@ -2,32 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate app_units;
-extern crate euclid;
-extern crate winit;
 extern crate webrender;
-extern crate webrender_api;
 extern crate rayon;
+extern crate winit;
 
-use app_units::Au;
-use std::collections::HashMap;
-use std::env;
-use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
-use std::rc::Rc;
-use webrender_api::{ColorF, DisplayListBuilder, Epoch, GlyphInstance};
-use webrender_api::{DeviceIntPoint, DeviceUintSize, LayoutPoint, LayoutRect, LayoutSize};
-use webrender_api::{ImageData, ImageDescriptor, ImageFormat};
-use webrender_api::{PipelineId, RenderApi, TransformStyle, BoxShadowClipMode};
-use euclid::vec2;
+#[path="common/boilerplate_dx.rs"]
+mod boilerplate;
 
+use boilerplate::{Example, HandyDandyRectBuilder};
 use rayon::ThreadPool;
 use rayon::Configuration as ThreadPoolConfig;
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Sender, Receiver};
-use webrender_api as api;
+use webrender::api::{self, RenderApi, DisplayListBuilder, ResourceUpdates, LayoutSize, PipelineId, DocumentId};
 
 // This example shows how to implement a very basic BlobImageRenderer that can only render
 // a checkerboard pattern.
@@ -55,8 +44,8 @@ fn deserialize_blob(blob: &[u8]) -> Result<ImageRenderingCommands, ()> {
 // actual image data.
 fn render_blob(
     commands: Arc<ImageRenderingCommands>,
-    descriptor: &api::BlobImageDescriptor,
-    tile: Option<api::TileOffset>,
+   descriptor: &api::BlobImageDescriptor,
+   tile: Option<api::TileOffset>
 ) -> api::BlobImageResult {
     let color = *commands;
 
@@ -138,9 +127,9 @@ impl CheckerboardRenderer {
         CheckerboardRenderer {
             image_cmds: HashMap::new(),
             rendered_images: HashMap::new(),
-            workers: workers,
-            tx: tx,
-            rx: rx,
+            workers,
+            tx,
+            rx,
         }
     }
 }
@@ -161,7 +150,7 @@ impl api::BlobImageRenderer for CheckerboardRenderer {
     }
 
     fn request(&mut self,
-               resources: &api::BlobImageResources,
+               _resources: &api::BlobImageResources,
                request: api::BlobImageRequest,
                descriptor: &api::BlobImageDescriptor,
                _dirty_rect: Option<api::DeviceUintRect>) {
@@ -217,68 +206,77 @@ impl api::BlobImageRenderer for CheckerboardRenderer {
         // If we break out of the loop above it means the channel closed unexpectedly.
         Err(api::BlobImageError::Other("Channel closed".into()))
     }
-    fn delete_font(&mut self, font: api::FontKey) {}
+    fn delete_font(&mut self, _font: api::FontKey) { }
     fn delete_font_instance(&mut self, _instance: api::FontInstanceKey) { }
 }
 
-pub trait HandyDandyRectBuilder {
-    fn to(&self, x2: i32, y2: i32) -> LayoutRect;
-    fn by(&self, w: i32, h: i32) -> LayoutRect;
-}
-// Allows doing `(x, y).to(x2, y2)` or `(x, y).by(width, height)` with i32
-// values to build a f32 LayoutRect
-impl HandyDandyRectBuilder for (i32, i32) {
-    fn to(&self, x2: i32, y2: i32) -> LayoutRect {
-        LayoutRect::new(LayoutPoint::new(self.0 as f32, self.1 as f32),
-                        LayoutSize::new((x2 - self.0) as f32, (y2 - self.1) as f32))
-    }
+struct App {
 
-    fn by(&self, w: i32, h: i32) -> LayoutRect {
-        LayoutRect::new(LayoutPoint::new(self.0 as f32, self.1 as f32),
-                        LayoutSize::new(w as f32, h as f32))
-    }
 }
 
-struct Notifier {
-    proxy: winit::EventsLoopProxy,
-}
+impl Example for App {
+    fn render(&mut self,
+              api: &RenderApi,
+              builder: &mut DisplayListBuilder,
+              resources: &mut ResourceUpdates,
+              layout_size: LayoutSize,
+              _pipeline_id: PipelineId,
+              _document_id: DocumentId) {
+        let blob_img1 = api.generate_image_key();
+        resources.add_image(
+            blob_img1,
+            api::ImageDescriptor::new(500, 500, api::ImageFormat::BGRA8, true),
+            api::ImageData::new_blob_image(serialize_blob(api::ColorU::new(50, 50, 150, 255))),
+            Some(128),
+        );
 
-impl Notifier {
-    fn new(proxy: winit::EventsLoopProxy) -> Notifier {
-        Notifier {
-            proxy: proxy,
-        }
+        let blob_img2 = api.generate_image_key();
+        resources.add_image(
+            blob_img2,
+            api::ImageDescriptor::new(200, 200, api::ImageFormat::BGRA8, true),
+            api::ImageData::new_blob_image(serialize_blob(api::ColorU::new(50, 150, 50, 255))),
+            None,
+        );
+
+        let bounds = api::LayoutRect::new(api::LayoutPoint::zero(), layout_size);
+        builder.push_stacking_context(api::ScrollPolicy::Scrollable,
+                                      bounds,
+                                      None,
+                                      api::TransformStyle::Flat,
+                                      None,
+                                      api::MixBlendMode::Normal,
+                                      Vec::new());
+
+        builder.push_image(
+            (30, 30).by(500, 500),
+            Some(api::LocalClip::from(bounds)),
+            api::LayoutSize::new(500.0, 500.0),
+            api::LayoutSize::new(0.0, 0.0),
+            api::ImageRendering::Auto,
+            blob_img1,
+        );
+
+        builder.push_image(
+            (600, 600).by(200, 200),
+            Some(api::LocalClip::from(bounds)),
+            api::LayoutSize::new(200.0, 200.0),
+            api::LayoutSize::new(0.0, 0.0),
+            api::ImageRendering::Auto,
+            blob_img2,
+        );
+
+        builder.pop_stacking_context();
     }
-}
 
-impl webrender_api::RenderNotifier for Notifier {
-    fn new_frame_ready(&mut self) {
-        #[cfg(not(target_os = "android"))]
-        self.proxy.wakeup().unwrap();
-    }
-
-    fn new_scroll_frame_ready(&mut self, _composite_needed: bool) {
-        #[cfg(not(target_os = "android"))]
-        self.proxy.wakeup().unwrap();
+    fn on_event(&mut self,
+                _event: winit::Event,
+                _api: &RenderApi,
+                _document_id: DocumentId) -> bool {
+        false
     }
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let res_path = if args.len() > 1 {
-        Some(PathBuf::from(&args[1]))
-    } else {
-        None
-    };
-
-    let mut events_loop = winit::EventsLoop::new();
-    let window = Rc::new(winit::WindowBuilder::new()
-                         .with_title("WebRender Sample dx11")
-                         .build(&events_loop)
-                         .unwrap());
-
-    let (width, height) = window.get_inner_size_pixels().unwrap();
-
     let worker_config = ThreadPoolConfig::new().thread_name(|idx|{
         format!("WebRender:Worker#{}", idx)
     });
@@ -286,99 +284,14 @@ fn main() {
     let workers = Arc::new(ThreadPool::new(worker_config).unwrap());
 
     let opts = webrender::RendererOptions {
-        resource_override_path: res_path,
-        debug: true,
-        precache_shaders: true,
-        device_pixel_ratio: window.hidpi_factor(),
+        workers: Some(Arc::clone(&workers)),
+        // Register our blob renderer, so that WebRender integrates it in the resource cache..
+        // Share the same pool of worker threads between WebRender and our blob renderer.
         blob_image_renderer: Some(Box::new(CheckerboardRenderer::new(Arc::clone(&workers)))),
         .. Default::default()
     };
 
-    let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender, result_window) = webrender::Renderer::new(window.clone(), opts).unwrap();
-    let gfx_window = result_window.unwrap();
-    let api = sender.create_api();
-    let document_id = api.add_document(size);
+    let mut app = App {};
 
-    let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    renderer.set_render_notifier(notifier);
-
-    let epoch = Epoch(0);
-    let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
-
-    let pipeline_id = PipelineId(0, 0);
-    let layout_size = LayoutSize::new(width as f32, height as f32);
-    let mut builder = api::DisplayListBuilder::new(pipeline_id, layout_size);
-    let mut resources = api::ResourceUpdates::new();
-
-    let blob_img1 = api.generate_image_key();
-    resources.add_image(
-        blob_img1,
-        api::ImageDescriptor::new(500, 500, api::ImageFormat::BGRA8, true),
-        api::ImageData::new_blob_image(serialize_blob(api::ColorU::new(50, 50, 150, 255))),
-        Some(128),
-    );
-
-    let blob_img2 = api.generate_image_key();
-    resources.add_image(
-        blob_img2,
-        api::ImageDescriptor::new(200, 200, api::ImageFormat::BGRA8, true),
-        api::ImageData::new_blob_image(serialize_blob(api::ColorU::new(50, 150, 50, 255))),
-        None,
-    );
-
-    let bounds = api::LayoutRect::new(api::LayoutPoint::zero(), layout_size);
-    builder.push_stacking_context(api::ScrollPolicy::Scrollable,
-                                  bounds,
-                                  None,
-                                  api::TransformStyle::Flat,
-                                  None,
-                                  api::MixBlendMode::Normal,
-                                  Vec::new());
-
-    builder.push_image(
-        (30, 30).by(500, 500),
-        Some(api::LocalClip::from(bounds)),
-        api::LayoutSize::new(500.0, 500.0),
-        api::LayoutSize::new(0.0, 0.0),
-        api::ImageRendering::Auto,
-        blob_img1,
-    );
-
-    builder.push_image(
-        (600, 600).by(200, 200),
-        Some(api::LocalClip::from(bounds)),
-        api::LayoutSize::new(200.0, 200.0),
-        api::LayoutSize::new(0.0, 0.0),
-        api::ImageRendering::Auto,
-        blob_img2,
-    );
-
-    builder.pop_stacking_context();
-
-    api.set_display_list(
-        document_id,
-        epoch,
-        Some(root_background_color),
-        LayoutSize::new(width as f32, height as f32),
-        builder.finalize(),
-        true,
-        resources
-    );
-    api.set_root_pipeline(document_id, pipeline_id);
-    api.generate_frame(document_id, None);
-
-    events_loop.run_forever(|event| {
-        match event {
-            winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => {
-                winit::ControlFlow::Break
-            },
-            _ => {
-                renderer.update();
-                renderer.render(DeviceUintSize::new(width, height));
-                gfx_window.swap_buffers(1);
-                winit::ControlFlow::Continue
-            },
-        }
-    });
+    boilerplate::main_wrapper(&mut app, Some(opts));
 }
