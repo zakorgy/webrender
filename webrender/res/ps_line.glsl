@@ -6,7 +6,7 @@
 
 #ifdef WR_DX11
      struct v2p {
-        vec4 Position : SV_Position;
+        vec4 gl_Position : SV_Position;
         flat vec4 vClipMaskUvBounds : vClipMaskUvBounds;
         vec3 vClipMaskUv : vClipMaskUv;
         vec4 vColor : vColor;
@@ -126,11 +126,9 @@ void main(in a2v IN, out v2p OUT) {
                           aPosition.xy);
 
     SHADER_OUT(vColor, shadow.color);
-    vLocalPos = mix(prim.local_rect.p0,
-                    prim.local_rect.p0 + prim.local_rect.size,
-                    aPosition.xy);
+    SHADER_OUT(vLocalPos, mix(prim.local_rect.p0, prim.local_rect.p0 + prim.local_rect.size, aPosition.xy));
 
-    gl_Position = uTransform * vec4(device_pos, 0.0, 1.0);
+    SHADER_OUT(gl_Position, mul(vec4(device_pos, 0.0, 1.0), uTransform));
 #else
     SHADER_OUT(vColor, line_.color);
 
@@ -143,7 +141,7 @@ void main(in a2v IN, out v2p OUT) {
                                                         prim.task,
                                                         prim.local_rect
 #ifdef WR_DX11
-                                                    , OUT.Position
+                                                    , OUT.gl_Position
                                                     , OUT.vLocalBounds
 #endif //WR_DX11
                                                         );
@@ -156,7 +154,7 @@ void main(in a2v IN, out v2p OUT) {
                                      prim.task,
                                      prim.local_rect
 #ifdef WR_DX11
-                                 , OUT.Position
+                                 , OUT.gl_Position
 #endif //WR_DX11
                                      );
     #endif //WR_FEATURE_TRANSFORM
