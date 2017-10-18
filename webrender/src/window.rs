@@ -4,7 +4,7 @@
 
 use backend::{self, Resources as R};
 use backend_window::{self, Window};
-use device::BackendDevice;
+use device::{BackendDevice, DeviceInitParams};
 use gfx::{self, Factory};
 use gfx::format::{DepthStencil as DepthFormat, Rgba8 as ColorFormat};
 use gfx::memory::Typed;
@@ -59,9 +59,9 @@ where Cf: gfx::format::RenderFormat,
 }
 
 pub fn create_rgba8_window(window: ExistingWindow)
-	-> (Window, BackendDevice, backend::Factory,
-        gfx::handle::RenderTargetView<R, ColorFormat>,
-        gfx::handle::DepthStencilView<R, DepthFormat>)
+	-> (Window, DeviceInitParams)
 {
-	init_existing::<ColorFormat, DepthFormat>(window)
+	let (window, device, factory, main_color, main_depth) = init_existing::<ColorFormat, DepthFormat>(window);
+  let params = DeviceInitParams {device, factory, main_color, main_depth};
+  (window, params)
 }

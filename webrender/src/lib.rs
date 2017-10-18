@@ -168,7 +168,4 @@ pub use renderer::{MAX_VERTEX_TEXTURE_WIDTH, PROFILER_DBG, RENDER_TARGET_DBG, TE
 pub use webrender_api as api;
 pub use window::create_rgba8_window;
 pub use backend_window::Window;
-pub use device::BackendDevice;
-pub use backend::Factory;
-pub type RTV = gfx::handle::RenderTargetView<backend::Resources, gfx::format::Rgba8>;
-pub type DSV = gfx::handle::DepthStencilView<backend::Resources, gfx::format::DepthStencil>;
+pub use device::{BackendDevice, DeviceInitParams};

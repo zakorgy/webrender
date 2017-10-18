@@ -96,9 +96,9 @@ pub fn main_wrapper(example: &mut Example,
         .. options.unwrap_or(webrender::RendererOptions::default())
     };
 
-    let (window, device, mut factory, main_color, main_depth) = webrender::create_rgba8_window(winit_window);
+    let (window, mut device_init_params) = webrender::create_rgba8_window(winit_window);
     let size = DeviceUintSize::new(width, height);
-    let (mut renderer, sender) = webrender::Renderer::new(opts, device, factory, main_color, main_depth).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(opts, device_init_params).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(size);
 

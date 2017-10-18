@@ -567,19 +567,22 @@ pub struct Device {
     frame_id: FrameId,
 }
 
+pub struct DeviceInitParams {
+    pub device: BackendDevice,
+    pub factory: backend::Factory,
+    pub main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
+    pub main_depth: gfx::handle::DepthStencilView<R, DepthFormat>,
+}
+
 impl Device {
-    pub fn new(resource_override_path: Option<PathBuf>,
-               device: BackendDevice,
-               mut factory: backend::Factory,
-               main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
-               main_depth: gfx::handle::DepthStencilView<R, DepthFormat>) -> Device
+    pub fn new(resource_override_path: Option<PathBuf>, mut params: DeviceInitParams) -> Device
     {
         let max_texture_size = 1024;
         #[cfg(all(target_os = "windows", feature="dx11"))]
-        let encoder = factory.create_command_buffer_native().into();
+        let encoder = params.factory.create_command_buffer_native().into();
 
         #[cfg(not(feature = "dx11"))]
-        let encoder = factory.create_command_buffer().into();
+        let encoder = params.factory.create_command_buffer().into();
         
         let (x0, y0, x1, y1) = (0.0, 0.0, 1.0, 1.0);
         let quad_indices: &[u16] = &[ 0, 1, 2, 2, 1, 3 ];
@@ -590,15 +593,15 @@ impl Device {
             Position::new([x1, y1]),
         ];
 
-        let (vertex_buffer, mut slice) = factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
+        let (vertex_buffer, mut slice) = params.factory.create_vertex_buffer_with_slice(&quad_vertices, quad_indices);
         slice.instances = Some((MAX_INSTANCE_COUNT as u32, 0));
 
         let wrap_mode = (gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Clamp, gfx::texture::WrapMode::Tile);
         let mut sampler_info = gfx::texture::SamplerInfo::new(gfx::texture::FilterMethod::Scale, gfx::texture::WrapMode::Clamp);
         sampler_info.wrap_mode = wrap_mode;
-        let sampler_nearest = factory.create_sampler(sampler_info);
+        let sampler_nearest = params.factory.create_sampler(sampler_info);
         sampler_info.filter = gfx::texture::FilterMethod::Bilinear;
-        let sampler_linear = factory.create_sampler(sampler_info);
+        let sampler_linear = params.factory.create_sampler(sampler_info);
 
         let dither_matrix: [u8; 64] = [
             00, 48, 12, 60, 03, 51, 15, 63,
@@ -610,13 +613,13 @@ impl Device {
             10, 58, 06, 54, 09, 57, 05, 53,
             42, 26, 38, 22, 41, 25, 37, 21
         ];
-        let dither_tex = DataTexture::create(&mut factory, [8, 8], Some((&[&dither_matrix], gfx::texture::Mipmap::Provided))).unwrap();
-        let dummy_cache_a8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
-        let dummy_cache_rgba8_tex = CacheTexture::create(&mut factory, [1, 1]).unwrap();
-        let dummy_image_tex = ImageTexture::create(&mut factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
-        let layers_tex = DataTexture::create(&mut factory, [LAYER_TEXTURE_WIDTH, 64], None).unwrap();
-        let render_tasks_tex = DataTexture::create(&mut factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH], None).unwrap();
-        let resource_cache_tex = DataTexture::create(&mut factory, [max_texture_size, max_texture_size], None).unwrap();
+        let dither_tex = DataTexture::create(&mut params.factory, [8, 8], Some((&[&dither_matrix], gfx::texture::Mipmap::Provided))).unwrap();
+        let dummy_cache_a8_tex = CacheTexture::create(&mut params.factory, [1, 1]).unwrap();
+        let dummy_cache_rgba8_tex = CacheTexture::create(&mut params.factory, [1, 1]).unwrap();
+        let dummy_image_tex = ImageTexture::create(&mut params.factory, [1, 1], 1, TextureFilter::Linear, ImageFormat::BGRA8).unwrap();
+        let layers_tex = DataTexture::create(&mut params.factory, [LAYER_TEXTURE_WIDTH, 64], None).unwrap();
+        let render_tasks_tex = DataTexture::create(&mut params.factory, [RENDER_TASK_TEXTURE_WIDTH, TEXTURE_HEIGTH], None).unwrap();
+        let resource_cache_tex = DataTexture::create(&mut params.factory, [max_texture_size, max_texture_size], None).unwrap();
 
         let mut cache_a8_textures = HashMap::new();
         cache_a8_textures.insert(DUMMY_ID, dummy_cache_a8_tex);
@@ -635,8 +638,8 @@ impl Device {
         };
 
         let dev = Device {
-            device: device,
-            factory: factory,
+            device: params.device,
+            factory: params.factory,
             encoder: encoder,
             sampler: (sampler_nearest, sampler_linear),
             dither: dither_tex,
@@ -649,8 +652,8 @@ impl Device {
             layers: layers_tex,
             render_tasks: render_tasks_tex,
             resource_cache: resource_cache_tex,
-            main_color: main_color,
-            main_depth: main_depth,
+            main_color: params.main_color,
+            main_depth: params.main_depth,
             vertex_buffer: vertex_buffer,
             slice: slice,
             image_batch_set: HashSet::new(),

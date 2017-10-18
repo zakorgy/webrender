@@ -18,7 +18,7 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{BackendDevice, Device, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
+use device::{BackendDevice, Device, DeviceInitParams, FrameId, VertexDescriptor, GpuMarker, GpuProfiler};
 use device::{GpuTimer, TextureFilter, VertexUsageHint, TextureTarget, ShaderError};
 use device::{TextureSlot, TextureStorage, VertexAttribute, VertexAttributeKind};
 use device::{TextureId, DUMMY_ID};
@@ -934,11 +934,7 @@ impl Renderer {
     /// let (renderer, sender) = Renderer::new(opts);
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
-    pub fn new(mut options: RendererOptions,
-               device: BackendDevice,
-               mut factory: backend::Factory,
-               main_color: gfx::handle::RenderTargetView<R, ColorFormat>,
-               main_depth: gfx::handle::DepthStencilView<R, DepthFormat>)
+    pub fn new(mut options: RendererOptions, mut params: DeviceInitParams)
         -> Result<(Renderer, RenderApiSender), RendererError>
     {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
@@ -948,7 +944,7 @@ impl Renderer {
         let notifier = Arc::new(Mutex::new(None));
         let debug_server = DebugServer::new(api_tx.clone());
 
-        let mut device = Device::new(options.resource_override_path.clone(), device, factory, main_color, main_depth);
+        let mut device = Device::new(options.resource_override_path.clone(), params);
 
         let cs_box_shadow = create_box_shadow_program(&mut device, "cs_box_shadow");
         let cs_text_run = create_program(&mut device, "cs_text_run");
