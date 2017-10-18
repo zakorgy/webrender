@@ -34,7 +34,7 @@ ws = { optional = true, version = "0.7.3" }
 serde_json = { optional = true, version = "1.0" }
 serde = { optional = true, version = "1.0" }
 serde_derive = { optional = true, version = "1.0" }
-servo-glutin = "0.11"
+servo-glutin = "0.12"
 rand = "0.3"
 gfx = { git = 'https://github.com/gfx-rs/gfx', branch = 'pre-ll' }
 #gfx = { path = '../../gfx/src/render' }
