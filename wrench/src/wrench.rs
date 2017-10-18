@@ -135,6 +135,7 @@ impl Wrench {
                dp_ratio: f32,
                save_type: Option<SaveType>,
                size: DeviceUintSize,
+               mut device_init_params: webrender::DeviceInitParams,
                do_rebuild: bool,
                no_subpixel_aa: bool,
                debug: bool,
@@ -172,7 +173,7 @@ impl Wrench {
             .. Default::default()
         };
 
-        let (renderer, sender, _) = webrender::Renderer::new(window.get_window(), opts).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(opts, device_init_params).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size);
 

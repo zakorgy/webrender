@@ -233,8 +233,8 @@ impl WindowWrapper {
 fn make_window(size: DeviceUintSize,
                dp_ratio: Option<f32>,
                vsync: bool,
-               headless: bool) -> WindowWrapper {
-    let wrapper = if headless {
+               headless: bool) -> (WindowWrapper, webrender::DeviceInitParams) {
+    let (wrapper, params) = /*if headless {
         let gl = match gl::GlType::default() {
             gl::GlType::Gl => {
                 unsafe { gl::GlFns::load_with(|symbol| HeadlessContext::get_proc_address(symbol) as *const _) }
@@ -246,7 +246,7 @@ fn make_window(size: DeviceUintSize,
         WindowWrapper::Headless(HeadlessContext::new(size.width,
                                                      size.height),
                                 gl)
-    } else {
+    } else */{
         let mut window = glutin::WindowBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
                 opengl_version: (3, 2),
@@ -254,7 +254,7 @@ fn make_window(size: DeviceUintSize,
             })
             .with_dimensions(size.width, size.height);
         window.opengl.vsync = vsync;
-        let window = Rc::new(window.build().unwrap());
+        let window = window.build().unwrap();
         unsafe {
             window.make_current().expect("unable to make context current!");
         }
@@ -266,7 +266,8 @@ fn make_window(size: DeviceUintSize,
                 unsafe { gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _) }
             }
         };
-        WindowWrapper::Window(window, gl)
+        let (win, params) = webrender::create_rgba8_window(window);
+        (WindowWrapper::Window(Rc::new(win), gl), params)
     };
 
     wrapper.gl().clear_color(0.3, 0.0, 0.0, 1.0);
@@ -278,7 +279,7 @@ fn make_window(size: DeviceUintSize,
     println!("OpenGL version {}, {}", gl_version, gl_renderer);
     println!("hidpi factor: {} (native {})", dp_ratio, wrapper.hidpi_factor());
 
-    wrapper
+    (wrapper, params)
 }
 
 fn main() {
@@ -321,10 +322,10 @@ fn main() {
     }).unwrap_or(DeviceUintSize::new(1920, 1080));
     let is_headless = args.is_present("headless");
 
-    let mut window = make_window(size,
-                                 dp_ratio,
-                                 args.is_present("vsync"),
-                                 is_headless);
+    let (mut window, mut params) = make_window(size,
+                                               dp_ratio,
+                                               args.is_present("vsync"),
+                                               is_headless);
     let dp_ratio = dp_ratio.unwrap_or(window.hidpi_factor());
     let (width, height) = window.get_inner_size_pixels();
     let dim = DeviceUintSize::new(width, height);
@@ -333,6 +334,7 @@ fn main() {
                                  dp_ratio,
                                  save_type,
                                  dim,
+                                 params,
                                  args.is_present("rebuild"),
                                  args.is_present("no_subpixel_aa"),
                                  args.is_present("debug"),
