@@ -155,6 +155,7 @@ impl HeadlessContext {
         unsafe {
             mem::transmute(osmesa_sys::OSMesaGetProcAddress(c_str.as_ptr()))
         }
+        /*self.context.get_proc_address(s) as *const c_void*/
     }
 
     #[cfg(not(feature = "headless"))]
@@ -234,7 +235,8 @@ fn make_window(size: DeviceUintSize,
                dp_ratio: Option<f32>,
                vsync: bool,
                headless: bool) -> (WindowWrapper, webrender::DeviceInitParams) {
-    let (wrapper, params) = /*if headless {
+    let (wrapper, params) = if headless {
+        let headles_ctx = HeadlessContext::new(size.width, size.height);
         let gl = match gl::GlType::default() {
             gl::GlType::Gl => {
                 unsafe { gl::GlFns::load_with(|symbol| HeadlessContext::get_proc_address(symbol) as *const _) }
@@ -243,10 +245,11 @@ fn make_window(size: DeviceUintSize,
                 unsafe { gl::GlesFns::load_with(|symbol| HeadlessContext::get_proc_address(symbol) as *const _) }
             }
         };
-        WindowWrapper::Headless(HeadlessContext::new(size.width,
-                                                     size.height),
-                                gl)
-    } else */{
+        let params = webrender::create_rgba8_headless(HeadlessContext::get_proc_address, size.width, size.height);
+        let wrapper = WindowWrapper::Headless(headles_ctx, gl);
+
+        (wrapper, params)
+    } else {
         let mut window = glutin::WindowBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
                 opengl_version: (3, 2),
