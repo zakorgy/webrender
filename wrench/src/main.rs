@@ -47,7 +47,7 @@ mod yaml_helper;
 
 use binary_frame_reader::BinaryFrameReader;
 use gleam::gl;
-use glutin::{ElementState, VirtualKeyCode, WindowProxy};
+use glutin::{Api, ElementState, GlRequest, GlProfile, HeadlessRendererBuilder, VirtualKeyCode, WindowProxy};
 use perf::PerfHarness;
 use png::save_flipped;
 use rawtest::RawtestHarness;
@@ -91,9 +91,15 @@ fn percentile(values: &[f64], pct_int: u32) -> f64 {
 pub struct HeadlessContext {
     width: u32,
     height: u32,
+    context: glutin::HeadlessContext,
+}
+
+/*pub struct HeadlessContext {
+    width: u32,
+    height: u32,
     _context: osmesa_sys::OSMesaContext,
     _buffer: Vec<u32>,
-}
+}*/
 
 #[cfg(not(feature = "headless"))]
 pub struct HeadlessContext {
@@ -104,7 +110,7 @@ pub struct HeadlessContext {
 impl HeadlessContext {
     #[cfg(feature = "headless")]
     fn new(width: u32, height: u32) -> HeadlessContext {
-        let mut attribs = Vec::new();
+        /*let mut attribs = Vec::new();
 
         attribs.push(osmesa_sys::OSMESA_PROFILE);
         attribs.push(osmesa_sys::OSMESA_CORE_PROFILE);
@@ -138,6 +144,15 @@ impl HeadlessContext {
             height,
             _context: context,
             _buffer: buffer,
+        }*/
+        HeadlessContext {
+            width,
+            height,
+            context: HeadlessRendererBuilder::new(width, height)
+                .with_gl(GlRequest::Specific(Api::OpenGl, (3, 3)))
+                .with_gl_profile(GlProfile::Core)
+                .build()
+                .expect("Failed to build headless context"),
         }
     }
 
@@ -150,11 +165,12 @@ impl HeadlessContext {
     }
 
     #[cfg(feature = "headless")]
-    fn get_proc_address(s: &str) -> *const c_void {
-        let c_str = CString::new(s).expect("Unable to create CString");
+    fn get_proc_address(&self, s: &str) -> *const c_void {
+        /*let c_str = CString::new(s).expect("Unable to create CString");
         unsafe {
             mem::transmute(osmesa_sys::OSMesaGetProcAddress(c_str.as_ptr()))
-        }
+        }*/
+        self.context.get_proc_address(s) as *const c_void
     }
 
     #[cfg(not(feature = "headless"))]
@@ -234,19 +250,21 @@ fn make_window(size: DeviceUintSize,
                dp_ratio: Option<f32>,
                vsync: bool,
                headless: bool) -> (WindowWrapper, webrender::DeviceInitParams) {
-    let (wrapper, params) = /*if headless {
+    let (wrapper, params) = if headless {
+        let headles_ctx = HeadlessContext::new(size.width, size.height);
         let gl = match gl::GlType::default() {
             gl::GlType::Gl => {
-                unsafe { gl::GlFns::load_with(|symbol| HeadlessContext::get_proc_address(symbol) as *const _) }
+                unsafe { gl::GlFns::load_with(|symbol| headles_ctx.get_proc_address(symbol) as *const _) }
             }
             gl::GlType::Gles => {
-                unsafe { gl::GlesFns::load_with(|symbol| HeadlessContext::get_proc_address(symbol) as *const _) }
+                unsafe { gl::GlesFns::load_with(|symbol| headles_ctx.get_proc_address(symbol) as *const _) }
             }
         };
-        WindowWrapper::Headless(HeadlessContext::new(size.width,
-                                                     size.height),
-                                gl)
-    } else */{
+        let params = webrender::create_rgba8_headless(&headles_ctx.context, size.width, size.height);
+        let wrapper = WindowWrapper::Headless(headles_ctx, gl);
+
+        (wrapper, params)
+    } else {
         let mut window = glutin::WindowBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
                 opengl_version: (3, 2),
