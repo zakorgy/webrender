@@ -166,6 +166,8 @@ pub use renderer::{CpuProfile, GpuProfile, DebugFlags, RendererKind};
 pub use renderer::{MAX_VERTEX_TEXTURE_WIDTH, PROFILER_DBG, RENDER_TARGET_DBG, TEXTURE_CACHE_DBG};
 
 pub use webrender_api as api;
-pub use window::{create_rgba8_headless, create_rgba8_window};
+pub use window::create_rgba8_window;
+#[cfg(target_os="linux")]
+pub use window::create_rgba8_headless;
 pub use backend_window::Window;
 pub use device::{BackendDevice, DeviceInitParams};
