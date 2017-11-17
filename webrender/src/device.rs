@@ -35,6 +35,11 @@ use renderer::{BlendMode, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 
 use backend;
 use backend::Resources as R;
+
+use image::ColorType;
+use image::png::PNGEncoder;
+use std::path::Path;
+
 #[cfg(all(target_os = "windows", feature="dx11"))]
 pub type CB = self::backend::CommandBuffer<backend::DeferredContext>;
 #[cfg(not(feature = "dx11"))]
@@ -734,6 +739,7 @@ impl Device {
         }
     }
 
+    #[cfg(not(feature = "dx11"))]
     pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
         // TODO add bgra flag
         self.encoder.flush(&mut self.device);
@@ -761,6 +767,62 @@ impl Device {
             }
         }
     }
+
+    #[cfg(all(target_os = "windows", feature="dx11"))]
+    pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
+        self.encoder.flush(&mut self.device);
+
+
+        let (w, h, _, _) = self.main_color.get_dimensions();
+        let tex_kind = Kind::D2(w, h, gfx::texture::AaMode::Single);
+        let desc = gfx::texture::Info {
+            kind: tex_kind,
+            levels: 1,
+            format: gfx::format::SurfaceType::R8_G8_B8_A8,
+            bind: gfx::TRANSFER_SRC | gfx::TRANSFER_DST,
+            usage: gfx::memory::Usage::Download,
+        };
+        let cty = gfx::format::ChannelType::Unorm;
+        let dst_tex_raw = self.factory.create_texture_raw(desc, Some(cty), None).unwrap();
+
+        let info = gfx::texture::RawImageInfo {
+            xoffset: rect.origin.x as u16,
+            yoffset: rect.origin.y as u16,
+            zoffset: 0,
+            width: rect.size.width as u16,
+            height: rect.size.height as u16,
+            depth: 0,
+            format: ColorFormat::get_format(),
+            mipmap: 0,
+        };
+
+        self.encoder.copy_texture_to_texture_raw(
+            &self.main_color.raw().get_texture(), None, info.clone(),
+            &dst_tex_raw, None, info).unwrap();
+        self.encoder.flush(&mut self.device);
+
+        let dst_tex = Typed::new(dst_tex_raw);
+
+        let data = self.factory.map_texture_read::<gfx::format::R8_G8_B8_A8>(&dst_tex);
+        self.factory.unmap_texture(&dst_tex);
+        Device::save_to_png(
+            &PathBuf::from("pixels.png"),
+            &gfx::memory::cast_slice(data),
+            DeviceUintSize::new(rect.size.width, rect.size.height)
+        );
+    }
+
+    pub fn save_to_png<P: AsRef<Path>>(path: P, orig_pixels: &[u8], size: DeviceUintSize) {
+    let mut data = orig_pixels.to_owned();
+    let stride = size.width as usize * 4;
+    let encoder = PNGEncoder::new(File::create(path).unwrap());
+    encoder.encode(&data,
+                   size.width,
+                   size.height,
+                   ColorType::RGBA(8))
+           .expect("Unable to encode PNG!");
+    }
+
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size

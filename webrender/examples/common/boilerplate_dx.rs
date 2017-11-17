@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use webrender;
 use webrender::api::*;
+//use wrench::png::save_flipped;
 use winit;
 
 struct Notifier {
@@ -155,6 +156,28 @@ pub fn main_wrapper(example: &mut Example,
                 flags.toggle(webrender::PROFILER_DBG);
                 renderer.set_debug_flags(flags);
                 winit::ControlFlow::Continue
+            },
+
+            winit::Event::WindowEvent {
+                window_id,
+                event: winit::WindowEvent::KeyboardInput {
+                    device_id,
+                    input: winit::KeyboardInput {
+                        scancode,
+                        state: winit::ElementState::Pressed,
+                        virtual_keycode: Some(winit::VirtualKeyCode::R),
+                        modifiers
+                    }
+                },
+            } => {
+                /*let mut flags = renderer.get_debug_flags();
+                flags.toggle(webrender::PROFILER_DBG);
+                renderer.set_debug_flags(flags);*/
+                let size = window.inner.get_inner_size_pixels().unwrap();
+                let device_size = DeviceUintSize::new(size.0, size.1);
+                let rect = DeviceUintRect::new(DeviceUintPoint::zero(), device_size);
+                let pixels = renderer.read_pixels_rgba8(rect);
+                winit::ControlFlow::Break
             },
 
             /*glutin::Event::KeyboardInput(glutin::ElementState::Pressed,pp

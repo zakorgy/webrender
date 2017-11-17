@@ -140,6 +140,7 @@ extern crate app_units;
 extern crate bincode;
 extern crate euclid;
 extern crate fxhash;
+extern crate image;
 //extern crate gleam;
 extern crate num_traits;
 //extern crate notify;
