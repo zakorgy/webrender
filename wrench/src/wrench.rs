@@ -10,7 +10,7 @@ use crossbeam::sync::chase_lev;
 use dwrote;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use font_loader::system_fonts;
-use glutin::WindowProxy;
+use winit::EventsLoopProxy;
 use image;
 use image::GenericImage;
 use json_frame_writer::JsonFrameWriter;
@@ -51,14 +51,14 @@ pub enum SaveType {
 }
 
 struct Notifier {
-    window_proxy: Option<WindowProxy>,
+    window_proxy: Option<EventsLoopProxy>,
     frames_notified: u32,
     timing_receiver: chase_lev::Stealer<time::SteadyTime>,
     verbose: bool,
 }
 
 impl Notifier {
-    fn new(window_proxy: Option<WindowProxy>,
+    fn new(window_proxy: Option<EventsLoopProxy>,
            timing_receiver: chase_lev::Stealer<time::SteadyTime>,
            verbose: bool)
            -> Notifier {
@@ -89,14 +89,14 @@ impl RenderNotifier for Notifier {
         }
         if let Some(ref window_proxy) = self.window_proxy {
             #[cfg(not(target_os = "android"))]
-            window_proxy.wakeup_event_loop();
+            window_proxy.wakeup().unwrap();
         }
     }
 
     fn new_scroll_frame_ready(&mut self, _composite_needed: bool) {
         if let Some(ref window_proxy) = self.window_proxy {
             #[cfg(not(target_os = "android"))]
-            window_proxy.wakeup_event_loop();
+            window_proxy.wakeup().unwrap();
         }
     }
 }
@@ -181,7 +181,7 @@ impl Wrench {
         // put an Awakened event into the queue to kick off the first frame
         if let Some(ref wp) = proxy {
             #[cfg(not(target_os = "android"))]
-            wp.wakeup_event_loop();
+            wp.wakeup().unwrap();
         }
 
         let (timing_sender, timing_receiver) = chase_lev::deque();

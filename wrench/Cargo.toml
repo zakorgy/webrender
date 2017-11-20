@@ -23,7 +23,8 @@ time = "0.1"
 crossbeam = "0.2"
 osmesa-sys = { version = "0.1.2", optional = true }
 osmesa-src = { git = "https://github.com/servo/osmesa-src", optional = true }
-webrender = {path = "../webrender"}
+webrender = {path = "../webrender", features= ["dx11"]}
+winit = "0.8"
 serde = {version = "1.0", features = ["derive"] }
 
 [features]

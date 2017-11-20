@@ -67,7 +67,7 @@ pub fn create_rgba8_window(window: ExistingWindow)
     (window, params)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(feature = "dx11"))]
 pub fn create_rgba8_headless<F>(get_proc_address: F, width: u32, height: u32)
     -> DeviceInitParams
     where F: Fn(&str) -> *const c_void

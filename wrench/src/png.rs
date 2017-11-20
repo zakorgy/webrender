@@ -31,6 +31,15 @@ pub fn save_flipped<P: AsRef<Path>>(path: P, orig_pixels: &[u8], size: DeviceUin
            .expect("Unable to encode PNG!");
 }
 
+pub fn save_to_png<P: AsRef<Path>>(path: P, orig_pixels: &[u8], size: DeviceUintSize) {
+    let encoder = PNGEncoder::new(File::create(path).unwrap());
+    encoder.encode(&orig_pixels,
+                   size.width,
+                   size.height,
+                   ColorType::RGBA(8))
+           .expect("Unable to encode PNG!");
+}
+
 pub fn png(wrench: &mut Wrench,
            window: &mut WindowWrapper,
            mut reader: YamlFrameReader)

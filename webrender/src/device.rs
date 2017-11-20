@@ -36,10 +36,6 @@ use renderer::{BlendMode, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
 use backend;
 use backend::Resources as R;
 
-use image::ColorType;
-use image::png::PNGEncoder;
-use std::path::Path;
-
 #[cfg(all(target_os = "windows", feature="dx11"))]
 pub type CB = self::backend::CommandBuffer<backend::DeferredContext>;
 #[cfg(not(feature = "dx11"))]
@@ -215,7 +211,10 @@ impl<T> CacheTexture<T> where T: gfx::format::RenderFormat + gfx::format::Textur
         where F: gfx::Factory<R>
     {
         let (width, height) = (size[0] as u16, size[1] as u16);
+        #[cfg(not(feature = "dx11"))]
         let tex_kind = Kind::D2Array(width, height, 1, gfx::texture::AaMode::Single);
+        #[cfg(all(target_os = "windows", feature="dx11"))]
+        let tex_kind = Kind::D2(width, height, gfx::texture::AaMode::Single);
 
         let (surface, rtv, view, dsv) = {
             let surface = <T::Surface as gfx::format::SurfaceTyped>::get_surface_type();
@@ -772,7 +771,6 @@ impl Device {
     pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
         self.encoder.flush(&mut self.device);
 
-
         let (w, h, _, _) = self.main_color.get_dimensions();
         let tex_kind = Kind::D2(w, h, gfx::texture::AaMode::Single);
         let desc = gfx::texture::Info {
@@ -804,25 +802,19 @@ impl Device {
         let dst_tex = Typed::new(dst_tex_raw);
 
         let data = self.factory.map_texture_read::<gfx::format::R8_G8_B8_A8>(&dst_tex);
-        self.factory.unmap_texture(&dst_tex);
-        Device::save_to_png(
-            &PathBuf::from("pixels.png"),
-            &gfx::memory::cast_slice(data),
-            DeviceUintSize::new(rect.size.width, rect.size.height)
-        );
+        println!("\n\nrect = {:?}\noutput len = {:?}\ndata len = {:?}\n\n", rect, output.len(), data.len()*4);
+        //output.clone_from_slice(gfx::memory::cast_slice(data));
+        for j in 0..rect.size.height as usize {
+            for i in 0..rect.size.width as usize {
+                let offset = i * RGBA_STRIDE + j * rect.size.width as usize * RGBA_STRIDE;
+                let src = &data[(j + rect.origin.y as usize) * w as usize + (i + rect.origin.x as usize)];
+                output[offset + 0] = src[0];
+                output[offset + 1] = src[1];
+                output[offset + 2] = src[2];
+                output[offset + 3] = src[3];
+            }
+        }
     }
-
-    pub fn save_to_png<P: AsRef<Path>>(path: P, orig_pixels: &[u8], size: DeviceUintSize) {
-    let mut data = orig_pixels.to_owned();
-    let stride = size.width as usize * 4;
-    let encoder = PNGEncoder::new(File::create(path).unwrap());
-    encoder.encode(&data,
-                   size.width,
-                   size.height,
-                   ColorType::RGBA(8))
-           .expect("Unable to encode PNG!");
-    }
-
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size
@@ -1020,7 +1012,10 @@ impl Device {
     {
         let src_tex = match src {
             Some((src_id, _)) => self.cache_rgba8_textures.get(&src_id).unwrap().handle.raw(),
-            None => self.main_color.raw().get_texture(),
+            None => {
+                println!("READING FROM MAIN COLOR!!!!!");
+                self.main_color.raw().get_texture()
+            },
         };
         let dst_tex = self.cache_rgba8_textures.get(&dst_id).unwrap().handle.raw();
         let src_rect = src_rect.unwrap_or_else(|| {
