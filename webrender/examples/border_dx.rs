@@ -6,6 +6,7 @@ extern crate app_units;
 extern crate euclid;
 extern crate winit;
 extern crate webrender;
+extern crate image;
 
 #[path="common/boilerplate_dx.rs"]
 mod boilerplate;

@@ -5,6 +5,7 @@
 extern crate webrender;
 extern crate rayon;
 extern crate winit;
+extern crate image;
 
 #[path="common/boilerplate_dx.rs"]
 mod boilerplate;

@@ -7,7 +7,7 @@ repository = "https://github.com/servo/webrender"
 build = "build.rs"
 
 [features]
-default = ["freetype-lib"]
+default = ["freetype-lib", "dx11"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "serde", "serde_derive"]
@@ -47,6 +47,7 @@ gfx_device_dx11 = { path = '../../gfx/src/backend/dx11', optional = true}
 #gfx_window_dxgi = { git = 'https://github.com/gfx-rs/gfx', branch = 'pre-ll', optional = true}
 gfx_window_dxgi = { path = '../../gfx/src/window/dxgi', optional = true}
 winit = "0.8"
+image = "0.14"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}

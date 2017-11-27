@@ -9,6 +9,11 @@ use webrender;
 use webrender::api::*;
 //use wrench::png::save_flipped;
 use winit;
+use std::fs::File;
+use std::path::Path;
+
+use image::png::PNGEncoder;
+use image::ColorType;
 
 struct Notifier {
     proxy: winit::EventsLoopProxy,
@@ -82,6 +87,7 @@ pub fn main_wrapper(example: &mut Example,
     let mut events_loop = winit::EventsLoop::new();
     let winit_window = winit::WindowBuilder::new()
                        .with_title("WebRender Sample D3D11")
+                       .with_dimensions(1920, 1080) // <- without this line, it works fine
                        .build(&events_loop)
                        .unwrap();
     println!("Shader resource path: {:?}", res_path);
@@ -111,7 +117,7 @@ pub fn main_wrapper(example: &mut Example,
     }
 
     let epoch = Epoch(0);
-    let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
+    let root_background_color = ColorF::new(1.0, 1.0, 1.0, 1.0);
 
     let pipeline_id = PipelineId(0, 0);
     let layout_size = LayoutSize::new(width as f32, height as f32);
@@ -170,13 +176,16 @@ pub fn main_wrapper(example: &mut Example,
                     }
                 },
             } => {
-                /*let mut flags = renderer.get_debug_flags();
-                flags.toggle(webrender::PROFILER_DBG);
-                renderer.set_debug_flags(flags);*/
                 let size = window.inner.get_inner_size_pixels().unwrap();
                 let device_size = DeviceUintSize::new(size.0, size.1);
                 let rect = DeviceUintRect::new(DeviceUintPoint::zero(), device_size);
                 let pixels = renderer.read_pixels_rgba8(rect);
+                let encoder = PNGEncoder::new(File::create("read_pixels_result.png").unwrap());
+                encoder.encode(&pixels,
+                               device_size.width,
+                               device_size.height,
+                               ColorType::RGBA(8))
+                       .expect("Unable to encode PNG!");
                 winit::ControlFlow::Break
             },
 

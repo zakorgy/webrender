@@ -771,6 +771,8 @@ impl Device {
     pub fn read_pixels(&mut self, rect: DeviceUintRect, output: &mut [u8]) {
         self.encoder.flush(&mut self.device);
 
+        let tex = self.main_color.raw().get_texture();
+        let tex_info = tex.get_info().to_raw_image_info(gfx::format::ChannelType::Unorm, 0);
         let (w, h, _, _) = self.main_color.get_dimensions();
         let tex_kind = Kind::D2(w, h, gfx::texture::AaMode::Single);
         let desc = gfx::texture::Info {
@@ -783,26 +785,16 @@ impl Device {
         let cty = gfx::format::ChannelType::Unorm;
         let dst_tex_raw = self.factory.create_texture_raw(desc, Some(cty), None).unwrap();
 
-        let info = gfx::texture::RawImageInfo {
-            xoffset: rect.origin.x as u16,
-            yoffset: rect.origin.y as u16,
-            zoffset: 0,
-            width: rect.size.width as u16,
-            height: rect.size.height as u16,
-            depth: 0,
-            format: ColorFormat::get_format(),
-            mipmap: 0,
-        };
-
         self.encoder.copy_texture_to_texture_raw(
-            &self.main_color.raw().get_texture(), None, info.clone(),
-            &dst_tex_raw, None, info).unwrap();
+            &tex, None, tex_info,
+            &dst_tex_raw, None, tex_info).unwrap();
         self.encoder.flush(&mut self.device);
 
         let dst_tex = Typed::new(dst_tex_raw);
 
         let data = self.factory.map_texture_read::<gfx::format::R8_G8_B8_A8>(&dst_tex);
-        println!("\n\nrect = {:?}\noutput len = {:?}\ndata len = {:?}\n\n", rect, output.len(), data.len()*4);
+        self.factory.unmap_texture::<gfx::format::R8_G8_B8_A8>(&dst_tex);
+        println!("\n\nrect = {:?}\ntex_kind={:?}\noutput len = {:?}\ndata len = {:?}\n\n", rect, tex_kind, output.len(), data.len()*RGBA_STRIDE);
         //output.clone_from_slice(gfx::memory::cast_slice(data));
         for j in 0..rect.size.height as usize {
             for i in 0..rect.size.width as usize {

@@ -63,6 +63,8 @@ extern crate glutin as backend_window;
 
 #[cfg(all(target_os = "windows", feature="dx11"))]
 extern crate winit;
+#[cfg(all(target_os = "windows", feature="dx11"))]
+extern crate image;
 
 mod border;
 mod clip;
