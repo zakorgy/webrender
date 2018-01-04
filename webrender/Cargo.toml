@@ -11,6 +11,7 @@ default = ["freetype-lib"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "serde", "serde_derive", "image", "base64"]
+vulkan = ["gfx-backend-vulkan"]
 
 [dependencies]
 app_units = "0.6"
@@ -35,6 +36,9 @@ serde = { optional = true, version = "1.0" }
 serde_derive = { optional = true, version = "1.0" }
 image = { optional = true, version = "0.17" }
 base64 = { optional = true, version = "0.3.0" }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1", optional = true, features = ["glsl-to-spirv"] }
+winit = "0.9"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
