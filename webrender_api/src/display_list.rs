@@ -225,12 +225,13 @@ impl<'a> BuiltDisplayListIter<'a> {
                 return None;
             }
 
-            {
+            /*{
                 let reader = bincode::read_types::IoReader::new(UnsafeReader::new(&mut self.data));
                 let mut deserializer = bincode::Deserializer::new(reader, bincode::Infinite);
                 self.cur_item.deserialize_from(&mut deserializer)
                     .expect("MEH: malicious process?");
-            }
+            }*/
+            self.cur_item = bincode::deserialize_from(&mut UnsafeReader::new(&mut self.data), bincode::Infinite).expect("MEH: malicious process?");
 
             match self.cur_item.item {
                 SetGradientStops => {
