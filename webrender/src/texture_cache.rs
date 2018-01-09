@@ -11,7 +11,7 @@ use freelist::{FreeList, FreeListHandle, UpsertResult, WeakFreeListHandle};
 use gpu_cache::{GpuCache, GpuCacheHandle};
 use internal_types::{CacheTextureId, TextureUpdateList, TextureUpdateSource};
 use internal_types::{RenderTargetInfo, SourceTexture, TextureUpdate, TextureUpdateOp};
-use profiler::{ResourceProfileCounter, TextureCacheProfileCounters};
+//use profiler::{ResourceProfileCounter, TextureCacheProfileCounters};
 use resource_cache::CacheItem;
 use std::cmp;
 use std::mem;
@@ -247,10 +247,10 @@ impl TextureCache {
         self.frame_id = frame_id;
     }
 
-    pub fn end_frame(&mut self, texture_cache_profile: &mut TextureCacheProfileCounters) {
+    pub fn end_frame(&mut self/*, texture_cache_profile: &mut TextureCacheProfileCounters*/) {
         self.expire_old_standalone_entries();
 
-        self.array_a8_linear
+        /*self.array_a8_linear
             .update_profile(&mut texture_cache_profile.pages_a8_linear);
         self.array_rg8_linear
             .update_profile(&mut texture_cache_profile.pages_rg8_linear);
@@ -259,7 +259,7 @@ impl TextureCache {
         self.array_rgba8_linear
             .update_profile(&mut texture_cache_profile.pages_rgba8_linear);
         self.array_rgba8_nearest
-            .update_profile(&mut texture_cache_profile.pages_rgba8_nearest);
+            .update_profile(&mut texture_cache_profile.pages_rgba8_nearest);*/
     }
 
     // Request an item in the texture cache. All images that will
@@ -909,14 +909,14 @@ impl TextureArray {
         }
     }
 
-    fn update_profile(&self, counter: &mut ResourceProfileCounter) {
-        if self.is_allocated {
+    fn update_profile(&self/*, counter: &mut ResourceProfileCounter*/) {
+        /*if self.is_allocated {
             let size = self.layer_count as u32 * TEXTURE_LAYER_DIMENSIONS *
                 TEXTURE_LAYER_DIMENSIONS * self.format.bytes_per_pixel();
             counter.set(self.layer_count as usize, size as usize);
         } else {
             counter.set(0, 0);
-        }
+        }*/
     }
 
     // Allocate space in this texture array.

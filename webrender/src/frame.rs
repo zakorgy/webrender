@@ -18,7 +18,7 @@ use frame_builder::{FrameBuilder, FrameBuilderConfig, ScrollbarInfo};
 use gpu_cache::GpuCache;
 use internal_types::{FastHashMap, FastHashSet, RenderedDocument};
 use prim_store::{BrushAntiAliasMode};
-use profiler::{GpuCacheProfileCounters, TextureCacheProfileCounters};
+//use profiler::{GpuCacheProfileCounters, TextureCacheProfileCounters};
 use resource_cache::{FontInstanceMap,ResourceCache, TiledImageMap};
 use scene::{Scene, StackingContextHelpers, ScenePipeline, SceneProperties};
 use tiling::CompositeOps;
@@ -1083,8 +1083,8 @@ impl FrameContext {
         device_pixel_ratio: f32,
         layer: DocumentLayer,
         pan: LayerPoint,
-        texture_cache_profile: &mut TextureCacheProfileCounters,
-        gpu_cache_profile: &mut GpuCacheProfileCounters,
+        //texture_cache_profile: &mut TextureCacheProfileCounters,
+        //gpu_cache_profile: &mut GpuCacheProfileCounters,
 		scene_properties: &SceneProperties,
     ) -> RenderedDocument {
         let frame = frame_builder.build(
@@ -1097,8 +1097,8 @@ impl FrameContext {
             device_pixel_ratio,
             layer,
             pan,
-            texture_cache_profile,
-            gpu_cache_profile,
+            //texture_cache_profile,
+            //gpu_cache_profile,
             scene_properties,
         );
 

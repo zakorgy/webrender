@@ -4,8 +4,8 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat};
 use debug_font_data;
-use device::{Device, Program, Texture, TextureSlot, VertexDescriptor, VAO};
-use device::{TextureFilter, TextureTarget, VertexAttribute, VertexAttributeKind, VertexUsageHint};
+use device::{Device};//, Program, Texture, TextureSlot, VertexDescriptor, VAO};
+//use device::{TextureFilter, TextureTarget, VertexAttribute, VertexAttributeKind, VertexUsageHint};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use std::f32;

@@ -19,7 +19,7 @@ use glyph_cache::GlyphCache;
 use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphRasterizer, GlyphRequest};
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
 use internal_types::{FastHashMap, FastHashSet, SourceTexture, TextureUpdateList};
-use profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
+//use profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
 use rayon::ThreadPool;
 use std::collections::hash_map::Entry::{self, Occupied, Vacant};
 use std::cmp;
@@ -274,7 +274,7 @@ impl ResourceCache {
     pub fn update_resources(
         &mut self,
         updates: ResourceUpdates,
-        profile_counters: &mut ResourceProfileCounters,
+//        profile_counters: &mut ResourceProfileCounters,
     ) {
         // TODO, there is potential for optimization here, by processing updates in
         // bulk rather than one by one (for example by sorting allocations by size or
@@ -284,7 +284,7 @@ impl ResourceCache {
             match update {
                 ResourceUpdate::AddImage(img) => {
                     if let ImageData::Raw(ref bytes) = img.data {
-                        profile_counters.image_templates.inc(bytes.len());
+                        //profile_counters.image_templates.inc(bytes.len());
                     }
                     self.add_image_template(img.key, img.descriptor, img.data, img.tiling);
                 }
@@ -296,7 +296,7 @@ impl ResourceCache {
                 }
                 ResourceUpdate::AddFont(font) => match font {
                     AddFont::Raw(id, bytes, index) => {
-                        profile_counters.font_templates.inc(bytes.len());
+                        //profile_counters.font_templates.inc(bytes.len());
                         self.add_font_template(id, FontTemplate::Raw(Arc::new(bytes), index));
                     }
                     AddFont::Native(id, native_font_handle) => {
@@ -761,7 +761,7 @@ impl ResourceCache {
     pub fn block_until_all_resources_added(
         &mut self,
         gpu_cache: &mut GpuCache,
-        texture_cache_profile: &mut TextureCacheProfileCounters,
+//        texture_cache_profile: &mut TextureCacheProfileCounters,
     ) {
         profile_scope!("block_until_all_resources_added");
 
@@ -772,12 +772,12 @@ impl ResourceCache {
             &mut self.cached_glyphs,
             &mut self.texture_cache,
             gpu_cache,
-            texture_cache_profile,
+            //texture_cache_profile,
         );
 
         // Apply any updates of new / updated images (incl. blobs) to the texture cache.
         self.update_texture_cache(gpu_cache);
-        self.texture_cache.end_frame(texture_cache_profile);
+        self.texture_cache.end_frame(/*texture_cache_profile*/);
     }
 
     fn update_texture_cache(&mut self, gpu_cache: &mut GpuCache) {

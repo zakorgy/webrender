@@ -25,7 +25,7 @@ use picture::{PictureCompositeMode, PictureKind, PicturePrimitive, Rasterization
 use plane_split::{BspSplitter, Polygon, Splitter};
 use prim_store::{PrimitiveIndex, PrimitiveKind, PrimitiveMetadata, PrimitiveStore};
 use prim_store::{BrushPrimitive, BrushMaskKind, BrushKind, BrushSegmentKind, DeferredResolve, PrimitiveRun};
-use profiler::FrameProfileCounters;
+//use profiler::FrameProfileCounters;
 use render_task::{ClipWorkItem};
 use render_task::{RenderTaskAddress, RenderTaskId, RenderTaskKey, RenderTaskKind};
 use render_task::{BlurTask, ClearMode, RenderTaskLocation, RenderTaskTree};
@@ -2075,7 +2075,7 @@ pub struct Frame {
     pub layer: DocumentLayer,
     pub device_pixel_ratio: f32,
     pub passes: Vec<RenderPass>,
-    pub profile_counters: FrameProfileCounters,
+    //pub profile_counters: FrameProfileCounters,
 
     pub node_data: Vec<ClipScrollNodeData>,
     pub render_tasks: RenderTaskTree,

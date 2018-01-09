@@ -16,7 +16,7 @@ use frame::FrameContext;
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use gpu_cache::GpuCache;
 use internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
-use profiler::{BackendProfileCounters, ResourceProfileCounters};
+//use profiler::{BackendProfileCounters, ResourceProfileCounters};
 use rayon::ThreadPool;
 use record::ApiRecordingReceiver;
 use resource_cache::ResourceCache;
@@ -107,7 +107,7 @@ impl Document {
         &mut self,
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
-        resource_profile: &mut ResourceProfileCounters,
+        //resource_profile: &mut ResourceProfileCounters,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.accumulated_scale_factor();
         let pan = LayerPoint::new(
@@ -122,8 +122,8 @@ impl Document {
             accumulated_scale_factor,
             self.layer,
             pan,
-            &mut resource_profile.texture_cache,
-            &mut resource_profile.gpu_cache,
+            //&mut resource_profile.texture_cache,
+            //&mut resource_profile.gpu_cache,
             &self.scene.properties,
         )
     }
@@ -205,7 +205,7 @@ impl RenderBackend {
         document_id: DocumentId,
         message: DocumentMsg,
         frame_counter: u32,
-        profile_counters: &mut BackendProfileCounters,
+        //profile_counters: &mut BackendProfileCounters,
     ) -> DocumentOp {
         let doc = self.documents.get_mut(&document_id).expect("No document?");
 
@@ -253,7 +253,7 @@ impl RenderBackend {
                 profile_scope!("SetDisplayList");
 
                 self.resource_cache
-                    .update_resources(resources, &mut profile_counters.resources);
+                    .update_resources(resources/*, &mut profile_counters.resources*/);
 
                 let mut data;
                 while {
@@ -280,7 +280,7 @@ impl RenderBackend {
                 let display_list_received_time = precise_time_ns();
 
                 {
-                    let _timer = profile_counters.total_time.timer();
+                    //let _timer = profile_counters.total_time.timer();
                     doc.scene.set_display_list(
                         pipeline_id,
                         epoch,
@@ -301,14 +301,14 @@ impl RenderBackend {
                 // really simple and cheap to access, so it's not a big deal.
                 let display_list_consumed_time = precise_time_ns();
 
-                profile_counters.ipc.set(
+                /*profile_counters.ipc.set(
                     builder_start_time,
                     builder_finish_time,
                     send_start_time,
                     display_list_received_time,
                     display_list_consumed_time,
                     display_list_len,
-                );
+                );*/
 
                 DocumentOp::Built
             }
@@ -316,7 +316,7 @@ impl RenderBackend {
                 profile_scope!("UpdateResources");
 
                 self.resource_cache
-                    .update_resources(resources, &mut profile_counters.resources);
+                    .update_resources(resources/*, &mut profile_counters.resources*/);
 
                 doc.scene.update_epoch(pipeline_id, epoch);
                 doc.frame_ctx.update_epoch(pipeline_id, epoch);
@@ -328,7 +328,7 @@ impl RenderBackend {
 
                 doc.scene.set_root_pipeline_id(pipeline_id);
                 if doc.scene.pipelines.get(&pipeline_id).is_some() {
-                    let _timer = profile_counters.total_time.timer();
+                    //let _timer = profile_counters.total_time.timer();
                     doc.build_scene(&mut self.resource_cache);
                     DocumentOp::Built
                 } else {
@@ -343,14 +343,14 @@ impl RenderBackend {
             }
             DocumentMsg::Scroll(delta, cursor, move_phase) => {
                 profile_scope!("Scroll");
-                let _timer = profile_counters.total_time.timer();
+                //let _timer = profile_counters.total_time.timer();
 
                 if doc.frame_ctx.scroll(delta, cursor, move_phase) && doc.render_on_scroll == Some(true)
                 {
                     let frame = doc.render(
                         &mut self.resource_cache,
                         &mut self.gpu_cache,
-                        &mut profile_counters.resources,
+                        //&mut profile_counters.resources,
                     );
                     DocumentOp::Scrolled(frame)
                 } else {
@@ -369,13 +369,13 @@ impl RenderBackend {
             }
             DocumentMsg::ScrollNodeWithId(origin, id, clamp) => {
                 profile_scope!("ScrollNodeWithScrollId");
-                let _timer = profile_counters.total_time.timer();
+                //let _timer = profile_counters.total_time.timer();
 
                 if doc.frame_ctx.scroll_node(origin, id, clamp) && doc.render_on_scroll == Some(true) {
                     let frame = doc.render(
                         &mut self.resource_cache,
                         &mut self.gpu_cache,
-                        &mut profile_counters.resources,
+                        //&mut profile_counters.resources,
                     );
                     DocumentOp::Scrolled(frame)
                 } else {
@@ -384,14 +384,14 @@ impl RenderBackend {
             }
             DocumentMsg::TickScrollingBounce => {
                 profile_scope!("TickScrollingBounce");
-                let _timer = profile_counters.total_time.timer();
+                //let _timer = profile_counters.total_time.timer();
 
                 doc.frame_ctx.tick_scrolling_bounce_animations();
                 if doc.render_on_scroll == Some(true) {
                     let frame = doc.render(
                         &mut self.resource_cache,
                         &mut self.gpu_cache,
-                        &mut profile_counters.resources,
+                        //&mut profile_counters.resources,
                     );
                     DocumentOp::Scrolled(frame)
                 } else {
@@ -405,7 +405,7 @@ impl RenderBackend {
             }
             DocumentMsg::GenerateFrame(property_bindings) => {
                 profile_scope!("GenerateFrame");
-                let _timer = profile_counters.total_time.timer();
+                //let _timer = profile_counters.total_time.timer();
 
                 if let Some(property_bindings) = property_bindings {
                     doc.scene.properties.set_properties(property_bindings);
@@ -419,7 +419,7 @@ impl RenderBackend {
                     let frame = doc.render(
                         &mut self.resource_cache,
                         &mut self.gpu_cache,
-                        &mut profile_counters.resources,
+                        //&mut profile_counters.resources,
                     );
                     DocumentOp::Rendered(frame)
                 } else {
@@ -433,7 +433,7 @@ impl RenderBackend {
         IdNamespace(NEXT_NAMESPACE_ID.fetch_add(1, Ordering::Relaxed) as u32)
     }
 
-    pub fn run(&mut self, mut profile_counters: BackendProfileCounters) {
+    pub fn run(&mut self/*, mut profile_counters: BackendProfileCounters*/) {
         let mut frame_counter: u32 = 0;
 
         loop {
@@ -455,7 +455,7 @@ impl RenderBackend {
             match msg {
                 ApiMsg::UpdateResources(updates) => {
                     self.resource_cache
-                        .update_resources(updates, &mut profile_counters.resources);
+                        .update_resources(updates/*, &mut profile_counters.resources*/);
                 }
                 ApiMsg::GetGlyphDimensions(instance_key, glyph_keys, tx) => {
                     let mut glyph_dimensions = Vec::with_capacity(glyph_keys.len());
@@ -492,7 +492,7 @@ impl RenderBackend {
                     document_id,
                     doc_msg,
                     frame_counter,
-                    &mut profile_counters,
+                    //&mut profile_counters,
                 ) {
                     DocumentOp::Nop => {}
                     DocumentOp::Built => {}
@@ -500,7 +500,7 @@ impl RenderBackend {
                         self.notify_compositor_of_new_scroll_document(document_id, false);
                     }
                     DocumentOp::Scrolled(doc) => {
-                        self.publish_document(document_id, doc, &mut profile_counters);
+                        self.publish_document(document_id, doc/*, &mut profile_counters*/);
                         self.notify_compositor_of_new_scroll_document(document_id, true);
                     }
                     DocumentOp::Rendered(doc) => {
@@ -508,7 +508,7 @@ impl RenderBackend {
                         self.publish_document_and_notify_compositor(
                             document_id,
                             doc,
-                            &mut profile_counters,
+                            //&mut profile_counters,
                         );
                     }
                 },
@@ -567,21 +567,21 @@ impl RenderBackend {
         &mut self,
         document_id: DocumentId,
         document: RenderedDocument,
-        profile_counters: &mut BackendProfileCounters,
+        //profile_counters: &mut BackendProfileCounters,
     ) {
         let pending_update = self.resource_cache.pending_updates();
-        let msg = ResultMsg::PublishDocument(document_id, document, pending_update, profile_counters.clone());
+        let msg = ResultMsg::PublishDocument(document_id, document, pending_update/*, profile_counters.clone()*/);
         self.result_tx.send(msg).unwrap();
-        profile_counters.reset();
+        //profile_counters.reset();
     }
 
     fn publish_document_and_notify_compositor(
         &mut self,
         document_id: DocumentId,
         document: RenderedDocument,
-        profile_counters: &mut BackendProfileCounters,
+        //profile_counters: &mut BackendProfileCounters,
     ) {
-        self.publish_document(document_id, document, profile_counters);
+        self.publish_document(document_id, document/*, profile_counters*/);
 
         self.notifier.new_document_ready(document_id, false, true);
     }

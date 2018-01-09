@@ -7,7 +7,7 @@ repository = "https://github.com/servo/webrender"
 build = "build.rs"
 
 [features]
-default = ["freetype-lib"]
+default = ["freetype-lib", "vulkan"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "serde", "serde_derive", "image", "base64"]
@@ -30,15 +30,15 @@ bitflags = "1.0"
 thread_profiler = "0.1.1"
 plane-split = "0.7"
 smallvec = "0.6"
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1" }
+winit = "0.9"
 ws = { optional = true, version = "0.7.3" }
 serde_json = { optional = true, version = "1.0" }
 serde = { optional = true, version = "1.0" }
 serde_derive = { optional = true, version = "1.0" }
 image = { optional = true, version = "0.17" }
 base64 = { optional = true, version = "0.3.0" }
-gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1" }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1", optional = true, features = ["glsl-to-spirv"] }
-winit = "0.9"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}

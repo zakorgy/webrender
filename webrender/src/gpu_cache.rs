@@ -27,7 +27,7 @@
 use api::{LayerRect, PremultipliedColorF};
 use device::FrameId;
 use internal_types::UvRect;
-use profiler::GpuCacheProfileCounters;
+//use profiler::GpuCacheProfileCounters;
 use renderer::MAX_VERTEX_TEXTURE_WIDTH;
 use std::{mem, u16, u32};
 use std::ops::Add;
@@ -584,9 +584,9 @@ impl GpuCache {
     /// device specific cache texture.
     pub fn end_frame(
         &mut self,
-        profile_counters: &mut GpuCacheProfileCounters,
+        //profile_counters: &mut GpuCacheProfileCounters,
     ) -> GpuCacheUpdateList {
-        profile_counters
+        /*profile_counters
             .allocated_rows
             .set(self.texture.rows.len());
         profile_counters
@@ -594,7 +594,7 @@ impl GpuCache {
             .set(self.texture.allocated_block_count);
         profile_counters
             .saved_blocks
-            .set(self.saved_block_count);
+            .set(self.saved_block_count);*/
 
         GpuCacheUpdateList {
             height: self.texture.height,

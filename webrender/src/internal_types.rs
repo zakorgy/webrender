@@ -8,7 +8,7 @@ use api::{ImageFormat, PipelineId};
 use api::DebugCommand;
 use device::TextureFilter;
 use fxhash::FxHasher;
-use profiler::BackendProfileCounters;
+//use profiler::BackendProfileCounters;
 use std::{usize, i32};
 use std::collections::{HashMap, HashSet};
 use std::f32;
@@ -184,7 +184,7 @@ pub enum ResultMsg {
         DocumentId,
         RenderedDocument,
         TextureUpdateList,
-        BackendProfileCounters,
+        //BackendProfileCounters,
     ),
     UpdateResources {
         updates: TextureUpdateList,

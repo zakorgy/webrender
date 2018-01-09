@@ -18,7 +18,7 @@ use gpu_cache::{GpuBlockData, GpuCache, GpuCacheAddress, GpuCacheHandle, GpuData
                 ToGpuBlocks};
 use gpu_types::ClipScrollNodeData;
 use picture::{PictureKind, PicturePrimitive, RasterizationSpace};
-use profiler::FrameProfileCounters;
+//use profiler::FrameProfileCounters;
 use render_task::{ClipChain, ClipChainNode, ClipChainNodeIter, ClipWorkItem, RenderTask};
 use render_task::{RenderTaskId, RenderTaskTree};
 use renderer::{BLOCKS_PER_UV_RECT, MAX_VERTEX_TEXTURE_WIDTH};
@@ -1674,7 +1674,7 @@ impl PrimitiveStore {
         perform_culling: bool,
         parent_tasks: &mut Vec<RenderTaskId>,
         scene_properties: &SceneProperties,
-        profile_counters: &mut FrameProfileCounters,
+        //profile_counters: &mut FrameProfileCounters,
         pic_index: SpecificPrimitiveIndex,
         screen_rect: &DeviceIntRect,
         node_data: &[ClipScrollNodeData],
@@ -1739,7 +1739,7 @@ impl PrimitiveStore {
                 prim_context,
                 cull_children,
                 &mut child_tasks,
-                profile_counters,
+                //profile_counters,
                 rfid,
                 scene_properties,
                 cpu_prim_index,
@@ -1840,7 +1840,7 @@ impl PrimitiveStore {
         parent_prim_context: &PrimitiveContext,
         perform_culling: bool,
         parent_tasks: &mut Vec<RenderTaskId>,
-        profile_counters: &mut FrameProfileCounters,
+        //profile_counters: &mut FrameProfileCounters,
         original_reference_frame_id: Option<ClipId>,
         scene_properties: &SceneProperties,
         pic_index: SpecificPrimitiveIndex,
@@ -1910,12 +1910,12 @@ impl PrimitiveStore {
                     perform_culling,
                     parent_tasks,
                     scene_properties,
-                    profile_counters,
+                    //profile_counters,
                     pic_index,
                     screen_rect,
                     node_data,
                 ) {
-                    profile_counters.visible_primitives.inc();
+                    //profile_counters.visible_primitives.inc();
 
                     if let Some(ref matrix) = original_relative_transform {
                         let bounds = matrix.transform_rect(&prim_local_rect);

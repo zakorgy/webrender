@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use gleam::gl;
+//use gleam::gl;
 use std::mem;
 use std::rc::Rc;
 
@@ -26,9 +26,9 @@ pub struct GpuSampler<T> {
 }
 
 pub struct QuerySet<T> {
-    set: Vec<gl::GLuint>,
+    set: Vec</*gl::GLuint*/ u8>,
     data: Vec<T>,
-    pending: gl::GLuint,
+    pending: /*gl::GLuint*/ u8,
 }
 
 impl<T> QuerySet<T> {
@@ -45,7 +45,7 @@ impl<T> QuerySet<T> {
         self.pending = 0;
     }
 
-    fn add(&mut self, value: T) -> Option<gl::GLuint> {
+    fn add(&mut self, value: T) -> Option</*gl::GLuint*/ u8> {
         assert_eq!(self.pending, 0);
         self.set.get(self.data.len()).cloned().map(|query_id| {
             self.data.push(value);
@@ -54,7 +54,7 @@ impl<T> QuerySet<T> {
         })
     }
 
-    fn take<F: Fn(&mut T, gl::GLuint)>(&mut self, fun: F) -> Vec<T> {
+    fn take<F: Fn(&mut T/*, gl::GLuint*/)>(&mut self, fun: F) -> Vec<T> {
         let mut data = mem::replace(&mut self.data, Vec::new());
         for (value, &query) in data.iter_mut().zip(self.set.iter()) {
             fun(value, query)
@@ -64,7 +64,7 @@ impl<T> QuerySet<T> {
 }
 
 pub struct GpuFrameProfile<T> {
-    gl: Rc<gl::Gl>,
+    //gl: Rc<gl::Gl>,
     timers: QuerySet<GpuTimer<T>>,
     samplers: QuerySet<GpuSampler<T>>,
     frame_id: FrameId,
@@ -72,9 +72,9 @@ pub struct GpuFrameProfile<T> {
 }
 
 impl<T> GpuFrameProfile<T> {
-    fn new(gl: Rc<gl::Gl>) -> Self {
+    fn new(/*gl: Rc<gl::Gl>*/) -> Self {
         GpuFrameProfile {
-            gl,
+            //gl,
             timers: QuerySet::new(),
             samplers: QuerySet::new(),
             frame_id: FrameId::new(0),
@@ -83,23 +83,23 @@ impl<T> GpuFrameProfile<T> {
     }
 
     fn enable_timers(&mut self, count: i32) {
-        self.timers.set = self.gl.gen_queries(count);
+        //self.timers.set = self.gl.gen_queries(count);
     }
 
     fn disable_timers(&mut self) {
         if !self.timers.set.is_empty() {
-            self.gl.delete_queries(&self.timers.set);
+            //self.gl.delete_queries(&self.timers.set);
         }
         self.timers.set = Vec::new();
     }
 
     fn enable_samplers(&mut self, count: i32) {
-        self.samplers.set = self.gl.gen_queries(count);
+        //self.samplers.set = self.gl.gen_queries(count);
     }
 
     fn disable_samplers(&mut self) {
         if !self.samplers.set.is_empty() {
-            self.gl.delete_queries(&self.samplers.set);
+            //self.gl.delete_queries(&self.samplers.set);
         }
         self.samplers.set = Vec::new();
     }
@@ -120,7 +120,7 @@ impl<T> GpuFrameProfile<T> {
     fn finish_timer(&mut self) {
         debug_assert!(self.inside_frame);
         if self.timers.pending != 0 {
-            self.gl.end_query(gl::TIME_ELAPSED);
+            //self.gl.end_query(gl::TIME_ELAPSED);
             self.timers.pending = 0;
         }
     }
@@ -128,7 +128,7 @@ impl<T> GpuFrameProfile<T> {
     fn finish_sampler(&mut self) {
         debug_assert!(self.inside_frame);
         if self.samplers.pending != 0 {
-            self.gl.end_query(gl::SAMPLES_PASSED);
+            //self.gl.end_query(gl::SAMPLES_PASSED);
             self.samplers.pending = 0;
         }
     }
@@ -138,10 +138,10 @@ impl<T: NamedTag> GpuFrameProfile<T> {
     fn start_timer(&mut self, tag: T) -> GpuTimeQuery {
         self.finish_timer();
 
-        let marker = GpuMarker::new(&self.gl, tag.get_label());
+        let marker = GpuMarker::new(/*&self.gl,*/ tag.get_label());
 
         if let Some(query) = self.timers.add(GpuTimer { tag, time_ns: 0 }) {
-            self.gl.begin_query(gl::TIME_ELAPSED, query);
+            //self.gl.begin_query(gl::TIME_ELAPSED, query);
         }
 
         GpuTimeQuery(marker)
@@ -151,7 +151,7 @@ impl<T: NamedTag> GpuFrameProfile<T> {
         self.finish_sampler();
 
         if let Some(query) = self.samplers.add(GpuSampler { tag, count: 0 }) {
-            self.gl.begin_query(gl::SAMPLES_PASSED, query);
+            //self.gl.begin_query(gl::SAMPLES_PASSED, query);
         }
 
         GpuSampleQuery
@@ -159,15 +159,15 @@ impl<T: NamedTag> GpuFrameProfile<T> {
 
     fn build_samples(&mut self) -> (FrameId, Vec<GpuTimer<T>>, Vec<GpuSampler<T>>) {
         debug_assert!(!self.inside_frame);
-        let gl = &self.gl;
+        //let gl = &self.gl;
 
         (
             self.frame_id,
             self.timers.take(|timer, query| {
-                timer.time_ns = gl.get_query_object_ui64v(query, gl::QUERY_RESULT)
+                //timer.time_ns = gl.get_query_object_ui64v(query, gl::QUERY_RESULT)
             }),
             self.samplers.take(|sampler, query| {
-                sampler.count = gl.get_query_object_ui64v(query, gl::QUERY_RESULT)
+                //sampler.count = gl.get_query_object_ui64v(query, gl::QUERY_RESULT)
             }),
         )
     }
@@ -181,20 +181,20 @@ impl<T> Drop for GpuFrameProfile<T> {
 }
 
 pub struct GpuProfiler<T> {
-    gl: Rc<gl::Gl>,
+    //gl: Rc<gl::Gl>,
     frames: Vec<GpuFrameProfile<T>>,
     next_frame: usize,
 }
 
 impl<T> GpuProfiler<T> {
-    pub fn new(gl: Rc<gl::Gl>) -> Self {
+    pub fn new(/*gl: Rc<gl::Gl>*/) -> Self {
         const MAX_PROFILE_FRAMES: usize = 4;
         let frames = (0 .. MAX_PROFILE_FRAMES)
-            .map(|_| GpuFrameProfile::new(Rc::clone(&gl)))
+            .map(|_| GpuFrameProfile::new(/*Rc::clone(&gl)*/))
             .collect();
 
         GpuProfiler {
-            gl,
+            //gl,
             next_frame: 0,
             frames,
         }
@@ -259,33 +259,33 @@ impl<T: NamedTag> GpuProfiler<T> {
     }
 
     pub fn start_marker(&mut self, label: &str) -> GpuMarker {
-        GpuMarker::new(&self.gl, label)
+        GpuMarker::new(/*&self.gl,*/ label)
     }
 
     pub fn place_marker(&mut self, label: &str) {
-        GpuMarker::fire(&self.gl, label)
+        GpuMarker::fire(/*&self.gl,*/ label)
     }
 }
 
 #[must_use]
 pub struct GpuMarker {
-    gl: Rc<gl::Gl>,
+    //gl: Rc<gl::Gl>,
 }
 
 impl GpuMarker {
-    fn new(gl: &Rc<gl::Gl>, message: &str) -> Self {
-        gl.push_group_marker_ext(message);
-        GpuMarker { gl: Rc::clone(gl) }
+    fn new(/*gl: &Rc<gl::Gl>,*/ message: &str) -> Self {
+        //gl.push_group_marker_ext(message);
+        GpuMarker { /*gl: Rc::clone(gl)*/ }
     }
 
-    fn fire(gl: &Rc<gl::Gl>, message: &str) {
-        gl.insert_event_marker_ext(message);
+    fn fire(/*gl: &Rc<gl::Gl>,*/ message: &str) {
+        //gl.insert_event_marker_ext(message);
     }
 }
 
 impl Drop for GpuMarker {
     fn drop(&mut self) {
-        self.gl.pop_group_marker_ext();
+        //self.gl.pop_group_marker_ext();
     }
 }
 

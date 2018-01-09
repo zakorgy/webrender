@@ -15,7 +15,7 @@ use glyph_cache::{CachedGlyphInfo, GlyphCache};
 use gpu_cache::GpuCache;
 use internal_types::FastHashSet;
 use platform::font::FontContext;
-use profiler::TextureCacheProfileCounters;
+//use profiler::TextureCacheProfileCounters;
 use rayon::ThreadPool;
 use rayon::prelude::*;
 use std::cmp;
@@ -479,7 +479,7 @@ impl GlyphRasterizer {
         glyph_cache: &mut GlyphCache,
         texture_cache: &mut TextureCache,
         gpu_cache: &mut GpuCache,
-        _texture_cache_profile: &mut TextureCacheProfileCounters,
+        //_texture_cache_profile: &mut TextureCacheProfileCounters,
     ) {
         let mut rasterized_glyphs = Vec::with_capacity(self.pending_glyphs.len());
 
@@ -665,6 +665,6 @@ fn raterize_200_glyphs() {
         &mut glyph_cache,
         &mut TextureCache::new(4096),
         &mut gpu_cache,
-        &mut TextureCacheProfileCounters::new(),
+        //&mut TextureCacheProfileCounters::new(),
     );
 }

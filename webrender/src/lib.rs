@@ -48,6 +48,13 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate thread_profiler;
+#[macro_use]
+extern crate gfx_hal as hal;
+
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+
+extern crate winit;
 
 mod border;
 mod box_shadow;
@@ -56,7 +63,7 @@ mod clip_scroll_node;
 mod clip_scroll_tree;
 mod debug_colors;
 mod debug_font_data;
-mod debug_render;
+//mod debug_render;
 #[cfg(feature = "debugger")]
 mod debug_server;
 mod device;
@@ -75,8 +82,8 @@ mod internal_types;
 mod picture;
 mod prim_store;
 mod print_tree;
-mod profiler;
-mod query;
+//mod profiler;
+//mod query;
 mod record;
 mod render_backend;
 mod render_task;
@@ -135,7 +142,6 @@ extern crate bincode;
 extern crate byteorder;
 extern crate euclid;
 extern crate fxhash;
-extern crate gleam;
 extern crate num_traits;
 extern crate plane_split;
 extern crate rayon;
@@ -156,8 +162,8 @@ extern crate base64;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::{build_shader_strings, ProgramCache, UploadMethod, VertexUsageHint};
-pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
+//pub use device::{build_shader_strings, ProgramCache, UploadMethod, VertexUsageHint};
+pub use renderer::{/*CpuProfile,*/ DebugFlags, /*GpuProfile,*/ OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, ReadPixelsFormat, Renderer, RendererOptions};
 pub use renderer::{RendererStats, ThreadListener};

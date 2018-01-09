@@ -29,7 +29,7 @@ use prim_store::{GradientPrimitiveCpu, ImagePrimitiveCpu, LinePrimitive, Primiti
 use prim_store::{PrimitiveContainer, PrimitiveIndex, SpecificPrimitiveIndex};
 use prim_store::{PrimitiveStore, RadialGradientPrimitiveCpu};
 use prim_store::{BrushSegmentDescriptor, TextRunPrimitiveCpu};
-use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
+//use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
 use render_task::{ClearMode, RenderTask, RenderTaskId, RenderTaskTree};
 use resource_cache::ResourceCache;
 use scene::{ScenePipeline, SceneProperties};
@@ -1584,7 +1584,7 @@ impl FrameBuilder {
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskTree,
-        profile_counters: &mut FrameProfileCounters,
+        //profile_counters: &mut FrameProfileCounters,
         device_pixel_ratio: f32,
         scene_properties: &SceneProperties,
         node_data: &[ClipScrollNodeData],
@@ -1625,7 +1625,7 @@ impl FrameBuilder {
             &root_prim_context,
             true,
             &mut child_tasks,
-            profile_counters,
+            //profile_counters,
             None,
             scene_properties,
             SpecificPrimitiveIndex(0),
@@ -1693,8 +1693,8 @@ impl FrameBuilder {
         device_pixel_ratio: f32,
         layer: DocumentLayer,
         pan: LayerPoint,
-        texture_cache_profile: &mut TextureCacheProfileCounters,
-        gpu_cache_profile: &mut GpuCacheProfileCounters,
+        //texture_cache_profile: &mut TextureCacheProfileCounters,
+        //gpu_cache_profile: &mut GpuCacheProfileCounters,
         scene_properties: &SceneProperties,
     ) -> Frame {
         profile_scope!("build");
@@ -1703,10 +1703,10 @@ impl FrameBuilder {
                 .contains_rect(&self.screen_rect)
         );
 
-        let mut profile_counters = FrameProfileCounters::new();
-        profile_counters
+        //let mut profile_counters = FrameProfileCounters::new();
+        /*profile_counters
             .total_primitives
-            .set(self.prim_store.prim_count());
+            .set(self.prim_store.prim_count());*/
 
         resource_cache.begin_frame(frame_id);
         gpu_cache.begin_frame();
@@ -1733,14 +1733,14 @@ impl FrameBuilder {
             resource_cache,
             gpu_cache,
             &mut render_tasks,
-            &mut profile_counters,
+            //&mut profile_counters,
             device_pixel_ratio,
             scene_properties,
             &node_data,
         );
 
         let mut passes = Vec::new();
-        resource_cache.block_until_all_resources_added(gpu_cache, texture_cache_profile);
+        resource_cache.block_until_all_resources_added(gpu_cache/*, texture_cache_profile*/);
 
         if let Some(main_render_task_id) = main_render_task_id {
             let mut required_pass_count = 0;
@@ -1782,7 +1782,7 @@ impl FrameBuilder {
             );
         }
 
-        let gpu_cache_updates = gpu_cache.end_frame(gpu_cache_profile);
+        let gpu_cache_updates = gpu_cache.end_frame(/*gpu_cache_profile*/);
 
         render_tasks.build();
 
@@ -1794,7 +1794,7 @@ impl FrameBuilder {
             device_pixel_ratio,
             background_color: self.background_color,
             layer,
-            profile_counters,
+            //profile_counters,
             passes,
             node_data,
             render_tasks,
