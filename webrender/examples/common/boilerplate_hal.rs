@@ -10,7 +10,6 @@ extern crate gfx_backend_vulkan as back;
 
 use std::env;
 use std::path::PathBuf;
-use std::rc::Rc;
 use webrender;
 use webrender::api::*;
 use winit;
@@ -35,7 +34,7 @@ impl RenderNotifier for Notifier {
 
     fn wake_up(&self) {
         #[cfg(not(target_os = "android"))]
-            self.proxy.wakeup();
+            self.proxy.wakeup().unwrap();
     }
 
     fn new_document_ready(&self, _: DocumentId, _scrolled: bool, _composite_needed: bool) {
@@ -109,7 +108,7 @@ pub fn main_wrapper<E: Example>(
         .with_dimensions(1024, 768)
         .with_title(E::TITLE);
 
-    let mut window = wb
+    let window = wb
         .build(&events_loop)
         .unwrap();
 
@@ -126,7 +125,7 @@ pub fn main_wrapper<E: Example>(
     };
 
     let framebuffer_size = {
-        let (width, height) = window.get_inner_size_pixels().unwrap();
+        let (width, height) = window.get_inner_size().unwrap();
         DeviceUintSize::new(width, height)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));

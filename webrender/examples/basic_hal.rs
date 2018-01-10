@@ -10,20 +10,8 @@ extern crate winit;
 #[path = "common/boilerplate_hal.rs"]
 mod boilerplate;
 
-use app_units::Au;
-use boilerplate::{Example, HandyDandyRectBuilder};
-use euclid::vec2;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
+use boilerplate::Example;
 use webrender::api::*;
-
-fn load_file(name: &str) -> Vec<u8> {
-    let mut file = File::open(name).unwrap();
-    let mut buffer = vec![];
-    file.read_to_end(&mut buffer).unwrap();
-    buffer
-}
 
 fn main() {
     let mut app = App {};
@@ -35,9 +23,9 @@ struct App {}
 impl Example for App {
     fn render(
         &mut self,
-        api: &RenderApi,
-        builder: &mut DisplayListBuilder,
-        resources: &mut ResourceUpdates,
+        _api: &RenderApi,
+        _builder: &mut DisplayListBuilder,
+        _resources: &mut ResourceUpdates,
         _: DeviceUintSize,
         _pipeline_id: PipelineId,
         _document_id: DocumentId,
@@ -104,7 +92,7 @@ impl Example for App {
         builder.pop_stacking_context();*/
     }
 
-    fn on_event(&mut self, event: winit::Event, api: &RenderApi, document_id: DocumentId) -> bool {
+    fn on_event(&mut self, _event: winit::Event, _api: &RenderApi, _document_id: DocumentId) -> bool {
         false
     }
 }
