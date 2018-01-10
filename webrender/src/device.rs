@@ -21,6 +21,21 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread;
 
+use hal;
+use winit;
+use back;
+
+// gfx-hal
+use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
+use hal::{
+    DescriptorPool, Gpu, FrameSync, Primitive,
+    Backbuffer, SwapchainConfig,
+};
+use hal::format::{ChannelType, Swizzle};
+use hal::pass::Subpass;
+use hal::pso::{PipelineStage, ShaderStageFlags};
+use hal::queue::Submission;
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureFilter {
     Nearest,
@@ -123,13 +138,62 @@ impl Texture {
     }
 }
 
-pub struct Device {
-
+pub struct Device<B: hal::Backend> {
+    pub device: B::Device
 }
 
-impl Device {
-    pub fn new() -> Device {
-        Device { }
+impl<B: hal::Backend> Device<B> {
+    pub fn new(
+        window: &winit::Window,
+        instance: &back::Instance,
+        surface: &mut <back::Backend as hal::Backend>::Surface
+    ) -> Device<back::Backend> {
+        let max_texture_size = 1024;
+
+        let window_size = window.get_inner_size().unwrap();
+        let pixel_width = window_size.0 as u16;
+        let pixel_height = window_size.1 as u16;
+
+        // instantiate backend
+        let mut adapters = instance.enumerate_adapters();
+
+        for adapter in &adapters {
+            println!("{:?}", adapter.info);
+        }
+
+        let adapter = adapters.remove(0);
+        let surface_format = surface
+            .capabilities_and_formats(&adapter.physical_device)
+            .1
+            .map_or(
+                hal::format::Format::Rgba8Srgb,
+                |formats| {
+                    formats
+                        .into_iter()
+                        .find(|format| {
+                            format.base_format().1 == ChannelType::Srgb
+                        })
+                        .unwrap()
+                }
+            );
+
+        let memory_types = adapter
+            .physical_device
+            .memory_properties()
+            .memory_types;
+        let limits = adapter
+            .physical_device
+            .get_limits();
+
+        let Gpu { device, mut queue_groups } =
+            adapter.open_with(|family| {
+                if family.supports_graphics() && surface.supports_queue_family(family) {
+                    Some(1)
+                } else { None }
+            }).unwrap();
+        Device {
+            device,
+        }
     }
 
     pub fn create_texture(&mut self, target: TextureTarget) -> Texture {
@@ -141,6 +205,6 @@ impl Device {
     }
 
     pub fn swap_buffers(&mut self) {
-        println!("swap_buffers");
+        //println!("swap_buffers");
     }
 }
