@@ -802,13 +802,13 @@ enum CacheBus {
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
 struct CacheTexture {
-    texture: Texture,
+    texture: TextureSampler,
     bus: CacheBus,
 }
 
 impl CacheTexture {
     fn new(device: &mut Device<back::Backend>) -> Result<Self, RendererError> {
-        let texture = device.create_texture(TextureTarget::Default);
+        let texture = TextureSampler::ResourceCache;
 
         let bus = CacheBus::PixelBuffer {
             rows: Vec::new(),
@@ -831,7 +831,8 @@ impl CacheTexture {
     }
 
     fn get_height(&self) -> u32 {
-        self.texture.get_dimensions().height
+        //self.texture.get_dimensions().height
+        1024
     }
 
     fn prepare_for_updates(
@@ -841,24 +842,15 @@ impl CacheTexture {
         max_height: u32,
     ) {
         // See if we need to create or resize the texture.
-        let old_size = self.texture.get_dimensions();
+        let old_height = self.get_height();
         let new_size = DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, max_height);
 
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, .. } => {
-                if max_height > old_size.height {
+                if max_height > old_height {
+                    unreachable!("TODO implement resize");
                     // Create a f32 texture that can be used for the vertex shader
                     // to fetch data from.
-/*                    device.init_texture(
-                        &mut self.texture,
-                        new_size.width,
-                        new_size.height,
-                        ImageFormat::RGBAF32,
-                        TextureFilter::Nearest,
-                        None,
-                        1,
-                        None,
-                    );*/
 
                     // If we had to resize the texture, just mark all rows
                     // as dirty so they will be uploaded to the texture
@@ -920,12 +912,6 @@ impl CacheTexture {
                     return 0
                 }
 
-/*                let mut uploader = device.upload_texture(
-                    &self.texture,
-                    buffer,
-                    rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
-                );*/
-
                 for (row_index, row) in rows.iter_mut().enumerate() {
                     if !row.is_dirty {
                         continue;
@@ -940,7 +926,10 @@ impl CacheTexture {
                     );
 
                     //uploader.upload(rect, 0, None, cpu_blocks);
-
+                    println!("upload rect={:?} cpu_blocks={:?}", rect, cpu_blocks);
+                    let data_blocks = cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>();
+                    device.update_resource_cache(rect, &data_blocks);
+                    //device.update_resource_cache(rect, &cpu_blocks.into());
                     row.is_dirty = false;
                 }
 
@@ -950,73 +939,7 @@ impl CacheTexture {
     }
 }
 
-struct VertexDataTexture {
-    texture: Texture,
-    //pbo: PBO,
-}
-
-impl VertexDataTexture {
-    fn new(device: &mut Device<back::Backend>) -> VertexDataTexture {
-        let texture = device.create_texture(TextureTarget::Default);
-//        let pbo = device.create_pbo();
-
-        VertexDataTexture { texture/*, pbo*/ }
-    }
-
-    fn update<T>(&mut self, device: &mut Device<back::Backend>, data: &mut Vec<T>) {
-        if data.is_empty() {
-            return;
-        }
-
-        debug_assert!(mem::size_of::<T>() % 16 == 0);
-        let texels_per_item = mem::size_of::<T>() / 16;
-        let items_per_row = MAX_VERTEX_TEXTURE_WIDTH / texels_per_item;
-
-        // Extend the data array to be a multiple of the row size.
-        // This ensures memory safety when the array is passed to
-        // OpenGL to upload to the GPU.
-        if items_per_row != 0 {
-            while data.len() % items_per_row != 0 {
-                data.push(unsafe { mem::uninitialized() });
-            }
-        }
-
-        let width =
-            (MAX_VERTEX_TEXTURE_WIDTH - (MAX_VERTEX_TEXTURE_WIDTH % texels_per_item)) as u32;
-        let needed_height = (data.len() / items_per_row) as u32;
-
-        // Determine if the texture needs to be resized.
-        let texture_size = self.texture.get_dimensions();
-
-        if needed_height > texture_size.height {
-            let new_height = (needed_height + 127) & !127;
-
-/*            device.init_texture(
-                &mut self.texture,
-                width,
-                new_height,
-                ImageFormat::RGBAF32,
-                TextureFilter::Nearest,
-                None,
-                1,
-                None,
-            );*/
-        }
-
-        let rect = DeviceUintRect::new(
-            DeviceUintPoint::zero(),
-            DeviceUintSize::new(width, needed_height),
-        );
-//        device
-//            .upload_texture(&self.texture, &self.pbo, 0)
-//            .upload(rect, 0, None, data);
-    }
-
-    fn deinit(self, device: &mut Device<back::Backend>) {
-//        device.delete_pbo(self.pbo);
-//        device.delete_texture(self.texture);
-    }
-}
+//impl Into
 
 struct FileWatcher {
     notifier: Box<RenderNotifier>,
@@ -1066,8 +989,8 @@ pub struct Renderer {
     //profiler: Profiler,
     last_time: u64,
 
-    node_data_texture: VertexDataTexture,
-    render_task_texture: VertexDataTexture,
+    //node_data_texture: VertexDataTexture,
+    //render_task_texture: VertexDataTexture,
     gpu_cache_texture: CacheTexture,
 
     pipeline_epoch_map: FastHashMap<PipelineId, Epoch>,
@@ -1303,8 +1226,8 @@ impl Renderer {
 
         let texture_resolver = SourceTextureResolver::new(&mut device);
 
-        let node_data_texture = VertexDataTexture::new(&mut device);
-        let render_task_texture = VertexDataTexture::new(&mut device);
+        //let node_data_texture = VertexDataTexture::new(&mut device);
+        //let render_task_texture = VertexDataTexture::new(&mut device);
 
         let gpu_cache_texture = CacheTexture::new(&mut device)?;
 
@@ -1434,8 +1357,8 @@ impl Renderer {
             //prim_vao,
             //blur_vao,
             //clip_vao,
-            node_data_texture,
-            render_task_texture,
+            //node_data_texture,
+            //render_task_texture,
             pipeline_epoch_map: FastHashMap::default(),
             dither_matrix_texture,
             external_image_handler: None,
@@ -3186,17 +3109,51 @@ impl Renderer {
             }
         }
 
-        self.node_data_texture
-            .update(&mut self.device, &mut frame.node_data);
-//        self.device
-//            .bind_texture(TextureSampler::ClipScrollNodes, &self.node_data_texture.texture);
+        let task_data_blocks = frame.node_data.iter().map(
+            |block| {
+                let mut res_block: [f32; 28] = [0.0; 28];
+                let transform = block.transform.to_row_major_array();
+                res_block[0] = transform[0];
+                res_block[1] = transform[1];
+                res_block[2] = transform[2];
+                res_block[3] = transform[3];
+                res_block[4] = transform[4];
+                res_block[5] = transform[5];
+                res_block[6] = transform[6];
+                res_block[7] = transform[7];
+                res_block[8] = transform[8];
+                res_block[9] = transform[9];
+                res_block[10] = transform[10];
+                res_block[11] = transform[11];
+                res_block[12] = transform[12];
+                res_block[13] = transform[13];
+                res_block[14] = transform[14];
+                res_block[15] = transform[15];
 
-        self.render_task_texture
-            .update(&mut self.device, &mut frame.render_tasks.task_data);
-//        self.device.bind_texture(
-//            TextureSampler::RenderTasks,
-//            &self.render_task_texture.texture,
-//        );
+                res_block[16] = block.local_clip_rect.origin.x;
+                res_block[17] = block.local_clip_rect.origin.y;
+                res_block[18] = block.local_clip_rect.size.width;
+                res_block[19] = block.local_clip_rect.size.height;
+
+                res_block[20] = block.reference_frame_relative_scroll_offset.x;
+                res_block[21] = block.reference_frame_relative_scroll_offset.y;
+
+                res_block[22] = block.scroll_offset.x;
+                res_block[23] = block.scroll_offset.y;
+
+                res_block[24] = block.transform_kind;
+
+                res_block[25] = block.padding[0];
+                res_block[26] = block.padding[1];
+                res_block[27] = block.padding[2];
+
+                res_block
+            }
+        ).collect::<Vec<[f32; 28]>>();
+        self.device.update_node_data(&task_data_blocks);
+
+        let task_data_blocks = frame.render_tasks.task_data.iter().map(|block| block.data).collect::<Vec<[f32; 12]>>();
+        self.device.update_render_tasks(&task_data_blocks);
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
         debug_assert!(self.texture_resolver.cache_rgba8_texture.is_none());
@@ -3525,7 +3482,7 @@ impl Renderer {
         pixels
     }
 
-    pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
+    /*pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
         let size = self.gpu_cache_texture.texture.get_dimensions();
         let mut texels = vec![0u8; 4 * (size.width * size.height) as usize];
 //        self.device.begin_frame();
@@ -3538,7 +3495,7 @@ impl Renderer {
 //        self.device.bind_read_target(None);
 //        self.device.end_frame();
         (size, texels)
-    }
+    }*/
 
     pub fn read_pixels_into(
         &self,
@@ -3574,8 +3531,8 @@ impl Renderer {
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
 //            self.device.delete_texture(dither_matrix_texture);
         }
-        self.node_data_texture.deinit(&mut self.device);
-        self.render_task_texture.deinit(&mut self.device);
+        //self.node_data_texture.deinit(&mut self.device);
+        //self.render_task_texture.deinit(&mut self.device);
 //        self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
 //        self.device.delete_vao(self.prim_vao);
@@ -3620,6 +3577,7 @@ impl Renderer {
         self.ps_split_composite.deinit(&mut self.device);
         self.ps_composite.deinit(&mut self.device);*/
 //        self.device.end_frame();
+        self.device.cleanup();
     }
 
     pub fn swap_buffers(&mut self) {
