@@ -10,7 +10,7 @@ extern crate winit;
 #[path = "common/boilerplate_hal.rs"]
 mod boilerplate;
 
-use boilerplate::Example;
+use boilerplate::{Example, HandyDandyRectBuilder};
 use webrender::api::*;
 
 fn main() {
@@ -24,13 +24,13 @@ impl Example for App {
     fn render(
         &mut self,
         _api: &RenderApi,
-        _builder: &mut DisplayListBuilder,
+        builder: &mut DisplayListBuilder,
         _resources: &mut ResourceUpdates,
         _: DeviceUintSize,
         _pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
-        /*let bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
+        let bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
         let info = LayoutPrimitiveInfo::new(bounds);
         builder.push_stacking_context(
             &info,
@@ -41,55 +41,20 @@ impl Example for App {
             MixBlendMode::Normal,
             Vec::new(),
         );
-
-        let image_mask_key = api.generate_image_key();
-        resources.add_image(
-            image_mask_key,
-            ImageDescriptor::new(2, 2, ImageFormat::A8, true),
-            ImageData::new(vec![0, 80, 180, 255]),
-            None,
-        );
-        let mask = ImageMask {
-            image: image_mask_key,
-            rect: (75, 75).by(100, 100),
-            repeat: false,
-        };
-        let complex = ComplexClipRegion::new(
-            (50, 50).to(150, 150),
-            BorderRadius::uniform(20.0),
-            ClipMode::Clip
-        );
-        let id = builder.define_clip(None, bounds, vec![complex], Some(mask));
+        let id = builder.define_clip(None, bounds, vec![], None);
         builder.push_clip_id(id);
 
         let info = LayoutPrimitiveInfo::new((100, 100).to(200, 200));
-        builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        builder.push_line(
+            &info,
+            0.0,
+            LineOrientation::Horizontal,
+            &ColorF::new(0.0, 1.0, 0.0, 1.0),
+            LineStyle::Solid,
+        );
 
-        let info = LayoutPrimitiveInfo::new((250, 100).to(350, 200));
-        builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
-        let border_side = BorderSide {
-            color: ColorF::new(0.0, 0.0, 1.0, 1.0),
-            style: BorderStyle::Groove,
-        };
-        let border_widths = BorderWidths {
-            top: 10.0,
-            left: 10.0,
-            bottom: 10.0,
-            right: 10.0,
-        };
-        let border_details = BorderDetails::Normal(NormalBorder {
-            top: border_side,
-            right: border_side,
-            bottom: border_side,
-            left: border_side,
-            radius: BorderRadius::uniform(20.0),
-        });
-
-        let info = LayoutPrimitiveInfo::new((100, 100).to(200, 200));
-        builder.push_border(&info, border_widths, border_details);
         builder.pop_clip_id();
-
-        builder.pop_stacking_context();*/
+        builder.pop_stacking_context();
     }
 
     fn on_event(&mut self, _event: winit::Event, _api: &RenderApi, _document_id: DocumentId) -> bool {
