@@ -33,6 +33,7 @@ use hal::format::{ChannelType, Swizzle};
 use hal::pass::Subpass;
 use hal::pso::{PipelineStage, ShaderStageFlags};
 use hal::queue::Submission;
+use parser;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TextureFilter {
@@ -69,7 +70,7 @@ const ENTRY_NAME: &str = "main";
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
-struct Vertex {
+pub struct Vertex {
     aPosition: [f32; 3],
 }
 
@@ -83,7 +84,7 @@ struct Locals {
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
-struct PrimitiveInstance {
+pub struct PrimitiveInstance {
     aData0: [i32; 4],
     aData1: [i32; 4],
 }
@@ -530,130 +531,9 @@ impl<B: hal::Backend> Device<B> {
             )
             .unwrap();
 
-        let set_layout = device.create_descriptor_set_layout(&[
-            hal::pso::DescriptorSetLayoutBinding { // Locals
-                binding: 0,
-                ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 1,
-                stage_flags: ShaderStageFlags::VERTEX,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tColor0
-                binding: 1,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sColor0
-                binding: 2,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tColor1
-                binding: 3,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sColor1
-                binding: 4,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tColor2
-                binding: 5,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sColor2
-                binding: 6,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-
-            //binding 7-8 <- dither
-
-            hal::pso::DescriptorSetLayoutBinding { // tCacheA8
-                binding: 9,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sCacheA8
-                binding: 10,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tCacheRGBA8
-                binding: 11,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sCacheRGBA8
-                binding: 12,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tSharedCacheA8
-                binding: 13,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sSharedCacheA8
-                binding: 14,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-
-            // binding 15-16 <- {t|s}Gradients // Why this even exist?
-
-            hal::pso::DescriptorSetLayoutBinding { // tResourceCache
-                binding: 17,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sResourceCache
-                binding: 18,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tClipScrollNodes
-                binding: 19,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sClipScrollNodes
-                binding: 20,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // tRenderTasks
-                binding: 21,
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-            hal::pso::DescriptorSetLayoutBinding { // sRenderTasks
-                binding: 22,
-                ty: hal::pso::DescriptorType::Sampler,
-                count: 1,
-                stage_flags: ShaderStageFlags::ALL,
-            },
-        ],
-        );
-
+        let json = parser::read_json();
+        let (dsl_bindings, descriptors) = parser::create_descriptor_set_layout_bindings(&json, "ps_line");
+        let set_layout = device.create_descriptor_set_layout(&dsl_bindings);
         let pipeline_layout = device.create_pipeline_layout(&[&set_layout], &[]);
 
         let pipelines = {
@@ -683,61 +563,19 @@ impl<B: hal::Backend> Device<B> {
                 hal::pso::ColorMask::ALL,
                 hal::pso::BlendState::ALPHA,
             ));
-            pipeline_desc.vertex_buffers.push(hal::pso::VertexBufferDesc {
-                stride: mem::size_of::<Vertex>() as u32,
-                rate: 0, // VertexBuffer
-            });
-            pipeline_desc.vertex_buffers.push(hal::pso::VertexBufferDesc {
-                stride: mem::size_of::<PrimitiveInstance>() as u32,
-                rate: 1, // InstanceBuffer
-            });
 
-            pipeline_desc.attributes.push(hal::pso::AttributeDesc { // aPosition
-                location: 0,
-                binding: 0,
-                element: hal::pso::Element {
-                    format: hal::format::Format::Rgb32Float,
-                    offset: 0,
-                },
-            });
-            pipeline_desc.attributes.push(hal::pso::AttributeDesc { // aData0
-                location: 4,
-                binding: 1,
-                element: hal::pso::Element {
-                    format: hal::format::Format::Rgba32Int,
-                    offset: 0,
-                },
-            });
-            pipeline_desc.attributes.push(hal::pso::AttributeDesc { // aData1
-                location: 5,
-                binding: 1,
-                element: hal::pso::Element {
-                    format: hal::format::Format::Rgba32Int,
-                    offset: 16,
-                },
-            });
+            pipeline_desc.vertex_buffers = parser::create_vertex_buffer_descriptors(&json, "ps_line");
+            pipeline_desc.attributes = parser::create_attribute_descriptors(&json, "ps_line");
 
             device.create_graphics_pipelines(&[pipeline_desc])
         };
 
         println!("pipelines: {:?}", pipelines);
 
+        let (range_descs, sets) = parser::create_range_descriptors_and_set_count(&json, "ps_line");
         let mut desc_pool = device.create_descriptor_pool(
-            1, // sets
-            &[
-                hal::pso::DescriptorRangeDesc {
-                    ty: hal::pso::DescriptorType::UniformBuffer,
-                    count: 1,
-                },
-                hal::pso::DescriptorRangeDesc {
-                    ty: hal::pso::DescriptorType::SampledImage,
-                    count: 11,
-                },
-                hal::pso::DescriptorRangeDesc {
-                    ty: hal::pso::DescriptorType::Sampler,
-                    count: 11,
-                },
-            ],
+            sets,
+            &range_descs,
         );
 
         let desc_sets = desc_pool.allocate_sets(&[&set_layout]);
@@ -863,7 +701,7 @@ impl<B: hal::Backend> Device<B> {
         device.update_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 0,
+                binding: descriptors["Locals"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::UniformBuffer(vec![
                     (&locals_buffer.buffer, 0..mem::size_of::<Locals>() as u64),
@@ -871,37 +709,37 @@ impl<B: hal::Backend> Device<B> {
             },
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 17,
+                binding: descriptors["tResourceCache"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::SampledImage(vec![(&resource_cache.image_srv, hal::image::ImageLayout::Undefined)]),
             },
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 18,
+                binding: descriptors["sResourceCache"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
             },
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 19,
+                binding: descriptors["tClipScrollNodes"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::SampledImage(vec![(&node_data.image_srv, hal::image::ImageLayout::Undefined)]),
             },
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 20,
+                binding: descriptors["sClipScrollNodes"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
             },
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 21,
+                binding: descriptors["tRenderTasks"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::SampledImage(vec![(&render_tasks.image_srv, hal::image::ImageLayout::Undefined)]),
             },
             hal::pso::DescriptorSetWrite {
                 set: &desc_sets[0],
-                binding: 22,
+                binding: descriptors["sRenderTasks"],
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
             },

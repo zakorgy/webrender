@@ -435,9 +435,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
         pipeline_requirmenets.insert("descriptorPool", descriptor_pool);
         pipeline_requirmenets.insert("descriptorSetLayouts", json!(descriptor_set_layouts));
         pipeline_requirmenets.insert("vertexBufferDescriptors", json!(vertex_buffer_descriptors));
-        return Some(json!({
-            file_name.trim_right_matches(".vert"): pipeline_requirmenets
-        }));
+        return Some(json!(pipeline_requirmenets));
     }
     None
 }
@@ -722,11 +720,11 @@ fn create_vertex_buffer_descriptors_json(file_name: &str) -> Vec<JsonValue> {
 }
 
 fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) -> JsonValue {
-    let mut requirements = Vec::new();
+    let mut requirements = serde_json::Map::new();
     for mut file_name in file_name_vector {
         let file_path = Path::new(&out_dir).join(&file_name);
         if let Some(req) = process_glsl_for_spirv(&file_path, &file_name) {
-            requirements.push(req);
+            requirements.insert(file_name.trim_right_matches(".vert").to_owned(), req);
         }
         file_name.push_str(".spv");
         let spirv_file_path = Path::new(&out_dir).join(&file_name);
