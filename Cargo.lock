@@ -491,6 +491,7 @@ source = "git+https://github.com/gfx-rs/gfx.git?rev=7d4b4f1#7d4b4f16de9841e403f0
 dependencies = [
  "bitflags 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
