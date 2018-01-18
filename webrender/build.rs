@@ -384,6 +384,9 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
             // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform float uDevicePixelRatio") {
                 replace_non_sampler_uniforms(&mut new_data);
+                if write_json {
+                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layouts);
+                }
             }
 
         // Adding location info for non-uniform variables.
@@ -544,6 +547,16 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
          \t\tuniform int uMode;\n\
          \t};\n",
     );
+}
+
+fn add_locals_to_descriptor_set_layout(descriptor_set_layouts: &mut Vec<JsonValue>) {
+    descriptor_set_layouts.push(json!({
+        "name": "Locals",
+        "binding": 0,
+        "ty": "UniformBuffer",
+        "count": 1,
+        "stage_flags": "Vertex",
+    }));
 }
 
 fn extend_non_uniform_variables_with_location_info(
