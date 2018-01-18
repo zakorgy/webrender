@@ -340,7 +340,7 @@ fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) -> HashMap<S
 
 fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue> {
     let mut new_data = String::new();
-    let mut binding = 0;
+    let mut binding = 1; // 0 is reserved for Locals
     let mut in_location = 0;
     let mut out_location = 0;
     let mut attribute_descriptors: Vec<JsonValue> = Vec::new();
@@ -383,7 +383,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
             // We just place a predifened structure to the position of the last non-uniform
             // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform float uDevicePixelRatio") {
-                replace_non_sampler_uniforms(&mut new_data)
+                replace_non_sampler_uniforms(&mut new_data);
             }
 
         // Adding location info for non-uniform variables.
