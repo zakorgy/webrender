@@ -634,14 +634,20 @@ impl<B: hal::Backend> Device<B> {
                 locals_buffer_stride,
                 locals_buffer_len
             );
-        let projection = Transform3D::row_major(0.001953125, 0.0, 0.0, 0.0,
+        let mut projection = Transform3D::row_major(0.001953125, 0.0, 0.0, 0.0,
                                                 0.0,-0.0026041667, 0.0, 0.0,
                                                 0.0, 0.0, 0.000001, 0.0,
                                                 -1.0, 1.0, 0.0, 1.0);
+
+        let y_flip = Transform3D::row_major(1.0, 0.0, 0.0, 0.0,
+                                            0.0, -1.0, 0.0, 0.0,
+                                            0.0, 0.0, 1.0, 0.0,
+                                            0.0, 0.0, 0.0, 1.0);
+
         let locals_data =
             vec![
                 Locals {
-                    uTransform: projection.to_row_arrays(),
+                    uTransform: projection.post_mul(&y_flip).to_row_arrays(),
                     uDevicePixelRatio: 1.0,
                     uMode: 0i32,
                 }
