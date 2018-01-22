@@ -803,7 +803,7 @@ impl<B: hal::Backend> Device<B> {
         let locals_data =
             vec![
                 Locals {
-                    uTransform: projection.to_row_arrays(),
+                    uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
                     uDevicePixelRatio: 1.0,
                     uMode: 0i32,
                 }
