@@ -8,8 +8,10 @@ use api::{DeviceUintPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize};
 use euclid::Transform3D;
 //use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
+use serde_json::Value;
 use smallvec::SmallVec;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::iter::repeat;
@@ -258,7 +260,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
     }
 
     pub fn update_buffer_and_submit_upload<T>(
-        &self,
+        &mut self,
         device: &mut B::Device,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         image_offset: DeviceUintPoint,
@@ -318,6 +320,8 @@ pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
     pub data_stride: usize,
+    //pub buffer_max_size: usize,
+    pub buffer_size: usize,
 }
 
 impl<B: hal::Backend> Buffer<B> {
@@ -348,11 +352,12 @@ impl<B: hal::Backend> Buffer<B> {
             memory,
             buffer,
             data_stride,
+            buffer_size: 0,
         }
     }
 
     pub fn update<T>(
-        &self,
+        &mut self,
         device: &B::Device,
         buffer_offset: u64,
         buffer_width: u64,
@@ -368,6 +373,265 @@ impl<B: hal::Backend> Buffer<B> {
             data[i] = *d;
         }
         device.release_mapping_writer(data);
+        self.buffer_size += update_data.len();
+    }
+}
+
+pub struct Program<B: hal::Backend> {
+    pub bindings_map: HashMap<String, usize>,
+    pub descriptor_set_layout: B::DescriptorSetLayout,
+    pub descriptor_pool: B::DescriptorPool,
+    pub descriptor_sets: Vec<B::DescriptorSet>,
+    pub pipeline_layout: B::PipelineLayout,
+    pub pipelines: Vec<B::GraphicsPipeline>,
+    pub vertex_buffer: Buffer<B>,
+    pub instance_buffer: Buffer<B>,
+    pub locals_buffer: Buffer<B>,
+}
+
+impl<B: hal::Backend> Program<B> {
+    pub fn create(
+        json: &Value,
+        device: &B::Device,
+        memory_types: &Vec<hal::MemoryType>,
+        shader_name: String,
+        render_pass: &B::RenderPass,
+    ) -> Program<B> {
+        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+        let vs_module = device
+            .create_shader_module(
+                get_shader_source(shader_name.as_str(), ".vert.spv").as_slice()
+            )
+            .unwrap();
+        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+        let fs_module = device
+            .create_shader_module(
+                get_shader_source(shader_name.as_str(), ".frag.spv").as_slice()
+            )
+            .unwrap();
+        let (bindings, bindings_map) = parser::create_descriptor_set_layout_bindings(&json, shader_name.as_str());
+        let (ranges, sets) = parser::create_range_descriptors_and_set_count(&json, shader_name.as_str());
+
+        let descriptor_set_layout = device.create_descriptor_set_layout(&bindings);
+        let mut descriptor_pool = device.create_descriptor_pool(sets, &ranges);
+        let descriptor_sets = descriptor_pool.allocate_sets(&[&descriptor_set_layout]);
+
+        let pipeline_layout = device.create_pipeline_layout(&[&descriptor_set_layout], &[]);
+
+        let pipelines = {
+            let (vs_entry, fs_entry) = (
+                hal::pso::EntryPoint::<B> { entry: ENTRY_NAME, module: &vs_module, specialization: &[] },
+                hal::pso::EntryPoint::<B> { entry: ENTRY_NAME, module: &fs_module, specialization: &[] },
+            );
+
+            let shader_entries = hal::pso::GraphicsShaderSet {
+                vertex: vs_entry,
+                hull: None,
+                domain: None,
+                geometry: None,
+                fragment: Some(fs_entry),
+            };
+
+            let subpass = Subpass { index: 0, main_pass: render_pass };
+
+            let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
+                shader_entries,
+                Primitive::TriangleList,
+                hal::pso::Rasterizer::FILL,
+                &pipeline_layout,
+                subpass,
+            );
+            pipeline_descriptor.blender.targets.push(hal::pso::ColorBlendDesc(
+                hal::pso::ColorMask::ALL,
+                hal::pso::BlendState::ALPHA,
+            ));
+
+            pipeline_descriptor.vertex_buffers = parser::create_vertex_buffer_descriptors(&json, "ps_line");
+            pipeline_descriptor.attributes = parser::create_attribute_descriptors(&json, "ps_line");
+
+            //device.create_graphics_pipelines(&[pipeline_desc])
+            device
+                .create_graphics_pipelines(&[pipeline_descriptor])
+                .into_iter()
+                .map(|pipeline| pipeline.unwrap())
+                .collect()
+        };
+
+        device.destroy_shader_module(vs_module);
+        device.destroy_shader_module(fs_module);
+
+        let vertex_buffer_stride = mem::size_of::<Vertex>();
+        let vertex_buffer_len = QUAD.len() * vertex_buffer_stride;
+
+        let mut vertex_buffer =
+            Buffer::create(
+                device,
+                memory_types,
+                hal::buffer::Usage::VERTEX,
+                vertex_buffer_stride,
+                vertex_buffer_len
+            );
+
+        vertex_buffer.update(device, 0, vertex_buffer_len as u64, &vec![QUAD]);
+
+        let instance_buffer_stride = mem::size_of::<PrimitiveInstance>();
+        let instance_buffer_len = MAX_INSTANCE_COUNT * instance_buffer_stride;
+
+        let mut instance_buffer =
+            Buffer::create(
+                device,
+                memory_types,
+                hal::buffer::Usage::VERTEX,
+                instance_buffer_stride,
+                instance_buffer_len
+            );
+
+        let instance_data =
+            vec![
+                PrimitiveInstance {
+                    aData0: [2044, 0, 2147483647, 131074],
+                    aData1: [3, 0, 0, 0],
+                }
+            ];
+        instance_buffer.update(
+            device,
+            0,
+            (instance_data.len() * instance_buffer_stride) as u64,
+            &instance_data
+        );
+
+        let locals_buffer_stride = mem::size_of::<Locals>();
+        let locals_buffer_len = locals_buffer_stride;
+
+        let mut locals_buffer =
+            Buffer::create(
+                device,
+                memory_types,
+                hal::buffer::Usage::UNIFORM,
+                locals_buffer_stride,
+                locals_buffer_len
+            );
+        let projection = Transform3D::row_major(0.001953125, 0.0, 0.0, 0.0,
+                                                0.0,-0.0026041667, 0.0, 0.0,
+                                                0.0, 0.0, 0.000001, 0.0,
+                                                -1.0, 1.0, 0.0, 1.0);
+        let locals_data =
+            vec![
+                Locals {
+                    uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
+                    uDevicePixelRatio: 1.0,
+                    uMode: 0i32,
+                }
+            ];
+        locals_buffer.update(
+            device,
+            0,
+            (locals_data.len() * locals_buffer_stride) as u64,
+            &locals_data
+        );
+
+        device.update_descriptor_sets(&[
+            hal::pso::DescriptorSetWrite {
+                set: &descriptor_sets[0],
+                binding: bindings_map["Locals"],
+                array_offset: 0,
+                write: hal::pso::DescriptorWrite::UniformBuffer(vec![
+                    (&locals_buffer.buffer, 0..mem::size_of::<Locals>() as u64),
+                ]),
+            }
+        ]);
+
+        Program {
+            bindings_map,
+            descriptor_set_layout,
+            descriptor_pool,
+            descriptor_sets,
+            pipeline_layout,
+            pipelines,
+            vertex_buffer,
+            instance_buffer,
+            locals_buffer,
+        }
+    }
+
+    pub fn init_vertex_data<'a>(
+        &mut self,
+        device: &B::Device,
+        resource_cache: hal::pso::DescriptorWrite<'a, B>,
+        resource_cache_sampler: hal::pso::DescriptorWrite<'a, B>,
+        node_data: hal::pso::DescriptorWrite<'a, B>,
+        node_data_sampler: hal::pso::DescriptorWrite<'a, B>,
+        render_tasks: hal::pso::DescriptorWrite<'a, B>,
+        render_tasks_sampler: hal::pso::DescriptorWrite<'a, B>,
+    ) {
+        device.update_descriptor_sets(&[
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tResourceCache"],
+                array_offset: 0,
+                write: resource_cache,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sResourceCache"],
+                array_offset: 0,
+                write: resource_cache_sampler,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tClipScrollNodes"],
+                array_offset: 0,
+                write: node_data,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sClipScrollNodes"],
+                array_offset: 0,
+                write: node_data_sampler,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tRenderTasks"],
+                array_offset: 0,
+                write: render_tasks,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sRenderTasks"],
+                array_offset: 0,
+                write: render_tasks_sampler,
+            },
+        ]);
+    }
+
+    pub fn submit(
+        &mut self,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        viewport: hal::command::Viewport,
+        render_pass: &B::RenderPass,
+        frame_buffer: &B::Framebuffer,
+        clear_values: &Vec<hal::command::ClearValue>,
+    ) -> hal::command::Submit<B, hal::queue::Graphics>
+    {
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer();
+
+        cmd_buffer.set_viewports(&[viewport.clone()]);
+        cmd_buffer.set_scissors(&[viewport.rect]);
+        cmd_buffer.bind_graphics_pipeline(&self.pipelines[0]);
+        cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![(&self.vertex_buffer.buffer, 0), (&self.instance_buffer.buffer, 0)]));
+        cmd_buffer.bind_graphics_descriptor_sets(&self.pipeline_layout, 0, &self.descriptor_sets[0..1]);
+
+        {
+            let mut encoder = cmd_buffer.begin_renderpass_inline(
+                render_pass,
+                frame_buffer,
+                viewport.rect,
+                clear_values,
+            );
+            encoder.draw(0..6, 0..self.instance_buffer.buffer_size as u32);
+        }
+
+        cmd_buffer.finish()
     }
 }
 
@@ -381,22 +645,13 @@ pub struct Device<B: hal::Backend> {
     pub framebuffers: Vec<B::Framebuffer>,
     pub frame_images: Vec<(B::Image, B::ImageView)>,
     pub viewport: hal::command::Viewport,
-    pub vs_module: B::ShaderModule,
-    pub fs_module: B::ShaderModule,
-    pub set_layout: B::DescriptorSetLayout,
-    pub pipeline_layout: B::PipelineLayout,
-    pub pipelines: Vec<Result<B::GraphicsPipeline, hal::pso::CreationError>>,
-    pub desc_pool: B::DescriptorPool,
-    pub desc_sets: Vec<B::DescriptorSet>,
-    pub vertex_buffer: Buffer<B>,
-    pub instance_buffer: Buffer<B>,
-    pub locals_buffer: Buffer<B>,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
     pub resource_cache: VertexDataImage<B>,
     pub render_tasks: VertexDataImage<B>,
     pub node_data: VertexDataImage<B>,
     pub image_uploads: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
+    pub ps_line: Program<B>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -518,140 +773,14 @@ impl<B: hal::Backend> Device<B> {
             depth: 0.0 .. 1.0,
         };
 
-        // Setup renderpass and pipeline
-        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
-        let vs_module = device
-            .create_shader_module(
-                get_shader_source("ps_line", ".vert.spv").as_slice()
-            )
-            .unwrap();
-        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
-        let fs_module = device
-            .create_shader_module(
-                get_shader_source("ps_line", ".frag.spv").as_slice()
-            )
-            .unwrap();
-
         let json = parser::read_json();
-        let (dsl_bindings, descriptors) = parser::create_descriptor_set_layout_bindings(&json, "ps_line");
-        let set_layout = device.create_descriptor_set_layout(&dsl_bindings);
-        let pipeline_layout = device.create_pipeline_layout(&[&set_layout], &[]);
 
-        let pipelines = {
-            let (vs_entry, fs_entry) = (
-                hal::pso::EntryPoint::<back::Backend> { entry: ENTRY_NAME, module: &vs_module, specialization: &[] },
-                hal::pso::EntryPoint::<back::Backend> { entry: ENTRY_NAME, module: &fs_module, specialization: &[] },
-            );
-
-            let shader_entries = hal::pso::GraphicsShaderSet {
-                vertex: vs_entry,
-                hull: None,
-                domain: None,
-                geometry: None,
-                fragment: Some(fs_entry),
-            };
-
-            let subpass = Subpass { index: 0, main_pass: &render_pass };
-
-            let mut pipeline_desc = hal::pso::GraphicsPipelineDesc::new(
-                shader_entries,
-                Primitive::TriangleList,
-                hal::pso::Rasterizer::FILL,
-                &pipeline_layout,
-                subpass,
-            );
-            pipeline_desc.blender.targets.push(hal::pso::ColorBlendDesc(
-                hal::pso::ColorMask::ALL,
-                hal::pso::BlendState::ALPHA,
-            ));
-
-            pipeline_desc.vertex_buffers = parser::create_vertex_buffer_descriptors(&json, "ps_line");
-            pipeline_desc.attributes = parser::create_attribute_descriptors(&json, "ps_line");
-
-            device.create_graphics_pipelines(&[pipeline_desc])
-        };
-
-        println!("pipelines: {:?}", pipelines);
-
-        let (range_descs, sets) = parser::create_range_descriptors_and_set_count(&json, "ps_line");
-        let mut desc_pool = device.create_descriptor_pool(
-            sets,
-            &range_descs,
-        );
-
-        let desc_sets = desc_pool.allocate_sets(&[&set_layout]);
-
-        // Buffer allocations
-        println!("Memory types: {:?}", memory_types);
-
-        let vertex_buffer_stride = mem::size_of::<Vertex>();
-        let vertex_buffer_len = QUAD.len() * vertex_buffer_stride;
-
-        let vertex_buffer =
-            Buffer::create(
-                &device,
-                &memory_types,
-                hal::buffer::Usage::VERTEX,
-                vertex_buffer_stride,
-                vertex_buffer_len
-            );
-
-        vertex_buffer.update(&device, 0, vertex_buffer_len as u64, &vec![QUAD]);
-
-        let instance_buffer_stride = mem::size_of::<PrimitiveInstance>();
-        let instance_buffer_len = MAX_INSTANCE_COUNT * instance_buffer_stride;
-
-        let instance_buffer =
-            Buffer::create(
-                &device,
-                &memory_types,
-                hal::buffer::Usage::VERTEX,
-                instance_buffer_stride,
-                instance_buffer_len
-            );
-
-        let instance_data =
-            vec![
-                PrimitiveInstance {
-                    aData0: [2044, 0, 2147483647, 131074],
-                    aData1: [3, 0, 0, 0],
-                }
-            ];
-        instance_buffer.update(
+        let mut ps_line = Program::create(
+            &json,
             &device,
-            0,
-            (instance_data.len() * instance_buffer_stride) as u64,
-            &instance_data
-        );
-
-        let locals_buffer_stride = mem::size_of::<Locals>();
-        let locals_buffer_len = locals_buffer_stride;
-
-        let locals_buffer =
-            Buffer::create(
-                &device,
-                &memory_types,
-                hal::buffer::Usage::UNIFORM,
-                locals_buffer_stride,
-                locals_buffer_len
-            );
-        let projection = Transform3D::row_major(0.001953125, 0.0, 0.0, 0.0,
-                                                0.0,-0.0026041667, 0.0, 0.0,
-                                                0.0, 0.0, 0.000001, 0.0,
-                                                -1.0, 1.0, 0.0, 1.0);
-        let locals_data =
-            vec![
-                Locals {
-                    uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
-                    uDevicePixelRatio: 1.0,
-                    uMode: 0i32,
-                }
-            ];
-        locals_buffer.update(
-            &device,
-            0,
-            (locals_data.len() * locals_buffer_stride) as u64,
-            &locals_data
+            &memory_types,
+            "ps_line".to_owned(),
+            &render_pass,
         );
 
         // Samplers
@@ -699,52 +828,15 @@ impl<B: hal::Backend> Device<B> {
                 TEXTURE_HEIGHT as u32
             );
 
-        device.update_descriptor_sets(&[
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["Locals"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::UniformBuffer(vec![
-                    (&locals_buffer.buffer, 0..mem::size_of::<Locals>() as u64),
-                ]),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["tResourceCache"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(vec![(&resource_cache.image_srv, hal::image::ImageLayout::Undefined)]),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["sResourceCache"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["tClipScrollNodes"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(vec![(&node_data.image_srv, hal::image::ImageLayout::Undefined)]),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["sClipScrollNodes"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["tRenderTasks"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(vec![(&render_tasks.image_srv, hal::image::ImageLayout::Undefined)]),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &desc_sets[0],
-                binding: descriptors["sRenderTasks"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
-            },
-        ]);
+        ps_line.init_vertex_data(
+            &device,
+            hal::pso::DescriptorWrite::SampledImage(vec![(&resource_cache.image_srv, hal::image::ImageLayout::Undefined)]),
+            hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![(&node_data.image_srv, hal::image::ImageLayout::Undefined)]),
+            hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![(&render_tasks.image_srv, hal::image::ImageLayout::Undefined)]),
+            hal::pso::DescriptorWrite::Sampler(vec![&sampler_nearest]),
+        );
 
         let image_uploads = Vec::new();
 
@@ -758,22 +850,13 @@ impl<B: hal::Backend> Device<B> {
             framebuffers,
             frame_images,
             viewport,
-            vs_module,
-            fs_module,
-            set_layout,
-            pipeline_layout,
-            pipelines,
-            desc_pool,
-            desc_sets,
-            vertex_buffer,
-            instance_buffer,
-            locals_buffer,
             sampler_linear,
             sampler_nearest,
             resource_cache,
             render_tasks,
             node_data,
             image_uploads,
+            ps_line,
         }
     }
 
@@ -821,29 +904,24 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn cleanup(mut self) {
         self.device.destroy_command_pool(self.command_pool.downgrade());
-        self.device.destroy_descriptor_pool(self.desc_pool);
-        self.device.destroy_descriptor_set_layout(self.set_layout);
+        //self.device.destroy_descriptor_pool(self.desc_pool);
+        //self.device.destroy_descriptor_set_layout(self.set_layout);
 
-        {
-            self.device.destroy_shader_module(self.vs_module);
-            self.device.destroy_shader_module(self.fs_module);
-        }
+        //self.device.destroy_buffer(self.vertex_buffer.buffer);
+        //self.device.destroy_buffer(self.instance_buffer.buffer);
+        //self.device.destroy_buffer(self.locals_buffer.buffer);
+        //self.device.destroy_pipeline_layout(self.pipeline_layout);
 
-        self.device.destroy_buffer(self.vertex_buffer.buffer);
-        self.device.destroy_buffer(self.instance_buffer.buffer);
-        self.device.destroy_buffer(self.locals_buffer.buffer);
-        self.device.destroy_pipeline_layout(self.pipeline_layout);
-
-        self.device.free_memory(self.vertex_buffer.memory);
-        self.device.free_memory(self.instance_buffer.memory);
-        self.device.free_memory(self.locals_buffer.memory);
+        //self.device.free_memory(self.vertex_buffer.memory);
+        //self.device.free_memory(self.instance_buffer.memory);
+        //self.device.free_memory(self.locals_buffer.memory);
 
         self.device.destroy_renderpass(self.render_pass);
-        for pipeline in self.pipelines {
+        /*for pipeline in self.pipelines {
             if let Ok(pipeline) = pipeline {
                 self.device.destroy_graphics_pipeline(pipeline);
             }
-        }
+        }*/
 
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
@@ -864,28 +942,13 @@ impl<B: hal::Backend> Device<B> {
 
             let frame = self.swap_chain.acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
 
-            // Rendering
-            let submit = {
-                let mut cmd_buffer = self.command_pool.acquire_command_buffer();
-
-                cmd_buffer.set_viewports(&[self.viewport.clone()]);
-                cmd_buffer.set_scissors(&[self.viewport.rect]);
-                cmd_buffer.bind_graphics_pipeline(&self.pipelines[0].as_ref().unwrap());
-                cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![(&self.vertex_buffer.buffer, 0), (&self.instance_buffer.buffer, 0)]));
-                cmd_buffer.bind_graphics_descriptor_sets(&self.pipeline_layout, 0, &self.desc_sets[0..1]);
-
-                {
-                    let mut encoder = cmd_buffer.begin_renderpass_inline(
-                        &self.render_pass,
-                        &self.framebuffers[frame.id()],
-                        self.viewport.rect,
-                        &[hal::command::ClearValue::Color(hal::command::ClearColor::Float([0.3, 0.0, 0.0, 1.0]))],
-                    );
-                    encoder.draw(0..6, 0..1);
-                }
-
-                cmd_buffer.finish()
-            };
+            let submit = self.ps_line.submit(
+                &mut self.command_pool,
+                self.viewport.clone(),
+                &self.render_pass,
+                &self.framebuffers[frame.id()],
+                &vec![hal::command::ClearValue::Color(hal::command::ClearColor::Float([0.3, 0.0, 0.0, 1.0]))],
+            );
 
             self.image_uploads.push(submit);
 
