@@ -267,13 +267,13 @@ impl<B: hal::Backend> VertexDataImage<B> {
     where
         T: Copy
     {
-        let needed_height = (image_data.len() / (self.image_width as  usize * self.image_stride / self.image_upload_buffer.data_stride)) as u32;
-        if needed_height > self.image_height {
+        let needed_height = (image_data.len() * self.image_upload_buffer.data_stride) / (self.image_width as  usize * self.image_stride) + 1;
+        if needed_height > self.image_height as usize {
             unimplemented!("TODO: implement resize");
         }
-        let buffer_height = cmp::max(1, needed_height) as u64;
-        let buffer_width = (image_data.len() * self.image_upload_buffer.data_stride * self.mem_stride) as u64;
-        let buffer_offset = (image_offset.y * buffer_width as u32 * self.image_stride as u32 * self.mem_stride as u32) as u64;
+        let buffer_height = needed_height as u64;
+        let buffer_width = (image_data.len() * self.image_upload_buffer.data_stride) as u64;
+        let buffer_offset = (image_offset.y * buffer_width as u32) as u64;
         self.image_upload_buffer.update(device, buffer_offset, buffer_width, image_data);
 
         let mut cmd_buffer = cmd_pool.acquire_command_buffer();
@@ -363,6 +363,7 @@ impl<B: hal::Backend> Buffer<B> {
         let mut data = device
             .acquire_mapping_writer::<T>(&self.buffer, buffer_offset..(buffer_offset + buffer_width))
             .unwrap();
+        assert_eq!(data.len(), update_data.len());
         for (i, d) in update_data.iter().enumerate() {
             data[i] = *d;
         }
