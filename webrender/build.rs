@@ -4,7 +4,9 @@
 
 #[macro_use]
 extern crate serde_json;
+extern crate gfx_hal;
 
+use gfx_hal::pso::ShaderStageFlags;
 use serde_json::value::Value as JsonValue;
 use std::cmp::max;
 use std::env;
@@ -506,7 +508,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
                         "binding": binding,
                         "ty": "SampledImage",
                         "count": 1,
-                        "stage_flags": "All",
+                        "stage_flags": ShaderStageFlags::ALL,
                     }));
         }
         new_data.push_str(&layout_str);
@@ -529,7 +531,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
                         "binding": binding,
                         "ty": "Sampler",
                         "count": 1,
-                        "stage_flags": "All",
+                        "stage_flags": ShaderStageFlags::ALL,
                     }));
         }
         new_data.push_str(&layout_str);
@@ -555,7 +557,7 @@ fn add_locals_to_descriptor_set_layout(descriptor_set_layouts: &mut Vec<JsonValu
         "binding": 0,
         "ty": "UniformBuffer",
         "count": 1,
-        "stage_flags": "Vertex",
+        "stage_flags": ShaderStageFlags::VERTEX,
     }));
 }
 
