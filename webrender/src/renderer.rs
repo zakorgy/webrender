@@ -25,7 +25,7 @@ use debug_colors;
 //use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{Device, FrameId, /*Program,*/ Texture, VertexDescriptor};
+use device::{Device, FrameId, /*Program,*/ PrimitiveInstance, Texture, VertexDescriptor};
 use device::{ExternalTexture, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{TextureFilter, TextureTarget};
 use euclid::{rect, TypedScale, Transform3D};
@@ -33,7 +33,7 @@ use frame_builder::FrameBuilderConfig;
 //use gleam::gl;
 use glyph_rasterizer::GlyphFormat;
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
-use gpu_types::PrimitiveInstance;
+use gpu_types::PrimitiveInstance as GpuPrimitiveInstance;
 use internal_types::{BatchTextures, SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use internal_types::{CacheTextureId, FastHashMap, RenderedDocument, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, RenderPassIndex, RenderTargetInfo, TextureUpdateList, TextureUpdateSource};
@@ -2097,7 +2097,7 @@ impl Renderer {
     fn submit_batch(
         &mut self,
         key: &BatchKey,
-        instances: &[PrimitiveInstance],
+        instances: &[GpuPrimitiveInstance],
         projection: &Transform3D<f32>,
         render_tasks: &RenderTaskTree,
         render_target: Option<(&Texture, i32)>,
@@ -2152,13 +2152,16 @@ impl Renderer {
             }
             BatchKind::Transformable(transform_kind, batch_kind) => match batch_kind {
                 TransformBatchKind::Line => {
-//                    self.ps_line.bind(
-//                        &mut self.device,
-//                        transform_kind,
-//                        projection,
-//                        0,
-//                        &mut self.renderer_errors,
-//                    );
+                    self.device.ps_line.bind(
+                        &self.device.device,
+                        //transform_kind,
+                        projection,
+                        0,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                        //&mut self.renderer_errors,
+                    );
                 }
                 TransformBatchKind::TextRun(..) => {
                     unreachable!("bug: text batches are special cased");

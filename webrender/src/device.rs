@@ -91,6 +91,15 @@ pub struct PrimitiveInstance {
     aData1: [i32; 4],
 }
 
+impl PrimitiveInstance {
+    pub fn new(data: [i32; 8]) -> PrimitiveInstance {
+        PrimitiveInstance {
+            aData0: [data[0], data[1], data[2], data[3]],
+            aData1: [data[4], data[5], data[6], data[7]],
+        }
+    }
+}
+
 const QUAD: [Vertex; 6] = [
     Vertex { aPosition: [  0.0, 0.0, 0.0  ] },
     Vertex { aPosition: [  1.0, 0.0, 0.0  ] },
@@ -486,20 +495,6 @@ impl<B: hal::Backend> Program<B> {
                 instance_buffer_len
             );
 
-        let instance_data =
-            vec![
-                PrimitiveInstance {
-                    aData0: [2044, 0, 2147483647, 131074],
-                    aData1: [3, 0, 0, 0],
-                }
-            ];
-        instance_buffer.update(
-            device,
-            0,
-            (instance_data.len() * instance_buffer_stride) as u64,
-            &instance_data
-        );
-
         let locals_buffer_stride = mem::size_of::<Locals>();
         let locals_buffer_len = locals_buffer_stride;
 
@@ -511,24 +506,6 @@ impl<B: hal::Backend> Program<B> {
                 locals_buffer_stride,
                 locals_buffer_len
             );
-        let projection = Transform3D::row_major(0.001953125, 0.0, 0.0, 0.0,
-                                                0.0,-0.0026041667, 0.0, 0.0,
-                                                0.0, 0.0, 0.000001, 0.0,
-                                                -1.0, 1.0, 0.0, 1.0);
-        let locals_data =
-            vec![
-                Locals {
-                    uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
-                    uDevicePixelRatio: 1.0,
-                    uMode: 0i32,
-                }
-            ];
-        locals_buffer.update(
-            device,
-            0,
-            (locals_data.len() * locals_buffer_stride) as u64,
-            &locals_data
-        );
 
         device.update_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
@@ -552,6 +529,40 @@ impl<B: hal::Backend> Program<B> {
             instance_buffer,
             locals_buffer,
         }
+    }
+
+    pub fn bind(
+        &mut self,
+        device: &B::Device,
+        projection: &Transform3D<f32>,
+        umode: i32,
+        instances: &[PrimitiveInstance],
+//        renderer_errors: &mut Vec<RendererError>,
+    ) {
+        self.instance_buffer.buffer_size = 0;
+        let data_stride = self.instance_buffer.data_stride;
+        self.instance_buffer.update(
+            device,
+            0,
+            (instances.len() * data_stride) as u64,
+            &instances.to_owned()
+        );
+
+        let locals_buffer_stride = mem::size_of::<Locals>();
+        let locals_data =
+            vec![
+                Locals {
+                    uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
+                    uDevicePixelRatio: 1.0,
+                    uMode: umode,
+                }
+            ];
+        self.locals_buffer.update(
+            device,
+            0,
+            (locals_data.len() * locals_buffer_stride) as u64,
+            &locals_data
+        );
     }
 
     pub fn init_vertex_data<'a>(

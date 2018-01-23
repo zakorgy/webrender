@@ -40,7 +40,7 @@ pub struct ClipMaskInstance {
 // 32 bytes per instance should be enough for anyone!
 #[derive(Debug, Clone)]
 pub struct PrimitiveInstance {
-    data: [i32; 8],
+    pub data: [i32; 8],
 }
 
 pub struct SimplePrimitiveInstance {
