@@ -384,8 +384,12 @@ impl<B: hal::Backend> Buffer<B> {
         device.release_mapping_writer(data);
         self.buffer_size += update_data.len();
     }
-}
 
+    pub fn cleanup(mut self, device: &B::Device) {
+        device.destroy_buffer(self.buffer);
+        device.free_memory(self.memory);
+    }
+}
 pub struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, usize>,
     pub descriptor_set_layout: B::DescriptorSetLayout,
@@ -643,6 +647,18 @@ impl<B: hal::Backend> Program<B> {
         }
 
         cmd_buffer.finish()
+    }
+
+    pub fn cleanup(mut self, device: &B::Device) {
+        self.vertex_buffer.cleanup(device);
+        self.instance_buffer.cleanup(device);
+        self.locals_buffer.cleanup(device);
+        device.destroy_descriptor_pool(self.descriptor_pool);
+        device.destroy_descriptor_set_layout(self.descriptor_set_layout);
+        device.destroy_pipeline_layout(self.pipeline_layout);
+        for pipeline in self.pipelines.drain(..) {
+            device.destroy_graphics_pipeline(pipeline);
+        }
     }
 }
 
@@ -914,30 +930,12 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn cleanup(mut self) {
+        self.ps_line.cleanup(&self.device);
         self.device.destroy_command_pool(self.command_pool.downgrade());
-        //self.device.destroy_descriptor_pool(self.desc_pool);
-        //self.device.destroy_descriptor_set_layout(self.set_layout);
-
-        //self.device.destroy_buffer(self.vertex_buffer.buffer);
-        //self.device.destroy_buffer(self.instance_buffer.buffer);
-        //self.device.destroy_buffer(self.locals_buffer.buffer);
-        //self.device.destroy_pipeline_layout(self.pipeline_layout);
-
-        //self.device.free_memory(self.vertex_buffer.memory);
-        //self.device.free_memory(self.instance_buffer.memory);
-        //self.device.free_memory(self.locals_buffer.memory);
-
         self.device.destroy_renderpass(self.render_pass);
-        /*for pipeline in self.pipelines {
-            if let Ok(pipeline) = pipeline {
-                self.device.destroy_graphics_pipeline(pipeline);
-            }
-        }*/
-
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
         }
-
         for (image, rtv) in self.frame_images {
             self.device.destroy_image_view(rtv);
             self.device.destroy_image(image);
