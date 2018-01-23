@@ -330,7 +330,6 @@ pub struct Buffer<B: hal::Backend> {
     pub buffer: B::Buffer,
     pub data_stride: usize,
     //pub buffer_max_size: usize,
-    pub buffer_size: usize,
 }
 
 impl<B: hal::Backend> Buffer<B> {
@@ -361,7 +360,6 @@ impl<B: hal::Backend> Buffer<B> {
             memory,
             buffer,
             data_stride,
-            buffer_size: 0,
         }
     }
 
@@ -382,7 +380,6 @@ impl<B: hal::Backend> Buffer<B> {
             data[i] = *d;
         }
         device.release_mapping_writer(data);
-        self.buffer_size += update_data.len();
     }
 
     pub fn cleanup(mut self, device: &B::Device) {
@@ -390,6 +387,23 @@ impl<B: hal::Backend> Buffer<B> {
         device.free_memory(self.memory);
     }
 }
+
+pub struct InstanceBuffer<B: hal::Backend> {
+    pub buffer: Buffer<B>,
+    pub size: usize,
+    pub offset: usize,
+}
+
+impl<B: hal::Backend> InstanceBuffer<B> {
+    fn new(buffer: Buffer<B>) -> InstanceBuffer<B> {
+        InstanceBuffer {
+            buffer,
+            size: 0,
+            offset: 0,
+        }
+    }
+}
+
 pub struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, usize>,
     pub descriptor_set_layout: B::DescriptorSetLayout,
@@ -398,7 +412,7 @@ pub struct Program<B: hal::Backend> {
     pub pipeline_layout: B::PipelineLayout,
     pub pipelines: Vec<B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
-    pub instance_buffer: Buffer<B>,
+    pub instance_buffer: InstanceBuffer<B>,
     pub locals_buffer: Buffer<B>,
 }
 
@@ -530,7 +544,7 @@ impl<B: hal::Backend> Program<B> {
             pipeline_layout,
             pipelines,
             vertex_buffer,
-            instance_buffer,
+            instance_buffer: InstanceBuffer::new(instance_buffer),
             locals_buffer,
         }
     }
@@ -543,15 +557,16 @@ impl<B: hal::Backend> Program<B> {
         instances: &[PrimitiveInstance],
 //        renderer_errors: &mut Vec<RendererError>,
     ) {
-        self.instance_buffer.buffer_size = 0;
-        let data_stride = self.instance_buffer.data_stride;
-        self.instance_buffer.update(
+        let data_stride = self.instance_buffer.buffer.data_stride;
+        let offset = self.instance_buffer.offset as u64;
+        self.instance_buffer.buffer.update(
             device,
-            0,
+            offset,
             (instances.len() * data_stride) as u64,
             &instances.to_owned()
         );
 
+        self.instance_buffer.size += instances.len();
         let locals_buffer_stride = mem::size_of::<Locals>();
         let locals_data =
             vec![
@@ -633,7 +648,7 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.set_viewports(&[viewport.clone()]);
         cmd_buffer.set_scissors(&[viewport.rect]);
         cmd_buffer.bind_graphics_pipeline(&self.pipelines[0]);
-        cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![(&self.vertex_buffer.buffer, 0), (&self.instance_buffer.buffer, 0)]));
+        cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![(&self.vertex_buffer.buffer, 0), (&self.instance_buffer.buffer.buffer, 0)]));
         cmd_buffer.bind_graphics_descriptor_sets(&self.pipeline_layout, 0, &self.descriptor_sets[0..1]);
 
         {
@@ -643,7 +658,7 @@ impl<B: hal::Backend> Program<B> {
                 viewport.rect,
                 clear_values,
             );
-            encoder.draw(0..6, 0..self.instance_buffer.buffer_size as u32);
+            encoder.draw(0..6, 0..self.instance_buffer.size as u32);
         }
 
         cmd_buffer.finish()
@@ -651,7 +666,7 @@ impl<B: hal::Backend> Program<B> {
 
     pub fn cleanup(mut self, device: &B::Device) {
         self.vertex_buffer.cleanup(device);
-        self.instance_buffer.cleanup(device);
+        self.instance_buffer.buffer.cleanup(device);
         self.locals_buffer.cleanup(device);
         device.destroy_descriptor_pool(self.descriptor_pool);
         device.destroy_descriptor_set_layout(self.descriptor_set_layout);
