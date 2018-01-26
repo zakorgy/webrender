@@ -652,7 +652,7 @@ impl RenderBackend {
     ) {
         let mut op = DocumentOps::nop();
         for doc_msg in doc_msgs {
-            let _timer = profile_counters.total_time.timer();
+            // let _timer = profile_counters.total_time.timer();
             op.combine(
                 self.process_document(
                     document_id,
@@ -667,7 +667,7 @@ impl RenderBackend {
         let doc = self.documents.get_mut(&document_id).unwrap();
 
         if op.build {
-            let _timer = profile_counters.total_time.timer();
+            // let _timer = profile_counters.total_time.timer();
             profile_scope!("build scene");
             doc.build_scene(&mut self.resource_cache);
             doc.render_on_hittest = true;
@@ -680,7 +680,7 @@ impl RenderBackend {
 
             // borrow ck hack for profile_counters
             let (pending_update, rendered_document) = {
-                let _timer = profile_counters.total_time.timer();
+                // let _timer = profile_counters.total_time.timer();
 
                 let rendered_document = doc.render(
                     &mut self.resource_cache,
