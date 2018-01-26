@@ -781,6 +781,8 @@ impl<B: hal::Backend> Program<B> {
         node_data_sampler: hal::pso::DescriptorWrite<'a, B>,
         render_tasks: hal::pso::DescriptorWrite<'a, B>,
         render_tasks_sampler: hal::pso::DescriptorWrite<'a, B>,
+        local_clip_rects: hal::pso::DescriptorWrite<'a, B>,
+        local_clip_rects_sampler: hal::pso::DescriptorWrite<'a, B>,
     ) {
         device.update_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
@@ -818,6 +820,18 @@ impl<B: hal::Backend> Program<B> {
                 binding: self.bindings_map["sRenderTasks"],
                 array_offset: 0,
                 write: render_tasks_sampler,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tLocalClipRects"],
+                array_offset: 0,
+                write: local_clip_rects,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sLocalClipRects"],
+                array_offset: 0,
+                write: local_clip_rects_sampler,
             },
         ]);
     }
@@ -1256,6 +1270,13 @@ impl<B: hal::Backend> Device<B> {
             hal::pso::DescriptorWrite::SampledImage(vec![
                 (
                     &self.render_tasks.image_srv,
+                    hal::image::ImageLayout::Undefined,
+                ),
+            ]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![
+                (
+                    &self.local_clip_rects.image_srv,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),

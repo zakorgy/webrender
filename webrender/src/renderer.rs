@@ -1064,7 +1064,7 @@ impl CacheTexture {
                     );
 
                     let data_blocks = cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>();
-                    //device.update_resource_cache(rect, &data_blocks);
+                    device.update_resource_cache(rect, &data_blocks);
                     //uploader.upload(rect, 0, None, cpu_blocks);
 
                     row.is_dirty = false;
@@ -4718,8 +4718,8 @@ impl Renderer {
         for (_, target) in self.output_targets {
             self.device.delete_fbo(target.fbo_id);
         }
-        self.ps_border_corner.deinit(&mut self.device);
-        self.ps_border_edge.deinit(&mut self.device);
+        self.ps_border_corner.deinit(&self.device.device);
+        self.ps_border_edge.deinit(&self.device.device);
         // self.ps_gradient.deinit(&mut self.device);
         // self.ps_angle_gradient.deinit(&mut self.device);
         // self.ps_radial_gradient.deinit(&mut self.device);
