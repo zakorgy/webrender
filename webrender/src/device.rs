@@ -4,7 +4,7 @@
 
 use super::shader_source;
 use api::{ColorF, ImageDescriptor, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::TextureTarget;
 use euclid::Transform3D;
 //use gleam::gl;
@@ -33,6 +33,12 @@ use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
 //use parser;
+
+pub const NODE_TEXTURE_WIDTH: usize = 1020; // 204 * ( 20 / 4)
+pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023; // 341 * ( 12 / 4 )
+pub const CLIP_RECTS_TEXTURE_WIDTH: usize = 1024;
+pub const TEXTURE_HEIGHT: usize = 8;
+pub const MAX_INSTANCE_COUNT: usize = 1024;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::AspectFlags::COLOR,
@@ -244,6 +250,275 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
+pub struct VertexDataImage<B: hal::Backend> {
+    pub image_upload_buffer: Buffer<B>,
+    pub image: B::Image,
+    pub image_memory: B::Memory,
+    pub image_srv: B::ImageView,
+    pub image_stride: usize,
+    pub mem_stride: usize,
+    pub image_width: u32,
+    pub image_height: u32,
+}
+
+impl<B: hal::Backend> VertexDataImage<B> {
+    pub fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        data_stride: usize,
+        image_width: u32,
+        image_height: u32,
+    ) -> VertexDataImage<B> {
+        let image_upload_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::TRANSFER_SRC,
+            data_stride,
+            (image_width * image_height) as usize,
+        );
+        let kind = hal::image::Kind::D2(
+            image_width as hal::image::Size,
+            image_height as hal::image::Size,
+            hal::image::AaMode::Single,
+        );
+        let image_unbound = device
+            .create_image(
+                kind,
+                1,
+                hal::format::Format::Rgba32Float,
+                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
+            )
+            .unwrap(); // TODO: usage
+        println!("{:?}", image_unbound);
+        let image_req = device.get_image_requirements(&image_unbound);
+
+        let device_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mem_type)| {
+                image_req.type_mask & (1 << id) != 0
+                    && mem_type
+                    .properties
+                    .contains(hal::memory::Properties::DEVICE_LOCAL)
+            })
+            .unwrap()
+            .into();
+
+        let image_memory = device.allocate_memory(device_type, image_req.size).unwrap();
+
+        let image = device
+            .bind_image_memory(&image_memory, 0, image_unbound)
+            .unwrap();
+        let image_srv = device
+            .create_image_view(
+                &image,
+                hal::format::Format::Rgba32Float,
+                Swizzle::NO,
+                COLOR_RANGE.clone(),
+            )
+            .unwrap();
+
+        VertexDataImage {
+            image_upload_buffer,
+            image,
+            image_memory,
+            image_srv,
+            image_stride: 4usize,              // Rgba
+            mem_stride: mem::size_of::<f32>(), // Float
+            image_width,
+            image_height,
+        }
+    }
+
+    pub fn update_buffer_and_submit_upload<T>(
+        &mut self,
+        device: &mut B::Device,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        image_offset: DeviceUintPoint,
+        image_data: &[T],
+    ) -> hal::command::Submit<B, hal::queue::Graphics>
+        where
+            T: Copy,
+    {
+        let needed_height = (image_data.len() * self.image_upload_buffer.data_stride)
+            / (self.image_width as usize * self.image_stride) + 1;
+        if needed_height > self.image_height as usize {
+            unimplemented!("TODO: implement resize");
+        }
+        let buffer_height = needed_height as u64;
+        let buffer_width = (image_data.len() * self.image_upload_buffer.data_stride) as u64;
+        let buffer_offset = (image_offset.y * buffer_width as u32) as u64;
+        self.image_upload_buffer
+            .update(device, buffer_offset, buffer_width, image_data);
+
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer();
+
+        let image_barrier = hal::memory::Barrier::Image {
+            states: (
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            )
+                .. (
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            ),
+            target: &self.image,
+            range: COLOR_RANGE.clone(),
+        };
+        cmd_buffer.pipeline_barrier(
+            hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+            &[image_barrier],
+        );
+
+        cmd_buffer.copy_buffer_to_image(
+            &self.image_upload_buffer.buffer,
+            &self.image,
+            hal::image::ImageLayout::TransferDstOptimal,
+            &[
+                hal::command::BufferImageCopy {
+                    buffer_offset,
+                    buffer_width: buffer_width as u32,
+                    buffer_height: buffer_height as u32,
+                    image_layers: hal::image::SubresourceLayers {
+                        aspects: hal::format::AspectFlags::COLOR,
+                        level: 0,
+                        layers: 0 .. 1,
+                    },
+                    image_offset: hal::command::Offset {
+                        x: image_offset.x as i32,
+                        y: image_offset.y as i32,
+                        z: 0,
+                    },
+                    image_extent: hal::device::Extent {
+                        width: buffer_width as u32,
+                        height: buffer_height as u32,
+                        depth: 1,
+                    },
+                },
+            ],
+        );
+
+        let image_barrier = hal::memory::Barrier::Image {
+            states: (
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            )
+                .. (
+                hal::image::Access::SHADER_READ,
+                hal::image::ImageLayout::ShaderReadOnlyOptimal,
+            ),
+            target: &self.image,
+            range: COLOR_RANGE.clone(),
+        };
+        cmd_buffer.pipeline_barrier(
+            hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+            &[image_barrier],
+        );
+        cmd_buffer.finish()
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.image_upload_buffer.deinit(device);
+        device.destroy_image(self.image);
+        device.destroy_image_view(self.image_srv);
+        device.free_memory(self.image_memory);
+    }
+}
+
+pub struct Buffer<B: hal::Backend> {
+    pub memory: B::Memory,
+    pub buffer: B::Buffer,
+    pub data_stride: usize,
+}
+
+impl<B: hal::Backend> Buffer<B> {
+    pub fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        data_len: usize,
+    ) -> Buffer<B> {
+        let buffer_size = data_stride * data_len;
+        let buffer_type: hal::MemoryTypeId = memory_types
+            .iter()
+            .position(|mt| {
+                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
+                //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        let (memory, buffer) = {
+            let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
+            let buffer_req = device.get_buffer_requirements(&unbound_buffer);
+            let buffer_memory = device
+                .allocate_memory(buffer_type, buffer_req.size)
+                .unwrap();
+            let buffer = device
+                .bind_buffer_memory(&buffer_memory, 0, unbound_buffer)
+                .unwrap();
+            (buffer_memory, buffer)
+        };
+        Buffer {
+            memory,
+            buffer,
+            data_stride,
+        }
+    }
+
+    pub fn update<T>(
+        &mut self,
+        device: &B::Device,
+        buffer_offset: u64,
+        buffer_width: u64,
+        update_data: &[T],
+    ) where
+        T: Copy,
+    {
+        let mut data = device
+            .acquire_mapping_writer::<T>(
+                &self.buffer,
+                buffer_offset .. (buffer_offset + buffer_width),
+            )
+            .unwrap();
+        assert_eq!(data.len(), update_data.len());
+        for (i, d) in update_data.iter().enumerate() {
+            data[i] = *d;
+        }
+        device.release_mapping_writer(data);
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        device.destroy_buffer(self.buffer);
+        device.free_memory(self.memory);
+    }
+}
+
+pub struct InstanceBuffer<B: hal::Backend> {
+    pub buffer: Buffer<B>,
+    pub size: usize,
+    pub offset: usize,
+}
+
+impl<B: hal::Backend> InstanceBuffer<B> {
+    fn new(buffer: Buffer<B>) -> InstanceBuffer<B> {
+        InstanceBuffer {
+            buffer,
+            size: 0,
+            offset: 0,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.size = 1;
+        self.offset = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.buffer.deinit(device);
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
     pub upload_memory_type: hal::MemoryTypeId,
@@ -258,9 +533,10 @@ pub struct Device<B: hal::Backend> {
     pub viewport: hal::command::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    // pub resource_cache: VertexDataImage<B>,
-    // pub render_tasks: VertexDataImage<B>,
-    // pub node_data: VertexDataImage<B>,
+    pub resource_cache: VertexDataImage<B>,
+    pub render_tasks: VertexDataImage<B>,
+    pub local_clip_rects: VertexDataImage<B>,
+    pub node_data: VertexDataImage<B>,
     pub upload_queue: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
     pub current_frame_id: usize,
     // device state
@@ -479,6 +755,38 @@ impl<B: hal::Backend> Device<B> {
             hal::image::WrapMode::Tile,
         ));
 
+        let resource_cache = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 4]>(),
+            max_texture_size as u32,
+            max_texture_size as u32,
+        );
+
+        let render_tasks = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 12]>(),
+            RENDER_TASK_TEXTURE_WIDTH as u32,
+            TEXTURE_HEIGHT as u32,
+        );
+
+        let local_clip_rects = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 4]>(),
+            CLIP_RECTS_TEXTURE_WIDTH as u32,
+            TEXTURE_HEIGHT as u32,
+        );
+
+        let node_data = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 20]>(),
+            NODE_TEXTURE_WIDTH as u32,
+            TEXTURE_HEIGHT as u32,
+        );
+
         Device {
             device,
             limits,
@@ -493,9 +801,10 @@ impl<B: hal::Backend> Device<B> {
             viewport,
             sampler_linear,
             sampler_nearest,
-            //resource_cache,
-            //render_tasks,
-            //node_data,
+            resource_cache,
+            render_tasks,
+            local_clip_rects,
+            node_data,
             upload_queue: Vec::new(),
             current_frame_id: 0,
             resource_override_path,
@@ -523,6 +832,47 @@ impl<B: hal::Backend> Device<B> {
             frame_id: FrameId(0),
             extensions,
         }
+    }
+
+    pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
+        debug_assert_eq!(gpu_data.len(), 1024);
+        self.upload_queue
+            .push(self.resource_cache.update_buffer_and_submit_upload(
+                &mut self.device,
+                &mut self.command_pool,
+                rect.origin,
+                gpu_data,
+            ));
+    }
+
+    pub fn update_render_tasks(&mut self, task_data: &[[f32; 12]]) {
+        self.upload_queue
+            .push(self.render_tasks.update_buffer_and_submit_upload(
+                &mut self.device,
+                &mut self.command_pool,
+                DeviceUintPoint::zero(),
+                task_data,
+            ));
+    }
+
+    pub fn update_local_rects(&mut self, local_data: &[[f32; 4]]) {
+        self.upload_queue
+            .push(self.local_clip_rects.update_buffer_and_submit_upload(
+                &mut self.device,
+                &mut self.command_pool,
+                DeviceUintPoint::zero(),
+                local_data,
+            ));
+    }
+
+    pub fn update_node_data(&mut self, node_data: &[[f32; 20]]) {
+        self.upload_queue
+            .push(self.node_data.update_buffer_and_submit_upload(
+                &mut self.device,
+                &mut self.command_pool,
+                DeviceUintPoint::zero(),
+                node_data,
+            ));
     }
 
     /*pub fn gl(&self) -> &gl::Gl {
@@ -1276,42 +1626,51 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn clear_target(
-        &self,
+        &mut self,
         color: Option<[f32; 4]>,
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
     ) {
-        let mut clear_bits = 0;
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer();
+
+        if let Some(rect) = rect {
+            cmd_buffer.set_scissors(&[
+                hal::command::Rect {
+                    x: rect.origin.x as u16,
+                    y: rect.origin.y as u16,
+                    w: rect.size.width as u16,
+                    h: rect.size.height as u16,
+                },
+            ]);
+        }
 
         if let Some(color) = color {
-            //self.gl.clear_color(color[0], color[1], color[2], color[3]);
-            //clear_bits |= gl::COLOR_BUFFER_BIT;
+            cmd_buffer.clear_color_image(
+                &self.frame_images[self.current_frame_id].0,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+                hal::image::SubresourceRange {
+                    aspects: hal::format::AspectFlags::COLOR,
+                    levels: 0 .. 1,
+                    layers: 0 .. 1,
+                },
+                hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]]),
+            );
         }
 
-        if let Some(depth) = depth {
-            //debug_assert_ne!(self.gl.get_boolean_v(gl::DEPTH_WRITEMASK), 0);
-            //self.gl.clear_depth(depth as f64);
-            //clear_bits |= gl::DEPTH_BUFFER_BIT;
-        }
-
-        if clear_bits != 0 {
-            match rect {
-                Some(rect) => {
-                    /*self.gl.enable(gl::SCISSOR_TEST);
-                    self.gl.scissor(
-                        rect.origin.x,
-                        rect.origin.y,
-                        rect.size.width,
-                        rect.size.height,
-                    );
-                    self.gl.clear(clear_bits);
-                    self.gl.disable(gl::SCISSOR_TEST);*/
-                }
-                None => {
-                    //self.gl.clear(clear_bits);
-                }
-            }
-        }
+        // TODO enable it when the crash is resolved
+        /*if let Some(depth) = depth {
+            cmd_buffer.clear_depth_stencil_image(
+                &self.frame_images[self.current_frame_id].0,
+                hal::image::ImageLayout::DepthStencilAttachmentOptimal,
+                hal::image::SubresourceRange {
+                            aspects: hal::format::AspectFlags::DEPTH,
+                            levels: 0 .. 1,
+                            layers: 0 .. 1,
+                        },
+                hal::command::ClearDepthStencil(depth, 0)
+            );
+        }*/
+        self.upload_queue.push(cmd_buffer.finish());
     }
 
     pub fn enable_depth(&self) {
@@ -1441,6 +1800,23 @@ impl<B: hal::Backend> Device<B> {
         self.upload_queue.clear();
         self.device.destroy_fence(frame_fence);
         self.device.destroy_semaphore(frame_semaphore);
+    }
+
+    pub fn deinit(self) {
+        self.device
+            .destroy_command_pool(self.command_pool.downgrade());
+        self.device.destroy_renderpass(self.render_pass);
+        for framebuffer in self.framebuffers {
+            self.device.destroy_framebuffer(framebuffer);
+        }
+        for (image, rtv) in self.frame_images {
+            self.device.destroy_image_view(rtv);
+            self.device.destroy_image(image);
+        }
+        self.resource_cache.deinit(&self.device);
+        self.render_tasks.deinit(&self.device);
+        self.local_clip_rects.deinit(&self.device);
+        self.node_data.deinit(&self.device);
     }
 }
 

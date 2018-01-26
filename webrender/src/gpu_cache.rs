@@ -58,7 +58,7 @@ struct CacheLocation {
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct GpuBlockData {
-    data: [f32; 4],
+    pub data: [f32; 4],
 }
 
 impl GpuBlockData {

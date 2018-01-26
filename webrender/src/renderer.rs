@@ -812,7 +812,7 @@ enum CacheBus {
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
         /// PBO used for transfers.
-        buffer: PBO,
+        //buffer: PBO,
         /// Meta-data about the cached rows.
         rows: Vec<CacheRow>,
         /// Mirrored block data on CPU.
@@ -863,9 +863,7 @@ impl CacheTexture {
                 //count: 0,
             }
         } else {
-            let buffer = device.create_pbo();
             CacheBus::PixelBuffer {
-                buffer,
                 rows: Vec::new(),
                 cpu_blocks: Vec::new(),
             }
@@ -880,8 +878,8 @@ impl CacheTexture {
     fn deinit(self, device: &mut Device<back::Backend>) {
         device.delete_texture(self.texture);
         match self.bus {
-            CacheBus::PixelBuffer { buffer, ..} => {
-                device.delete_pbo(buffer);
+            CacheBus::PixelBuffer { .. } => {
+                //device.delete_pbo(buffer);
             }
             CacheBus::Scatter { /*program, vao, buf_position, buf_value, .. */} => {
                 //device.delete_program(program);
@@ -1037,7 +1035,7 @@ impl CacheTexture {
 
     fn flush(&mut self, device: &mut Device<back::Backend>) -> usize {
         match self.bus {
-            CacheBus::PixelBuffer { ref buffer, ref mut rows, ref cpu_blocks } => {
+            CacheBus::PixelBuffer { /*ref buffer,*/ ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
                     .iter()
                     .filter(|row| row.is_dirty)
@@ -1046,11 +1044,11 @@ impl CacheTexture {
                     return 0
                 }
 
-                let mut uploader = device.upload_texture(
+                /*let mut uploader = device.upload_texture(
                     &self.texture,
                     buffer,
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
-                );
+                );*/
 
                 for (row_index, row) in rows.iter_mut().enumerate() {
                     if !row.is_dirty {
@@ -1065,7 +1063,9 @@ impl CacheTexture {
                         DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as u32, 1),
                     );
 
-                    uploader.upload(rect, 0, None, cpu_blocks);
+                    let data_blocks = cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>();
+                    //device.update_resource_cache(rect, &data_blocks);
+                    //uploader.upload(rect, 0, None, cpu_blocks);
 
                     row.is_dirty = false;
                 }
@@ -4232,6 +4232,38 @@ impl Renderer {
         // self.node_data_texture.update(&mut self.device, &mut frame.node_data);
         // self.device.bind_texture(TextureSampler::ClipScrollNodes, &self.node_data_texture.texture);
 
+        let node_data_blocks = frame.node_data.iter().map(
+            |block| {
+                let mut res_block: [f32; 20] = [0.0; 20];
+                let transform = block.transform.to_row_major_array();
+                res_block[0] = transform[0];
+                res_block[1] = transform[1];
+                res_block[2] = transform[2];
+                res_block[3] = transform[3];
+                res_block[4] = transform[4];
+                res_block[5] = transform[5];
+                res_block[6] = transform[6];
+                res_block[7] = transform[7];
+                res_block[8] = transform[8];
+                res_block[9] = transform[9];
+                res_block[10] = transform[10];
+                res_block[11] = transform[11];
+                res_block[12] = transform[12];
+                res_block[13] = transform[13];
+                res_block[14] = transform[14];
+                res_block[15] = transform[15];
+
+                res_block[16] = block.transform_kind;
+
+                res_block[17] = block.padding[0];
+                res_block[18] = block.padding[1];
+                res_block[19] = block.padding[2];
+
+                res_block
+            }
+        ).collect::<Vec<[f32; 20]>>();
+        //self.device.update_node_data(&node_data_blocks);
+
         // self.local_clip_rects_texture.update(
         //     &mut self.device,
         //     &mut frame.clip_chain_local_clip_rects
@@ -4241,12 +4273,28 @@ impl Renderer {
         //     &self.local_clip_rects_texture.texture
         // );
 
+        let local_rects_data_blocks = frame.clip_chain_local_clip_rects.iter().map(
+            |block| {
+                let mut res_block: [f32; 4] = [0.0; 4];
+                res_block[0] = block.origin.x;
+                res_block[1] = block.origin.y;
+                res_block[2] = block.size.width;
+                res_block[3] = block.size.height;
+
+                res_block
+            }
+        ).collect::<Vec<[f32; 4]>>();
+        //self.device.update_local_rects(&local_rects_data_blocks);
+
         // self.render_task_texture
         //     .update(&mut self.device, &mut frame.render_tasks.task_data);
         // self.device.bind_texture(
         //     TextureSampler::RenderTasks,
         //     &self.render_task_texture.texture,
         // );
+
+        let task_data_blocks = frame.render_tasks.task_data.iter().map(|block| block.data).collect::<Vec<[f32; 12]>>();
+        //self.device.update_render_tasks(&task_data_blocks);
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
         debug_assert!(self.texture_resolver.cache_rgba8_texture.is_none());
@@ -4675,6 +4723,7 @@ impl Renderer {
             self.device.delete_external_texture(ext);
         }
         self.device.end_frame();
+        self.device.deinit();
     }
 }
 
