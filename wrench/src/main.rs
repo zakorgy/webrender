@@ -20,8 +20,9 @@ extern crate env_logger;
 extern crate euclid;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 extern crate font_loader;
-extern crate gleam;
-extern crate glutin;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+extern crate gfx_hal as hal;
 extern crate image;
 #[macro_use]
 extern crate lazy_static;
@@ -35,6 +36,7 @@ extern crate serde;
 extern crate serde_json;
 extern crate time;
 extern crate webrender;
+extern crate winit;
 extern crate yaml_rust;
 
 mod binary_frame_reader;
@@ -56,12 +58,12 @@ mod yaml_helper;
 mod cgfont_to_data;
 
 use binary_frame_reader::BinaryFrameReader;
-use gleam::gl;
-use glutin::{GlContext, VirtualKeyCode};
+use winit::{ElementState, VirtualKeyCode, EventsLoop, EventsLoopProxy};
 use perf::PerfHarness;
 use png::save_flipped;
 use rawtest::RawtestHarness;
 use reftest::{ReftestHarness, ReftestOptions};
+use std::cell::RefCell;
 #[cfg(feature = "headless")]
 use std::ffi::CString;
 #[cfg(feature = "headless")]
@@ -76,6 +78,7 @@ use webrender::DebugFlags;
 use webrender::api::*;
 use wrench::{Wrench, WrenchThing};
 use yaml_frame_reader::YamlFrameReader;
+use hal::Instance;
 
 lazy_static! {
     static ref PLATFORM_DEFAULT_FACE_NAME: String = String::from("Arial");
@@ -158,58 +161,58 @@ impl HeadlessContext {
 }
 
 pub enum WindowWrapper {
-    Window(glutin::GlWindow, Rc<gl::Gl>),
-    Headless(HeadlessContext, Rc<gl::Gl>),
+    Window(winit::Window),
+    Headless(HeadlessContext),
 }
 
 pub struct HeadlessEventIterater;
 
 impl WindowWrapper {
-    fn swap_buffers(&self) {
+    /*fn swap_buffers(&self) {
         match *self {
-            WindowWrapper::Window(ref window, _) => window.swap_buffers().unwrap(),
-            WindowWrapper::Headless(_, _) => {}
+            WindowWrapper::Window(ref window) => window.swap_buffers().unwrap(),
+            WindowWrapper::Headless(_) => {}
         }
-    }
+    }*/
 
     fn get_inner_size(&self) -> DeviceUintSize {
         let (w, h) = match *self {
             //HACK: `winit` needs to figure out its hidpi story...
             #[cfg(target_os = "macos")]
-            WindowWrapper::Window(ref window, _) => {
+            WindowWrapper::Window(ref window) => {
                 let (w, h) = window.get_inner_size().unwrap();
                 let factor = window.hidpi_factor();
                 ((w as f32 * factor) as _, (h as f32 * factor) as _)
             },
             #[cfg(not(target_os = "macos"))]
-            WindowWrapper::Window(ref window, _) => window.get_inner_size().unwrap(),
-            WindowWrapper::Headless(ref context, _) => (context.width, context.height),
+            WindowWrapper::Window(ref window) => window.get_inner_size().unwrap(),
+            WindowWrapper::Headless(ref context) => (context.width, context.height),
         };
         DeviceUintSize::new(w, h)
     }
 
     fn hidpi_factor(&self) -> f32 {
         match *self {
-            WindowWrapper::Window(ref window, _) => window.hidpi_factor(),
-            WindowWrapper::Headless(_, _) => 1.0,
+            WindowWrapper::Window(ref window) => window.hidpi_factor(),
+            WindowWrapper::Headless(_) => 1.0,
         }
     }
 
     fn resize(&mut self, size: DeviceUintSize) {
         match *self {
-            WindowWrapper::Window(ref mut window, _) => window.set_inner_size(size.width, size.height),
-            WindowWrapper::Headless(_, _) => unimplemented!(), // requites Glutin update
+            WindowWrapper::Window(ref mut window) => window.set_inner_size(size.width, size.height),
+            WindowWrapper::Headless(..) => unimplemented!(), // requites Glutin update
         }
     }
 
     fn set_title(&mut self, title: &str) {
         match *self {
-            WindowWrapper::Window(ref window, _) => window.set_title(title),
-            WindowWrapper::Headless(_, _) => (),
+            WindowWrapper::Window(ref window) => window.set_title(title),
+            WindowWrapper::Headless(_) => (),
         }
     }
 
-    pub fn gl(&self) -> &gl::Gl {
+    /*pub fn gl(&self) -> &gl::Gl {
         match *self {
             WindowWrapper::Window(_, ref gl) | WindowWrapper::Headless(_, ref gl) => &**gl,
         }
@@ -219,6 +222,13 @@ impl WindowWrapper {
         match *self {
             WindowWrapper::Window(_, ref gl) | WindowWrapper::Headless(_, ref gl) => gl.clone(),
         }
+    }*/
+
+    fn get_window(&self) -> &winit::Window {
+        match *self {
+            WindowWrapper::Window(ref window) => &window,
+            WindowWrapper::Headless(..) => unreachable!(),
+        }
     }
 }
 
@@ -226,70 +236,20 @@ fn make_window(
     size: DeviceUintSize,
     dp_ratio: Option<f32>,
     vsync: bool,
-    events_loop: &Option<glutin::EventsLoop>,
+    events_loop: &Option<winit::EventsLoop>,
 ) -> WindowWrapper {
     let wrapper = match *events_loop {
         Some(ref events_loop) => {
-            let context_builder = glutin::ContextBuilder::new()
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0),
-                })
-                .with_vsync(vsync);
-            let window_builder = glutin::WindowBuilder::new()
-                .with_title("WRech")
-                .with_multitouch()
-                .with_dimensions(size.width, size.height);
-            let window = glutin::GlWindow::new(window_builder, context_builder, events_loop)
+            let winit_window = winit::WindowBuilder::new()
+                .with_dimensions(size.width, size.height)
+                .build(&events_loop)
                 .unwrap();
-
-            unsafe {
-                window
-                    .make_current()
-                    .expect("unable to make context current!");
-            }
-
-            let gl = match window.get_api() {
-                glutin::Api::OpenGl => unsafe {
-                    gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-                },
-                glutin::Api::OpenGlEs => unsafe {
-                    gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-                },
-                glutin::Api::WebGl => unimplemented!(),
-            };
-            WindowWrapper::Window(window, gl)
+            WindowWrapper::Window(winit_window)
         }
         None => {
-            let gl = match gl::GlType::default() {
-                gl::GlType::Gl => unsafe {
-                    gl::GlFns::load_with(|symbol| {
-                        HeadlessContext::get_proc_address(symbol) as *const _
-                    })
-                },
-                gl::GlType::Gles => unsafe {
-                    gl::GlesFns::load_with(|symbol| {
-                        HeadlessContext::get_proc_address(symbol) as *const _
-                    })
-                },
-            };
-            WindowWrapper::Headless(HeadlessContext::new(size.width, size.height), gl)
+            WindowWrapper::Headless(HeadlessContext::new(size.width, size.height))
         }
     };
-
-    wrapper.gl().clear_color(0.3, 0.0, 0.0, 1.0);
-
-    let gl_version = wrapper.gl().get_string(gl::VERSION);
-    let gl_renderer = wrapper.gl().get_string(gl::RENDERER);
-
-    let dp_ratio = dp_ratio.unwrap_or(wrapper.hidpi_factor());
-    println!("OpenGL version {}, {}", gl_version, gl_renderer);
-    println!(
-        "hidpi factor: {} (native {})",
-        dp_ratio,
-        wrapper.hidpi_factor()
-    );
-
     wrapper
 }
 
@@ -361,10 +321,14 @@ fn main() {
     let mut events_loop = if args.is_present("headless") {
         None
     } else {
-        Some(glutin::EventsLoop::new())
+        Some(winit::EventsLoop::new())
     };
 
     let mut window = make_window(size, dp_ratio, args.is_present("vsync"), &events_loop);
+    let instance = back::Instance::create("gfx-rs instance", 1);
+    let mut adapters = instance.enumerate_adapters();
+    let adapter = adapters.remove(0);
+    let mut surface = instance.create_surface(window.get_window());
     let dp_ratio = dp_ratio.unwrap_or(window.hidpi_factor());
     let dim = window.get_inner_size();
 
@@ -381,6 +345,8 @@ fn main() {
     let mut wrench = Wrench::new(
         &mut window,
         events_loop.as_mut().map(|el| el.create_proxy()),
+        adapter,
+        &mut surface,
         res_path,
         dp_ratio,
         save_type,
@@ -423,7 +389,7 @@ fn main() {
         let num_failures = ReftestHarness::new(&mut wrench, &mut window, rx.unwrap())
             .run(base_manifest, specific_reftest, &reftest_options);
         wrench.renderer.deinit();
-        // exit with an error code to fail on CI
+        // return an error code so that we fail CI
         process::exit(num_failures as _);
     } else if let Some(_) = args.subcommand_matches("rawtest") {
         {
@@ -466,7 +432,7 @@ fn main() {
     wrench.update(dim);
     thing.do_frame(&mut wrench);
 
-    let mut body = |wrench: &mut Wrench, global_event: glutin::Event| {
+    let mut body = |wrench: &mut Wrench, global_event: winit::Event| {
         if let Some(window_title) = wrench.take_title() {
             if !cfg!(windows) { //TODO: calling `set_title` from inside the `run_forever` loop is illegal...
                 window.set_title(&window_title);
@@ -477,30 +443,30 @@ fn main() {
         let mut do_render = false;
 
         match global_event {
-            glutin::Event::Awakened => {
+            winit::Event::Awakened => {
                 do_render = true;
             }
-            glutin::Event::WindowEvent { event, .. } => match event {
-                glutin::WindowEvent::Closed => {
-                    return glutin::ControlFlow::Break;
+            winit::Event::WindowEvent { event, .. } => match event {
+                winit::WindowEvent::Closed => {
+                    return winit::ControlFlow::Break;
                 }
 
-                glutin::WindowEvent::Refresh |
-                glutin::WindowEvent::Focused(..) |
-                glutin::WindowEvent::CursorMoved { .. } => {
+                winit::WindowEvent::Refresh |
+                winit::WindowEvent::Focused(..) |
+                winit::WindowEvent::CursorMoved { .. } => {
                     do_render = true;
                 }
 
-                glutin::WindowEvent::KeyboardInput {
-                    input: glutin::KeyboardInput {
-                        state: glutin::ElementState::Pressed,
+                winit::WindowEvent::KeyboardInput {
+                    input: winit::KeyboardInput {
+                        state: winit::ElementState::Pressed,
                         virtual_keycode: Some(vk),
                         ..
                     },
                     ..
                 } => match vk {
                     VirtualKeyCode::Escape => {
-                        return glutin::ControlFlow::Break;
+                        return winit::ControlFlow::Break;
                     }
                     VirtualKeyCode::P => {
                         wrench.renderer.toggle_debug_flags(DebugFlags::PROFILER_DBG);
@@ -575,7 +541,7 @@ fn main() {
                 }
                 _ => {}
             },
-            _ => return glutin::ControlFlow::Continue,
+            _ => return winit::ControlFlow::Continue,
         };
 
         let dim = window.get_inner_size();
@@ -594,19 +560,18 @@ fn main() {
             }
 
             wrench.render();
-            window.swap_buffers();
 
             if do_loop {
                 thing.next_frame();
             }
         }
 
-        glutin::ControlFlow::Continue
+        winit::ControlFlow::Continue
     };
 
     match events_loop {
         None => {
-            while body(&mut wrench, glutin::Event::Awakened) == glutin::ControlFlow::Continue {}
+            while body(&mut wrench, winit::Event::Awakened) == winit::ControlFlow::Continue {}
             let rect = DeviceUintRect::new(DeviceUintPoint::zero(), size);
             let pixels = wrench.renderer.read_pixels_rgba8(rect);
             save_flipped("screenshot.png", pixels, size);

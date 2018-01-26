@@ -48,9 +48,13 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate thread_profiler;
-#[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
+//#[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate gfx_hal as hal;
+extern crate winit;
+extern crate rand;
 
 mod batch;
 mod border;
@@ -148,7 +152,7 @@ extern crate gleam;
 extern crate num_traits;
 extern crate plane_split;
 extern crate rayon;
-#[cfg(feature = "ron")]
+//#[cfg(feature = "ron")]
 extern crate ron;
 #[cfg(feature = "debugger")]
 extern crate serde_json;
@@ -166,7 +170,7 @@ extern crate png;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::{build_shader_strings, ProgramCache, ReadPixelsFormat, UploadMethod, VertexUsageHint};
+pub use device::{ReadPixelsFormat, UploadMethod, VertexUsageHint};
 pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, Renderer, RendererOptions};

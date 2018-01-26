@@ -4,13 +4,14 @@
 
 
 use app_units::Au;
+use back;
 use blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
 use dwrote;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use font_loader::system_fonts;
-use glutin::EventsLoopProxy;
+use hal;
 use json_frame_writer::JsonFrameWriter;
 use ron_frame_writer::RonFrameWriter;
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ use time;
 use webrender;
 use webrender::api::*;
 use webrender::{DebugFlags, RendererStats};
+use winit::EventsLoopProxy;
 use yaml_frame_writer::YamlFrameWriterReceiver;
 use {WindowWrapper, BLACK_COLOR, WHITE_COLOR};
 
@@ -146,7 +148,7 @@ pub struct Wrench {
     device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer,
+    pub renderer: webrender::Renderer<back::Backend>,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
@@ -167,6 +169,8 @@ impl Wrench {
     pub fn new(
         window: &mut WindowWrapper,
         proxy: Option<EventsLoopProxy>,
+        adapter: hal::Adapter<back::Backend>,
+        surface: &mut <back::Backend as hal::Backend>::Surface,
         shader_override_path: Option<PathBuf>,
         dp_ratio: f32,
         save_type: Option<SaveType>,
@@ -228,7 +232,7 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(notifier, opts, &window.get_window(), adapter, surface).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 
@@ -541,11 +545,11 @@ impl Wrench {
         self.api.send_transaction(self.document_id, txn);
     }
 
-    pub fn get_frame_profiles(
+    /*pub fn get_frame_profiles(
         &mut self,
     ) -> (Vec<webrender::CpuProfile>, Vec<webrender::GpuProfile>) {
         self.renderer.get_frame_profiles()
-    }
+    }*/
 
     pub fn render(&mut self) -> RendererStats {
         self.renderer.update();
@@ -579,7 +583,7 @@ impl Wrench {
         ];
 
         let color_and_offset = [(*BLACK_COLOR, 2.0), (*WHITE_COLOR, 0.0)];
-        let dr = self.renderer.debug_renderer();
+        /*let dr = self.renderer.debug_renderer();
 
         for ref co in &color_and_offset {
             let x = self.device_pixel_ratio * (15.0 + co.1);
@@ -588,6 +592,6 @@ impl Wrench {
                 dr.add_text(x, y, line, co.0.into());
                 y += self.device_pixel_ratio * dr.line_height();
             }
-        }
+        }*/
     }
 }

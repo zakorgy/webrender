@@ -33,11 +33,11 @@ struct App {
 }
 
 struct OutputHandler {
-    texture_id: gl::GLuint
+    texture_id: u32
 }
 
 struct ExternalHandler {
-    texture_id: gl::GLuint
+    texture_id: u32
 }
 
 impl webrender::OutputImageHandler for OutputHandler {

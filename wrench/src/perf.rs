@@ -145,7 +145,7 @@ impl<'a> PerfHarness<'a> {
     }
 
     fn render_yaml(&mut self, filename: &Path) -> TestProfile {
-        let mut reader = YamlFrameReader::new(filename);
+        /*let mut reader = YamlFrameReader::new(filename);
 
         // Loop until we get a reasonable number of CPU and GPU
         // frame profiles. Then take the mean.
@@ -158,7 +158,6 @@ impl<'a> PerfHarness<'a> {
             reader.do_frame(self.wrench);
             self.rx.recv().unwrap();
             self.wrench.render();
-            self.window.swap_buffers();
             let (cpu_profiles, gpu_profiles) = self.wrench.get_frame_profiles();
             cpu_frame_profiles.extend(cpu_profiles);
             gpu_frame_profiles.extend(gpu_profiles);
@@ -174,14 +173,14 @@ impl<'a> PerfHarness<'a> {
 
         let composite_time_ns = extract_sample(&mut cpu_frame_profiles, |a| a.composite_time_ns);
         let paint_time_ns = extract_sample(&mut gpu_frame_profiles, |a| a.paint_time_ns);
-        let backend_time_ns = extract_sample(&mut cpu_frame_profiles, |a| a.backend_time_ns);
+        let backend_time_ns = extract_sample(&mut cpu_frame_profiles, |a| a.backend_time_ns);*/
 
         TestProfile {
             name: filename.to_str().unwrap().to_string(),
-            composite_time_ns,
-            paint_time_ns,
-            backend_time_ns,
-            draw_calls,
+            composite_time_ns: 0,
+            paint_time_ns: 0,
+            backend_time_ns: 0,
+            draw_calls: 0,
         }
     }
 }
