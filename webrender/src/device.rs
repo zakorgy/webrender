@@ -269,7 +269,7 @@ impl Device {
         _file_changed_handler: Box<FileWatcherHandler>,
         //cached_programs: Option<Rc<ProgramCache>>,
     ) -> Device {
-        let max_texture_size = 2028u32;
+        let max_texture_size = 2048u32;
         let renderer_name = "WIP".to_owned();
 
         let mut extensions = Vec::new();
