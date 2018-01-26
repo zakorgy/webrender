@@ -30,8 +30,7 @@ use debug_server::{self, DebugServer};
 use device::{DepthFunction, Device, FrameId, /*Program,*/ UploadMethod, Texture,
              VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
-use device::{FileWatcherHandler, ShaderError, TextureFilter,
-             VertexUsageHint, VAO, VBO, CustomVAO};
+use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
 use device::{ReadPixelsFormat};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
@@ -817,16 +816,16 @@ enum CacheBus {
     /// Shader-based scattering updates. Currently rendered by a set
     /// of points into the GPU texture, each carrying a `GpuBlockData`.
     Scatter {
-        /// Special program to run the scattered update.
+        // Special program to run the scattered update.
         //program: Program,
-        /// VAO containing the source vertex buffers.
-        vao: CustomVAO,
-        /// VBO for positional data, supplied as normalized `u16`.
-        buf_position: VBO<[u16; 2]>,
-        /// VBO for gpu block data.
-        buf_value: VBO<GpuBlockData>,
-        /// Currently stored block count.
-        count: usize,
+        // VAO containing the source vertex buffers.
+        //vao: CustomVAO,
+        // VBO for positional data, supplied as normalized `u16`.
+        //buf_position: VBO<[u16; 2]>,
+        // VBO for gpu block data.
+        //buf_value: VBO<GpuBlockData>,
+        // Currently stored block count.
+        //count: usize,
     },
 }
 
@@ -843,20 +842,20 @@ impl CacheTexture {
         let bus = if use_scatter {
             //let program = device
             //    .create_program("gpu_cache_update", "", &DESC_GPU_CACHE_UPDATE)?;
-            let buf_position = device.create_vbo();
-            let buf_value = device.create_vbo();
+            //let buf_position = device.create_vbo();
+            //let buf_value = device.create_vbo();
             //Note: the vertex attributes have to be supplied in the same order
             // as for program creation, but each assigned to a different stream.
-            let vao = device.create_custom_vao(&[
+            /*let vao = device.create_custom_vao(&[
                 buf_position.stream_with(&DESC_GPU_CACHE_UPDATE.vertex_attributes[0..1]),
                 buf_value   .stream_with(&DESC_GPU_CACHE_UPDATE.vertex_attributes[1..2]),
-            ]);
+            ]);*/
             CacheBus::Scatter {
                 //program,
-                vao,
-                buf_position,
-                buf_value,
-                count: 0,
+                //vao,
+                //buf_position,
+                //buf_value,
+                //count: 0,
             }
         } else {
             let buffer = device.create_pbo();
@@ -879,11 +878,11 @@ impl CacheTexture {
             CacheBus::PixelBuffer { buffer, ..} => {
                 device.delete_pbo(buffer);
             }
-            CacheBus::Scatter { /*program,*/ vao, buf_position, buf_value, ..} => {
+            CacheBus::Scatter { /*program, vao, buf_position, buf_value, .. */} => {
                 //device.delete_program(program);
-                device.delete_custom_vao(vao);
-                device.delete_vbo(buf_position);
-                device.delete_vbo(buf_value);
+                //device.delete_custom_vao(vao);
+                //device.delete_vbo(buf_position);
+                //device.delete_vbo(buf_value);
             }
         }
     }
@@ -926,11 +925,12 @@ impl CacheTexture {
                 }
             }
             CacheBus::Scatter {
-                ref mut buf_position,
+                /*ref mut buf_position,
                 ref mut buf_value,
                 ref mut count,
-                ..
+                ..*/
             } => {
+                /*
                 *count = 0;
                 if total_block_count > buf_value.allocated_count() {
                     device.allocate_vbo(buf_position, total_block_count, VertexUsageHint::Stream);
@@ -953,7 +953,7 @@ impl CacheTexture {
                             None,
                         );
                     }
-                }
+                }*/
             }
         }
     }
@@ -994,11 +994,12 @@ impl CacheTexture {
                 }
             }
             CacheBus::Scatter {
-                ref buf_position,
+                /*ref buf_position,
                 ref buf_value,
                 ref mut count,
-                ..
+                ..*/
             } => {
+                /*
                 //TODO: re-use this heap allocation
                 // Unused positions will be left as 0xFFFF, which translates to
                 // (1.0, 1.0) in the vertex output position and gets culled out
@@ -1024,7 +1025,7 @@ impl CacheTexture {
 
                 device.fill_vbo(buf_value, &updates.blocks, *count);
                 device.fill_vbo(buf_position, &position_data, *count);
-                *count += position_data.len();
+                *count += position_data.len();*/
             }
         }
     }
@@ -1066,8 +1067,8 @@ impl CacheTexture {
 
                 rows_dirty
             }
-            CacheBus::Scatter { /*ref program,*/ ref vao, count, .. } => {
-                device.disable_depth();
+            CacheBus::Scatter { /*ref program, ref vao, count, ..*/ } => {
+                /*device.disable_depth();
                 device.set_blend(false);
                 //device.bind_program(program);
                 device.bind_custom_vao(vao);
@@ -1075,7 +1076,7 @@ impl CacheTexture {
                     Some((&self.texture, 0)),
                     Some(self.texture.get_dimensions()),
                 );
-                device.draw_nonindexed_points(0, count as _);
+                device.draw_nonindexed_points(0, count as _);*/
                 0
             }
         }
@@ -1647,9 +1648,6 @@ pub struct Renderer {
     last_time: u64,
 
     gpu_profile: GpuProfiler<GpuProfileTag>,
-    prim_vao: VAO,
-    blur_vao: VAO,
-    clip_vao: VAO,
 
     // node_data_texture: VertexDataTexture,
     // local_clip_rects_texture: VertexDataTexture,
@@ -2145,14 +2143,6 @@ impl Renderer {
             PackedVertex { pos: [x1, y1] },
         ];
 
-        let prim_vao = device.create_vao(&DESC_PRIM_INSTANCES);
-        device.bind_vao(&prim_vao);
-        device.update_vao_indices(&prim_vao, &quad_indices, VertexUsageHint::Static);
-        device.update_vao_main_vertices(&prim_vao, &quad_vertices, VertexUsageHint::Static);
-
-        let blur_vao = device.create_vao_with_new_instances(&DESC_BLUR, &prim_vao);
-        let clip_vao = device.create_vao_with_new_instances(&DESC_CLIP, &prim_vao);
-
         let texture_cache_upload_pbo = device.create_pbo();
 
         let texture_resolver = SourceTextureResolver::new(&mut device);
@@ -2297,9 +2287,6 @@ impl Renderer {
             enable_clear_scissor: options.enable_clear_scissor,
             last_time: 0,
             gpu_profile,
-            prim_vao,
-            blur_vao,
-            clip_vao,
             // node_data_texture,
             // local_clip_rects_texture,
             // render_task_texture,
@@ -3084,19 +3071,11 @@ impl Renderer {
         //     self.device.bind_texture(TextureSampler::Dither, texture);
         // }
 
-        let vao = match vertex_array_kind {
-            VertexArrayKind::Primitive => &self.prim_vao,
-            VertexArrayKind::Clip => &self.clip_vao,
-            VertexArrayKind::Blur => &self.blur_vao,
-        };
-
-        self.device.bind_vao(vao);
-
         let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
 
         if batched {
             self.device
-                .update_vao_instances(vao, data, VertexUsageHint::Stream);
+                .update_instances(data, VertexUsageHint::Stream);
             self.device
                 .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
             self.profile_counters.draw_calls.inc();
@@ -3104,7 +3083,7 @@ impl Renderer {
         } else {
             for i in 0 .. data.len() {
                 self.device
-                    .update_vao_instances(vao, &data[i .. i + 1], VertexUsageHint::Stream);
+                    .update_instances(&data[i .. i + 1], VertexUsageHint::Stream);
                 self.device.draw_triangles_u16(0, 6);
                 self.profile_counters.draw_calls.inc();
                 stats.total_draw_calls += 1;
@@ -4639,9 +4618,6 @@ impl Renderer {
         // self.render_task_texture.deinit(&mut self.device);
         self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
-        self.device.delete_vao(self.prim_vao);
-        self.device.delete_vao(self.clip_vao);
-        self.device.delete_vao(self.blur_vao);
         self.debug.deinit(&mut self.device);
         // self.cs_text_run.deinit(&mut self.device);
         // self.cs_blur_a8.deinit(&mut self.device);
