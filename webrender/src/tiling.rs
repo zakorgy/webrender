@@ -211,7 +211,8 @@ impl<T: RenderTarget> RenderTargetList<T> {
     }
 
     pub fn check_ready(&self) {
-        match self.texture {
+        //TODO use this
+        /*match self.texture {
             Some(ref t) => {
                 assert_eq!(t.get_dimensions(), self.max_size);
                 assert_eq!(t.get_format(), self.format);
@@ -223,7 +224,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
             None => {
                 assert!(self.targets.is_empty())
             }
-        }
+        }*/
     }
 }
 

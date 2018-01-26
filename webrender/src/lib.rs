@@ -51,6 +51,11 @@ extern crate thread_profiler;
 #[cfg(any(feature = "debugger", feature = "capture"))]
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate gfx_hal as hal;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+extern crate winit;
 
 mod batch;
 mod border;
@@ -78,6 +83,7 @@ mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod internal_types;
+//mod parser;
 mod picture;
 mod prim_store;
 mod print_tree;
@@ -164,7 +170,7 @@ extern crate png;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::{build_shader_strings, ProgramCache, ReadPixelsFormat, UploadMethod, VertexUsageHint};
+pub use device::{ReadPixelsFormat, UploadMethod, VertexUsageHint};
 pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, Renderer, RendererOptions};

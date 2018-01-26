@@ -4,7 +4,7 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, Program, Texture, TextureSlot, VertexDescriptor, VAO};
+use device::{Device, /*Program,*/ Texture, TextureSlot, VertexDescriptor, VAO};
 use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
@@ -91,7 +91,7 @@ impl DebugColorVertex {
 pub struct DebugRenderer {
     font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
-    font_program: Program,
+    //font_program: Program,
     font_vao: VAO,
     font_texture: Texture,
 
@@ -100,17 +100,17 @@ pub struct DebugRenderer {
     tri_vao: VAO,
     line_vertices: Vec<DebugColorVertex>,
     line_vao: VAO,
-    color_program: Program,
+    //color_program: Program,
 }
 
 impl DebugRenderer {
     pub fn new(device: &mut Device) -> Self {
-        let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
-        device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
+        //let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
+        //device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
 
-        let color_program = device
-            .create_program("debug_color", "", &DESC_COLOR)
-            .unwrap();
+        //let color_program = device
+        //    .create_program("debug_color", "", &DESC_COLOR)
+        //    .unwrap();
 
         let font_vao = device.create_vao(&DESC_FONT);
         let line_vao = device.create_vao(&DESC_COLOR);
@@ -134,8 +134,8 @@ impl DebugRenderer {
             tri_vao,
             tri_vertices: Vec::new(),
             tri_indices: Vec::new(),
-            font_program,
-            color_program,
+            //font_program,
+            //color_program,
             font_vao,
             line_vao,
             font_texture,
@@ -144,8 +144,8 @@ impl DebugRenderer {
 
     pub fn deinit(self, device: &mut Device) {
         device.delete_texture(self.font_texture);
-        device.delete_program(self.font_program);
-        device.delete_program(self.color_program);
+        //device.delete_program(self.font_program);
+        //device.delete_program(self.color_program);
         device.delete_vao(self.tri_vao);
         device.delete_vao(self.line_vao);
         device.delete_vao(self.font_vao);
@@ -281,8 +281,8 @@ impl DebugRenderer {
 
             // Triangles
             if !self.tri_vertices.is_empty() {
-                device.bind_program(&self.color_program);
-                device.set_uniforms(&self.color_program, &projection, 0);
+                //device.bind_program(&self.color_program);
+                //device.set_uniforms(&self.color_program, &projection, 0);
                 device.bind_vao(&self.tri_vao);
                 device.update_vao_indices(&self.tri_vao, &self.tri_indices, VertexUsageHint::Dynamic);
                 device.update_vao_main_vertices(
@@ -295,8 +295,8 @@ impl DebugRenderer {
 
             // Lines
             if !self.line_vertices.is_empty() {
-                device.bind_program(&self.color_program);
-                device.set_uniforms(&self.color_program, &projection, 0);
+                //device.bind_program(&self.color_program);
+                //device.set_uniforms(&self.color_program, &projection, 0);
                 device.bind_vao(&self.line_vao);
                 device.update_vao_main_vertices(
                     &self.line_vao,
@@ -308,8 +308,8 @@ impl DebugRenderer {
 
             // Glyph
             if !self.font_indices.is_empty() {
-                device.bind_program(&self.font_program);
-                device.set_uniforms(&self.font_program, &projection, 0);
+                //device.bind_program(&self.font_program);
+                //device.set_uniforms(&self.font_program, &projection, 0);
                 device.bind_texture(DebugSampler::Font, &self.font_texture);
                 device.bind_vao(&self.font_vao);
                 device.update_vao_indices(&self.font_vao, &self.font_indices, VertexUsageHint::Dynamic);

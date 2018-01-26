@@ -26,9 +26,9 @@ pub struct GpuSampler<T> {
 }
 
 pub struct QuerySet<T> {
-    set: Vec<gl::GLuint>,
+    set: Vec<u32>,
     data: Vec<T>,
-    pending: gl::GLuint,
+    pending: u32,
 }
 
 impl<T> QuerySet<T> {
@@ -45,7 +45,7 @@ impl<T> QuerySet<T> {
         self.pending = 0;
     }
 
-    fn add(&mut self, value: T) -> Option<gl::GLuint> {
+    fn add(&mut self, value: T) -> Option<u32> {
         assert_eq!(self.pending, 0);
         self.set.get(self.data.len()).cloned().map(|query_id| {
             self.data.push(value);
@@ -54,7 +54,7 @@ impl<T> QuerySet<T> {
         })
     }
 
-    fn take<F: Fn(&mut T, gl::GLuint)>(&mut self, fun: F) -> Vec<T> {
+    fn take<F: Fn(&mut T, u32)>(&mut self, fun: F) -> Vec<T> {
         let mut data = mem::replace(&mut self.data, Vec::new());
         for (value, &query) in data.iter_mut().zip(self.set.iter()) {
             fun(value, query)

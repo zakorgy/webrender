@@ -7,11 +7,12 @@ repository = "https://github.com/servo/webrender"
 build = "build.rs"
 
 [features]
-default = ["freetype-lib"]
+default = ["freetype-lib", "vulkan", "gfx-hal/serde", "serde_json"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "serde", "image", "base64"]
 capture = ["webrender_api/debug-serialization", "ron", "serde"]
+vulkan = ["gfx-backend-vulkan"]
 
 [dependencies]
 app_units = "0.6"
@@ -37,6 +38,9 @@ serde = { optional = true, version = "1.0", features = ["serde_derive"] }
 image = { optional = true, version = "0.17" }
 base64 = { optional = true, version = "0.3.0" }
 ron = { optional = true, version = "0.1.7" }
+winit = "0.9"
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1" , feature = "serde"}
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1", optional = true, features = ["glsl-to-spirv"] }
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
@@ -54,3 +58,7 @@ dwrote = "0.4.1"
 core-foundation = "0.4.6"
 core-graphics = "0.12.3"
 core-text = { version = "8.0", default-features = false }
+
+[build-dependencies]
+serde_json =  "1.0"
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1" , feature = "serde"}
