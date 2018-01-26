@@ -10,6 +10,8 @@ use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use std::f32;
 
+use back;
+
 #[derive(Debug, Copy, Clone)]
 enum DebugSampler {
     Font,
@@ -67,7 +69,7 @@ pub struct DebugRenderer {
 }
 
 impl DebugRenderer {
-    pub fn new(device: &mut Device) -> Self {
+    pub fn new(device: &mut Device<back::Backend>) -> Self {
         //let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
         //device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
 
@@ -105,7 +107,7 @@ impl DebugRenderer {
         }
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut Device<back::Backend>) {
         device.delete_texture(self.font_texture);
         //device.delete_program(self.font_program);
         //device.delete_program(self.color_program);
@@ -225,7 +227,7 @@ impl DebugRenderer {
 
     pub fn render(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<back::Backend>,
         viewport_size: Option<DeviceUintSize>,
     ) {
         if let Some(viewport_size) = viewport_size {

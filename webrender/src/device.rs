@@ -21,6 +21,24 @@ use std::ptr;
 use std::rc::Rc;
 use std::thread;
 
+use hal;
+use winit;
+use back;
+
+// gfx-hal
+use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
+use hal::{Backbuffer, DescriptorPool, FrameSync, Gpu, Primitive, SwapchainConfig};
+use hal::format::{ChannelType, Swizzle};
+use hal::pass::Subpass;
+use hal::pso::PipelineStage;
+use hal::queue::Submission;
+//use parser;
+
+const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
+    aspects: hal::format::AspectFlags::COLOR,
+    levels: 0 .. 1,
+    layers: 0 .. 1,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
@@ -226,8 +244,25 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
-pub struct Device {
-    //gl: Rc<gl::Gl>,
+pub struct Device<B: hal::Backend> {
+    pub device: B::Device,
+    pub upload_memory_type: hal::MemoryTypeId,
+    pub download_memory_type: hal::MemoryTypeId,
+    pub limits: hal::Limits,
+    pub queue_group: hal::QueueGroup<B, hal::queue::Graphics>,
+    pub command_pool: hal::CommandPool<B, hal::queue::Graphics>,
+    pub swap_chain: Box<B::Swapchain>,
+    pub render_pass: B::RenderPass,
+    pub framebuffers: Vec<B::Framebuffer>,
+    pub frame_images: Vec<(B::Image, B::ImageView)>,
+    pub viewport: hal::command::Viewport,
+    pub sampler_linear: B::Sampler,
+    pub sampler_nearest: B::Sampler,
+    // pub resource_cache: VertexDataImage<B>,
+    // pub render_tasks: VertexDataImage<B>,
+    // pub node_data: VertexDataImage<B>,
+    pub upload_queue: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
+    pub current_frame_id: usize,
     // device state
     bound_textures: [u32; 16],
     bound_program: u32,
@@ -261,25 +296,208 @@ pub struct Device {
     extensions: Vec<String>,
 }
 
-impl Device {
+impl<B: hal::Backend> Device<B> {
     pub fn new(
-        //gl: Rc<gl::Gl>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
-        //cached_programs: Option<Rc<ProgramCache>>,
-    ) -> Device {
+        window: &winit::Window,
+        instance: &back::Instance,
+        surface: &mut <back::Backend as hal::Backend>::Surface,
+    ) -> Device<back::Backend> {
         let max_texture_size = 2048u32;
         let renderer_name = "WIP".to_owned();
 
         let mut extensions = Vec::new();
-        /*let extension_count = gl.get_integer_v(gl::NUM_EXTENSIONS) as u32;
-        for i in 0 .. extension_count {
-            extensions.push(gl.get_string_i(gl::EXTENSIONS, i));
-        }*/
+
+        let window_size = window.get_inner_size().unwrap();
+        let pixel_width = window_size.0 as u16;
+        let pixel_height = window_size.1 as u16;
+
+        // instantiate backend
+        let mut adapters = instance.enumerate_adapters();
+
+        for adapter in &adapters {
+            println!("{:?}", adapter.info);
+        }
+
+        let adapter = adapters.remove(0);
+        let surface_format = surface
+            .capabilities_and_formats(&adapter.physical_device)
+            .1
+            .map_or(
+                //hal::format::Format::Rgba8Srgb,
+                hal::format::Format::Rgba8Unorm,
+                |formats| {
+                    formats
+                        .into_iter()
+                        .find(|format| {
+                            //format.base_format().1 == ChannelType::Srgb
+                            format.base_format().1 == ChannelType::Unorm
+                        })
+                        .unwrap()
+                },
+            );
+
+        let memory_types = adapter
+            .physical_device
+            .memory_properties()
+            .memory_types;
+        let limits = adapter
+            .physical_device
+            .get_limits();
+
+        let upload_memory_type: hal::MemoryTypeId = memory_types
+            .iter()
+            .position(|mt| {
+                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
+                //&&!mt.properties.contains(hal::memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        let download_memory_type = memory_types
+            .iter()
+            .position(|mt| {
+                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE | hal::memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        info!("upload memory: {:?}", upload_memory_type);
+        info!("download memory: {:?}", &download_memory_type);
+
+        let Gpu {
+            device,
+            mut queue_groups,
+        } = adapter
+            .open_with(|family| {
+                if family.supports_graphics() && surface.supports_queue_family(family) {
+                    Some(1)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        let queue_group = hal::QueueGroup::<_, hal::Graphics>::new(queue_groups.remove(0));
+        let mut command_pool = device.create_command_pool_typed(
+            &queue_group,
+            hal::pool::CommandPoolCreateFlags::empty(),
+            32,
+        );
+        command_pool.reset();
+
+        println!("{:?}", surface_format);
+        let swap_config = SwapchainConfig::new().with_color(surface_format);
+        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
+        println!("backbuffer={:?}", backbuffer);
+
+        let render_pass = {
+            let attachment = hal::pass::Attachment {
+                format: Some(surface_format),
+                ops: hal::pass::AttachmentOps::new(
+                    hal::pass::AttachmentLoadOp::Load,
+                    hal::pass::AttachmentStoreOp::Store,
+                ),
+                stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+                layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::Present,
+            };
+
+            let subpass = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::ImageLayout::ColorAttachmentOptimal)],
+                depth_stencil: None,
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let dependency = hal::pass::SubpassDependency {
+                passes: hal::pass::SubpassRef::External .. hal::pass::SubpassRef::Pass(0),
+                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                    .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                accesses: hal::image::Access::empty()
+                    .. (hal::image::Access::COLOR_ATTACHMENT_READ
+                    | hal::image::Access::COLOR_ATTACHMENT_WRITE),
+            };
+
+            device.create_render_pass(&[attachment], &[subpass], &[dependency])
+        };
+
+        // Framebuffer and render target creation
+        let (frame_images, framebuffers) = match backbuffer {
+            Backbuffer::Images(images) => {
+                let extent = hal::device::Extent {
+                    width: pixel_width as _,
+                    height: pixel_height as _,
+                    depth: 1,
+                };
+                let pairs = images
+                    .into_iter()
+                    .map(|image| {
+                        let rtv = device
+                            .create_image_view(
+                                &image,
+                                surface_format,
+                                Swizzle::NO,
+                                COLOR_RANGE.clone(),
+                            )
+                            .unwrap();
+                        (image, rtv)
+                    })
+                    .collect::<Vec<_>>();
+                let fbos = pairs
+                    .iter()
+                    .map(|&(_, ref rtv)| {
+                        device
+                            .create_framebuffer(&render_pass, &[rtv], extent)
+                            .unwrap()
+                    })
+                    .collect();
+                (pairs, fbos)
+            }
+            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
+        };
+
+        // Rendering setup
+        let viewport = hal::command::Viewport {
+            rect: hal::command::Rect {
+                x: 0,
+                y: 0,
+                w: pixel_width,
+                h: pixel_height,
+            },
+            depth: 0.0 .. 1.0,
+        };
+
+        // Samplers
+
+        let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::FilterMethod::Bilinear,
+            hal::image::WrapMode::Tile,
+        ));
+
+        let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::FilterMethod::Scale,
+            hal::image::WrapMode::Tile,
+        ));
 
         Device {
-            //gl,
+            device,
+            limits,
+            upload_memory_type,
+            download_memory_type,
+            queue_group,
+            command_pool,
+            swap_chain: Box::new(swap_chain),
+            render_pass,
+            framebuffers,
+            frame_images,
+            viewport,
+            sampler_linear,
+            sampler_nearest,
+            //resource_cache,
+            //render_tasks,
+            //node_data,
+            upload_queue: Vec::new(),
+            current_frame_id: 0,
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
@@ -1194,6 +1412,35 @@ impl Device {
 
     pub fn supports_extension(&self, extension: &str) -> bool {
         self.extensions.iter().any(|s| s == extension)
+    }
+
+    pub fn swap_buffers(&mut self) {
+        let mut frame_semaphore = self.device.create_semaphore();
+        let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        {
+            self.device.reset_fences(&[&frame_fence]);
+
+            let frame = self.swap_chain
+                .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
+            assert_eq!(frame.id(), self.current_frame_id);
+
+            let submission = Submission::new()
+                .wait_on(&[(&mut frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
+                .submit(&self.upload_queue);
+            self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
+
+            // TODO: replace with semaphore
+            self.device
+                .wait_for_fences(&[&frame_fence], hal::device::WaitFor::All, !0);
+
+            // present frame
+            self.swap_chain
+                .present(&mut self.queue_group.queues[0], &[]);
+            self.current_frame_id = (self.current_frame_id + 1) % self.framebuffers.len();
+        }
+        self.upload_queue.clear();
+        self.device.destroy_fence(frame_fence);
+        self.device.destroy_semaphore(frame_semaphore);
     }
 }
 
