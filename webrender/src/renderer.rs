@@ -72,6 +72,11 @@ use tiling::{Frame, RenderTarget, ScalingInfo, TextureCacheRenderTarget};
 use time::precise_time_ns;
 use util::TransformedRectKind;
 
+use hal;
+use winit;
+use back;
+//use parser;
+
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 /// Enabling this toggle would force the GPU cache scattered texture to
 /// be resized every frame, which enables GPU debuggers to see if this
@@ -1725,9 +1730,11 @@ impl Renderer {
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        //gl: Rc<gl::Gl>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
+        mut window: &winit::Window,
+        instance: &back::Instance,
+        surface: &mut <back::Backend as hal::Backend>::Surface,
     ) -> Result<(Renderer, RenderApiSender), RendererError> {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
         let (payload_tx, payload_rx) = try!{ channel::payload_channel() };
@@ -2308,6 +2315,10 @@ impl Renderer {
 
         let sender = RenderApiSender::new(api_tx, payload_tx);
         Ok((renderer, sender))
+    }
+
+    pub fn swap_buffers(&mut self) {
+
     }
 
     pub fn get_max_texture_size(&self) -> u32 {
