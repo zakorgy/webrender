@@ -9,6 +9,8 @@ use api::TextureTarget;
 use euclid::Transform3D;
 //use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
+use serde_json::Value;
+use std::collections::HashMap;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::fs::File;
@@ -32,7 +34,7 @@ use hal::format::{ChannelType, Swizzle};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
-//use parser;
+use parser;
 
 pub const NODE_TEXTURE_WIDTH: usize = 1020; // 204 * ( 20 / 4)
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023; // 341 * ( 12 / 4 )
@@ -45,6 +47,68 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     levels: 0 .. 1,
     layers: 0 .. 1,
 };
+
+const ENTRY_NAME: &str = "main";
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct Vertex {
+    aPosition: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+struct Locals {
+    uTransform: [[f32; 4]; 4],
+    uDevicePixelRatio: f32,
+    uMode: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct PrimitiveInstance {
+    aData0: [i32; 4],
+    aData1: [i32; 4],
+}
+
+impl PrimitiveInstance {
+    pub fn new(data: [i32; 8]) -> PrimitiveInstance {
+        PrimitiveInstance {
+            aData0: [data[0], data[1], data[2], data[3]],
+            aData1: [data[4], data[5], data[6], data[7]],
+        }
+    }
+}
+
+const QUAD: [Vertex; 6] = [
+    Vertex {
+        aPosition: [0.0, 0.0, 0.0],
+    },
+    Vertex {
+        aPosition: [1.0, 0.0, 0.0],
+    },
+    Vertex {
+        aPosition: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        aPosition: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        aPosition: [1.0, 0.0, 0.0],
+    },
+    Vertex {
+        aPosition: [1.0, 1.0, 0.0],
+    },
+];
+
+fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
+    use std::io::Read;
+    let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
+    let mut file = File::open(path_str).unwrap();
+    let mut shader = Vec::new();
+    file.read_to_end(&mut shader).unwrap();
+    shader
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
@@ -519,8 +583,297 @@ impl<B: hal::Backend> InstanceBuffer<B> {
     }
 }
 
+pub struct Program<B: hal::Backend> {
+    pub bindings_map: HashMap<String, usize>,
+    pub descriptor_set_layout: B::DescriptorSetLayout,
+    pub descriptor_pool: B::DescriptorPool,
+    pub descriptor_sets: Vec<B::DescriptorSet>,
+    pub pipeline_layout: B::PipelineLayout,
+    pub pipelines: Vec<B::GraphicsPipeline>,
+    pub vertex_buffer: Buffer<B>,
+    pub instance_buffer: InstanceBuffer<B>,
+    pub locals_buffer: Buffer<B>,
+}
+
+impl<B: hal::Backend> Program<B> {
+    pub fn create(
+        json: &Value,
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        shader_name: String,
+        render_pass: &B::RenderPass,
+    ) -> Program<B> {
+        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+        let vs_module = device
+            .create_shader_module(get_shader_source(shader_name.as_str(), ".vert.spv").as_slice())
+            .unwrap();
+        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+        let fs_module = device
+            .create_shader_module(get_shader_source(shader_name.as_str(), ".frag.spv").as_slice())
+            .unwrap();
+        let (bindings, bindings_map) =
+            parser::create_descriptor_set_layout_bindings(&json, shader_name.as_str());
+        let (ranges, sets) =
+            parser::create_range_descriptors_and_set_count(&json, shader_name.as_str());
+
+        let descriptor_set_layout = device.create_descriptor_set_layout(&bindings);
+        let mut descriptor_pool = device.create_descriptor_pool(sets, &ranges);
+        let descriptor_sets = descriptor_pool.allocate_sets(&[&descriptor_set_layout]);
+
+        let pipeline_layout = device.create_pipeline_layout(&[&descriptor_set_layout], &[]);
+
+        let pipelines = {
+            let (vs_entry, fs_entry) = (
+                hal::pso::EntryPoint::<B> {
+                    entry: ENTRY_NAME,
+                    module: &vs_module,
+                    specialization: &[],
+                },
+                hal::pso::EntryPoint::<B> {
+                    entry: ENTRY_NAME,
+                    module: &fs_module,
+                    specialization: &[],
+                },
+            );
+
+            let shader_entries = hal::pso::GraphicsShaderSet {
+                vertex: vs_entry,
+                hull: None,
+                domain: None,
+                geometry: None,
+                fragment: Some(fs_entry),
+            };
+
+            let subpass = Subpass {
+                index: 0,
+                main_pass: render_pass,
+            };
+
+            let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
+                shader_entries,
+                Primitive::TriangleList,
+                hal::pso::Rasterizer::FILL,
+                &pipeline_layout,
+                subpass,
+            );
+            pipeline_descriptor
+                .blender
+                .targets
+                .push(hal::pso::ColorBlendDesc(
+                    hal::pso::ColorMask::ALL,
+                    hal::pso::BlendState::ALPHA,
+                ));
+
+            pipeline_descriptor.vertex_buffers =
+                parser::create_vertex_buffer_descriptors(&json, shader_name.as_str());
+            pipeline_descriptor.attributes =
+                parser::create_attribute_descriptors(&json, shader_name.as_str());
+
+            //device.create_graphics_pipelines(&[pipeline_desc])
+            device
+                .create_graphics_pipelines(&[pipeline_descriptor])
+                .into_iter()
+                .map(|pipeline| pipeline.unwrap())
+                .collect()
+        };
+
+        device.destroy_shader_module(vs_module);
+        device.destroy_shader_module(fs_module);
+
+        let vertex_buffer_stride = mem::size_of::<Vertex>();
+        let vertex_buffer_len = QUAD.len() * vertex_buffer_stride;
+
+        let mut vertex_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::VERTEX,
+            vertex_buffer_stride,
+            vertex_buffer_len,
+        );
+
+        vertex_buffer.update(device, 0, vertex_buffer_len as u64, &vec![QUAD]);
+
+        let instance_buffer_stride = mem::size_of::<PrimitiveInstance>();
+        let instance_buffer_len = MAX_INSTANCE_COUNT * instance_buffer_stride;
+
+        let instance_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::VERTEX,
+            instance_buffer_stride,
+            instance_buffer_len,
+        );
+
+        let locals_buffer_stride = mem::size_of::<Locals>();
+        let locals_buffer_len = locals_buffer_stride;
+
+        let locals_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::UNIFORM,
+            locals_buffer_stride,
+            locals_buffer_len,
+        );
+
+        device.update_descriptor_sets(&[
+            hal::pso::DescriptorSetWrite {
+                set: &descriptor_sets[0],
+                binding: bindings_map["Locals"],
+                array_offset: 0,
+                write: hal::pso::DescriptorWrite::UniformBuffer(vec![
+                    (&locals_buffer.buffer, 0 .. mem::size_of::<Locals>() as u64),
+                ]),
+            },
+        ]);
+
+        Program {
+            bindings_map,
+            descriptor_set_layout,
+            descriptor_pool,
+            descriptor_sets,
+            pipeline_layout,
+            pipelines,
+            vertex_buffer,
+            instance_buffer: InstanceBuffer::new(instance_buffer),
+            locals_buffer,
+        }
+    }
+
+    pub fn bind(
+        &mut self,
+        device: &B::Device,
+        projection: &Transform3D<f32>,
+        u_mode: i32,
+        instances: &[PrimitiveInstance],
+    ) {
+        let data_stride = self.instance_buffer.buffer.data_stride;
+        let offset = self.instance_buffer.offset as u64;
+        self.instance_buffer.buffer.update(
+            device,
+            offset,
+            (instances.len() * data_stride) as u64,
+            &instances.to_owned(),
+        );
+
+        self.instance_buffer.size += instances.len();
+        let locals_buffer_stride = mem::size_of::<Locals>();
+        let locals_data = vec![
+            Locals {
+                uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
+                uDevicePixelRatio: 1.0,
+                uMode: u_mode,
+            },
+        ];
+        self.locals_buffer.update(
+            device,
+            0,
+            (locals_data.len() * locals_buffer_stride) as u64,
+            &locals_data,
+        );
+    }
+
+    pub fn init_vertex_data<'a>(
+        &mut self,
+        device: &B::Device,
+        resource_cache: hal::pso::DescriptorWrite<'a, B>,
+        resource_cache_sampler: hal::pso::DescriptorWrite<'a, B>,
+        node_data: hal::pso::DescriptorWrite<'a, B>,
+        node_data_sampler: hal::pso::DescriptorWrite<'a, B>,
+        render_tasks: hal::pso::DescriptorWrite<'a, B>,
+        render_tasks_sampler: hal::pso::DescriptorWrite<'a, B>,
+    ) {
+        device.update_descriptor_sets(&[
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tResourceCache"],
+                array_offset: 0,
+                write: resource_cache,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sResourceCache"],
+                array_offset: 0,
+                write: resource_cache_sampler,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tClipScrollNodes"],
+                array_offset: 0,
+                write: node_data,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sClipScrollNodes"],
+                array_offset: 0,
+                write: node_data_sampler,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["tRenderTasks"],
+                array_offset: 0,
+                write: render_tasks,
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_sets[0],
+                binding: self.bindings_map["sRenderTasks"],
+                array_offset: 0,
+                write: render_tasks_sampler,
+            },
+        ]);
+    }
+
+    pub fn submit(
+        &mut self,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        viewport: hal::command::Viewport,
+        render_pass: &B::RenderPass,
+        frame_buffer: &B::Framebuffer,
+        clear_values: &[hal::command::ClearValue],
+    ) -> hal::command::Submit<B, hal::queue::Graphics> {
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer();
+
+        cmd_buffer.set_viewports(&[viewport.clone()]);
+        cmd_buffer.set_scissors(&[viewport.rect]);
+        cmd_buffer.bind_graphics_pipeline(&self.pipelines[0]);
+        cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![
+            (&self.vertex_buffer.buffer, 0),
+            (&self.instance_buffer.buffer.buffer, 0),
+        ]));
+        cmd_buffer.bind_graphics_descriptor_sets(
+            &self.pipeline_layout,
+            0,
+            &self.descriptor_sets[0 .. 1],
+        );
+
+        {
+            let mut encoder = cmd_buffer.begin_renderpass_inline(
+                render_pass,
+                frame_buffer,
+                viewport.rect,
+                clear_values,
+            );
+            encoder.draw(0 .. 6, 0 .. self.instance_buffer.size as u32);
+        }
+
+        cmd_buffer.finish()
+    }
+
+    pub fn deinit(mut self, device: &B::Device) {
+        self.vertex_buffer.deinit(device);
+        self.instance_buffer.buffer.deinit(device);
+        self.locals_buffer.deinit(device);
+        device.destroy_descriptor_pool(self.descriptor_pool);
+        device.destroy_descriptor_set_layout(self.descriptor_set_layout);
+        device.destroy_pipeline_layout(self.pipeline_layout);
+        for pipeline in self.pipelines.drain(..) {
+            device.destroy_graphics_pipeline(pipeline);
+        }
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
+    pub memory_types: Vec<hal::MemoryType>,
     pub upload_memory_type: hal::MemoryTypeId,
     pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
@@ -790,6 +1143,7 @@ impl<B: hal::Backend> Device<B> {
         Device {
             device,
             limits,
+            memory_types,
             upload_memory_type,
             download_memory_type,
             queue_group,
@@ -873,6 +1227,58 @@ impl<B: hal::Backend> Device<B> {
                 DeviceUintPoint::zero(),
                 node_data,
             ));
+    }
+
+    pub fn create_program(&mut self, json: &Value, shader_name: String) -> Program<B> {
+        let mut program = Program::create(
+            json,
+            &self.device,
+            &self.memory_types,
+            shader_name,
+            &self.render_pass,
+        );
+        program.init_vertex_data(
+            &self.device,
+            hal::pso::DescriptorWrite::SampledImage(vec![
+                (
+                    &self.resource_cache.image_srv,
+                    hal::image::ImageLayout::Undefined,
+                ),
+            ]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![
+                (
+                    &self.node_data.image_srv,
+                    hal::image::ImageLayout::Undefined,
+                ),
+            ]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(vec![
+                (
+                    &self.render_tasks.image_srv,
+                    hal::image::ImageLayout::Undefined,
+                ),
+            ]),
+            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+        );
+        program
+    }
+
+    pub fn draw(
+        &mut self,
+        program: &mut Program<B>,
+        //blend_mode: &BlendMode,
+        //enable_depth_write: bool
+    ) {
+        let submit = program.submit(
+            &mut self.command_pool,
+            self.viewport.clone(),
+            &self.render_pass,
+            &self.framebuffers[self.current_frame_id],
+            &vec![],
+        );
+
+        self.upload_queue.push(submit);
     }
 
     /*pub fn gl(&self) -> &gl::Gl {

@@ -27,7 +27,7 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{DepthFunction, Device, FrameId, /*Program,*/ UploadMethod, Texture,
+use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
              VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
@@ -75,7 +75,7 @@ use util::TransformedRectKind;
 use hal;
 use winit;
 use back;
-//use parser;
+use parser;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 /// Enabling this toggle would force the GPU cache scattered texture to
@@ -1629,8 +1629,8 @@ pub struct Renderer {
     // ps_text_run_dual_source: TextShader,
     // ps_image: Vec<Option<PrimitiveShader>>,
     // ps_yuv_image: Vec<Option<PrimitiveShader>>,
-    // ps_border_corner: PrimitiveShader,
-    // ps_border_edge: PrimitiveShader,
+    ps_border_corner: Program<back::Backend>,
+    ps_border_edge: Program<back::Backend>,
     // ps_gradient: PrimitiveShader,
     // ps_angle_gradient: PrimitiveShader,
     // ps_radial_gradient: PrimitiveShader,
@@ -1756,6 +1756,11 @@ impl Renderer {
             instance,
             surface,
         );
+
+        let json = parser::read_json();
+
+        let ps_border_corner = device.create_program(&json, "ps_border_corner".to_owned());
+        let ps_border_edge = device.create_program(&json, "ps_border_edge".to_owned());
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
             device.supports_extension("GL_ARB_blend_func_extended");
@@ -2274,10 +2279,10 @@ impl Renderer {
             ps_text_run,
             ps_text_run_dual_source,
             ps_image,
-            ps_yuv_image,
+            ps_yuv_image,*/
             ps_border_corner,
             ps_border_edge,
-            ps_gradient,
+            /*ps_gradient,
             ps_angle_gradient,
             ps_radial_gradient,
             ps_blend,
@@ -2847,6 +2852,7 @@ impl Renderer {
                     cpu_frame_id,
                     &mut stats
                 );
+                self.flush();
 
                 if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
                     frame_profiles.push(frame.profile_counters.clone());
@@ -2908,6 +2914,11 @@ impl Renderer {
         } else {
             Err(mem::replace(&mut self.renderer_errors, Vec::new()))
         }
+    }
+
+    fn flush(&mut self) {
+        self.ps_border_corner.instance_buffer.reset();
+        self.ps_border_edge.instance_buffer.reset();
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
@@ -4707,8 +4718,8 @@ impl Renderer {
         for (_, target) in self.output_targets {
             self.device.delete_fbo(target.fbo_id);
         }
-        // self.ps_border_corner.deinit(&mut self.device);
-        // self.ps_border_edge.deinit(&mut self.device);
+        self.ps_border_corner.deinit(&mut self.device);
+        self.ps_border_edge.deinit(&mut self.device);
         // self.ps_gradient.deinit(&mut self.device);
         // self.ps_angle_gradient.deinit(&mut self.device);
         // self.ps_radial_gradient.deinit(&mut self.device);

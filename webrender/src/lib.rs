@@ -83,7 +83,7 @@ mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod internal_types;
-//mod parser;
+mod parser;
 mod picture;
 mod prim_store;
 mod print_tree;
@@ -154,7 +154,7 @@ extern crate plane_split;
 extern crate rayon;
 #[cfg(feature = "capture")]
 extern crate ron;
-#[cfg(feature = "debugger")]
+//#[cfg(feature = "debugger")]
 extern crate serde_json;
 extern crate smallvec;
 extern crate time;
