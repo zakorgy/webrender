@@ -34,15 +34,10 @@ struct Shader {
 
 const SHADERS: &[Shader] = &[
     // Cache shaders
-    /*Shader {
+    Shader {
         name: "cs_text_run",
         source_name: "cs_text_run",
         features: &[""],
-    },
-    Shader {
-        name: "cs_line",
-        source_name: "ps_line",
-        features: &["CACHE"],
     },
     Shader {
         name: "cs_blur_a8",
@@ -66,8 +61,8 @@ const SHADERS: &[Shader] = &[
         features: &[""],
     },
     Shader {
-        name: "brush_image",
-        source_name: "brush_image",
+        name: "brush_picture",
+        source_name: "brush_picture",
         features: &[
             "ALPHA_TARGET",
             "ALPHA_TARGET, ALPHA_PASS",
@@ -76,6 +71,11 @@ const SHADERS: &[Shader] = &[
             "COLOR_TARGET_ALPHA_MASK",
             "COLOR_TARGET_ALPHA_MASK, ALPHA_PASS",
         ],
+    },
+    Shader {
+        name: "brush_line",
+        source_name: "brush_line",
+        features: &["", "ALPHA_PASS"],
     },
     Shader {
         name: "brush_solid",
@@ -100,11 +100,6 @@ const SHADERS: &[Shader] = &[
     },
     // Prim shaders
     Shader {
-        name: "ps_line",
-        source_name: "ps_line",
-        features: &["", "TRANSFORM"],
-    },*/
-    Shader {
         name: "ps_border_corner",
         source_name: "ps_border_corner",
         features: &["", "TRANSFORM"],
@@ -114,7 +109,7 @@ const SHADERS: &[Shader] = &[
         source_name: "ps_border_edge",
         features: &["", "TRANSFORM"],
     },
-    /*Shader {
+    Shader {
         name: "ps_gradient",
         source_name: "ps_gradient",
         features: &["", "TRANSFORM", "DITHERING", "DITHERING,TRANSFORM"],
@@ -175,7 +170,14 @@ const SHADERS: &[Shader] = &[
     Shader {
         name: "ps_text_run",
         source_name: "ps_text_run",
-        features: &["", "TRANSFORM", "GLYPH_TRANSFORM"],
+        features: &[
+            "",
+            "TRANSFORM",
+            "GLYPH_TRANSFORM",
+            "DUAL_SOURCE_BLENDING",
+            "DUAL_SOURCE_BLENDING,TRANSFORM",
+            "DUAL_SOURCE_BLENDING,GLYPH_TRANSFORM",
+            ],
     },
     // Debug shaders
     Shader {
@@ -187,7 +189,7 @@ const SHADERS: &[Shader] = &[
         name: "debug_font",
         source_name: "debug_font",
         features: &[""],
-    },*/
+    },
 ];
 
 fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<String> {
