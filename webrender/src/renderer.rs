@@ -1603,13 +1603,13 @@ pub struct Renderer {
     // cs_blur_rgba8: LazilyCompiledShader,
 
     // Brush shaders
-    // brush_mask_corner: LazilyCompiledShader,
-    // brush_mask_rounded_rect: LazilyCompiledShader,
-    // brush_picture_rgba8: BrushShader,
-    // brush_picture_rgba8_alpha_mask: BrushShader,
-    // brush_picture_a8: BrushShader,
-    // brush_solid: BrushShader,
-    // brush_line: BrushShader,
+    brush_mask_corner: Program<back::Backend>,
+    brush_mask_rounded_rect: Program<back::Backend>,
+    brush_picture_rgba8: Program<back::Backend>,
+    brush_picture_rgba8_alpha_mask: Program<back::Backend>,
+    brush_picture_a8: Program<back::Backend>,
+    brush_solid: Program<back::Backend>,
+    brush_line: Program<back::Backend>,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
@@ -1625,20 +1625,20 @@ pub struct Renderer {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    // ps_text_run: TextShader,
-    // ps_text_run_dual_source: TextShader,
-    // ps_image: Vec<Option<PrimitiveShader>>,
-    // ps_yuv_image: Vec<Option<PrimitiveShader>>,
+    //ps_text_run: TextShader,
+    //ps_text_run_dual_source: TextShader,
+    //ps_image: Vec<Option<PrimitiveShader>>,
+    //ps_yuv_image: Vec<Option<PrimitiveShader>>,
     ps_border_corner: Program<back::Backend>,
     ps_border_edge: Program<back::Backend>,
-    // ps_gradient: PrimitiveShader,
-    // ps_angle_gradient: PrimitiveShader,
-    // ps_radial_gradient: PrimitiveShader,
+    ps_gradient: Program<back::Backend>,
+    ps_angle_gradient: Program<back::Backend>,
+    ps_radial_gradient: Program<back::Backend>,
 
-    // ps_blend: LazilyCompiledShader,
-    // ps_hw_composite: LazilyCompiledShader,
-    // ps_split_composite: LazilyCompiledShader,
-    // ps_composite: LazilyCompiledShader,
+    ps_blend: Program<back::Backend>,
+    ps_hw_composite: Program<back::Backend>,
+    ps_split_composite: Program<back::Backend>,
+    ps_composite: Program<back::Backend>,
 
     max_texture_size: u32,
 
@@ -1759,8 +1759,22 @@ impl Renderer {
 
         let json = parser::read_json();
 
+        let brush_line = device.create_program(&json, "brush_line".to_owned());
+        let brush_mask_corner = device.create_program(&json, "brush_mask_corner".to_owned());
+        let brush_mask_rounded_rect = device.create_program(&json, "brush_mask_rounded_rect".to_owned());
+        let brush_picture_rgba8 = device.create_program(&json, "brush_picture_color_target".to_owned());
+        let brush_picture_rgba8_alpha_mask = device.create_program(&json, "brush_picture_color_target_alpha_mask".to_owned());
+        let brush_picture_a8 = device.create_program(&json, "brush_picture_alpha_target".to_owned());
+        let brush_solid = device.create_program(&json, "brush_solid".to_owned());
         let ps_border_corner = device.create_program(&json, "ps_border_corner".to_owned());
         let ps_border_edge = device.create_program(&json, "ps_border_edge".to_owned());
+        let ps_gradient: Program<back::Backend> = device.create_program(&json, "ps_gradient".to_owned());
+        let ps_angle_gradient: Program<back::Backend> = device.create_program(&json, "ps_angle_gradient".to_owned());
+        let ps_radial_gradient: Program<back::Backend> = device.create_program(&json, "ps_radial_gradient".to_owned());
+        let ps_blend: Program<back::Backend> = device.create_program(&json, "ps_blend".to_owned());
+        let ps_hw_composite: Program<back::Backend> = device.create_program(&json, "ps_hardware_composite".to_owned());
+        let ps_split_composite: Program<back::Backend> = device.create_program(&json, "ps_split_composite".to_owned());
+        let ps_composite: Program<back::Backend> = device.create_program(&json, "ps_composite".to_owned());
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
             device.supports_extension("GL_ARB_blend_func_extended");
@@ -2265,7 +2279,7 @@ impl Renderer {
             pending_shader_updates: Vec::new(),
             /*cs_text_run,
             cs_blur_a8,
-            cs_blur_rgba8,
+            cs_blur_rgba8,*/
             brush_mask_corner,
             brush_mask_rounded_rect,
             brush_picture_rgba8,
@@ -2273,7 +2287,7 @@ impl Renderer {
             brush_picture_a8,
             brush_solid,
             brush_line,
-            cs_clip_rectangle,
+            /*cs_clip_rectangle,
             cs_clip_border,
             cs_clip_image,
             ps_text_run,
@@ -2282,13 +2296,13 @@ impl Renderer {
             ps_yuv_image,*/
             ps_border_corner,
             ps_border_edge,
-            /*ps_gradient,
+            ps_gradient,
             ps_angle_gradient,
             ps_radial_gradient,
             ps_blend,
             ps_hw_composite,
             ps_split_composite,
-            ps_composite,*/
+            ps_composite,
             debug: debug_renderer,
             debug_flags,
             backend_profile_counters: BackendProfileCounters::new(),
@@ -3126,13 +3140,15 @@ impl Renderer {
         framebuffer_size: DeviceUintSize,
         stats: &mut RendererStats,
     ) {
-        match key.kind {
+        let mut program = match key.kind {
             BatchKind::Composite { .. } => {
                 // self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
+                &mut self.ps_composite
             }
             BatchKind::HardwareComposite => {
                 // self.ps_hw_composite
                 //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
+                &mut self.ps_hw_composite
             }
             BatchKind::SplitComposite => {
                 // self.ps_split_composite.bind(
@@ -3141,20 +3157,23 @@ impl Renderer {
                 //     0,
                 //     &mut self.renderer_errors,
                 // );
+                &mut self.ps_split_composite
             }
             BatchKind::Blend => {
                 // self.ps_blend.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
+                &mut self.ps_blend
             }
             BatchKind::Brush(brush_kind) => {
                 match brush_kind {
                     BrushBatchKind::Solid => {
                         // self.brush_solid.bind(
                         //     &mut self.device,
-                        //     key.blend_mode,
+                        //     //key.blend_mode,
                         //     projection,
                         //     0,
-                        //     &mut self.renderer_errors,
+                        //     //&mut self.renderer_errors,
                         // );
+                        &mut self.brush_solid
                     }
                     BrushBatchKind::Picture(target_kind) => {
                         // let shader = match target_kind {
@@ -3169,15 +3188,21 @@ impl Renderer {
                         //     0,
                         //     &mut self.renderer_errors,
                         // );
+                        return
                     }
                     BrushBatchKind::Line => {
                         // self.brush_line.bind(
-                        //     &mut self.device,
-                        //     key.blend_mode,
+                        //     &mut self.device.device,
+                        //     //key.blend_mode,
                         //     projection,
                         //     0,
-                        //     &mut self.renderer_errors,
+                        //     &instances.iter().map(|pi|
+                        //         PrimitiveInstance::new(pi.data)
+                        //     ).collect::<Vec<PrimitiveInstance>>(),
+                        //     //&mut self.renderer_errors,
                         // );
+                        // self.device.draw(&mut self.brush_line);
+                        &mut self.brush_line
                     }
                 }
             }
@@ -3196,6 +3221,7 @@ impl Renderer {
                     //         0,
                     //         &mut self.renderer_errors,
                     //     );
+                    return
                 }
                 TransformBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                     let shader_index =
@@ -3210,32 +3236,35 @@ impl Renderer {
                     //         0,
                     //         &mut self.renderer_errors,
                     //     );
+                    return
                 }
                 TransformBatchKind::BorderCorner => {
-                    self.ps_border_corner.bind(
-                        &mut self.device.device,
-                        //transform_kind,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                        //&mut self.renderer_errors,
-                    );
-                    self.device.draw(&mut self.ps_border_corner);
+                    //self.ps_border_corner.bind(
+                    //    &mut self.device.device,
+                    //    //transform_kind,
+                    //    projection,
+                    //    0,
+                    //    &instances.iter().map(|pi|
+                    //        PrimitiveInstance::new(pi.data)
+                    //    ).collect::<Vec<PrimitiveInstance>>(),
+                    //    //&mut self.renderer_errors,
+                    //);
+                    //self.device.draw(&mut self.ps_border_corner);
+                    &mut self.ps_border_corner
                 }
                 TransformBatchKind::BorderEdge => {
-                    self.ps_border_edge.bind(
-                        &mut self.device.device,
-                        //transform_kind,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                        //&mut self.renderer_errors,
-                    );
-                    self.device.draw(&mut self.ps_border_edge);
+                    //self.ps_border_edge.bind(
+                    //    &mut self.device.device,
+                    //    //transform_kind,
+                    //    projection,
+                    //    0,
+                    //    &instances.iter().map(|pi|
+                    //        PrimitiveInstance::new(pi.data)
+                    //    ).collect::<Vec<PrimitiveInstance>>(),
+                    //    //&mut self.renderer_errors,
+                    //);
+                    //self.device.draw(&mut self.ps_border_edge);
+                    &mut self.ps_border_edge
                 }
                 TransformBatchKind::AlignedGradient => {
                     // self.ps_gradient.bind(
@@ -3245,6 +3274,7 @@ impl Renderer {
                     //     0,
                     //     &mut self.renderer_errors,
                     // );
+                    &mut self.ps_gradient
                 }
                 TransformBatchKind::AngleGradient => {
                     // self.ps_angle_gradient.bind(
@@ -3254,6 +3284,7 @@ impl Renderer {
                     //     0,
                     //     &mut self.renderer_errors,
                     // );
+                    &mut self.ps_angle_gradient
                 }
                 TransformBatchKind::RadialGradient => {
                     // self.ps_radial_gradient.bind(
@@ -3263,6 +3294,7 @@ impl Renderer {
                     //     0,
                     //     &mut self.renderer_errors,
                     // );
+                    &mut self.ps_radial_gradient
                 }
             },
         };
@@ -3330,12 +3362,21 @@ impl Renderer {
         }
 
         // let _timer = self.gpu_profile.start_timer(key.kind.gpu_sampler_tag());
-        self.draw_instanced_batch(
-            instances,
-            VertexArrayKind::Primitive,
-            &key.textures,
-            stats
+        //self.draw_instanced_batch(
+        //    instances,
+        //    VertexArrayKind::Primitive,
+        //    &key.textures,
+        //    stats
+        //);
+        program.bind(
+            &self.device.device,
+            projection,
+            0,
+            &instances.iter().map(|pi|
+                PrimitiveInstance::new(pi.data)
+            ).collect::<Vec<PrimitiveInstance>>(),
         );
+        self.device.draw(&mut program);
     }
 
     fn handle_blits(
@@ -4701,13 +4742,13 @@ impl Renderer {
         // self.cs_text_run.deinit(&mut self.device);
         // self.cs_blur_a8.deinit(&mut self.device);
         // self.cs_blur_rgba8.deinit(&mut self.device);
-        // self.brush_mask_rounded_rect.deinit(&mut self.device);
-        // self.brush_mask_corner.deinit(&mut self.device);
-        // self.brush_picture_rgba8.deinit(&mut self.device);
-        // self.brush_picture_rgba8_alpha_mask.deinit(&mut self.device);
-        // self.brush_picture_a8.deinit(&mut self.device);
-        // self.brush_solid.deinit(&mut self.device);
-        // self.brush_line.deinit(&mut self.device);
+        self.brush_mask_rounded_rect.deinit(&self.device.device);
+        self.brush_mask_corner.deinit(&self.device.device);
+        self.brush_picture_rgba8.deinit(&self.device.device);
+        self.brush_picture_rgba8_alpha_mask.deinit(&self.device.device);
+        self.brush_picture_a8.deinit(&self.device.device);
+        self.brush_solid.deinit(&self.device.device);
+        self.brush_line.deinit(&self.device.device);
         // self.cs_clip_rectangle.deinit(&mut self.device);
         // self.cs_clip_image.deinit(&mut self.device);
         // self.cs_clip_border.deinit(&mut self.device);
@@ -4728,13 +4769,13 @@ impl Renderer {
         }
         self.ps_border_corner.deinit(&self.device.device);
         self.ps_border_edge.deinit(&self.device.device);
-        // self.ps_gradient.deinit(&mut self.device);
-        // self.ps_angle_gradient.deinit(&mut self.device);
-        // self.ps_radial_gradient.deinit(&mut self.device);
-        // self.ps_blend.deinit(&mut self.device);
-        // self.ps_hw_composite.deinit(&mut self.device);
-        // self.ps_split_composite.deinit(&mut self.device);
-        // self.ps_composite.deinit(&mut self.device);
+        self.ps_gradient.deinit(&self.device.device);
+        self.ps_angle_gradient.deinit(&self.device.device);
+        self.ps_radial_gradient.deinit(&self.device.device);
+        self.ps_blend.deinit(&self.device.device);
+        self.ps_hw_composite.deinit(&self.device.device);
+        self.ps_split_composite.deinit(&self.device.device);
+        self.ps_composite.deinit(&self.device.device);
         #[cfg(feature = "capture")]
         self.device.delete_fbo(self.capture.read_fbo);
         #[cfg(feature = "capture")]
