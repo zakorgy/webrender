@@ -44,7 +44,7 @@ pub struct ClipMaskInstance {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct PrimitiveInstance {
-    data: [i32; 8],
+    pub data: [i32; 8],
 }
 
 pub struct SimplePrimitiveInstance {

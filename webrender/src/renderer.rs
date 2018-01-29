@@ -31,13 +31,13 @@ use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
              VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
-use device::{ReadPixelsFormat};
+use device::{PrimitiveInstance, ReadPixelsFormat};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 //use gleam::gl;
 use glyph_rasterizer::GlyphFormat;
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
-use gpu_types::PrimitiveInstance;
+use gpu_types::PrimitiveInstance as GpuPrimitiveInstance;
 use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use internal_types::{CacheTextureId, FastHashMap, RenderedDocument, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, RenderPassIndex, RenderTargetInfo, TextureUpdateList, TextureUpdateSource};
@@ -3119,7 +3119,7 @@ impl Renderer {
     fn submit_batch(
         &mut self,
         key: &BatchKey,
-        instances: &[PrimitiveInstance],
+        instances: &[GpuPrimitiveInstance],
         projection: &Transform3D<f32>,
         render_tasks: &RenderTaskTree,
         render_target: Option<(&Texture, i32)>,
@@ -3212,22 +3212,30 @@ impl Renderer {
                     //     );
                 }
                 TransformBatchKind::BorderCorner => {
-                    // self.ps_border_corner.bind(
-                    //     &mut self.device,
-                    //     transform_kind,
-                    //     projection,
-                    //     0,
-                    //     &mut self.renderer_errors,
-                    // );
+                    self.ps_border_corner.bind(
+                        &mut self.device.device,
+                        //transform_kind,
+                        projection,
+                        0,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                        //&mut self.renderer_errors,
+                    );
+                    self.device.draw(&mut self.ps_border_corner);
                 }
                 TransformBatchKind::BorderEdge => {
-                    // self.ps_border_edge.bind(
-                    //     &mut self.device,
-                    //     transform_kind,
-                    //     projection,
-                    //     0,
-                    //     &mut self.renderer_errors,
-                    // );
+                    self.ps_border_edge.bind(
+                        &mut self.device.device,
+                        //transform_kind,
+                        projection,
+                        0,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                        //&mut self.renderer_errors,
+                    );
+                    self.device.draw(&mut self.ps_border_edge);
                 }
                 TransformBatchKind::AlignedGradient => {
                     // self.ps_gradient.bind(
@@ -4273,7 +4281,7 @@ impl Renderer {
                 res_block
             }
         ).collect::<Vec<[f32; 20]>>();
-        //self.device.update_node_data(&node_data_blocks);
+        self.device.update_node_data(&node_data_blocks);
 
         // self.local_clip_rects_texture.update(
         //     &mut self.device,
@@ -4295,7 +4303,7 @@ impl Renderer {
                 res_block
             }
         ).collect::<Vec<[f32; 4]>>();
-        //self.device.update_local_rects(&local_rects_data_blocks);
+        self.device.update_local_rects(&local_rects_data_blocks);
 
         // self.render_task_texture
         //     .update(&mut self.device, &mut frame.render_tasks.task_data);
@@ -4305,7 +4313,7 @@ impl Renderer {
         // );
 
         let task_data_blocks = frame.render_tasks.task_data.iter().map(|block| block.data).collect::<Vec<[f32; 12]>>();
-        //self.device.update_render_tasks(&task_data_blocks);
+        self.device.update_render_tasks(&task_data_blocks);
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
         debug_assert!(self.texture_resolver.cache_rgba8_texture.is_none());
