@@ -1,0 +1,212 @@
+[
+    (
+        name: "cs_text_run",
+        source_name: "cs_text_run",
+        features: [
+            "",// [0]
+        ],
+    ),// [0]
+    (
+        name: "cs_blur_a8",
+        source_name: "cs_blur",
+        features: [
+            "ALPHA_TARGET",// [0]
+        ],
+    ),// [1]
+    (
+        name: "cs_blur_rgba8",
+        source_name: "cs_blur",
+        features: [
+            "COLOR_TARGET",// [0]
+        ],
+    ),// [2]
+    (
+        name: "brush_mask_corner",
+        source_name: "brush_mask_corner",
+        features: [
+            "",// [0]
+        ],
+    ),// [3]
+    (
+        name: "brush_mask_rounded_rect",
+        source_name: "brush_mask_rounded_rect",
+        features: [
+            "",// [0]
+        ],
+    ),// [4]
+    (
+        name: "brush_picture",
+        source_name: "brush_picture",
+        features: [
+            "ALPHA_TARGET",// [0]
+            "ALPHA_TARGET, ALPHA_PASS",// [1]
+            "COLOR_TARGET",// [2]
+            "COLOR_TARGET, ALPHA_PASS",// [3]
+            "COLOR_TARGET_ALPHA_MASK",// [4]
+            "COLOR_TARGET_ALPHA_MASK, ALPHA_PASS",// [5]
+        ],
+    ),// [5]
+    (
+        name: "brush_line",
+        source_name: "brush_line",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [6]
+    (
+        name: "brush_solid",
+        source_name: "brush_solid",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [7]
+    (
+        name: "cs_clip_rectangle",
+        source_name: "cs_clip_rectangle",
+        features: [
+            "TRANSFORM",// [0]
+        ],
+    ),// [8]
+    (
+        name: "cs_clip_image",
+        source_name: "cs_clip_image",
+        features: [
+            "TRANSFORM",// [0]
+        ],
+    ),// [9]
+    (
+        name: "cs_clip_border",
+        source_name: "cs_clip_border",
+        features: [
+            "TRANSFORM",// [0]
+        ],
+    ),// [10]
+    (
+        name: "ps_border_corner",
+        source_name: "ps_border_corner",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+        ],
+    ),// [11]
+    (
+        name: "ps_border_edge",
+        source_name: "ps_border_edge",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+        ],
+    ),// [12]
+    (
+        name: "ps_gradient",
+        source_name: "ps_gradient",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+            "DITHERING",// [2]
+            "DITHERING,TRANSFORM",// [3]
+        ],
+    ),// [13]
+    (
+        name: "ps_angle_gradient",
+        source_name: "ps_angle_gradient",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+            "DITHERING",// [2]
+            "DITHERING,TRANSFORM",// [3]
+        ],
+    ),// [14]
+    (
+        name: "ps_radial_gradient",
+        source_name: "ps_radial_gradient",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+            "DITHERING",// [2]
+            "DITHERING,TRANSFORM",// [3]
+        ],
+    ),// [15]
+    (
+        name: "ps_blend",
+        source_name: "ps_blend",
+        features: [
+            "",// [0]
+        ],
+    ),// [16]
+    (
+        name: "ps_composite",
+        source_name: "ps_composite",
+        features: [
+            "",// [0]
+        ],
+    ),// [17]
+    (
+        name: "ps_hardware_composite",
+        source_name: "ps_hardware_composite",
+        features: [
+            "",// [0]
+        ],
+    ),// [18]
+    (
+        name: "ps_split_composite",
+        source_name: "ps_split_composite",
+        features: [
+            "",// [0]
+        ],
+    ),// [19]
+    (
+        name: "ps_image",
+        source_name: "ps_image",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+        ],
+    ),// [20]
+    (
+        name: "ps_yuv_image",
+        source_name: "ps_yuv_image",
+        features: [
+            "NV12",// [0]
+            "",// [1]
+            "INTERLEAVED_Y_CB_CR",// [2]
+            "NV12,YUV_REC709",// [3]
+            "YUV_REC709",// [4]
+            "INTERLEAVED_Y_CB_CR,YUV_REC709",// [5]
+            "NV12,TRANSFORM",// [6]
+            "TRANSFORM",// [7]
+            "INTERLEAVED_Y_CB_CR,TRANSFORM",// [8]
+            "NV12,YUV_REC709,TRANSFORM",// [9]
+            "YUV_REC709,TRANSFORM",// [10]
+            "INTERLEAVED_Y_CB_CR,YUV_REC709,TRANSFORM",// [11]
+        ],
+    ),// [21]
+    (
+        name: "ps_text_run",
+        source_name: "ps_text_run",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+            "GLYPH_TRANSFORM",// [2]
+            "DUAL_SOURCE_BLENDING",// [3]
+            "DUAL_SOURCE_BLENDING,TRANSFORM",// [4]
+            "DUAL_SOURCE_BLENDING,GLYPH_TRANSFORM",// [5]
+        ],
+    ),// [22]
+    (
+        name: "debug_color",
+        source_name: "debug_color",
+        features: [
+            "",// [0]
+        ],
+    ),// [23]
+    (
+        name: "debug_font",
+        source_name: "debug_font",
+        features: [
+            "",// [0]
+        ],
+    ),// [24]
+]

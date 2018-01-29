@@ -2,11 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+extern crate ron;
 #[macro_use]
 extern crate serde_json;
+#[macro_use]
+extern crate serde;
 extern crate gfx_hal;
 
 use gfx_hal::pso::ShaderStageFlags;
+use ron::de::from_str;
 use serde_json::value::Value as JsonValue;
 use std::cmp::max;
 use std::env;
@@ -26,171 +30,12 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
                                      #extension GL_ARB_explicit_attrib_location : enable\n\
                                      #extension GL_ARB_separate_shader_objects : enable\n";
 
+#[derive(Deserialize)]
 struct Shader {
-    name: &'static str,
-    source_name: &'static str,
-    features: &'static [&'static str],
+    name: String,
+    source_name: String,
+    features: Vec<String>,
 }
-
-const SHADERS: &[Shader] = &[
-    // Cache shaders
-    Shader {
-        name: "cs_text_run",
-        source_name: "cs_text_run",
-        features: &[""],
-    },
-    Shader {
-        name: "cs_blur_a8",
-        source_name: "cs_blur",
-        features: &["ALPHA_TARGET"],
-    },
-    Shader {
-        name: "cs_blur_rgba8",
-        source_name: "cs_blur",
-        features: &["COLOR_TARGET"],
-    },
-    // Brush shaders
-    Shader {
-        name: "brush_mask_corner",
-        source_name: "brush_mask_corner",
-        features: &[""],
-    },
-    Shader {
-        name: "brush_mask_rounded_rect",
-        source_name: "brush_mask_rounded_rect",
-        features: &[""],
-    },
-    Shader {
-        name: "brush_picture",
-        source_name: "brush_picture",
-        features: &[
-            "ALPHA_TARGET",
-            "ALPHA_TARGET, ALPHA_PASS",
-            "COLOR_TARGET",
-            "COLOR_TARGET, ALPHA_PASS",
-            "COLOR_TARGET_ALPHA_MASK",
-            "COLOR_TARGET_ALPHA_MASK, ALPHA_PASS",
-        ],
-    },
-    Shader {
-        name: "brush_line",
-        source_name: "brush_line",
-        features: &["", "ALPHA_PASS"],
-    },
-    Shader {
-        name: "brush_solid",
-        source_name: "brush_solid",
-        features: &["", "ALPHA_PASS"],
-    },
-    // Cache clip shaders
-    Shader {
-        name: "cs_clip_rectangle",
-        source_name: "cs_clip_rectangle",
-        features: &["TRANSFORM"],
-    },
-    Shader {
-        name: "cs_clip_image",
-        source_name: "cs_clip_image",
-        features: &["TRANSFORM"],
-    },
-    Shader {
-        name: "cs_clip_border",
-        source_name: "cs_clip_border",
-        features: &["TRANSFORM"],
-    },
-    // Prim shaders
-    Shader {
-        name: "ps_border_corner",
-        source_name: "ps_border_corner",
-        features: &["", "TRANSFORM"],
-    },
-    Shader {
-        name: "ps_border_edge",
-        source_name: "ps_border_edge",
-        features: &["", "TRANSFORM"],
-    },
-    Shader {
-        name: "ps_gradient",
-        source_name: "ps_gradient",
-        features: &["", "TRANSFORM", "DITHERING", "DITHERING,TRANSFORM"],
-    },
-    Shader {
-        name: "ps_angle_gradient",
-        source_name: "ps_angle_gradient",
-        features: &["", "TRANSFORM", "DITHERING", "DITHERING,TRANSFORM"],
-    },
-    Shader {
-        name: "ps_radial_gradient",
-        source_name: "ps_radial_gradient",
-        features: &["", "TRANSFORM", "DITHERING", "DITHERING,TRANSFORM"],
-    },
-    Shader {
-        name: "ps_blend",
-        source_name: "ps_blend",
-        features: &[""],
-    },
-    Shader {
-        name: "ps_composite",
-        source_name: "ps_composite",
-        features: &[""],
-    },
-    Shader {
-        name: "ps_hardware_composite",
-        source_name: "ps_hardware_composite",
-        features: &[""],
-    },
-    Shader {
-        name: "ps_split_composite",
-        source_name: "ps_split_composite",
-        features: &[""],
-    },
-    Shader {
-        name: "ps_image",
-        source_name: "ps_image",
-        features: &["", "TRANSFORM"],
-    },
-    Shader {
-        name: "ps_yuv_image",
-        source_name: "ps_yuv_image",
-        features: &[
-            "NV12",
-            "",
-            "INTERLEAVED_Y_CB_CR",
-            "NV12,YUV_REC709",
-            "YUV_REC709",
-            "INTERLEAVED_Y_CB_CR,YUV_REC709",
-            "NV12,TRANSFORM",
-            "TRANSFORM",
-            "INTERLEAVED_Y_CB_CR,TRANSFORM",
-            "NV12,YUV_REC709,TRANSFORM",
-            "YUV_REC709,TRANSFORM",
-            "INTERLEAVED_Y_CB_CR,YUV_REC709,TRANSFORM",
-        ],
-    },
-    Shader {
-        name: "ps_text_run",
-        source_name: "ps_text_run",
-        features: &[
-            "",
-            "TRANSFORM",
-            "GLYPH_TRANSFORM",
-            "DUAL_SOURCE_BLENDING",
-            "DUAL_SOURCE_BLENDING,TRANSFORM",
-            "DUAL_SOURCE_BLENDING,GLYPH_TRANSFORM",
-            ],
-    },
-    // Debug shaders
-    Shader {
-        name: "debug_color",
-        source_name: "debug_color",
-        features: &[""],
-    },
-    Shader {
-        name: "debug_font",
-        source_name: "debug_font",
-        features: &[""],
-    },
-];
 
 fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<String> {
     fn get_shader_source(shader_name: &str, shaders: &HashMap<String, String>) -> Option<String> {
@@ -260,9 +105,14 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
         (vs_source, fs_source)
     }
 
+    let mut file = File::open("shaders.ron").expect("Unable to open shaders.ron");
+    let mut source = String::new();
+    file.read_to_string(&mut source).unwrap();
+    let shader_configs: Vec<Shader> = from_str(&source).expect("Unable to parse shaders.ron");
+
     let mut file_names = Vec::new();
-    for shader in SHADERS {
-        for config in shader.features {
+    for shader in &shader_configs {
+        for config in &shader.features {
             let mut features = String::new();
 
             features.push_str(SHADER_PREFIX);
@@ -282,9 +132,9 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
             features.push_str(VK_EXTENSIONS);
 
             let (mut vs_source, mut fs_source) =
-                build_shader_strings(shader.source_name, &features, shaders);
+                build_shader_strings(&shader.source_name, &features, shaders);
 
-            let mut filename = String::from(shader.name);
+            let mut filename = shader.name.clone();
             filename.push_str(file_name_postfix.as_str());
             let (mut vs_name, mut fs_name) = (filename.clone(), filename);
             vs_name.push_str(".vert");
