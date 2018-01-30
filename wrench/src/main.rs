@@ -77,6 +77,7 @@ use webrender::DebugFlags;
 use webrender::api::*;
 use wrench::{Wrench, WrenchThing};
 use yaml_frame_reader::YamlFrameReader;
+use hal::Instance;
 
 lazy_static! {
     static ref PLATFORM_DEFAULT_FACE_NAME: String = String::from("Arial");
@@ -159,7 +160,7 @@ impl HeadlessContext {
 }
 
 pub enum WindowWrapper {
-    Window(Rc<winit::Window>, RefCell<EventsLoop>),
+    Window(winit::Window, RefCell<EventsLoop>),
     Headless(HeadlessContext),
 }
 
@@ -213,9 +214,9 @@ impl WindowWrapper {
             WindowWrapper::Window(_, ref gl) | WindowWrapper::Headless(_, ref gl) => gl.clone(),
         }
     }*/
-    fn get_window(&self) -> Rc<winit::Window> {
+    fn get_window(&self) -> &winit::Window {
         match *self {
-            WindowWrapper::Window(ref window, _) => window.clone(),
+            WindowWrapper::Window(ref window, _) => &window,
             WindowWrapper::Headless(..) => unreachable!(),
         }
     }
@@ -235,7 +236,7 @@ fn make_window(
             .with_dimensions(size.width, size.height)
             .build(&events_loop)
             .unwrap();
-        WindowWrapper::Window(Rc::new(winit_window), RefCell::new(events_loop))
+        WindowWrapper::Window(winit_window, RefCell::new(events_loop))
     };
     //wrapper.gl().clear_color(0.3, 0.0, 0.0, 1.0);
     wrapper
@@ -308,7 +309,9 @@ fn main() {
     let zoom_factor = args.value_of("zoom").map(|z| z.parse::<f32>().unwrap());
     let mut window = make_window(size, dp_ratio, args.is_present("vsync"), is_headless);
     let instance = back::Instance::create("gfx-rs instance", 1);
-    let mut surface = instance.create_surface(&window.get_window());
+    let mut adapters = instance.enumerate_adapters();
+    let adapter = adapters.remove(0);
+    let mut surface = instance.create_surface(window.get_window());
     let dp_ratio = dp_ratio.unwrap_or(window.hidpi_factor());
     let dim = window.get_inner_size();
 
@@ -324,7 +327,7 @@ fn main() {
 
     let mut wrench = Wrench::new(
         &mut window,
-        &instance,
+        adapter,
         &mut surface,
         res_path,
         dp_ratio,

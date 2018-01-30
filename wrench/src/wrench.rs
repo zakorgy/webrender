@@ -167,7 +167,7 @@ pub struct Wrench {
 impl Wrench {
     pub fn new(
         window: &mut WindowWrapper,
-        instance: &back::Instance,
+        adapter: hal::Adapter<back::Backend>,
         surface: &mut <back::Backend as hal::Backend>::Surface,
         shader_override_path: Option<PathBuf>,
         dp_ratio: f32,
@@ -231,7 +231,7 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(notifier, opts, &window.get_window(), instance, surface).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(notifier, opts, &window.get_window(), adapter, surface).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 

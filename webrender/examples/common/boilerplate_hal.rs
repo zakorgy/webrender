@@ -14,6 +14,8 @@ use webrender;
 use webrender::api::*;
 use winit;
 
+use self::gfx_hal::Instance;
+
 struct Notifier {
     proxy: winit::EventsLoopProxy,
 }
@@ -121,8 +123,10 @@ pub fn main_wrapper<E: Example>(
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
     let instance = back::Instance::create("gfx-rs instance", 1);
+    let mut adapters = instance.enumerate_adapters();
+    let adapter = adapters.remove(0);
     let mut surface = instance.create_surface(&window);
-    let (mut renderer, sender) = webrender::Renderer::new(notifier, opts, &window, &instance, &mut surface).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(notifier, opts, &window, adapter, &mut surface).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 

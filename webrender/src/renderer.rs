@@ -628,7 +628,7 @@ struct SourceTextureResolver {
 }
 
 impl SourceTextureResolver {
-    fn new(device: &mut Device<back::Backend>) -> SourceTextureResolver {
+    fn new(device: &mut Device<back::Backend, hal::Graphics>) -> SourceTextureResolver {
         let mut dummy_cache_texture = device
             .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
         device.init_texture(
@@ -653,7 +653,7 @@ impl SourceTextureResolver {
         }
     }
 
-    fn deinit(self, device: &mut Device<back::Backend>) {
+    fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -705,7 +705,7 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<back::Backend>) {
+    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<back::Backend, hal::Graphics>) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
@@ -842,7 +842,7 @@ struct CacheTexture {
 }
 
 impl CacheTexture {
-    fn new(device: &mut Device<back::Backend>, use_scatter: bool) -> Result<Self, RendererError> {
+    fn new(device: &mut Device<back::Backend, hal::Graphics>, use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         let bus = if use_scatter {
@@ -876,7 +876,7 @@ impl CacheTexture {
         })
     }
 
-    fn deinit(self, device: &mut Device<back::Backend>) {
+    fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
         device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { .. } => {
@@ -897,7 +897,7 @@ impl CacheTexture {
 
     fn prepare_for_updates(
         &mut self,
-        device: &mut Device<back::Backend>,
+        device: &mut Device<back::Backend, hal::Graphics>,
         total_block_count: usize,
         max_height: u32,
     ) {
@@ -962,7 +962,7 @@ impl CacheTexture {
         }
     }
 
-    fn update(&mut self, device: &mut Device<back::Backend>, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, device: &mut Device<back::Backend, hal::Graphics>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1034,7 +1034,7 @@ impl CacheTexture {
         }
     }
 
-    fn flush(&mut self, device: &mut Device<back::Backend>) -> usize {
+    fn flush(&mut self, device: &mut Device<back::Backend, hal::Graphics>) -> usize {
         match self.bus {
             CacheBus::PixelBuffer { /*ref buffer,*/ ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
@@ -1095,14 +1095,14 @@ struct VertexDataTexture {
 }
 
 impl VertexDataTexture {
-    fn new(device: &mut Device<back::Backend>) -> VertexDataTexture {
+    fn new(device: &mut Device<back::Backend, hal::Graphics>) -> VertexDataTexture {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
         let pbo = device.create_pbo();
 
         VertexDataTexture { texture, pbo }
     }
 
-    fn update<T>(&mut self, device: &mut Device<back::Backend>, data: &mut Vec<T>) {
+    fn update<T>(&mut self, device: &mut Device<back::Backend, hal::Graphics>, data: &mut Vec<T>) {
         if data.is_empty() {
             return;
         }
@@ -1150,7 +1150,7 @@ impl VertexDataTexture {
             .upload(rect, 0, None, data);
     }
 
-    fn deinit(self, device: &mut Device<back::Backend>) {
+    fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
         device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
@@ -1590,7 +1590,7 @@ struct RendererCapture;
 pub struct Renderer {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
-    device: Device<back::Backend>,
+    device: Device<back::Backend, hal::Graphics>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
@@ -1734,7 +1734,7 @@ impl Renderer {
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
         mut window: &winit::Window,
-        instance: &back::Instance,
+        adapter: hal::Adapter<back::Backend>,
         surface: &mut <back::Backend as hal::Backend>::Surface,
     ) -> Result<(Renderer, RenderApiSender), RendererError> {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
@@ -1749,12 +1749,12 @@ impl Renderer {
             notifier: notifier.clone(),
         };
 
-        let mut device = Device::<back::Backend>::new(
+        let mut device = Device::new(
             options.resource_override_path.clone(),
             options.upload_method,
             Box::new(file_watch_handler),
             window,
-            instance,
+            adapter,
             surface,
         );
 

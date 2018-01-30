@@ -25,7 +25,7 @@ use std::thread;
 
 use hal;
 use winit;
-use back;
+//use back;
 
 // gfx-hal
 use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
@@ -342,7 +342,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         data_stride: usize,
         image_width: u32,
         image_height: u32,
-    ) -> VertexDataImage<B> {
+    ) -> Self {
         let image_upload_buffer = Buffer::create(
             device,
             memory_types,
@@ -410,7 +410,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         image_offset: DeviceUintPoint,
         image_data: &[T],
-    ) -> hal::command::Submit<B, hal::queue::Graphics>
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
         where
             T: Copy,
     {
@@ -425,7 +425,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         self.image_upload_buffer
             .update(device, buffer_offset, buffer_width, image_data);
 
-        let mut cmd_buffer = cmd_pool.acquire_command_buffer();
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         let image_barrier = hal::memory::Barrier::Image {
             states: (
@@ -551,7 +551,7 @@ impl<B: hal::Backend> Buffer<B> {
     {
         let mut data = device
             .acquire_mapping_writer::<T>(
-                &self.buffer,
+                &self.memory,
                 buffer_offset .. (buffer_offset + buffer_width),
             )
             .unwrap();
@@ -784,14 +784,14 @@ impl<B: hal::Backend> Program<B> {
     pub fn init_vertex_data<'a>(
         &mut self,
         device: &B::Device,
-        resource_cache: hal::pso::DescriptorWrite<'a, B>,
-        resource_cache_sampler: hal::pso::DescriptorWrite<'a, B>,
-        node_data: hal::pso::DescriptorWrite<'a, B>,
-        node_data_sampler: hal::pso::DescriptorWrite<'a, B>,
-        render_tasks: hal::pso::DescriptorWrite<'a, B>,
-        render_tasks_sampler: hal::pso::DescriptorWrite<'a, B>,
-        local_clip_rects: hal::pso::DescriptorWrite<'a, B>,
-        local_clip_rects_sampler: hal::pso::DescriptorWrite<'a, B>,
+        resource_cache: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        resource_cache_sampler: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        node_data: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        node_data_sampler: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        render_tasks: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        render_tasks_sampler: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        local_clip_rects: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
+        local_clip_rects_sampler: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
     ) {
         device.update_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
@@ -852,8 +852,8 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         clear_values: &[hal::command::ClearValue],
-    ) -> hal::command::Submit<B, hal::queue::Graphics> {
-        let mut cmd_buffer = cmd_pool.acquire_command_buffer();
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         cmd_buffer.set_viewports(&[viewport.clone()]);
         cmd_buffer.set_scissors(&[viewport.rect]);
@@ -894,14 +894,14 @@ impl<B: hal::Backend> Program<B> {
     }
 }
 
-pub struct Device<B: hal::Backend> {
+pub struct Device<B: hal::Backend, C> {
     pub device: B::Device,
     pub memory_types: Vec<hal::MemoryType>,
     pub upload_memory_type: hal::MemoryTypeId,
     pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
-    pub queue_group: hal::QueueGroup<B, hal::queue::Graphics>,
-    pub command_pool: hal::CommandPool<B, hal::queue::Graphics>,
+    pub queue_group: hal::QueueGroup<B, C>,
+    pub command_pool: hal::CommandPool<B, C>,
     pub swap_chain: Box<B::Swapchain>,
     pub render_pass: B::RenderPass,
     pub framebuffers: Vec<B::Framebuffer>,
@@ -913,7 +913,7 @@ pub struct Device<B: hal::Backend> {
     pub render_tasks: VertexDataImage<B>,
     pub local_clip_rects: VertexDataImage<B>,
     pub node_data: VertexDataImage<B>,
-    pub upload_queue: Vec<hal::command::Submit<B, hal::queue::Graphics>>,
+    pub upload_queue: Vec<hal::command::Submit<B, C, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
     // device state
     bound_textures: [u32; 16],
@@ -948,15 +948,15 @@ pub struct Device<B: hal::Backend> {
     extensions: Vec<String>,
 }
 
-impl<B: hal::Backend> Device<B> {
+impl<B: hal::Backend> Device<B, hal::Graphics> {
     pub fn new(
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         window: &winit::Window,
-        instance: &back::Instance,
-        surface: &mut <back::Backend as hal::Backend>::Surface,
-    ) -> Device<back::Backend> {
+        adapter: hal::Adapter<B>,
+        surface: &mut <B as hal::Backend>::Surface,
+    ) -> Self {
         let max_texture_size = 2048u32;
         let renderer_name = "WIP".to_owned();
 
@@ -966,14 +966,6 @@ impl<B: hal::Backend> Device<B> {
         let pixel_width = window_size.0 as u16;
         let pixel_height = window_size.1 as u16;
 
-        // instantiate backend
-        let mut adapters = instance.enumerate_adapters();
-
-        for adapter in &adapters {
-            println!("{:?}", adapter.info);
-        }
-
-        let adapter = adapters.remove(0);
         let surface_format = surface
             .capabilities_and_formats(&adapter.physical_device)
             .1
@@ -1017,20 +1009,11 @@ impl<B: hal::Backend> Device<B> {
         info!("upload memory: {:?}", upload_memory_type);
         info!("download memory: {:?}", &download_memory_type);
 
-        let Gpu {
-            device,
-            mut queue_groups,
-        } = adapter
-            .open_with(|family| {
-                if family.supports_graphics() && surface.supports_queue_family(family) {
-                    Some(1)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
+        let (device, mut queue_group) =
+            adapter.open_with(1, |family| {
+                surface.supports_queue_family(family)
+            }).unwrap();
 
-        let queue_group = hal::QueueGroup::<_, hal::Graphics>::new(queue_groups.remove(0));
         let mut command_pool = device.create_command_pool_typed(
             &queue_group,
             hal::pool::CommandPoolCreateFlags::empty(),
@@ -1932,7 +1915,7 @@ impl<B: hal::Backend> Device<B> {
         );
 
         let copy_submit = {
-            let mut cmd_buffer = self.command_pool.acquire_command_buffer();
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
             let image_barrier = hal::memory::Barrier::Image {
                 states: (hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal) ..
                     (hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal),
@@ -1978,14 +1961,15 @@ impl<B: hal::Backend> Device<B> {
 
         let copy_fence = self.device.create_fence(false);
         let submission = hal::queue::Submission::new()
-            .submit(&[copy_submit]);
+            .submit(Some(copy_submit));
         self.queue_group.queues[0].submit(submission, Some(&copy_fence));
+        //queue.destroy_command_pool(command_pool);
         self.device.wait_for_fences(&[&copy_fence], hal::device::WaitFor::Any, !0);
         self.device.destroy_fence(copy_fence);
 
         let mut reader = self.device
             .acquire_mapping_reader::<u8>(
-                &download_buffer.buffer,
+                &download_buffer.memory,
                 0 .. (rect.size.width * rect.size.height * bytes_per_pixel as u32) as u64,
             )
             .unwrap();
@@ -2125,7 +2109,7 @@ impl<B: hal::Backend> Device<B> {
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
     ) {
-        let mut cmd_buffer = self.command_pool.acquire_command_buffer();
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
 
         if let Some(rect) = rect {
             cmd_buffer.set_scissors(&[
