@@ -31,7 +31,7 @@ use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
              VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
-use device::{PrimitiveInstance, ReadPixelsFormat};
+use device::{PipelineRequirements, PrimitiveInstance, ReadPixelsFormat};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 //use gleam::gl;
@@ -51,13 +51,15 @@ use rayon::ThreadPool;
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
 use render_task::{RenderTaskKind, RenderTaskTree};
+use ron::de::from_reader;
 #[cfg(feature = "debugger")]
 use serde_json;
 use std;
 use std::cmp;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::Entry;
 use std::f32;
+use std::fs::File;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -75,7 +77,6 @@ use util::TransformedRectKind;
 use hal;
 use winit;
 use back;
-use parser;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 /// Enabling this toggle would force the GPU cache scattered texture to
@@ -1757,24 +1758,27 @@ impl Renderer {
             surface,
         );
 
-        let json = parser::read_json();
+        let file =
+            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
+        let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
+            from_reader(file).expect("Failed to load shader_bindings.ron");
 
-        let brush_line = device.create_program(&json, "brush_line".to_owned());
-        let brush_mask_corner = device.create_program(&json, "brush_mask_corner".to_owned());
-        let brush_mask_rounded_rect = device.create_program(&json, "brush_mask_rounded_rect".to_owned());
-        let brush_picture_rgba8 = device.create_program(&json, "brush_picture_color_target".to_owned());
-        let brush_picture_rgba8_alpha_mask = device.create_program(&json, "brush_picture_color_target_alpha_mask".to_owned());
-        let brush_picture_a8 = device.create_program(&json, "brush_picture_alpha_target".to_owned());
-        let brush_solid = device.create_program(&json, "brush_solid".to_owned());
-        let ps_border_corner = device.create_program(&json, "ps_border_corner".to_owned());
-        let ps_border_edge = device.create_program(&json, "ps_border_edge".to_owned());
-        let ps_gradient: Program<back::Backend> = device.create_program(&json, "ps_gradient".to_owned());
-        let ps_angle_gradient: Program<back::Backend> = device.create_program(&json, "ps_angle_gradient".to_owned());
-        let ps_radial_gradient: Program<back::Backend> = device.create_program(&json, "ps_radial_gradient".to_owned());
-        let ps_blend: Program<back::Backend> = device.create_program(&json, "ps_blend".to_owned());
-        let ps_hw_composite: Program<back::Backend> = device.create_program(&json, "ps_hardware_composite".to_owned());
-        let ps_split_composite: Program<back::Backend> = device.create_program(&json, "ps_split_composite".to_owned());
-        let ps_composite: Program<back::Backend> = device.create_program(&json, "ps_composite".to_owned());
+        let brush_line = device.create_program(&mut pipeline_requirements, "brush_line");
+        let brush_mask_corner = device.create_program(&mut pipeline_requirements, "brush_mask_corner");
+        let brush_mask_rounded_rect = device.create_program(&mut pipeline_requirements, "brush_mask_rounded_rect");
+        let brush_picture_rgba8 = device.create_program(&mut pipeline_requirements, "brush_picture_color_target");
+        let brush_picture_rgba8_alpha_mask = device.create_program(&mut pipeline_requirements, "brush_picture_color_target_alpha_mask");
+        let brush_picture_a8 = device.create_program(&mut pipeline_requirements, "brush_picture_alpha_target");
+        let brush_solid = device.create_program(&mut pipeline_requirements, "brush_solid");
+        let ps_border_corner = device.create_program(&mut pipeline_requirements, "ps_border_corner");
+        let ps_border_edge = device.create_program(&mut pipeline_requirements, "ps_border_edge");
+        let ps_gradient: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_gradient");
+        let ps_angle_gradient: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_angle_gradient");
+        let ps_radial_gradient: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_radial_gradient");
+        let ps_blend: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_blend");
+        let ps_hw_composite: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_hardware_composite");
+        let ps_split_composite: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_split_composite");
+        let ps_composite: Program<back::Backend> = device.create_program(&mut pipeline_requirements, "ps_composite");
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
             device.supports_extension("GL_ARB_blend_func_extended");

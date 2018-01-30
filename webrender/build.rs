@@ -4,14 +4,14 @@
 
 extern crate ron;
 #[macro_use]
-extern crate serde_json;
-#[macro_use]
 extern crate serde;
 extern crate gfx_hal;
 
-use gfx_hal::pso::ShaderStageFlags;
+use gfx_hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding};
+use gfx_hal::pso::{DescriptorType, Element, ShaderStageFlags, VertexBufferDesc};
+use gfx_hal::format::Format;
 use ron::de::from_str;
-use serde_json::value::Value as JsonValue;
+use ron::ser::{to_string_pretty, PrettyConfig};
 use std::cmp::max;
 use std::env;
 use std::fs::{canonicalize, read_dir, File};
@@ -35,6 +35,15 @@ struct Shader {
     name: String,
     source_name: String,
     features: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct PipelineRequirements {
+    attribute_descriptors: Vec<AttributeDesc>,
+    bindings_map: HashMap<String, usize>,
+    descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
+    descriptor_set_layouts: Vec<DescriptorSetLayoutBinding>,
+    vertex_buffer_descriptors: Vec<VertexBufferDesc>,
 }
 
 fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<String> {
@@ -192,19 +201,19 @@ fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) -> HashMap<S
     shader_map
 }
 
-fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue> {
+fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineRequirements> {
     let mut new_data = String::new();
     let mut binding = 1; // 0 is reserved for Locals
     let mut in_location = 0;
     let mut out_location = 0;
-    let mut attribute_descriptors: Vec<JsonValue> = Vec::new();
-    let mut descriptor_set_layouts = Vec::new();
+    let mut attribute_descriptors: Vec<AttributeDesc> = Vec::new();
+    let mut bindings_map: HashMap<String, usize> = HashMap::new();
+    let mut descriptor_set_layouts: Vec<DescriptorSetLayoutBinding> = Vec::new();
     let mut vertex_offset = 0;
     let mut instance_offset = 0;
-    let mut pipeline_requirmenets = HashMap::new();
     // Since the .vert and .frag files for the same shader use the same layout qualifiers
     // we extract layout datas from .vert files only.
-    let write_json = file_name.ends_with(".vert");
+    let write_ron = file_name.ends_with(".vert");
 
     // Mapping from glsl sampler variable name to a tuple,
     // in which the first item is the corresponding expression used in vulkan glsl files,
@@ -228,9 +237,10 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
                     &mut binding,
                     code,
                     &mut descriptor_set_layouts,
+                    &mut bindings_map,
                     &mut new_data,
                     &mut sampler_mapping,
-                    write_json,
+                    write_ron,
                 );
 
                 // Replace non-sampler uniforms with a structure.
@@ -238,8 +248,8 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
                 // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform float uDevicePixelRatio") {
                 replace_non_sampler_uniforms(&mut new_data);
-                if write_json {
-                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layouts);
+                if write_ron {
+                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layouts, &mut bindings_map);
                 }
             }
 
@@ -257,7 +267,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
                     &mut new_data,
                     &mut out_location,
                     &mut vertex_offset,
-                    write_json,
+                    write_ron,
                 );
                 // Replacing sampler variables with the corresponding expression from sampler_mapping.
             } else if l.contains("TEX_SAMPLE(") || l.contains("TEXEL_FETCH(")
@@ -279,15 +289,17 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<JsonValue
     }
     let mut file = File::create(file_path).unwrap();
     file.write(new_data.as_bytes()).unwrap();
-    if write_json {
-        let descriptor_pool = create_desciptor_pool_json(sampler_mapping.len() as i8);
-        let vertex_buffer_descriptors = create_vertex_buffer_descriptors_json(file_name);
-
-        pipeline_requirmenets.insert("attributeDescriptors", json!(attribute_descriptors));
-        pipeline_requirmenets.insert("descriptorPool", descriptor_pool);
-        pipeline_requirmenets.insert("descriptorSetLayouts", json!(descriptor_set_layouts));
-        pipeline_requirmenets.insert("vertexBufferDescriptors", json!(vertex_buffer_descriptors));
-        return Some(json!(pipeline_requirmenets));
+    if write_ron {
+        let descriptor_range_descriptors = create_desciptor_range_descriptors(sampler_mapping.len());
+        let vertex_buffer_descriptors = create_vertex_buffer_descriptors(file_name);
+        let pipeline_requirmenets = PipelineRequirements {
+            attribute_descriptors,
+            bindings_map,
+            descriptor_set_layouts,
+            descriptor_range_descriptors,
+            vertex_buffer_descriptors,
+        };
+        return Some(pipeline_requirmenets);
     }
     None
 }
@@ -299,12 +311,13 @@ fn split_code(line: &str) -> Vec<&str> {
 }
 
 fn replace_sampler_definition_with_texture_and_sampler(
-    binding: &mut i8,
+    binding: &mut usize,
     code: Vec<&str>,
-    descriptor_set_layouts: &mut Vec<JsonValue>,
+    descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
+    bindings_map: &mut HashMap<String, usize>,
     new_data: &mut String,
     sampler_mapping: &mut HashMap<String, (String, i8)>,
-    write_json: bool,
+    write_ron: bool,
 ) {
     // Get the name of the sampler.
     let (sampler_name, code) = code.split_last().unwrap();
@@ -352,21 +365,22 @@ fn replace_sampler_definition_with_texture_and_sampler(
             "layout(set = 0, binding = {}) {}{} {};\n",
             binding, code_str, texture_type, texture_name
         );
-        if write_json {
-            descriptor_set_layouts.push(json!({
-                        "name": texture_name,
-                        "binding": binding,
-                        "ty": "SampledImage",
-                        "count": 1,
-                        "stage_flags": ShaderStageFlags::ALL,
-                    }));
+        if write_ron {
+            descriptor_set_layouts.push(
+                DescriptorSetLayoutBinding {
+                    binding: *binding as usize,
+                    ty: DescriptorType::SampledImage,
+                    count: 1,
+                    stage_flags: ShaderStageFlags::ALL,
+                });
+            bindings_map.insert(texture_name.clone(), *binding);
         }
         new_data.push_str(&layout_str);
         sampler_mapping.insert(
             String::from(*sampler_name),
             (
                 format!("{}({}, {})", sampler_type, texture_name, sampler_name),
-                *binding,
+                *binding as i8,
             ),
         );
         *binding += 1;
@@ -375,14 +389,15 @@ fn replace_sampler_definition_with_texture_and_sampler(
             "layout(set = 0, binding = {}) {}sampler {};\n",
             binding, code_str, sampler_name
         );
-        if write_json {
-            descriptor_set_layouts.push(json!({
-                        "name": sampler_name,
-                        "binding": binding,
-                        "ty": "Sampler",
-                        "count": 1,
-                        "stage_flags": ShaderStageFlags::ALL,
-                    }));
+        if write_ron {
+            descriptor_set_layouts.push(
+                DescriptorSetLayoutBinding {
+                    binding: *binding as usize,
+                    ty: DescriptorType::Sampler,
+                    count: 1,
+                    stage_flags: ShaderStageFlags::ALL,
+                });
+            bindings_map.insert(String::from(*sampler_name), *binding);
         }
         new_data.push_str(&layout_str);
         *binding += 1;
@@ -401,32 +416,37 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
     );
 }
 
-fn add_locals_to_descriptor_set_layout(descriptor_set_layouts: &mut Vec<JsonValue>) {
-    descriptor_set_layouts.push(json!({
-        "name": "Locals",
-        "binding": 0,
-        "ty": "UniformBuffer",
-        "count": 1,
-        "stage_flags": ShaderStageFlags::VERTEX,
-    }));
+fn add_locals_to_descriptor_set_layout(
+    descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
+    bindings_map: &mut HashMap<String, usize>,
+) {
+    descriptor_set_layouts.push(
+        DescriptorSetLayoutBinding {
+            binding: 0,
+            ty: DescriptorType::UniformBuffer,
+            count: 1,
+            stage_flags: ShaderStageFlags::VERTEX,
+        }
+    );
+    bindings_map.insert("Locals".to_owned(), 0);
 }
 
 fn extend_non_uniform_variables_with_location_info(
-    attribute_descriptors: &mut Vec<JsonValue>,
+    attribute_descriptors: &mut Vec<AttributeDesc>,
     file_name: &str,
-    in_location: &mut i8,
-    instance_offset: &mut i8,
+    in_location: &mut u32,
+    instance_offset: &mut u32,
     line: &str,
     new_data: &mut String,
-    out_location: &mut i8,
-    vertex_offset: &mut i8,
-    write_json: bool,
+    out_location: &mut u32,
+    vertex_offset: &mut u32,
+    write_ron: bool,
 ) {
     let layout_str;
     if line.starts_with("in") {
         layout_str = format!("layout(location = {}) {}\n", in_location, line);
-        if write_json {
-            add_attribute_descriptors_json(
+        if write_ron {
+            add_attribute_descriptors(
                 attribute_descriptors,
                 file_name,
                 in_location,
@@ -448,35 +468,36 @@ fn extend_non_uniform_variables_with_location_info(
     new_data.push_str(&layout_str)
 }
 
-fn add_attribute_descriptors_json(
-    attribute_descriptors: &mut Vec<JsonValue>,
+fn add_attribute_descriptors(
+    attribute_descriptors: &mut Vec<AttributeDesc>,
     file_name: &str,
-    in_location: &mut i8,
-    instance_offset: &mut i8,
+    in_location: &mut u32,
+    instance_offset: &mut u32,
     line: &str,
-    vertex_offset: &mut i8,
+    vertex_offset: &mut u32,
 ) {
     let def = split_code(line);
     let (format, offset) = match def[1] {
-        "int" => ("R8Int", 4),
-        "ivec4" => ("Rgba32Int", 16),
-        "vec2" => ("Rg32Float", 8),
-        "vec3" => ("Rgb32Float", 12),
-        "vec4" => ("Rgba32Float", 16),
+        "int" => (Format::R8Int, 4),
+        "ivec4" => (Format::Rgba32Int, 16),
+        "vec2" => (Format::Rg32Float, 8),
+        "vec3" => (Format::Rgb32Float, 12),
+        "vec4" => (Format::Rgba32Float, 16),
         _ => unimplemented!(),
     };
     let var_name = def[2].trim_right_matches(';');
     match var_name {
         "aColor" | "aColorTexCoord" | "aPosition" => {
-            attribute_descriptors.push(json!({
-                                    "name": var_name,
-                                    "location": in_location,
-                                    "binding": 0,
-                                    "element": {
-                                        "format": format,
-                                        "offset": vertex_offset,
-                                    }
-                                }));
+            attribute_descriptors.push(
+                AttributeDesc {
+                    location: *in_location,
+                    binding: 0,
+                    element: Element {
+                        format: format,
+                        offset: *vertex_offset,
+                    }
+                }
+            );
             *vertex_offset += offset;
         }
         // All shader files contain aData0 and aData1 variables.
@@ -484,95 +505,101 @@ fn add_attribute_descriptors_json(
         // because they are not used in these and we don't want them when calculating offsets.
         "aData0" | "aData1" => {
             if !(file_name.starts_with("cs_blur") || file_name.starts_with("cs_clip")) {
-                attribute_descriptors.push(json!({
-                                        "name": var_name,
-                                        "location": in_location,
-                                        "binding": 1,
-                                        "element": {
-                                            "format": format,
-                                            "offset": instance_offset,
-                                        }
-                                    }));
+                attribute_descriptors.push(
+                    AttributeDesc {
+                        location: *in_location,
+                        binding: 1,
+                        element: Element {
+                            format: format,
+                            offset: *instance_offset,
+                        }
+                    }
+                );
                 *instance_offset += offset;
             }
         }
         _ => {
-            attribute_descriptors.push(json!({
-                                    "name": var_name,
-                                    "location": in_location,
-                                    "binding": 1,
-                                    "element": {
-                                        "format": format,
-                                        "offset": instance_offset,
-                                    }
-                                }));
+            attribute_descriptors.push(
+                AttributeDesc {
+                    location: *in_location,
+                    binding: 1,
+                    element: Element {
+                        format: format,
+                        offset: *instance_offset,
+                    }
+                }
+            );
             *instance_offset += offset;
         }
     };
 }
 
-fn create_desciptor_pool_json(count: i8) -> JsonValue {
-    json!({
-        "sets": 1,
-        "descriptors": [
-            {
-                "ty": "SampledImage",
-                "count": count,
+fn create_desciptor_range_descriptors(count: usize) -> Vec<DescriptorRangeDesc> {
+        vec![
+            DescriptorRangeDesc {
+                ty: DescriptorType::SampledImage,
+                count: count,
             },
-            {
-                "ty": "Sampler",
-                "count": count,
+            DescriptorRangeDesc {
+                ty: DescriptorType::Sampler,
+                count: count,
             },
-            {
-                "ty": "UniformBuffer",
-                "count": 1,
+            DescriptorRangeDesc {
+                ty: DescriptorType::UniformBuffer,
+                count: 1,
             },
-        ],
-    })
+        ]
 }
 
-fn create_vertex_buffer_descriptors_json(file_name: &str) -> Vec<JsonValue> {
-    let mut descriptors = Vec::new();
-    descriptors.push(json!({
-                "stride": "Vertex",
-                "rate": 0,
-            }));
+fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
+    let mut descriptors = vec![
+        VertexBufferDesc {
+            stride: 12, // size of Vertex 3 * 4
+            rate: 0,
+        }
+    ];
     if file_name.starts_with("cs_blur") {
-        descriptors.push(json!({
-                    "stride": "BlurInstance",
-                    "rate": 1,
-                }));
+        descriptors.push(
+            VertexBufferDesc {
+                stride: 12, // size of Bluerinstance 3 * 4
+                rate: 1,
+            }
+        );
     } else if file_name.starts_with("cs_clip") {
-        descriptors.push(json!({
-                    "stride": "ClipInstance",
-                    "rate": 1,
-                }));
+        descriptors.push(
+            VertexBufferDesc {
+                stride: 16, // size of ClipMaskInstance 3 * 4 + 2 * 2
+                rate: 1,
+            }
+        );
     } else if file_name.starts_with("debug_color") {
         descriptors = vec![
-            json!({
-                    "stride": "DebugColorVertex",
-                    "rate": 0,
-                }),
+            VertexBufferDesc{
+                stride: 12, // size of DebogColorVertex 3 * 4
+                rate: 0,
+            },
         ];
     } else if file_name.starts_with("debug_font") {
         descriptors = vec![
-            json!({
-                    "stride": "DebugFontVertex",
-                    "rate": 0,
-                }),
+            VertexBufferDesc{
+                stride: 20, // size of DebugFontVertex 5 * 4
+                rate: 0,
+            },
         ];
         // Primitive and brush shaders
     } else {
-        descriptors.push(json!({
-                    "stride": "PrimitiveInstance",
-                    "rate": 1,
-                }));
+        descriptors.push(
+            VertexBufferDesc {
+                stride: 32, // size of PrimitiveInstance 8 * 4
+                rate: 1,
+            }
+        );
     }
     descriptors
 }
 
-fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) -> JsonValue {
-    let mut requirements = serde_json::Map::new();
+fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashMap<String, PipelineRequirements> {
+    let mut requirements = HashMap::new();
     for mut file_name in file_name_vector {
         let file_path = Path::new(&out_dir).join(&file_name);
         if let Some(req) = process_glsl_for_spirv(&file_path, &file_name) {
@@ -617,15 +644,19 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) -> JsonVa
                 process::exit(1)
             }
     }
-    json!(requirements)
+    requirements
 }
 
-fn write_json_to_file(requriements: JsonValue, out_dir: &str) {
-    let json_file_path = Path::new(&out_dir).join("pipelines.json");
-    let mut json_file = File::create(&json_file_path).unwrap();
-    json_file
+fn write_ron_to_file(requriements: HashMap<String, PipelineRequirements>, out_dir: &str) {
+    let ron_file_path = Path::new(&out_dir).join("shader_bindings.ron");
+    let mut ron_file = File::create(&ron_file_path).unwrap();
+    let pretty = PrettyConfig {
+        enumerate_arrays: true,
+        ..PrettyConfig::default()
+    };
+    ron_file
         .write(
-            serde_json::to_string_pretty(&requriements)
+            to_string_pretty(&requriements, pretty)
                 .unwrap()
                 .as_bytes(),
         )
@@ -657,5 +688,5 @@ fn main() {
     let shader_map = write_shaders(glsl_files, &shaders_file);
     let shaders = create_shaders(&out_dir, &shader_map);
     let requirements = compile_glsl_to_spirv(shaders, &out_dir);
-    write_json_to_file(requirements, &out_dir);
+    write_ron_to_file(requirements, &out_dir);
 }

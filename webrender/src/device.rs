@@ -9,7 +9,7 @@ use api::TextureTarget;
 use euclid::Transform3D;
 //use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
-use serde_json::Value;
+use serde;
 use std::collections::HashMap;
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -28,13 +28,14 @@ use winit;
 use back;
 
 // gfx-hal
+use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
 use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
 use hal::{Backbuffer, DescriptorPool, FrameSync, Gpu, Primitive, SwapchainConfig};
 use hal::format::{ChannelType, Swizzle};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
-use parser;
+use ron::de::from_reader;
 
 pub const NODE_TEXTURE_WIDTH: usize = 1020; // 204 * ( 20 / 4)
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023; // 341 * ( 12 / 4 )
@@ -69,6 +70,15 @@ struct Locals {
 pub struct PrimitiveInstance {
     aData0: [i32; 4],
     aData1: [i32; 4],
+}
+
+#[derive(Deserialize)]
+pub struct PipelineRequirements {
+    pub attribute_descriptors: Vec<AttributeDesc>,
+    pub bindings_map: HashMap<String, usize>,
+    pub descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
+    pub descriptor_set_layouts: Vec<DescriptorSetLayoutBinding>,
+    pub vertex_buffer_descriptors: Vec<VertexBufferDesc>,
 }
 
 impl PrimitiveInstance {
@@ -597,27 +607,27 @@ pub struct Program<B: hal::Backend> {
 
 impl<B: hal::Backend> Program<B> {
     pub fn create(
-        json: &Value,
+        pipeline_requirements: PipelineRequirements,
         device: &B::Device,
         memory_types: &[hal::MemoryType],
-        shader_name: String,
+        shader_name: &str,
         render_pass: &B::RenderPass,
     ) -> Program<B> {
         #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
         let vs_module = device
-            .create_shader_module(get_shader_source(shader_name.as_str(), ".vert.spv").as_slice())
+            .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
             .unwrap();
         #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
         let fs_module = device
-            .create_shader_module(get_shader_source(shader_name.as_str(), ".frag.spv").as_slice())
+            .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
             .unwrap();
-        let (bindings, bindings_map) =
-            parser::create_descriptor_set_layout_bindings(&json, shader_name.as_str());
-        let (ranges, sets) =
-            parser::create_range_descriptors_and_set_count(&json, shader_name.as_str());
 
-        let descriptor_set_layout = device.create_descriptor_set_layout(&bindings);
-        let mut descriptor_pool = device.create_descriptor_pool(sets, &ranges);
+        let descriptor_set_layout = device.create_descriptor_set_layout(&pipeline_requirements.descriptor_set_layouts);
+        let mut descriptor_pool =
+            device.create_descriptor_pool(
+                1, //The number of descriptor sets
+                pipeline_requirements.descriptor_range_descriptors.as_slice(),
+            );
         let descriptor_sets = descriptor_pool.allocate_sets(&[&descriptor_set_layout]);
 
         let pipeline_layout = device.create_pipeline_layout(&[&descriptor_set_layout], &[]);
@@ -664,10 +674,8 @@ impl<B: hal::Backend> Program<B> {
                     hal::pso::BlendState::ALPHA,
                 ));
 
-            pipeline_descriptor.vertex_buffers =
-                parser::create_vertex_buffer_descriptors(&json, shader_name.as_str());
-            pipeline_descriptor.attributes =
-                parser::create_attribute_descriptors(&json, shader_name.as_str());
+            pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors;
+            pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors;
 
             //device.create_graphics_pipelines(&[pipeline_desc])
             device
@@ -715,6 +723,7 @@ impl<B: hal::Backend> Program<B> {
             locals_buffer_len,
         );
 
+        let bindings_map = pipeline_requirements.bindings_map;
         device.update_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
                 set: &descriptor_sets[0],
@@ -1243,9 +1252,14 @@ impl<B: hal::Backend> Device<B> {
             ));
     }
 
-    pub fn create_program(&mut self, json: &Value, shader_name: String) -> Program<B> {
+    pub fn create_program(
+        &mut self,
+        pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
+        shader_name: &str
+    ) -> Program<B> {
+        let pipeline_requirement = pipeline_requirements.remove(shader_name).expect("Shader name not found");
         let mut program = Program::create(
-            json,
+            pipeline_requirement,
             &self.device,
             &self.memory_types,
             shader_name,

@@ -48,7 +48,7 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate thread_profiler;
-#[cfg(any(feature = "debugger", feature = "capture"))]
+//#[cfg(any(feature = "debugger", feature = "capture"))]
 #[macro_use]
 extern crate serde;
 #[macro_use]
@@ -56,6 +56,7 @@ extern crate gfx_hal as hal;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 extern crate winit;
+extern crate ron;
 
 mod batch;
 mod border;
@@ -83,7 +84,6 @@ mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod internal_types;
-mod parser;
 mod picture;
 mod prim_store;
 mod print_tree;
@@ -154,7 +154,7 @@ extern crate plane_split;
 extern crate rayon;
 #[cfg(feature = "capture")]
 extern crate ron;
-//#[cfg(feature = "debugger")]
+#[cfg(feature = "debugger")]
 extern crate serde_json;
 extern crate smallvec;
 extern crate time;
