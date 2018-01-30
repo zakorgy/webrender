@@ -97,8 +97,9 @@ pub fn png(
             })
         }
         ReadSurface::GpuCache => {
-            let (size, data) = wrench.renderer
-                .read_gpu_cache();
+            /*let (size, data) = wrench.renderer
+                .read_gpu_cache();*/
+            let (size, data) = (DeviceUintSize::zero(), vec![]);
             (size, data, SaveSettings {
                 flip_vertical: false,
                 try_crop: false,

@@ -8,7 +8,7 @@ use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
 use parse_function::parse_function;
-use png::save_flipped;
+use png::{save, SaveSettings};
 use std::cmp;
 use std::fmt::{Display, Error, Formatter};
 use std::fs::File;
@@ -478,14 +478,19 @@ impl<'a> ReftestHarness<'a> {
         assert!(size.width <= window_size.width && size.height <= window_size.height);
 
         // taking the bottom left sub-rectangle
-        let rect = DeviceUintRect::new(DeviceUintPoint::new(0, window_size.height - size.height), size);
+        // let rect = DeviceUintRect::new(DeviceUintPoint::new(0, window_size.height - size.height), size);
+        let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
+        self.wrench.renderer.swap_buffers();
         let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
-        self.window.swap_buffers();
 
         let write_debug_images = false;
         if write_debug_images {
             let debug_path = filename.with_extension("yaml.png");
-            save_flipped(debug_path, pixels.clone(), size);
+            save(debug_path, pixels.clone(), size,
+                SaveSettings {
+                    flip_vertical: false,
+                    try_crop: true,
+                });
         }
 
         reader.deinit(self.wrench);

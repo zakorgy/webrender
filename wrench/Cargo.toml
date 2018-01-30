@@ -11,8 +11,6 @@ bincode = "0.9"
 byteorder = "1.0"
 env_logger = { version = "0.4", optional = true }
 euclid = "0.16"
-gleam = "0.4"
-servo-glutin = "0.13"
 app_units = "0.6"
 image = "0.17"
 clap = { version = "2", features = ["yaml"] }
@@ -25,17 +23,23 @@ time = "0.1"
 crossbeam = "0.2"
 osmesa-sys = { version = "0.1.2", optional = true }
 osmesa-src = { git = "https://github.com/servo/osmesa-src", optional = true }
-webrender = {path = "../webrender", features=["capture","debugger","png","profiler"]}
+#webrender = {path = "../webrender", features=["capture","debugger","png","profiler"]}
+webrender = {path = "../webrender"}
 webrender_api = {path = "../webrender_api", features=["debug-serialization"]}
+winit = "0.9"
 serde = {version = "1.0", features = ["derive"] }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "7d4b4f1", optional = true, features = ["glsl-to-spirv"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.12.4"
 core-foundation = "0.4"
 
 [features]
+default = ["vulkan"]
 headless = [ "osmesa-sys", "osmesa-src" ]
 logging = [ "env_logger" ]
+vulkan = [ "gfx-backend-vulkan" ]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 dwrote = "0.4.1"

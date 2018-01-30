@@ -4,13 +4,14 @@
 
 
 use app_units::Au;
+use back;
 use blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
 use dwrote;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use font_loader::system_fonts;
-use glutin::WindowProxy;
+use hal;
 use json_frame_writer::JsonFrameWriter;
 use ron_frame_writer::RonFrameWriter;
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ use time;
 use webrender;
 use webrender::api::*;
 use webrender::{DebugFlags, RendererStats};
+use winit::EventsLoopProxy;
 use yaml_frame_writer::YamlFrameWriterReceiver;
 use {WindowWrapper, BLACK_COLOR, WHITE_COLOR};
 
@@ -46,7 +48,7 @@ pub enum SaveType {
 }
 
 struct NotifierData {
-    window_proxy: Option<WindowProxy>,
+    window_proxy: Option<EventsLoopProxy>,
     frames_notified: u32,
     timing_receiver: chase_lev::Stealer<time::SteadyTime>,
     verbose: bool,
@@ -54,7 +56,7 @@ struct NotifierData {
 
 impl NotifierData {
     fn new(
-        window_proxy: Option<WindowProxy>,
+        window_proxy: Option<EventsLoopProxy>,
         timing_receiver: chase_lev::Stealer<time::SteadyTime>,
         verbose: bool,
     ) -> Self {
@@ -95,7 +97,7 @@ impl RenderNotifier for Notifier {
         }
         if let Some(ref window_proxy) = data.window_proxy {
             #[cfg(not(target_os = "android"))]
-            window_proxy.wakeup_event_loop();
+            window_proxy.wakeup().unwrap();
         }
     }
 
@@ -104,7 +106,7 @@ impl RenderNotifier for Notifier {
             let data = self.0.lock();
             if let Some(ref window_proxy) = data.unwrap().window_proxy {
                 #[cfg(not(target_os = "android"))]
-                window_proxy.wakeup_event_loop();
+                window_proxy.wakeup().unwrap();
             }
         } else {
             self.wake_up();
@@ -165,6 +167,8 @@ pub struct Wrench {
 impl Wrench {
     pub fn new(
         window: &mut WindowWrapper,
+        instance: &back::Instance,
+        surface: &mut <back::Backend as hal::Backend>::Surface,
         shader_override_path: Option<PathBuf>,
         dp_ratio: f32,
         save_type: Option<SaveType>,
@@ -218,7 +222,7 @@ impl Wrench {
         // put an Awakened event into the queue to kick off the first frame
         if let Some(ref wp) = proxy {
             #[cfg(not(target_os = "android"))]
-            wp.wakeup_event_loop();
+            wp.wakeup().unwrap();
         }
 
         let (timing_sender, timing_receiver) = chase_lev::deque();
@@ -227,7 +231,7 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(notifier, opts, &window.get_window(), instance, surface).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 
@@ -544,11 +548,11 @@ impl Wrench {
         self.api.send_transaction(self.document_id, txn);
     }
 
-    pub fn get_frame_profiles(
+    /*pub fn get_frame_profiles(
         &mut self,
     ) -> (Vec<webrender::CpuProfile>, Vec<webrender::GpuProfile>) {
         self.renderer.get_frame_profiles()
-    }
+    }*/
 
     pub fn render(&mut self) -> RendererStats {
         self.renderer.update();
@@ -581,7 +585,7 @@ impl Wrench {
         ];
 
         let color_and_offset = [(*BLACK_COLOR, 2.0), (*WHITE_COLOR, 0.0)];
-        let dr = self.renderer.debug_renderer();
+        /*let dr = self.renderer.debug_renderer();
 
         for ref co in &color_and_offset {
             let x = self.device_pixel_ratio * (15.0 + co.1);
@@ -590,6 +594,6 @@ impl Wrench {
                 dr.add_text(x, y, line, co.0.into());
                 y += self.device_pixel_ratio * dr.line_height();
             }
-        }
+        }*/
     }
 }
