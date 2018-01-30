@@ -1916,31 +1916,84 @@ impl<B: hal::Backend> Device<B> {
         format: ReadPixelsFormat,
         output: &mut [u8],
     ) {
-        /*let (bytes_per_pixel, desc) = match format {
-            ReadPixelsFormat::Standard(imf) => {
-                (imf.bytes_per_pixel(), gl_describe_format(self.gl(), imf))
-            }
-            ReadPixelsFormat::Rgba8 => {
-                (4, FormatDesc {
-                    external: gl::RGBA,
-                    internal: gl::RGBA8 as _,
-                    pixel_type: gl::UNSIGNED_BYTE,
-                })
-            }
+        let bytes_per_pixel = match format {
+            ReadPixelsFormat::Standard(imf) => imf.bytes_per_pixel(),
+            ReadPixelsFormat::Rgba8 => 4,
         };
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
+        let image = &self.frame_images[(self.current_frame_id + 1) % self.framebuffers.len()].0;
+        let download_buffer: Buffer<B> = Buffer::create(
+            &self.device,
+            &self.memory_types,
+            hal::buffer::Usage::TRANSFER_DST,
+            bytes_per_pixel as usize,
+            (rect.size.width * rect.size.height) as usize,
+        );
 
-        self.gl.flush();
-        self.gl.read_pixels_into_buffer(
-            rect.origin.x as _,
-            rect.origin.y as _,
-            rect.size.width as _,
-            rect.size.height as _,
-            desc.external,
-            desc.pixel_type,
-            output,
-        );*/
+        let copy_submit = {
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer();
+            let image_barrier = hal::memory::Barrier::Image {
+                states: (hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal) ..
+                    (hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal),
+                target: image,
+                range: COLOR_RANGE.clone(),
+            };
+            cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &[image_barrier]);
+
+            let buffer_width = rect.size.width * bytes_per_pixel as u32;
+            cmd_buffer.copy_image_to_buffer(
+                &image,
+                hal::image::ImageLayout::TransferSrcOptimal,
+                &download_buffer.buffer,
+                &[hal::command::BufferImageCopy {
+                    buffer_offset: 0,
+                    buffer_width: rect.size.width,
+                    buffer_height: rect.size.height,
+                    image_layers: hal::image::SubresourceLayers {
+                        aspects: hal::format::AspectFlags::COLOR,
+                        level: 0,
+                        layers: 0 .. 1,
+                    },
+                    image_offset: hal::command::Offset {
+                        x: rect.origin.x as i32,
+                        y: rect.origin.y as i32,
+                        z: 0,
+                    },
+                    image_extent: hal::device::Extent {
+                        width: rect.size.width as _,
+                        height: rect.size.height as _,
+                        depth: 1 as _,
+                    },
+                }]);
+            let image_barrier = hal::memory::Barrier::Image {
+                states: (hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal) ..
+                    (hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal),
+                target: image,
+                range: COLOR_RANGE.clone(),
+            };
+            cmd_buffer.pipeline_barrier(PipelineStage::TRANSFER .. PipelineStage::BOTTOM_OF_PIPE, &[image_barrier]);
+            cmd_buffer.finish()
+        };
+
+        let copy_fence = self.device.create_fence(false);
+        let submission = hal::queue::Submission::new()
+            .submit(&[copy_submit]);
+        self.queue_group.queues[0].submit(submission, Some(&copy_fence));
+        self.device.wait_for_fences(&[&copy_fence], hal::device::WaitFor::Any, !0);
+        self.device.destroy_fence(copy_fence);
+
+        let mut reader = self.device
+            .acquire_mapping_reader::<u8>(
+                &download_buffer.buffer,
+                0 .. (rect.size.width * rect.size.height * bytes_per_pixel as u32) as u64,
+            )
+            .unwrap();
+        assert_eq!(reader.len(), output.len());
+        for (i, d) in reader.iter().enumerate() {
+            output[i] = *d;
+        }
+        self.device.release_mapping_reader(reader);
     }
 
     /// Get texels of a texture into the specified output slice.
