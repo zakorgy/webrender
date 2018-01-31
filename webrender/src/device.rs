@@ -29,6 +29,7 @@ use winit;
 
 // gfx-hal
 use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
+use hal::pso::{BlendState, BlendOp, Factor};
 use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
 use hal::{Backbuffer, DescriptorPool, FrameSync, Gpu, Primitive, SwapchainConfig};
 use hal::format::{ChannelType, Swizzle};
@@ -323,6 +324,132 @@ pub enum ShaderError {
     Compilation(String, String), // name, error mssage
     Link(String, String),        // name, error message
 }
+
+pub const ALPHA: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::SrcAlpha,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+// PREMULTIPLIED_ALPHA is declared in gfx_hal
+
+pub const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+};
+
+// MULTIPLY is declared in gfx_hal
+
+pub const MAX: BlendState = BlendState::On {
+    color: BlendOp::Max, /*{
+        src: Factor::One,
+        dst: Factor::One,
+    },*/
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+pub const MIN: BlendState = BlendState::On {
+    color: BlendOp::Min, /*{
+        src: Factor::One,
+        dst: Factor::One,
+    },*/
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+pub const SUBPIXEL_PASS0: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcColor,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcColor,
+    },
+};
+
+pub const SUBPIXEL_PASS1: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+pub const SUBPIXEL_WITH_BG_COLOR_PASS0: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcColor,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::One,
+    },
+};
+
+pub const SUBPIXEL_WITH_BG_COLOR_PASS1: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::OneMinusDstAlpha,
+        dst: Factor::One,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::One,
+    },
+};
+
+pub const SUBPIXEL_WITH_BG_COLOR_PASS2: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+};
+
+// This requires blend color to be set
+pub const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::ConstColor,
+        dst: Factor::OneMinusSrcColor,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::ConstColor,
+        dst: Factor::OneMinusSrcColor,
+    },
+};
+
+pub const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::OneMinusSrc1Color,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::OneMinusSrc1Color,
+    },
+};
 
 pub struct VertexDataImage<B: hal::Backend> {
     pub image_upload_buffer: Buffer<B>,
