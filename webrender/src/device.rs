@@ -73,7 +73,7 @@ pub struct PrimitiveInstance {
     aData1: [i32; 4],
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct PipelineRequirements {
     pub attribute_descriptors: Vec<AttributeDesc>,
     pub bindings_map: HashMap<String, usize>,
@@ -325,7 +325,7 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
-pub const ALPHA: BlendState = BlendState::On {
+const ALPHA: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::SrcAlpha,
         dst: Factor::OneMinusSrcAlpha,
@@ -336,9 +336,7 @@ pub const ALPHA: BlendState = BlendState::On {
     },
 };
 
-// PREMULTIPLIED_ALPHA is declared in gfx_hal
-
-pub const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
+const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::Zero,
         dst: Factor::OneMinusSrcAlpha,
@@ -349,31 +347,23 @@ pub const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
     },
 };
 
-// MULTIPLY is declared in gfx_hal
-
-pub const MAX: BlendState = BlendState::On {
-    color: BlendOp::Max, /*{
-        src: Factor::One,
-        dst: Factor::One,
-    },*/
+const MAX: BlendState = BlendState::On {
+    color: BlendOp::Max,
     alpha: BlendOp::Add {
         src: Factor::One,
         dst: Factor::One,
     },
 };
 
-pub const MIN: BlendState = BlendState::On {
-    color: BlendOp::Min, /*{
-        src: Factor::One,
-        dst: Factor::One,
-    },*/
+const MIN: BlendState = BlendState::On {
+    color: BlendOp::Min,
     alpha: BlendOp::Add {
         src: Factor::One,
         dst: Factor::One,
     },
 };
 
-pub const SUBPIXEL_PASS0: BlendState = BlendState::On {
+const SUBPIXEL_PASS0: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::Zero,
         dst: Factor::OneMinusSrcColor,
@@ -384,7 +374,7 @@ pub const SUBPIXEL_PASS0: BlendState = BlendState::On {
     },
 };
 
-pub const SUBPIXEL_PASS1: BlendState = BlendState::On {
+const SUBPIXEL_PASS1: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::One,
         dst: Factor::One,
@@ -395,7 +385,7 @@ pub const SUBPIXEL_PASS1: BlendState = BlendState::On {
     },
 };
 
-pub const SUBPIXEL_WITH_BG_COLOR_PASS0: BlendState = BlendState::On {
+const SUBPIXEL_WITH_BG_COLOR_PASS0: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::Zero,
         dst: Factor::OneMinusSrcColor,
@@ -406,7 +396,7 @@ pub const SUBPIXEL_WITH_BG_COLOR_PASS0: BlendState = BlendState::On {
     },
 };
 
-pub const SUBPIXEL_WITH_BG_COLOR_PASS1: BlendState = BlendState::On {
+const SUBPIXEL_WITH_BG_COLOR_PASS1: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::OneMinusDstAlpha,
         dst: Factor::One,
@@ -417,7 +407,7 @@ pub const SUBPIXEL_WITH_BG_COLOR_PASS1: BlendState = BlendState::On {
     },
 };
 
-pub const SUBPIXEL_WITH_BG_COLOR_PASS2: BlendState = BlendState::On {
+const SUBPIXEL_WITH_BG_COLOR_PASS2: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::One,
         dst: Factor::One,
@@ -429,7 +419,7 @@ pub const SUBPIXEL_WITH_BG_COLOR_PASS2: BlendState = BlendState::On {
 };
 
 // This requires blend color to be set
-pub const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
+const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::ConstColor,
         dst: Factor::OneMinusSrcColor,
@@ -440,7 +430,7 @@ pub const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
     },
 };
 
-pub const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
+const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::One,
         dst: Factor::OneMinusSrc1Color,
@@ -450,6 +440,13 @@ pub const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
         dst: Factor::OneMinusSrc1Color,
     },
 };
+
+const PS_BLEND_STATES: [BlendState; 4] = [
+    BlendState::Off,
+    ALPHA,
+    BlendState::PREMULTIPLIED_ALPHA,
+    PREMULTIPLIED_DEST_OUT,
+];
 
 pub struct VertexDataImage<B: hal::Backend> {
     pub image_upload_buffer: Buffer<B>,
@@ -726,7 +723,7 @@ pub struct Program<B: hal::Backend> {
     pub descriptor_pool: B::DescriptorPool,
     pub descriptor_sets: Vec<B::DescriptorSet>,
     pub pipeline_layout: B::PipelineLayout,
-    pub pipelines: Vec<B::GraphicsPipeline>,
+    pub pipelines: HashMap<BlendState, B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
     pub instance_buffer: InstanceBuffer<B>,
     pub locals_buffer: Buffer<B>,
@@ -785,31 +782,36 @@ impl<B: hal::Backend> Program<B> {
                 index: 0,
                 main_pass: render_pass,
             };
+            let pipelines_descriptors = PS_BLEND_STATES.iter().map(|blend_state| {
+                let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
+                    shader_entries.clone(),
+                    Primitive::TriangleList,
+                    hal::pso::Rasterizer::FILL,
+                    &pipeline_layout,
+                    subpass,
+                );
+                pipeline_descriptor
+                    .blender
+                    .targets
+                    .push(hal::pso::ColorBlendDesc(
+                        hal::pso::ColorMask::ALL,
+                        *blend_state,
+                    ));
 
-            let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
-                shader_entries,
-                Primitive::TriangleList,
-                hal::pso::Rasterizer::FILL,
-                &pipeline_layout,
-                subpass,
-            );
-            pipeline_descriptor
-                .blender
-                .targets
-                .push(hal::pso::ColorBlendDesc(
-                    hal::pso::ColorMask::ALL,
-                    hal::pso::BlendState::ALPHA,
-                ));
-
-            pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors;
-            pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors;
+                pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors.clone();
+                pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors.clone();
+                pipeline_descriptor
+            }).collect::<Vec<_>>();
 
             //device.create_graphics_pipelines(&[pipeline_desc])
-            device
-                .create_graphics_pipelines(&[pipeline_descriptor])
-                .into_iter()
-                .map(|pipeline| pipeline.unwrap())
-                .collect()
+            let pipelines = device
+                .create_graphics_pipelines(pipelines_descriptors.as_slice())
+                .into_iter();
+
+            PS_BLEND_STATES.iter()
+                .cloned()
+                .zip(pipelines.map(|pipeline| pipeline.unwrap()))
+                .collect::<HashMap<BlendState, B::GraphicsPipeline>>()
         };
 
         device.destroy_shader_module(vs_module);
@@ -979,12 +981,13 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         clear_values: &[hal::command::ClearValue],
+        blend_state: BlendState,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         cmd_buffer.set_viewports(&[viewport.clone()]);
         cmd_buffer.set_scissors(&[viewport.rect]);
-        cmd_buffer.bind_graphics_pipeline(&self.pipelines[0]);
+        cmd_buffer.bind_graphics_pipeline(&self.pipelines[&blend_state]);
         cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![
             (&self.vertex_buffer.buffer, 0),
             (&self.instance_buffer.buffer.buffer, 0),
@@ -1015,8 +1018,8 @@ impl<B: hal::Backend> Program<B> {
         device.destroy_descriptor_pool(self.descriptor_pool);
         device.destroy_descriptor_set_layout(self.descriptor_set_layout);
         device.destroy_pipeline_layout(self.pipeline_layout);
-        for pipeline in self.pipelines.drain(..) {
-            device.destroy_graphics_pipeline(pipeline);
+        for pipeline in self.pipelines.drain() {
+            device.destroy_graphics_pipeline(pipeline.1);
         }
     }
 }
@@ -1042,6 +1045,7 @@ pub struct Device<B: hal::Backend, C> {
     pub node_data: VertexDataImage<B>,
     pub upload_queue: Vec<hal::command::Submit<B, C, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
+    current_blend_state: BlendState,
     // device state
     bound_textures: [u32; 16],
     bound_program: u32,
@@ -1294,6 +1298,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             node_data,
             upload_queue: Vec::new(),
             current_frame_id: 0,
+            current_blend_state: BlendState::Off,
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
@@ -1421,6 +1426,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             &self.render_pass,
             &self.framebuffers[self.current_frame_id],
             &vec![],
+            self.current_blend_state,
         );
 
         self.upload_queue.push(submit);
@@ -2306,28 +2312,22 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //self.gl.disable(gl::SCISSOR_TEST);
     }
 
-    pub fn set_blend(&self, enable: bool) {
-        if enable {
-            //self.gl.enable(gl::BLEND);
-        } else {
-            //self.gl.disable(gl::BLEND);
+    pub fn set_blend(&mut self, enable: bool) {
+        if !enable {
+            self.current_blend_state = BlendState::Off
         }
     }
 
-    pub fn set_blend_mode_alpha(&self) {
-        //self.gl.blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA,
-        //                            gl::ONE, gl::ONE);
-        //self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_alpha(&mut self) {
+        self.current_blend_state = ALPHA;
     }
 
-    pub fn set_blend_mode_premultiplied_alpha(&self) {
-        //self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
-        //self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_premultiplied_alpha(&mut self) {
+        self.current_blend_state = BlendState::PREMULTIPLIED_ALPHA;
     }
 
-    pub fn set_blend_mode_premultiplied_dest_out(&self) {
-        //self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_ALPHA);
-        //self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_premultiplied_dest_out(&mut self) {
+        self.current_blend_state = PREMULTIPLIED_DEST_OUT;
     }
 
     pub fn set_blend_mode_multiply(&self) {
