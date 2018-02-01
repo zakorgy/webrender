@@ -1404,11 +1404,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
-        let fbo_id = texture_and_layer.map_or(FBOId(self.default_read_fbo), |texture_and_layer| {
+        /*let fbo_id = texture_and_layer.map_or(FBOId(self.default_read_fbo), |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
 
-        self.bind_read_target_impl(fbo_id)
+        self.bind_read_target_impl(fbo_id)*/
     }
 
     fn bind_draw_target_impl(&mut self, fbo_id: FBOId) {
@@ -1425,7 +1425,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         texture_and_layer: Option<(&Texture, i32)>,
         dimensions: Option<DeviceUintSize>,
     ) {
-        let fbo_id = texture_and_layer.map_or(FBOId(self.default_draw_fbo), |texture_and_layer| {
+        /*let fbo_id = texture_and_layer.map_or(FBOId(self.default_draw_fbo), |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
 
@@ -1438,7 +1438,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 dimensions.width as _,
                 dimensions.height as _,
             );*/
-        }
+        }*/
     }
 
     pub fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> FBOId {

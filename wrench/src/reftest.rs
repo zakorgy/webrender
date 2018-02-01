@@ -452,7 +452,7 @@ impl<'a> ReftestHarness<'a> {
     fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
         let file = BufReader::new(File::open(filename).unwrap());
         let img_raw = load_piston_image(file, format).unwrap();
-        let img = img_raw.flipv().to_rgba();
+        let img = img_raw./*flipv().*/to_rgba();
         let size = img.dimensions();
         ReftestImage {
             data: img.into_raw(),
