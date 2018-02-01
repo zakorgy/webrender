@@ -584,7 +584,7 @@ impl<B: hal::Backend> InstanceBuffer<B> {
     }
 
     pub fn reset(&mut self) {
-        self.size = 1;
+        self.size = 0;
         self.offset = 0;
     }
 
@@ -2276,6 +2276,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             self.current_frame_id = (self.current_frame_id + 1) % self.framebuffers.len();
         }
         self.upload_queue.clear();
+        self.command_pool.reset();
         self.device.destroy_fence(frame_fence);
         self.device.destroy_semaphore(frame_semaphore);
     }

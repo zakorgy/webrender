@@ -2935,8 +2935,22 @@ impl Renderer {
     }
 
     fn flush(&mut self) {
+        self.brush_line.instance_buffer.reset();
+        self.brush_mask_corner.instance_buffer.reset();
+        self.brush_mask_rounded_rect.instance_buffer.reset();
+        self.brush_picture_rgba8.instance_buffer.reset();
+        self.brush_picture_rgba8_alpha_mask.instance_buffer.reset();
+        self.brush_picture_a8.instance_buffer.reset();
+        self.brush_solid.instance_buffer.reset();
         self.ps_border_corner.instance_buffer.reset();
         self.ps_border_edge.instance_buffer.reset();
+        self.ps_gradient.instance_buffer.reset();
+        self.ps_angle_gradient.instance_buffer.reset();
+        self.ps_radial_gradient.instance_buffer.reset();
+        self.ps_blend.instance_buffer.reset();
+        self.ps_hw_composite.instance_buffer.reset();
+        self.ps_split_composite.instance_buffer.reset();
+        self.ps_composite.instance_buffer.reset();
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
