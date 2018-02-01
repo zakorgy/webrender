@@ -73,6 +73,53 @@ pub struct PrimitiveInstance {
     aData1: [i32; 4],
 }
 
+impl PrimitiveInstance {
+    pub fn new(data: [i32; 8]) -> PrimitiveInstance {
+        PrimitiveInstance {
+            aData0: [data[0], data[1], data[2], data[3]],
+            aData1: [data[4], data[5], data[6], data[7]],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct ClipMaskInstance {
+    aClipRenderTaskAddress: i32,
+    aScrollNodeId: i32,
+    aClipSegment: i32,
+    aClipDataResourceAddress: [i32; 4],
+}
+
+impl ClipMaskInstance {
+    pub fn new(data: [i32; 7]) -> ClipMaskInstance {
+        ClipMaskInstance {
+            aClipRenderTaskAddress: data[0],
+            aScrollNodeId: data[1],
+            aClipSegment: data[2],
+            aClipDataResourceAddress: [data[3], data[4], data[5], data[6]],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct BlurInstance {
+    aBlurRenderTaskAddress: i32,
+    aBlurSourceTaskAddress: i32,
+    aBlurDirection: i32,
+}
+
+impl BlurInstance {
+    pub fn new(data: [i32; 3]) -> BlurInstance {
+        BlurInstance {
+            aBlurRenderTaskAddress: data[0],
+            aBlurSourceTaskAddress: data[1],
+            aBlurDirection: data[2],
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct PipelineRequirements {
     pub attribute_descriptors: Vec<AttributeDesc>,
@@ -82,14 +129,6 @@ pub struct PipelineRequirements {
     pub vertex_buffer_descriptors: Vec<VertexBufferDesc>,
 }
 
-impl PrimitiveInstance {
-    pub fn new(data: [i32; 8]) -> PrimitiveInstance {
-        PrimitiveInstance {
-            aData0: [data[0], data[1], data[2], data[3]],
-            aData1: [data[4], data[5], data[6], data[7]],
-        }
-    }
-}
 
 const QUAD: [Vertex; 6] = [
     Vertex {
@@ -323,6 +362,21 @@ pub struct Capabilities {
 pub enum ShaderError {
     Compilation(String, String), // name, error mssage
     Link(String, String),        // name, error message
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum VertexArrayKind {
+    Primitive,
+    Blur,
+    Clip,
+}
+
+pub enum ShaderKind {
+    Primitive,
+    Cache(VertexArrayKind),
+    ClipCache,
+    Brush,
+    Text,
 }
 
 const ALPHA: BlendState = BlendState::On {
@@ -735,6 +789,7 @@ impl<B: hal::Backend> Program<B> {
         device: &B::Device,
         memory_types: &[hal::MemoryType],
         shader_name: &str,
+        shader_kind: &ShaderKind,
         render_pass: &B::RenderPass,
     ) -> Program<B> {
         #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
@@ -830,7 +885,14 @@ impl<B: hal::Backend> Program<B> {
 
         vertex_buffer.update(device, 0, vertex_buffer_len as u64, &vec![QUAD]);
 
-        let instance_buffer_stride = mem::size_of::<PrimitiveInstance>();
+        let instance_buffer_stride = match *shader_kind {
+            ShaderKind::Primitive |
+            ShaderKind::Brush |
+            ShaderKind::Text |
+            ShaderKind::Cache(VertexArrayKind::Primitive) => mem::size_of::<PrimitiveInstance>(),
+            ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => mem::size_of::<ClipMaskInstance>(),
+            ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<BlurInstance>(),
+        };
         let instance_buffer_len = MAX_INSTANCE_COUNT * instance_buffer_stride;
 
         let instance_buffer = Buffer::create(
@@ -877,13 +939,16 @@ impl<B: hal::Backend> Program<B> {
         }
     }
 
-    pub fn bind(
+    pub fn bind<T>(
         &mut self,
         device: &B::Device,
         projection: &Transform3D<f32>,
         u_mode: i32,
-        instances: &[PrimitiveInstance],
-    ) {
+        //instances: &[PrimitiveInstance],
+        instances: &[T],
+    ) where
+        T: Copy,
+    {
         let data_stride = self.instance_buffer.buffer.data_stride;
         let offset = self.instance_buffer.offset as u64;
         self.instance_buffer.buffer.update(
@@ -1369,15 +1434,16 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     pub fn create_program(
         &mut self,
-        pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-        shader_name: &str
+        pipeline_requirements: PipelineRequirements,
+        shader_name: &str,
+        shader_kind: &ShaderKind,
     ) -> Program<B> {
-        let pipeline_requirement = pipeline_requirements.remove(shader_name).expect("Shader name not found");
         let mut program = Program::create(
-            pipeline_requirement,
+            pipeline_requirements,
             &self.device,
             &self.memory_types,
             shader_name,
+            shader_kind,
             &self.render_pass,
         );
         program.init_vertex_data(
