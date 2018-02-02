@@ -568,7 +568,7 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     } else if file_name.starts_with("cs_clip") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 16, // size of ClipMaskInstance 3 * 4 + 2 * 2
+                stride: 28, // size of ClipMaskInstance 3 * 4 + 4 * 4
                 rate: 1,
             }
         );
