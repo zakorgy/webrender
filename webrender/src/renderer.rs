@@ -1749,127 +1749,112 @@ impl Renderer {
         let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
             from_reader(file).expect("Failed to load shader_bindings.ron");
 
-        let cs_text_run =
-            LazilyCompiledShader::new(
-               ShaderKind::Cache(VertexArrayKind::Primitive),
-                "cs_text_run",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let cs_text_run = LazilyCompiledShader::new(
+           ShaderKind::Cache(VertexArrayKind::Primitive),
+            "cs_text_run",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_mask_corner =
-            LazilyCompiledShader::new(
-                ShaderKind::Brush,
-                "brush_mask_corner",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_mask_corner = LazilyCompiledShader::new(
+            ShaderKind::Brush,
+            "brush_mask_corner",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_mask_rounded_rect =
-            LazilyCompiledShader::new(
-                ShaderKind::Brush,
-                "brush_mask_rounded_rect",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_mask_rounded_rect = LazilyCompiledShader::new(
+            ShaderKind::Brush,
+            "brush_mask_rounded_rect",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_solid =
-            BrushShader::new(
-                "brush_solid",
-                "brush_solid_alpha_pass",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_solid = BrushShader::new(
+            "brush_solid",
+            "brush_solid_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_line =
-            BrushShader::new(
-                "brush_line",
-                "brush_line_alpha_pass",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_line = BrushShader::new(
+            "brush_line",
+            "brush_line_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_picture_a8 =
-            BrushShader::new(
-                "brush_picture_alpha_target",
-                "brush_picture_alpha_target_alpha_pass",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_picture_a8 = BrushShader::new(
+            "brush_picture_alpha_target",
+            "brush_picture_alpha_target_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_picture_rgba8 =
-            BrushShader::new(
-                "brush_picture_color_target",
-                "brush_picture_color_target_alpha_pass",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_picture_rgba8 = BrushShader::new(
+            "brush_picture_color_target",
+            "brush_picture_color_target_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_picture_rgba8_alpha_mask =
-            BrushShader::new(
-                "brush_picture_color_target_alpha_mask",
-                "brush_picture_color_target_alpha_mask_alpha_pass",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let brush_picture_rgba8_alpha_mask = BrushShader::new(
+            "brush_picture_color_target_alpha_mask",
+            "brush_picture_color_target_alpha_mask_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let cs_blur_a8 =
-            LazilyCompiledShader::new(
-                ShaderKind::Cache(VertexArrayKind::Blur),
-                "cs_blur_a8",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let cs_blur_a8 = LazilyCompiledShader::new(
+            ShaderKind::Cache(VertexArrayKind::Blur),
+            "cs_blur_a8",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let cs_blur_rgba8 =
-            LazilyCompiledShader::new(
-                ShaderKind::Cache(VertexArrayKind::Blur),
-                "cs_blur_rgba8",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let cs_blur_rgba8 = LazilyCompiledShader::new(
+            ShaderKind::Cache(VertexArrayKind::Blur),
+            "cs_blur_rgba8",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let cs_clip_rectangle =
-            LazilyCompiledShader::new(
-                ShaderKind::ClipCache,
-                "cs_clip_rectangle_transform",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let cs_clip_rectangle = LazilyCompiledShader::new(
+            ShaderKind::ClipCache,
+            "cs_clip_rectangle_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let cs_clip_image =
-            LazilyCompiledShader::new(
-                ShaderKind::ClipCache,
-                "cs_clip_image_transform",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let cs_clip_image = LazilyCompiledShader::new(
+            ShaderKind::ClipCache,
+            "cs_clip_image_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let cs_clip_border =
-            LazilyCompiledShader::new(
-                ShaderKind::ClipCache,
-                "cs_clip_border_transform",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let cs_clip_border = LazilyCompiledShader::new(
+            ShaderKind::ClipCache,
+            "cs_clip_border_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let ps_text_run =
-            TextShader::new(
-                "ps_text_run",
-                "ps_text_run_transform",
-                "ps_text_run_glyph_transform",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let ps_text_run = TextShader::new(
+            "ps_text_run",
+            "ps_text_run_transform",
+            "ps_text_run_glyph_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let ps_text_run_dual_source =
-            TextShader::new(
-                "ps_text_run_dual_source_blending",
-                "ps_text_run_dual_source_blending_transform",
-                "ps_text_run_dual_source_blending_glyph_transform",
-                &mut device,
-                &mut pipeline_requirements,
-            )?;
+        let ps_text_run_dual_source = TextShader::new(
+            "ps_text_run_dual_source_blending",
+            "ps_text_run_dual_source_blending_transform",
+            "ps_text_run_dual_source_blending_glyph_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
         let ps_image = PrimitiveShader::new(
             "ps_image",
@@ -3279,34 +3264,12 @@ impl Renderer {
         let mut program = match key.kind {
             BatchKind::Composite { .. } => {
                 // self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                let mut program = self.ps_composite.get(
-                    &mut self.device,
-                ).unwrap();
-                program.bind(
-                    &mut self.device.device,
-                    projection,
-                    0,
-                    &instances.iter().map(|pi|
-                        PrimitiveInstance::new(pi.data)
-                    ).collect::<Vec<PrimitiveInstance>>(),
-                );
-                program
+                self.ps_composite.get(&mut self.device).unwrap()
             }
             BatchKind::HardwareComposite => {
                 // self.ps_hw_composite
                 //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                let mut program = self.ps_hw_composite.get(
-                    &mut self.device,
-                ).unwrap();
-                program.bind(
-                    &mut self.device.device,
-                    projection,
-                    0,
-                    &instances.iter().map(|pi|
-                        PrimitiveInstance::new(pi.data)
-                    ).collect::<Vec<PrimitiveInstance>>(),
-                );
-                program
+                self.ps_hw_composite.get(&mut self.device).unwrap()
             }
             BatchKind::SplitComposite => {
                 // self.ps_split_composite.bind(
@@ -3315,47 +3278,15 @@ impl Renderer {
                 //     0,
                 //     &mut self.renderer_errors,
                 // );
-                let mut program = self.ps_split_composite.get(
-                    &mut self.device,
-                ).unwrap();
-                program.bind(
-                    &mut self.device.device,
-                    projection,
-                    0,
-                    &instances.iter().map(|pi|
-                        PrimitiveInstance::new(pi.data)
-                    ).collect::<Vec<PrimitiveInstance>>(),
-                );
-                program
+                self.ps_split_composite.get(&mut self.device).unwrap()
             }
             BatchKind::Blend => {
                 // self.ps_blend.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                let mut program = self.ps_blend.get(
-                    &mut self.device,
-                ).unwrap();
-                program.bind(
-                    &mut self.device.device,
-                    projection,
-                    0,
-                    &instances.iter().map(|pi|
-                        PrimitiveInstance::new(pi.data)
-                    ).collect::<Vec<PrimitiveInstance>>(),
-                );
-                program
+                self.ps_blend.get(&mut self.device).unwrap()
             }
             BatchKind::Brush(brush_kind) => {
                 match brush_kind {
                     BrushBatchKind::Solid => {
-                        let mut program = self.brush_solid.get(key.blend_mode, &mut self.device).unwrap();
-                        program.bind(
-                            &mut self.device.device,
-                            projection,
-                            0,
-                            &instances.iter().map(|pi|
-                                PrimitiveInstance::new(pi.data)
-                            ).collect::<Vec<PrimitiveInstance>>(),
-                        );
-                        program
                         // self.brush_solid.bind(
                         //     &mut self.device,
                         //     //key.blend_mode,
@@ -3363,22 +3294,14 @@ impl Renderer {
                         //     0,
                         //     //&mut self.renderer_errors,
                         // );
+                        self.brush_solid.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::Picture(target_kind) => {
-                        let mut program = match target_kind {
+                        match target_kind {
                              BrushImageSourceKind::Alpha => self.brush_picture_a8.get(key.blend_mode, &mut self.device).unwrap(),
                              BrushImageSourceKind::Color => self.brush_picture_rgba8.get(key.blend_mode, &mut self.device).unwrap(),
                              BrushImageSourceKind::ColorAlphaMask => self.brush_picture_rgba8_alpha_mask.get(key.blend_mode, &mut self.device).unwrap(),
-                        };
-                        program.bind(
-                            &mut self.device.device,
-                            projection,
-                            0,
-                            &instances.iter().map(|pi|
-                                PrimitiveInstance::new(pi.data)
-                            ).collect::<Vec<PrimitiveInstance>>(),
-                        );
-                        program
+                        }
                         // shader.bind(
                         //     &mut self.device,
                         //     key.blend_mode,
@@ -3388,16 +3311,6 @@ impl Renderer {
                         // );
                     }
                     BrushBatchKind::Line => {
-                        let mut program = self.brush_line.get(key.blend_mode, &mut self.device).unwrap();
-                        program.bind(
-                            &mut self.device.device,
-                            projection,
-                            0,
-                            &instances.iter().map(|pi|
-                                PrimitiveInstance::new(pi.data)
-                            ).collect::<Vec<PrimitiveInstance>>(),
-                        );
-                        program
                         // self.brush_line.bind(
                         //     &mut self.device.device,
                         //     //key.blend_mode,
@@ -3409,6 +3322,7 @@ impl Renderer {
                         //     //&mut self.renderer_errors,
                         // );
                         // self.device.draw(&mut self.brush_line);
+                        self.brush_line.get(key.blend_mode, &mut self.device).unwrap()
                     }
                 }
             }
@@ -3417,19 +3331,6 @@ impl Renderer {
                     unreachable!("bug: text batches are special cased");
                 }
                 TransformBatchKind::Image(image_buffer_kind) => {
-                    let mut program = self.ps_image.get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
                     // self.ps_image[image_buffer_kind as usize]
                     //     .as_mut()
                     //     .expect("Unsupported image shader kind")
@@ -3440,6 +3341,7 @@ impl Renderer {
                     //         0,
                     //         &mut self.renderer_errors,
                     //     );
+                    self.ps_image.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                     let shader_index =
@@ -3448,19 +3350,6 @@ impl Renderer {
                             format,
                             color_space,
                         ) % self.ps_yuv_image.len();
-                    let mut program = self.ps_yuv_image[shader_index].get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
                     // self.ps_yuv_image[shader_index]
                     //     .as_mut()
                     //     .expect("Unsupported YUV shader kind")
@@ -3471,6 +3360,7 @@ impl Renderer {
                     //         0,
                     //         &mut self.renderer_errors,
                     //     );
+                    self.ps_yuv_image[shader_index].get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::BorderCorner => {
                     //self.ps_border_corner.bind(
@@ -3484,19 +3374,7 @@ impl Renderer {
                     //    //&mut self.renderer_errors,
                     //);
                     //self.device.draw(&mut self.ps_border_corner);
-                    let mut program = self.ps_border_corner.get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
+                    self.ps_border_corner.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::BorderEdge => {
                     //self.ps_border_edge.bind(
@@ -3510,19 +3388,7 @@ impl Renderer {
                     //    //&mut self.renderer_errors,
                     //);
                     //self.device.draw(&mut self.ps_border_edge);
-                    let mut program = self.ps_border_edge.get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
+                    self.ps_border_edge.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::AlignedGradient => {
                     // self.ps_gradient.bind(
@@ -3532,19 +3398,7 @@ impl Renderer {
                     //     0,
                     //     &mut self.renderer_errors,
                     // );
-                    let mut program = self.ps_gradient.get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
+                    self.ps_gradient.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::AngleGradient => {
                     // self.ps_angle_gradient.bind(
@@ -3554,19 +3408,7 @@ impl Renderer {
                     //     0,
                     //     &mut self.renderer_errors,
                     // );
-                    let mut program = self.ps_angle_gradient.get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
+                    self.ps_angle_gradient.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::RadialGradient => {
                     // self.ps_radial_gradient.bind(
@@ -3576,19 +3418,7 @@ impl Renderer {
                     //     0,
                     //     &mut self.renderer_errors,
                     // );
-                    let mut program = self.ps_radial_gradient.get(
-                        transform_kind,
-                        &mut self.device,
-                    ).unwrap();
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                    program
+                    self.ps_radial_gradient.get(transform_kind, &mut self.device).unwrap()
                 }
             },
         };
@@ -3655,6 +3485,15 @@ impl Renderer {
             self.device.bind_draw_target(render_target, None);
         }
 
+        program.bind(
+            &self.device.device,
+            projection,
+            0,
+            &instances.iter().map(|pi|
+                PrimitiveInstance::new(pi.data)
+            ).collect::<Vec<PrimitiveInstance>>(),
+        );
+        self.device.draw(program);
         // let _timer = self.gpu_profile.start_timer(key.kind.gpu_sampler_tag());
         //self.draw_instanced_batch(
         //    instances,
@@ -3662,7 +3501,6 @@ impl Renderer {
         //    &key.textures,
         //    stats
         //);
-        self.device.draw(program);
     }
 
     fn handle_blits(
@@ -3867,25 +3705,14 @@ impl Renderer {
             self.device.set_blend_mode_premultiplied_alpha();
 
             let mut program = self.cs_text_run.get(&mut self.device).unwrap();
-            for (i, (_texture_id, instances)) in target.alpha_batcher.text_run_cache_prims.iter().enumerate() {
-                // Only bind projection and uMode in the first iteration
-                if i == 0 {
-                    program.bind(
-                        &mut self.device.device,
-                        projection,
-                        0,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
-                    );
-                } else {
+            program.bind_locals(&self.device.device, projection, 0);
+            for (_texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
                     program.bind_instances(
-                        &mut self.device.device,
+                        &self.device.device,
                         &instances.iter().map(|pi|
                             PrimitiveInstance::new(pi.data)
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
-                }
                 self.device.draw(program);
             }
             // let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_TEXT_RUN);
@@ -4550,29 +4377,11 @@ impl Renderer {
                 //     stats,
                 // );
             }
+
             // draw image masks
-            for (i, (_mask_texture_id, items)) in target.clip_batcher.images.iter().enumerate() {
-                let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
-                if i == 0 {
-                    program.bind(
-                        &self.device.device,
-                        projection,
-                        0,
-                        &items.iter().map(|ci|
-                            ClipMaskInstance::new(
-                                [
-                                    ci.render_task_address.0 as i32,
-                                    ci.scroll_node_data_index.0 as i32,
-                                    ci.segment,
-                                    ci.clip_data_address.u as i32,
-                                    ci.clip_data_address.v as i32,
-                                    ci.resource_address.u as i32,
-                                    ci.resource_address.v as i32,
-                                ]
-                            )
-                        ).collect::<Vec<ClipMaskInstance>>(),
-                    );
-                } else {
+            let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
+            program.bind_locals(&self.device.device, projection, 0);
+            for (_mask_texture_id, items) in &target.clip_batcher.images {
                     program.bind_instances(
                         &self.device.device,
                         &items.iter().map(|ci|
@@ -4589,7 +4398,6 @@ impl Renderer {
                             )
                         ).collect::<Vec<ClipMaskInstance>>(),
                     );
-                }
                 self.device.draw(&mut program);
                 // let _gm2 = self.gpu_profile.start_marker("clip images");
                 // let textures = BatchTextures {
