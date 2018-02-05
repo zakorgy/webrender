@@ -1600,7 +1600,7 @@ pub struct Renderer {
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
     cs_clip_rectangle: LazilyCompiledShader,
-    // cs_clip_image: LazilyCompiledShader,
+    cs_clip_image: LazilyCompiledShader,
     // cs_clip_border: LazilyCompiledShader,
 
     // The are "primitive shaders". These shaders draw and blend
@@ -1835,6 +1835,14 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
+        let cs_clip_image =
+            LazilyCompiledShader::new(
+                ShaderKind::ClipCache,
+                "cs_clip_image_transform",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
             "ps_border_corner_transform",
@@ -1961,14 +1969,6 @@ impl Renderer {
         let brush_mask_rounded_rect = try!{
             LazilyCompiledShader::new(ShaderKind::Brush,
                                       "brush_mask_rounded_rect",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let cs_clip_image = try!{
-            LazilyCompiledShader::new(ShaderKind::ClipCache,
-                                      "cs_clip_image",
                                       &[],
                                       &mut device,
                                       options.precache_shaders)
@@ -2368,9 +2368,9 @@ impl Renderer {
             brush_solid,
             brush_line,
             cs_clip_rectangle,
-            /*cs_clip_border,
+            //cs_clip_border,
             cs_clip_image,
-            ps_text_run,
+            /*ps_text_run,
             ps_text_run_dual_source,
             ps_image,
             ps_yuv_image,*/
@@ -4371,23 +4371,62 @@ impl Renderer {
                 // );
             }
             // draw image masks
-            for (mask_texture_id, items) in target.clip_batcher.images.iter() {
+            for (i, (_mask_texture_id, items)) in target.clip_batcher.images.iter().enumerate() {
+                let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
+                if i == 0 {
+                    program.bind(
+                        &self.device.device,
+                        projection,
+                        0,
+                        &items.iter().map(|ci|
+                            ClipMaskInstance::new(
+                                [
+                                    ci.render_task_address.0 as i32,
+                                    ci.scroll_node_data_index.0 as i32,
+                                    ci.segment,
+                                    ci.clip_data_address.u as i32,
+                                    ci.clip_data_address.v as i32,
+                                    ci.resource_address.u as i32,
+                                    ci.resource_address.v as i32,
+                                ]
+                            )
+                        ).collect::<Vec<ClipMaskInstance>>(),
+                    );
+                } else {
+                    program.bind_instances_only(
+                        &self.device.device,
+                        &items.iter().map(|ci|
+                            ClipMaskInstance::new(
+                                [
+                                    ci.render_task_address.0 as i32,
+                                    ci.scroll_node_data_index.0 as i32,
+                                    ci.segment,
+                                    ci.clip_data_address.u as i32,
+                                    ci.clip_data_address.v as i32,
+                                    ci.resource_address.u as i32,
+                                    ci.resource_address.v as i32,
+                                ]
+                            )
+                        ).collect::<Vec<ClipMaskInstance>>(),
+                    );
+                }
+                self.device.draw(&mut program);
                 // let _gm2 = self.gpu_profile.start_marker("clip images");
-                let textures = BatchTextures {
-                    colors: [
-                        mask_texture_id.clone(),
-                        SourceTexture::Invalid,
-                        SourceTexture::Invalid,
-                    ],
-                };
+                // let textures = BatchTextures {
+                //     colors: [
+                //         mask_texture_id.clone(),
+                //         SourceTexture::Invalid,
+                //         SourceTexture::Invalid,
+                //     ],
+                // };
                 // self.cs_clip_image
                 //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                self.draw_instanced_batch(
-                    items,
-                    VertexArrayKind::Clip,
-                    &textures,
-                    stats,
-                );
+                // self.draw_instanced_batch(
+                //     items,
+                //     VertexArrayKind::Clip,
+                //     &textures,
+                //     stats,
+                // );
             }
         }
 
@@ -5070,7 +5109,7 @@ impl Renderer {
         self.brush_solid.deinit(&self.device);
         self.brush_line.deinit(&self.device);
         self.cs_clip_rectangle.deinit(&mut self.device);
-        // self.cs_clip_image.deinit(&mut self.device);
+        self.cs_clip_image.deinit(&mut self.device);
         // self.cs_clip_border.deinit(&mut self.device);
         // self.ps_text_run.deinit(&mut self.device);
         // self.ps_text_run_dual_source.deinit(&mut self.device);
