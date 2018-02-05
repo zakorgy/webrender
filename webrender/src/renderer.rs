@@ -1582,7 +1582,7 @@ pub struct Renderer {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    // cs_text_run: LazilyCompiledShader,
+    cs_text_run: LazilyCompiledShader,
     // cs_blur_a8: LazilyCompiledShader,
     // cs_blur_rgba8: LazilyCompiledShader,
 
@@ -1746,7 +1746,14 @@ impl Renderer {
         let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
             from_reader(file).expect("Failed to load shader_bindings.ron");
 
-        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
+        let cs_text_run =
+            LazilyCompiledShader::new(
+               ShaderKind::Cache(VertexArrayKind::Primitive),
+                "cs_text_run",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let brush_mask_corner =
             LazilyCompiledShader::new(
                 ShaderKind::Brush,
@@ -1754,6 +1761,7 @@ impl Renderer {
                 &mut device,
                 &mut pipeline_requirements,
             )?;
+
         let brush_mask_rounded_rect =
             LazilyCompiledShader::new(
                 ShaderKind::Brush,
@@ -1761,9 +1769,11 @@ impl Renderer {
                 &mut device,
                 &mut pipeline_requirements,
             )?;
+
+        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
+        let brush_picture_a8 = device.create_program(pipeline_requirements.remove("brush_picture_alpha_target").unwrap(), "brush_picture_alpha_target", &ShaderKind::Primitive);
         let brush_picture_rgba8 = device.create_program(pipeline_requirements.remove("brush_picture_color_target").unwrap(), "brush_picture_color_target", &ShaderKind::Primitive);
         let brush_picture_rgba8_alpha_mask = device.create_program(pipeline_requirements.remove("brush_picture_color_target_alpha_mask").unwrap(), "brush_picture_color_target_alpha_mask", &ShaderKind::Primitive);
-        let brush_picture_a8 = device.create_program(pipeline_requirements.remove("brush_picture_alpha_target").unwrap(), "brush_picture_alpha_target", &ShaderKind::Primitive);
         let brush_solid = device.create_program(pipeline_requirements.remove("brush_solid").unwrap(), "brush_solid", &ShaderKind::Primitive);
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
@@ -1879,14 +1889,7 @@ impl Renderer {
 
         device.begin_frame();
 
-        /*let cs_text_run = try!{
-            LazilyCompiledShader::new(ShaderKind::Cache(VertexArrayKind::Primitive),
-                                      "cs_text_run",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
+        /*
         let brush_mask_corner = try!{
             LazilyCompiledShader::new(ShaderKind::Brush,
                                       "brush_mask_corner",
@@ -2353,8 +2356,8 @@ impl Renderer {
             pending_texture_updates: Vec::new(),
             pending_gpu_cache_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
-            /*cs_text_run,
-            cs_blur_a8,
+            cs_text_run,
+            /*cs_blur_a8,
             cs_blur_rgba8,*/
             brush_mask_corner,
             brush_mask_rounded_rect,
@@ -3762,17 +3765,39 @@ impl Renderer {
             self.device.set_blend(true);
             self.device.set_blend_mode_premultiplied_alpha();
 
+            let mut program = self.cs_text_run.get(&mut self.device).unwrap();
+            for (i, (_texture_id, instances)) in target.alpha_batcher.text_run_cache_prims.iter().enumerate() {
+                // Only bind projection and uMode in the first iteration
+                if i == 0 {
+                    program.bind(
+                        &mut self.device.device,
+                        projection,
+                        0,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                    );
+                } else {
+                    program.bind_instances_only(
+                        &mut self.device.device,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                    );
+                }
+                self.device.draw(program);
+            }
             // let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_TEXT_RUN);
             // self.cs_text_run
             //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            for (texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
-                self.draw_instanced_batch(
-                    instances,
-                    VertexArrayKind::Primitive,
-                    &BatchTextures::color(*texture_id),
-                    stats,
-                );
-            }
+            // for (texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
+            //     self.draw_instanced_batch(
+            //         instances,
+            //         VertexArrayKind::Primitive,
+            //         &BatchTextures::color(*texture_id),
+            //         stats,
+            //     );
+            // }
         }
 
         //TODO: record the pixel count for cached primitives
@@ -4962,7 +4987,7 @@ impl Renderer {
         self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
         self.debug.deinit(&mut self.device);
-        // self.cs_text_run.deinit(&mut self.device);
+        self.cs_text_run.deinit(&mut self.device);
         // self.cs_blur_a8.deinit(&mut self.device);
         // self.cs_blur_rgba8.deinit(&mut self.device);
         self.brush_mask_rounded_rect.deinit(&self.device);

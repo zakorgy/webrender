@@ -837,6 +837,7 @@ impl<B: hal::Backend> Program<B> {
                 index: 0,
                 main_pass: render_pass,
             };
+
             let pipelines_descriptors = PS_BLEND_STATES.iter().map(|blend_state| {
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
                     shader_entries.clone(),
@@ -949,16 +950,7 @@ impl<B: hal::Backend> Program<B> {
     ) where
         T: Copy,
     {
-        let data_stride = self.instance_buffer.buffer.data_stride;
-        let offset = self.instance_buffer.offset as u64;
-        self.instance_buffer.buffer.update(
-            device,
-            offset,
-            (instances.len() * data_stride) as u64,
-            &instances.to_owned(),
-        );
-
-        self.instance_buffer.size += instances.len();
+        self.bind_instances_only(device, instances);
         let locals_buffer_stride = mem::size_of::<Locals>();
         let locals_data = vec![
             Locals {
@@ -973,6 +965,25 @@ impl<B: hal::Backend> Program<B> {
             (locals_data.len() * locals_buffer_stride) as u64,
             &locals_data,
         );
+    }
+
+    pub fn bind_instances_only<T>(
+        &mut self,
+        device: &B::Device,
+        instances: &[T],
+    ) where
+        T: Copy,
+    {
+        let data_stride = self.instance_buffer.buffer.data_stride;
+        let offset = self.instance_buffer.offset as u64;
+        self.instance_buffer.buffer.update(
+            device,
+            offset,
+            (instances.len() * data_stride) as u64,
+            &instances.to_owned(),
+        );
+
+        self.instance_buffer.size += instances.len();
     }
 
     pub fn init_vertex_data<'a>(
