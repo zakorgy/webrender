@@ -1613,6 +1613,7 @@ pub struct Renderer {
     ps_text_run: TextShader,
     ps_text_run_dual_source: TextShader,
     //ps_image: Vec<Option<PrimitiveShader>>,
+    ps_image: PrimitiveShader,
     //ps_yuv_image: Vec<Option<PrimitiveShader>>,
     ps_border_corner: PrimitiveShader,
     ps_border_edge: PrimitiveShader,
@@ -1868,6 +1869,13 @@ impl Renderer {
                 &mut device,
                 &mut pipeline_requirements,
             )?;
+
+        let ps_image = PrimitiveShader::new(
+            "ps_image",
+            "ps_image_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
@@ -2360,8 +2368,8 @@ impl Renderer {
             cs_clip_image,
             ps_text_run,
             ps_text_run_dual_source,
-            /*ps_image,
-            ps_yuv_image,*/
+            ps_image,
+            //ps_yuv_image,
             ps_border_corner,
             ps_border_edge,
             ps_gradient,
@@ -3017,6 +3025,7 @@ impl Renderer {
         self.ps_composite.reset();
         self.ps_text_run.reset();
         self.ps_text_run_dual_source.reset();
+        self.ps_image.reset();
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
@@ -3365,6 +3374,19 @@ impl Renderer {
                     unreachable!("bug: text batches are special cased");
                 }
                 TransformBatchKind::Image(image_buffer_kind) => {
+                    let mut program = self.ps_image.get(
+                        transform_kind,
+                        &mut self.device,
+                    ).unwrap();
+                    program.bind(
+                        &mut self.device.device,
+                        projection,
+                        0,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                    );
+                    program
                     // self.ps_image[image_buffer_kind as usize]
                     //     .as_mut()
                     //     .expect("Unsupported image shader kind")
@@ -3375,7 +3397,6 @@ impl Renderer {
                     //         0,
                     //         &mut self.renderer_errors,
                     //     );
-                    return
                 }
                 TransformBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                     let shader_index =
@@ -5218,7 +5239,7 @@ impl Renderer {
         //         shader.deinit(&mut self.device);
         //     }
         // }
-
+        self.ps_image.deinit(&mut self.device);
         // for shader in self.ps_yuv_image {
         //     if let Some(shader) = shader {
         //         shader.deinit(&mut self.device);
