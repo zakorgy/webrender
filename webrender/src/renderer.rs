@@ -27,7 +27,7 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{BlurInstance, DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
+use device::{BlurInstance, ClipMaskInstance, DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
              VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
@@ -1599,7 +1599,7 @@ pub struct Renderer {
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    // cs_clip_rectangle: LazilyCompiledShader,
+    cs_clip_rectangle: LazilyCompiledShader,
     // cs_clip_image: LazilyCompiledShader,
     // cs_clip_border: LazilyCompiledShader,
 
@@ -1827,6 +1827,14 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
+        let cs_clip_rectangle =
+            LazilyCompiledShader::new(
+                ShaderKind::ClipCache,
+                "cs_clip_rectangle_transform",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
             "ps_border_corner_transform",
@@ -1953,14 +1961,6 @@ impl Renderer {
         let brush_mask_rounded_rect = try!{
             LazilyCompiledShader::new(ShaderKind::Brush,
                                       "brush_mask_rounded_rect",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let cs_clip_rectangle = try!{
-            LazilyCompiledShader::new(ShaderKind::ClipCache,
-                                      "cs_clip_rectangle",
                                       &[],
                                       &mut device,
                                       options.precache_shaders)
@@ -2367,8 +2367,8 @@ impl Renderer {
             brush_picture_a8,
             brush_solid,
             brush_line,
-            /*cs_clip_rectangle,
-            cs_clip_border,
+            cs_clip_rectangle,
+            /*cs_clip_border,
             cs_clip_image,
             ps_text_run,
             ps_text_run_dual_source,
@@ -4336,6 +4336,26 @@ impl Renderer {
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
+                let mut program = self.cs_clip_rectangle.get(&mut self.device).unwrap();
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.clip_batcher.rectangles.iter().map(|ci|
+                        ClipMaskInstance::new(
+                            [
+                                ci.render_task_address.0 as i32,
+                                ci.scroll_node_data_index.0 as i32,
+                                ci.segment,
+                                ci.clip_data_address.u as i32,
+                                ci.clip_data_address.v as i32,
+                                ci.resource_address.u as i32,
+                                ci.resource_address.v as i32,
+                            ]
+                        )
+                    ).collect::<Vec<ClipMaskInstance>>(),
+                );
+                self.device.draw(&mut program);
                 // let _gm2 = self.gpu_profile.start_marker("clip rectangles");
                 // self.cs_clip_rectangle.bind(
                 //     &mut self.device,
@@ -4343,12 +4363,12 @@ impl Renderer {
                 //     0,
                 //     &mut self.renderer_errors,
                 // );
-                self.draw_instanced_batch(
-                    &target.clip_batcher.rectangles,
-                    VertexArrayKind::Clip,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
+                // self.draw_instanced_batch(
+                //     &target.clip_batcher.rectangles,
+                //     VertexArrayKind::Clip,
+                //     &BatchTextures::no_texture(),
+                //     stats,
+                // );
             }
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
@@ -5049,7 +5069,7 @@ impl Renderer {
         self.brush_picture_a8.deinit(&self.device);
         self.brush_solid.deinit(&self.device);
         self.brush_line.deinit(&self.device);
-        // self.cs_clip_rectangle.deinit(&mut self.device);
+        self.cs_clip_rectangle.deinit(&mut self.device);
         // self.cs_clip_image.deinit(&mut self.device);
         // self.cs_clip_border.deinit(&mut self.device);
         // self.ps_text_run.deinit(&mut self.device);
