@@ -3032,13 +3032,25 @@ impl Renderer {
     }
 
     fn flush(&mut self) {
-        self.brush_line.reset();
+        self.cs_text_run.reset();
+        self.cs_blur_a8.reset();
+        self.cs_blur_rgba8.reset();
         self.brush_mask_corner.reset();
         self.brush_mask_rounded_rect.reset();
         self.brush_picture_rgba8.reset();
         self.brush_picture_rgba8_alpha_mask.reset();
         self.brush_picture_a8.reset();
         self.brush_solid.reset();
+        self.brush_line.reset();
+        self.cs_clip_rectangle.reset();
+        self.cs_clip_image.reset();
+        self.cs_clip_border.reset();
+        self.ps_text_run.reset();
+        self.ps_text_run_dual_source.reset();
+        self.ps_image.reset();
+        for mut program in &mut self.ps_yuv_image {
+            program.reset();
+        }
         self.ps_border_corner.reset();
         self.ps_border_edge.reset();
         self.ps_gradient.reset();
@@ -3048,12 +3060,6 @@ impl Renderer {
         self.ps_hw_composite.reset();
         self.ps_split_composite.reset();
         self.ps_composite.reset();
-        self.ps_text_run.reset();
-        self.ps_text_run_dual_source.reset();
-        self.ps_image.reset();
-        for mut program in &mut self.ps_yuv_image {
-            program.reset();
-        }
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
