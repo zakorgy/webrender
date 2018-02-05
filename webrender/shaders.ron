@@ -39,11 +39,11 @@
         source_name: "brush_picture",
         features: [
             "ALPHA_TARGET",// [0]
-            "ALPHA_TARGET, ALPHA_PASS",// [1]
+            "ALPHA_TARGET,ALPHA_PASS",// [1]
             "COLOR_TARGET",// [2]
-            "COLOR_TARGET, ALPHA_PASS",// [3]
+            "COLOR_TARGET,ALPHA_PASS",// [3]
             "COLOR_TARGET_ALPHA_MASK",// [4]
-            "COLOR_TARGET_ALPHA_MASK, ALPHA_PASS",// [5]
+            "COLOR_TARGET_ALPHA_MASK,ALPHA_PASS",// [5]
         ],
     ),// [5]
     (
