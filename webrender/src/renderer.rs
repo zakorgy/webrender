@@ -1601,7 +1601,7 @@ pub struct Renderer {
     /// of these shaders are also used by the primitive shaders.
     cs_clip_rectangle: LazilyCompiledShader,
     cs_clip_image: LazilyCompiledShader,
-    // cs_clip_border: LazilyCompiledShader,
+    cs_clip_border: LazilyCompiledShader,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -1843,6 +1843,14 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
+        let cs_clip_border =
+            LazilyCompiledShader::new(
+                ShaderKind::ClipCache,
+                "cs_clip_border_transform",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
             "ps_border_corner_transform",
@@ -1969,14 +1977,6 @@ impl Renderer {
         let brush_mask_rounded_rect = try!{
             LazilyCompiledShader::new(ShaderKind::Brush,
                                       "brush_mask_rounded_rect",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let cs_clip_border = try!{
-            LazilyCompiledShader::new(ShaderKind::ClipCache,
-                                      "cs_clip_border",
                                       &[],
                                       &mut device,
                                       options.precache_shaders)
@@ -2368,7 +2368,7 @@ impl Renderer {
             brush_solid,
             brush_line,
             cs_clip_rectangle,
-            //cs_clip_border,
+            cs_clip_border,
             cs_clip_image,
             /*ps_text_run,
             ps_text_run_dual_source,
@@ -4301,14 +4301,34 @@ impl Renderer {
             if !target.clip_batcher.border_clears.is_empty() {
                 // let _gm2 = self.gpu_profile.start_marker("clip borders [clear]");
                 self.device.set_blend(false);
+                let mut program = self.cs_clip_border.get(&mut self.device).unwrap();
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.clip_batcher.border_clears.iter().map(|ci|
+                        ClipMaskInstance::new(
+                            [
+                                ci.render_task_address.0 as i32,
+                                ci.scroll_node_data_index.0 as i32,
+                                ci.segment,
+                                ci.clip_data_address.u as i32,
+                                ci.clip_data_address.v as i32,
+                                ci.resource_address.u as i32,
+                                ci.resource_address.v as i32,
+                            ]
+                        )
+                    ).collect::<Vec<ClipMaskInstance>>(),
+                );
+                self.device.draw(&mut program);
                 // self.cs_clip_border
                 //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                self.draw_instanced_batch(
-                    &target.clip_batcher.border_clears,
-                    VertexArrayKind::Clip,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
+                // self.draw_instanced_batch(
+                //     &target.clip_batcher.border_clears,
+                //     VertexArrayKind::Clip,
+                //     &BatchTextures::no_texture(),
+                //     stats,
+                // );
             }
 
             // Draw any dots or dashes for border corners.
@@ -4320,14 +4340,35 @@ impl Renderer {
                 // a max blend mode here is fine.
                 self.device.set_blend(true);
                 self.device.set_blend_mode_max();
+
+                let mut program = self.cs_clip_border.get(&mut self.device).unwrap();
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.clip_batcher.borders.iter().map(|ci|
+                        ClipMaskInstance::new(
+                            [
+                                ci.render_task_address.0 as i32,
+                                ci.scroll_node_data_index.0 as i32,
+                                ci.segment,
+                                ci.clip_data_address.u as i32,
+                                ci.clip_data_address.v as i32,
+                                ci.resource_address.u as i32,
+                                ci.resource_address.v as i32,
+                            ]
+                        )
+                    ).collect::<Vec<ClipMaskInstance>>(),
+                );
+                self.device.draw(&mut program);
                 // self.cs_clip_border
                 //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                self.draw_instanced_batch(
-                    &target.clip_batcher.borders,
-                    VertexArrayKind::Clip,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
+                // self.draw_instanced_batch(
+                //     &target.clip_batcher.borders,
+                //     VertexArrayKind::Clip,
+                //     &BatchTextures::no_texture(),
+                //     stats,
+                // );
             }
 
             // switch to multiplicative blending
@@ -5110,7 +5151,7 @@ impl Renderer {
         self.brush_line.deinit(&self.device);
         self.cs_clip_rectangle.deinit(&mut self.device);
         self.cs_clip_image.deinit(&mut self.device);
-        // self.cs_clip_border.deinit(&mut self.device);
+        self.cs_clip_border.deinit(&mut self.device);
         // self.ps_text_run.deinit(&mut self.device);
         // self.ps_text_run_dual_source.deinit(&mut self.device);
         // for shader in self.ps_image {
