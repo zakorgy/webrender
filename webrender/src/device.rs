@@ -154,7 +154,7 @@ const QUAD: [Vertex; 6] = [
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
-    let mut file = File::open(path_str).unwrap();
+    let mut file = File::open(path_str).expect(&format!("Unable top open shader file: {}", filename));
     let mut shader = Vec::new();
     file.read_to_end(&mut shader).unwrap();
     shader
