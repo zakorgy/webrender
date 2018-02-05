@@ -1584,7 +1584,7 @@ pub struct Renderer {
     // of these shaders are then used by the primitive shaders.
     cs_text_run: LazilyCompiledShader,
     cs_blur_a8: LazilyCompiledShader,
-    // cs_blur_rgba8: LazilyCompiledShader,
+    cs_blur_rgba8: LazilyCompiledShader,
 
     // Brush shaders
     brush_mask_corner: LazilyCompiledShader,
@@ -1781,6 +1781,14 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
+        let cs_blur_rgba8 =
+            LazilyCompiledShader::new(
+                ShaderKind::Cache(VertexArrayKind::Blur),
+                "cs_blur_rgba8",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
         let brush_solid = device.create_program(pipeline_requirements.remove("brush_solid").unwrap(), "brush_solid", &ShaderKind::Primitive);
         let ps_border_corner = PrimitiveShader::new(
@@ -1947,14 +1955,6 @@ impl Renderer {
                              &mut device,
                              &["COLOR_TARGET_ALPHA_MASK"],
                              options.precache_shaders)
-        };
-
-        let cs_blur_rgba8 = try!{
-            LazilyCompiledShader::new(ShaderKind::Cache(VertexArrayKind::Blur),
-                                     "cs_blur",
-                                      &["COLOR_TARGET"],
-                                      &mut device,
-                                      options.precache_shaders)
         };
 
         let cs_clip_rectangle = try!{
@@ -2358,7 +2358,7 @@ impl Renderer {
             pending_shader_updates: Vec::new(),
             cs_text_run,
             cs_blur_a8,
-            // cs_blur_rgba8,
+            cs_blur_rgba8,
             brush_mask_corner,
             brush_mask_rounded_rect,
             brush_picture_rgba8,
@@ -3733,23 +3733,44 @@ impl Renderer {
             self.device.set_blend(false);
             // self.cs_blur_rgba8
             //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
+            let mut program = self.cs_blur_rgba8.get(&mut self.device).unwrap();
 
             if !target.vertical_blurs.is_empty() {
-                self.draw_instanced_batch(
-                    &target.vertical_blurs,
-                    VertexArrayKind::Blur,
-                    &BatchTextures::no_texture(),
-                    stats,
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.vertical_blurs.iter().map(|vb|
+                        BlurInstance::new(
+                            [vb.task_address.0 as i32, vb.src_task_address.0 as i32, vb.blur_direction as i32])
+                    ).collect::<Vec<BlurInstance>>(),
                 );
+                self.device.draw(&mut program);
+                //self.draw_instanced_batch(
+                //    &target.vertical_blurs,
+                //    VertexArrayKind::Blur,
+                //    &BatchTextures::no_texture(),
+                //    stats,
+                //);
             }
 
             if !target.horizontal_blurs.is_empty() {
-                self.draw_instanced_batch(
-                    &target.horizontal_blurs,
-                    VertexArrayKind::Blur,
-                    &BatchTextures::no_texture(),
-                    stats,
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.vertical_blurs.iter().map(|hb|
+                        BlurInstance::new(
+                            [hb.task_address.0 as i32, hb.src_task_address.0 as i32, hb.blur_direction as i32])
+                    ).collect::<Vec<BlurInstance>>(),
                 );
+                self.device.draw(&mut program);
+                // self.draw_instanced_batch(
+                //     &target.horizontal_blurs,
+                //     VertexArrayKind::Blur,
+                //     &BatchTextures::no_texture(),
+                //     stats,
+                // );
             }
         }
 
@@ -5010,7 +5031,7 @@ impl Renderer {
         self.debug.deinit(&mut self.device);
         self.cs_text_run.deinit(&mut self.device);
         self.cs_blur_a8.deinit(&mut self.device);
-        // self.cs_blur_rgba8.deinit(&mut self.device);
+        self.cs_blur_rgba8.deinit(&mut self.device);
         self.brush_mask_rounded_rect.deinit(&self.device);
         self.brush_mask_corner.deinit(&self.device);
         self.brush_picture_rgba8.deinit(&self.device.device);
