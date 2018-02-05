@@ -1615,6 +1615,7 @@ pub struct Renderer {
     //ps_image: Vec<Option<PrimitiveShader>>,
     ps_image: PrimitiveShader,
     //ps_yuv_image: Vec<Option<PrimitiveShader>>,
+    ps_yuv_image: Vec<PrimitiveShader>,
     ps_border_corner: PrimitiveShader,
     ps_border_edge: PrimitiveShader,
     ps_gradient: PrimitiveShader,
@@ -1876,6 +1877,45 @@ impl Renderer {
             &mut device,
             &mut pipeline_requirements,
         )?;
+
+        let ps_yuv_image = vec![
+            PrimitiveShader::new(
+                "ps_yuv_image_nv12",
+                "ps_yuv_image_nv12_transform",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            PrimitiveShader::new(
+                "ps_yuv_image_nv12_yuv_rec709",
+                "ps_yuv_image_nv12_yuv_rec709_transform",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            PrimitiveShader::new(
+                "ps_yuv_image",
+                "ps_yuv_image_transform",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            PrimitiveShader::new(
+                "ps_yuv_image_yuv_rec709",
+                "ps_yuv_image_yuv_rec709_transform",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            PrimitiveShader::new(
+                "ps_yuv_image_interleaved_y_cb_cr",
+                "ps_yuv_image_interleaved_y_cb_cr_transform",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            PrimitiveShader::new(
+                "ps_yuv_image_interleaved_y_cb_cr_yuv_rec709",
+                "ps_yuv_image_interleaved_y_cb_cr_yuv_rec709_transform",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+        ];
 
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
@@ -2369,7 +2409,7 @@ impl Renderer {
             ps_text_run,
             ps_text_run_dual_source,
             ps_image,
-            //ps_yuv_image,
+            ps_yuv_image,
             ps_border_corner,
             ps_border_edge,
             ps_gradient,
@@ -3026,6 +3066,9 @@ impl Renderer {
         self.ps_text_run.reset();
         self.ps_text_run_dual_source.reset();
         self.ps_image.reset();
+        for mut program in &mut self.ps_yuv_image {
+            program.reset();
+        }
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
@@ -3400,7 +3443,24 @@ impl Renderer {
                 }
                 TransformBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                     let shader_index =
-                        Renderer::get_yuv_shader_index(image_buffer_kind, format, color_space);
+                        Renderer::get_yuv_shader_index(
+                            image_buffer_kind,
+                            format,
+                            color_space,
+                        ) % self.ps_yuv_image.len();
+                    let mut program = self.ps_yuv_image[shader_index].get(
+                        transform_kind,
+                        &mut self.device,
+                    ).unwrap();
+                    program.bind(
+                        &mut self.device.device,
+                        projection,
+                        0,
+                        &instances.iter().map(|pi|
+                            PrimitiveInstance::new(pi.data)
+                        ).collect::<Vec<PrimitiveInstance>>(),
+                    );
+                    program
                     // self.ps_yuv_image[shader_index]
                     //     .as_mut()
                     //     .expect("Unsupported YUV shader kind")
@@ -3411,7 +3471,6 @@ impl Renderer {
                     //         0,
                     //         &mut self.renderer_errors,
                     //     );
-                    return
                 }
                 TransformBatchKind::BorderCorner => {
                     //self.ps_border_corner.bind(
@@ -5240,11 +5299,9 @@ impl Renderer {
         //     }
         // }
         self.ps_image.deinit(&mut self.device);
-        // for shader in self.ps_yuv_image {
-        //     if let Some(shader) = shader {
-        //         shader.deinit(&mut self.device);
-        //     }
-        // }
+        for shader in self.ps_yuv_image {
+             shader.deinit(&mut self.device);
+        }
         for (_, target) in self.output_targets {
             self.device.delete_fbo(target.fbo_id);
         }
