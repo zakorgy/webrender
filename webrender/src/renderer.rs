@@ -1593,7 +1593,7 @@ pub struct Renderer {
     brush_picture_rgba8: BrushShader,
     brush_picture_rgba8_alpha_mask: BrushShader,
     brush_picture_a8: BrushShader,
-    brush_solid: Program<back::Backend>,
+    brush_solid: BrushShader,
     brush_line: Program<back::Backend>,
 
     /// These are "cache clip shaders". These shaders are used to
@@ -1771,7 +1771,14 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
-        let brush_solid = device.create_program(pipeline_requirements.remove("brush_solid").unwrap(), "brush_solid", &ShaderKind::Primitive);
+        let brush_solid =
+            BrushShader::new(
+                "brush_solid",
+                "brush_solid_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
         let brush_picture_a8 =
             BrushShader::new(
@@ -1942,13 +1949,6 @@ impl Renderer {
                                       &[],
                                       &mut device,
                                       options.precache_shaders)
-        };
-
-        let brush_solid = try!{
-            BrushShader::new("brush_solid",
-                             &mut device,
-                             &[],
-                             options.precache_shaders)
         };
 
         let brush_line = try!{
@@ -3017,7 +3017,7 @@ impl Renderer {
         self.brush_picture_rgba8.reset();
         self.brush_picture_rgba8_alpha_mask.reset();
         self.brush_picture_a8.reset();
-        self.brush_solid.instance_buffer.reset();
+        self.brush_solid.reset();
         self.ps_border_corner.reset();
         self.ps_border_edge.reset();
         self.ps_gradient.reset();
@@ -3308,6 +3308,17 @@ impl Renderer {
             BatchKind::Brush(brush_kind) => {
                 match brush_kind {
                     BrushBatchKind::Solid => {
+                        let mut program = self.brush_solid.get(key.blend_mode, &mut self.device).unwrap();
+                        program.bind(
+                            &mut self.device.device,
+                            projection,
+                            0,
+                            &instances.iter().map(|pi|
+                                PrimitiveInstance::new(pi.data)
+                            ).collect::<Vec<PrimitiveInstance>>(),
+                        );
+                        self.device.draw(program);
+                        return;
                         // self.brush_solid.bind(
                         //     &mut self.device,
                         //     //key.blend_mode,
@@ -3315,7 +3326,6 @@ impl Renderer {
                         //     0,
                         //     //&mut self.renderer_errors,
                         // );
-                        &mut self.brush_solid
                     }
                     BrushBatchKind::Picture(target_kind) => {
                         let mut program = match target_kind {
@@ -5047,7 +5057,7 @@ impl Renderer {
         self.brush_picture_rgba8.deinit(&self.device);
         self.brush_picture_rgba8_alpha_mask.deinit(&self.device);
         self.brush_picture_a8.deinit(&self.device);
-        self.brush_solid.deinit(&self.device.device);
+        self.brush_solid.deinit(&self.device);
         self.brush_line.deinit(&self.device.device);
         // self.cs_clip_rectangle.deinit(&mut self.device);
         // self.cs_clip_image.deinit(&mut self.device);
