@@ -27,7 +27,7 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
+use device::{BlurInstance, DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
              VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
@@ -1583,7 +1583,7 @@ pub struct Renderer {
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
     cs_text_run: LazilyCompiledShader,
-    // cs_blur_a8: LazilyCompiledShader,
+    cs_blur_a8: LazilyCompiledShader,
     // cs_blur_rgba8: LazilyCompiledShader,
 
     // Brush shaders
@@ -1770,10 +1770,18 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
-        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
         let brush_picture_a8 = device.create_program(pipeline_requirements.remove("brush_picture_alpha_target").unwrap(), "brush_picture_alpha_target", &ShaderKind::Primitive);
         let brush_picture_rgba8 = device.create_program(pipeline_requirements.remove("brush_picture_color_target").unwrap(), "brush_picture_color_target", &ShaderKind::Primitive);
         let brush_picture_rgba8_alpha_mask = device.create_program(pipeline_requirements.remove("brush_picture_color_target_alpha_mask").unwrap(), "brush_picture_color_target_alpha_mask", &ShaderKind::Primitive);
+        let cs_blur_a8 =
+            LazilyCompiledShader::new(
+                ShaderKind::Cache(VertexArrayKind::Blur),
+                "cs_blur_a8",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
+        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
         let brush_solid = device.create_program(pipeline_requirements.remove("brush_solid").unwrap(), "brush_solid", &ShaderKind::Primitive);
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
@@ -1939,14 +1947,6 @@ impl Renderer {
                              &mut device,
                              &["COLOR_TARGET_ALPHA_MASK"],
                              options.precache_shaders)
-        };
-
-        let cs_blur_a8 = try!{
-            LazilyCompiledShader::new(ShaderKind::Cache(VertexArrayKind::Blur),
-                                     "cs_blur",
-                                      &["ALPHA_TARGET"],
-                                      &mut device,
-                                      options.precache_shaders)
         };
 
         let cs_blur_rgba8 = try!{
@@ -2357,8 +2357,8 @@ impl Renderer {
             pending_gpu_cache_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
             cs_text_run,
-            /*cs_blur_a8,
-            cs_blur_rgba8,*/
+            cs_blur_a8,
+            // cs_blur_rgba8,
             brush_mask_corner,
             brush_mask_rounded_rect,
             brush_picture_rgba8,
@@ -4169,23 +4169,44 @@ impl Renderer {
             self.device.set_blend(false);
             // self.cs_blur_a8
             //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
+            let mut program = self.cs_blur_a8.get(&mut self.device).unwrap();
 
             if !target.vertical_blurs.is_empty() {
-                self.draw_instanced_batch(
-                    &target.vertical_blurs,
-                    VertexArrayKind::Blur,
-                    &BatchTextures::no_texture(),
-                    stats,
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.vertical_blurs.iter().map(|vb|
+                        BlurInstance::new(
+                            [vb.task_address.0 as i32, vb.src_task_address.0 as i32, vb.blur_direction as i32])
+                    ).collect::<Vec<BlurInstance>>(),
                 );
+                self.device.draw(&mut program);
+                // self.draw_instanced_batch(
+                //     &target.vertical_blurs,
+                //     VertexArrayKind::Blur,
+                //     &BatchTextures::no_texture(),
+                //     stats,
+                // );
             }
 
             if !target.horizontal_blurs.is_empty() {
-                self.draw_instanced_batch(
-                    &target.horizontal_blurs,
-                    VertexArrayKind::Blur,
-                    &BatchTextures::no_texture(),
-                    stats,
+                program.bind(
+                    &self.device.device,
+                    projection,
+                    0,
+                    &target.horizontal_blurs.iter().map(|hb|
+                        BlurInstance::new(
+                            [hb.task_address.0 as i32, hb.src_task_address.0 as i32, hb.blur_direction as i32])
+                    ).collect::<Vec<BlurInstance>>(),
                 );
+                self.device.draw(&mut program);
+                // self.draw_instanced_batch(
+                //     &target.horizontal_blurs,
+                //     VertexArrayKind::Blur,
+                //     &BatchTextures::no_texture(),
+                //     stats,
+                // );
             }
         }
 
@@ -4988,7 +5009,7 @@ impl Renderer {
         self.texture_resolver.deinit(&mut self.device);
         self.debug.deinit(&mut self.device);
         self.cs_text_run.deinit(&mut self.device);
-        // self.cs_blur_a8.deinit(&mut self.device);
+        self.cs_blur_a8.deinit(&mut self.device);
         // self.cs_blur_rgba8.deinit(&mut self.device);
         self.brush_mask_rounded_rect.deinit(&self.device);
         self.brush_mask_corner.deinit(&self.device);
