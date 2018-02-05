@@ -1589,9 +1589,9 @@ pub struct Renderer {
     // Brush shaders
     brush_mask_corner: LazilyCompiledShader,
     brush_mask_rounded_rect: LazilyCompiledShader,
-    brush_picture_rgba8: Program<back::Backend>,
-    brush_picture_rgba8_alpha_mask: Program<back::Backend>,
-    brush_picture_a8: Program<back::Backend>,
+    brush_picture_rgba8: BrushShader,
+    brush_picture_rgba8_alpha_mask: BrushShader,
+    brush_picture_a8: BrushShader,
     brush_solid: Program<back::Backend>,
     brush_line: Program<back::Backend>,
 
@@ -1770,9 +1770,32 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
-        let brush_picture_a8 = device.create_program(pipeline_requirements.remove("brush_picture_alpha_target").unwrap(), "brush_picture_alpha_target", &ShaderKind::Primitive);
-        let brush_picture_rgba8 = device.create_program(pipeline_requirements.remove("brush_picture_color_target").unwrap(), "brush_picture_color_target", &ShaderKind::Primitive);
-        let brush_picture_rgba8_alpha_mask = device.create_program(pipeline_requirements.remove("brush_picture_color_target_alpha_mask").unwrap(), "brush_picture_color_target_alpha_mask", &ShaderKind::Primitive);
+        let brush_solid = device.create_program(pipeline_requirements.remove("brush_solid").unwrap(), "brush_solid", &ShaderKind::Primitive);
+        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
+        let brush_picture_a8 =
+            BrushShader::new(
+                "brush_picture_alpha_target",
+                "brush_picture_alpha_target_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
+        let brush_picture_rgba8 =
+            BrushShader::new(
+                "brush_picture_color_target",
+                "brush_picture_color_target_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
+        let brush_picture_rgba8_alpha_mask =
+            BrushShader::new(
+                "brush_picture_color_target_alpha_mask",
+                "brush_picture_color_target_alpha_mask_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let cs_blur_a8 =
             LazilyCompiledShader::new(
                 ShaderKind::Cache(VertexArrayKind::Blur),
@@ -1789,8 +1812,6 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
-        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
-        let brush_solid = device.create_program(pipeline_requirements.remove("brush_solid").unwrap(), "brush_solid", &ShaderKind::Primitive);
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
             "ps_border_corner_transform",
@@ -1933,27 +1954,6 @@ impl Renderer {
             BrushShader::new("brush_line",
                              &mut device,
                              &[],
-                             options.precache_shaders)
-        };
-
-        let brush_picture_a8 = try!{
-            BrushShader::new("brush_picture",
-                             &mut device,
-                             &["ALPHA_TARGET"],
-                             options.precache_shaders)
-        };
-
-        let brush_picture_rgba8 = try!{
-            BrushShader::new("brush_picture",
-                             &mut device,
-                             &["COLOR_TARGET"],
-                             options.precache_shaders)
-        };
-
-        let brush_picture_rgba8_alpha_mask = try!{
-            BrushShader::new("brush_picture",
-                             &mut device,
-                             &["COLOR_TARGET_ALPHA_MASK"],
                              options.precache_shaders)
         };
 
@@ -3013,9 +3013,9 @@ impl Renderer {
         self.brush_line.instance_buffer.reset();
         self.brush_mask_corner.reset();
         self.brush_mask_rounded_rect.reset();
-        self.brush_picture_rgba8.instance_buffer.reset();
-        self.brush_picture_rgba8_alpha_mask.instance_buffer.reset();
-        self.brush_picture_a8.instance_buffer.reset();
+        self.brush_picture_rgba8.reset();
+        self.brush_picture_rgba8_alpha_mask.reset();
+        self.brush_picture_a8.reset();
         self.brush_solid.instance_buffer.reset();
         self.ps_border_corner.reset();
         self.ps_border_edge.reset();
@@ -3317,11 +3317,21 @@ impl Renderer {
                         &mut self.brush_solid
                     }
                     BrushBatchKind::Picture(target_kind) => {
-                        // let shader = match target_kind {
-                        //     BrushImageSourceKind::Alpha => &mut self.brush_picture_a8,
-                        //     BrushImageSourceKind::Color => &mut self.brush_picture_rgba8,
-                        //     BrushImageSourceKind::ColorAlphaMask => &mut self.brush_picture_rgba8_alpha_mask,
-                        // };
+                        let mut program = match target_kind {
+                             BrushImageSourceKind::Alpha => self.brush_picture_a8.get(key.blend_mode, &mut self.device).unwrap(),
+                             BrushImageSourceKind::Color => self.brush_picture_rgba8.get(key.blend_mode, &mut self.device).unwrap(),
+                             BrushImageSourceKind::ColorAlphaMask => self.brush_picture_rgba8_alpha_mask.get(key.blend_mode, &mut self.device).unwrap(),
+                        };
+                        program.bind(
+                            &mut self.device.device,
+                            projection,
+                            0,
+                            &instances.iter().map(|pi|
+                                PrimitiveInstance::new(pi.data)
+                            ).collect::<Vec<PrimitiveInstance>>(),
+                        );
+                        self.device.draw(program);
+                        return;
                         // shader.bind(
                         //     &mut self.device,
                         //     key.blend_mode,
@@ -3329,7 +3339,6 @@ impl Renderer {
                         //     0,
                         //     &mut self.renderer_errors,
                         // );
-                        return
                     }
                     BrushBatchKind::Line => {
                         // self.brush_line.bind(
@@ -5034,9 +5043,9 @@ impl Renderer {
         self.cs_blur_rgba8.deinit(&mut self.device);
         self.brush_mask_rounded_rect.deinit(&self.device);
         self.brush_mask_corner.deinit(&self.device);
-        self.brush_picture_rgba8.deinit(&self.device.device);
-        self.brush_picture_rgba8_alpha_mask.deinit(&self.device.device);
-        self.brush_picture_a8.deinit(&self.device.device);
+        self.brush_picture_rgba8.deinit(&self.device);
+        self.brush_picture_rgba8_alpha_mask.deinit(&self.device);
+        self.brush_picture_a8.deinit(&self.device);
         self.brush_solid.deinit(&self.device.device);
         self.brush_line.deinit(&self.device.device);
         // self.cs_clip_rectangle.deinit(&mut self.device);
