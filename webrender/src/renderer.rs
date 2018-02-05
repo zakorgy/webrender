@@ -3234,7 +3234,7 @@ impl Renderer {
         framebuffer_size: DeviceUintSize,
         stats: &mut RendererStats,
     ) {
-        match key.kind {
+        let mut program = match key.kind {
             BatchKind::Composite { .. } => {
                 // self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
                 let mut program = self.ps_composite.get(
@@ -3248,8 +3248,7 @@ impl Renderer {
                         PrimitiveInstance::new(pi.data)
                     ).collect::<Vec<PrimitiveInstance>>(),
                 );
-                self.device.draw(program);
-                return;
+                program
             }
             BatchKind::HardwareComposite => {
                 // self.ps_hw_composite
@@ -3265,8 +3264,7 @@ impl Renderer {
                         PrimitiveInstance::new(pi.data)
                     ).collect::<Vec<PrimitiveInstance>>(),
                 );
-                self.device.draw(program);
-                return;
+                program
             }
             BatchKind::SplitComposite => {
                 // self.ps_split_composite.bind(
@@ -3286,8 +3284,7 @@ impl Renderer {
                         PrimitiveInstance::new(pi.data)
                     ).collect::<Vec<PrimitiveInstance>>(),
                 );
-                self.device.draw(program);
-                return;
+                program
             }
             BatchKind::Blend => {
                 // self.ps_blend.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
@@ -3302,8 +3299,7 @@ impl Renderer {
                         PrimitiveInstance::new(pi.data)
                     ).collect::<Vec<PrimitiveInstance>>(),
                 );
-                self.device.draw(program);
-                return;
+                program
             }
             BatchKind::Brush(brush_kind) => {
                 match brush_kind {
@@ -3317,8 +3313,7 @@ impl Renderer {
                                 PrimitiveInstance::new(pi.data)
                             ).collect::<Vec<PrimitiveInstance>>(),
                         );
-                        self.device.draw(program);
-                        return;
+                        program
                         // self.brush_solid.bind(
                         //     &mut self.device,
                         //     //key.blend_mode,
@@ -3341,8 +3336,7 @@ impl Renderer {
                                 PrimitiveInstance::new(pi.data)
                             ).collect::<Vec<PrimitiveInstance>>(),
                         );
-                        self.device.draw(program);
-                        return;
+                        program
                         // shader.bind(
                         //     &mut self.device,
                         //     key.blend_mode,
@@ -3361,8 +3355,7 @@ impl Renderer {
                                 PrimitiveInstance::new(pi.data)
                             ).collect::<Vec<PrimitiveInstance>>(),
                         );
-                        self.device.draw(program);
-                        return;
+                        program
                         // self.brush_line.bind(
                         //     &mut self.device.device,
                         //     //key.blend_mode,
@@ -3433,8 +3426,7 @@ impl Renderer {
                             PrimitiveInstance::new(pi.data)
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
-                    self.device.draw(program);
-                    return;
+                    program
                 }
                 TransformBatchKind::BorderEdge => {
                     //self.ps_border_edge.bind(
@@ -3460,8 +3452,7 @@ impl Renderer {
                             PrimitiveInstance::new(pi.data)
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
-                    self.device.draw(program);
-                    return;
+                    program
                 }
                 TransformBatchKind::AlignedGradient => {
                     // self.ps_gradient.bind(
@@ -3483,8 +3474,7 @@ impl Renderer {
                             PrimitiveInstance::new(pi.data)
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
-                    self.device.draw(program);
-                    return;
+                    program
                 }
                 TransformBatchKind::AngleGradient => {
                     // self.ps_angle_gradient.bind(
@@ -3506,8 +3496,7 @@ impl Renderer {
                             PrimitiveInstance::new(pi.data)
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
-                    self.device.draw(program);
-                    return;
+                    program
                 }
                 TransformBatchKind::RadialGradient => {
                     // self.ps_radial_gradient.bind(
@@ -3529,8 +3518,7 @@ impl Renderer {
                             PrimitiveInstance::new(pi.data)
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
-                    self.device.draw(program);
-                    return;
+                    program
                 }
             },
         };
@@ -3604,6 +3592,7 @@ impl Renderer {
         //    &key.textures,
         //    stats
         //);
+        self.device.draw(program);
     }
 
     fn handle_blits(
