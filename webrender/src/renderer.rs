@@ -1610,8 +1610,8 @@ pub struct Renderer {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    //ps_text_run: TextShader,
-    //ps_text_run_dual_source: TextShader,
+    ps_text_run: TextShader,
+    ps_text_run_dual_source: TextShader,
     //ps_image: Vec<Option<PrimitiveShader>>,
     //ps_yuv_image: Vec<Option<PrimitiveShader>>,
     ps_border_corner: PrimitiveShader,
@@ -1851,6 +1851,24 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
+        let ps_text_run =
+            TextShader::new(
+                "ps_text_run",
+                "ps_text_run_transform",
+                "ps_text_run_glyph_transform",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
+        let ps_text_run_dual_source =
+            TextShader::new(
+                "ps_text_run_dual_source_blending",
+                "ps_text_run_dual_source_blending_transform",
+                "ps_text_run_dual_source_blending_glyph_transform",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let ps_border_corner = PrimitiveShader::new(
             "ps_border_corner",
             "ps_border_corner_transform",
@@ -1966,36 +1984,6 @@ impl Renderer {
         device.begin_frame();
 
         /*
-        let brush_mask_corner = try!{
-            LazilyCompiledShader::new(ShaderKind::Brush,
-                                      "brush_mask_corner",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let brush_mask_rounded_rect = try!{
-            LazilyCompiledShader::new(ShaderKind::Brush,
-                                      "brush_mask_rounded_rect",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let ps_text_run = try!{
-            TextShader::new("ps_text_run",
-                            &mut device,
-                            &[],
-                            options.precache_shaders)
-        };
-
-        let ps_text_run_dual_source = try!{
-            TextShader::new("ps_text_run",
-                            &mut device,
-                            &["DUAL_SOURCE_BLENDING"],
-                            options.precache_shaders)
-        };
-
         // All image configuration.
         let mut image_features = Vec::new();
         let mut ps_image: Vec<Option<PrimitiveShader>> = Vec::new();
@@ -2370,9 +2358,9 @@ impl Renderer {
             cs_clip_rectangle,
             cs_clip_border,
             cs_clip_image,
-            /*ps_text_run,
+            ps_text_run,
             ps_text_run_dual_source,
-            ps_image,
+            /*ps_image,
             ps_yuv_image,*/
             ps_border_corner,
             ps_border_edge,
@@ -3027,6 +3015,8 @@ impl Renderer {
         self.ps_hw_composite.reset();
         self.ps_split_composite.reset();
         self.ps_composite.reset();
+        self.ps_text_run.reset();
+        self.ps_text_run_dual_source.reset();
     }
 
     pub fn layers_are_bouncing_back(&self) -> bool {
@@ -3809,7 +3799,7 @@ impl Renderer {
                         ).collect::<Vec<PrimitiveInstance>>(),
                     );
                 } else {
-                    program.bind_instances_only(
+                    program.bind_instances(
                         &mut self.device.device,
                         &instances.iter().map(|pi|
                             PrimitiveInstance::new(pi.data)
@@ -3907,6 +3897,16 @@ impl Renderer {
                             BlendMode::Alpha => panic!("Attempt to composite non-premultiplied text primitives."),
                             BlendMode::PremultipliedAlpha => {
                                 self.device.set_blend_mode_premultiplied_alpha();
+                                let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                program.bind(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::from(glyph_format).into(),
+                                    &batch.instances.iter().map(|pi|
+                                        PrimitiveInstance::new(pi.data)
+                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -3917,15 +3917,25 @@ impl Renderer {
                                 //     &mut self.renderer_errors,
                                 // );
 
-                                self.draw_instanced_batch(
-                                    &batch.instances,
-                                    VertexArrayKind::Primitive,
-                                    &batch.key.textures,
-                                    stats,
-                                );
+                                // self.draw_instanced_batch(
+                                //     &batch.instances,
+                                //     VertexArrayKind::Primitive,
+                                //     &batch.key.textures,
+                                //     stats,
+                                // );
                             }
                             BlendMode::SubpixelDualSource => {
                                 self.device.set_blend_mode_subpixel_dual_source();
+                                let mut program = self.ps_text_run_dual_source.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                program.bind(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelDualSource.into(),
+                                    &batch.instances.iter().map(|pi|
+                                        PrimitiveInstance::new(pi.data)
+                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run_dual_source.bind(
                                 //     &mut self.device,
@@ -3936,15 +3946,26 @@ impl Renderer {
                                 //     &mut self.renderer_errors,
                                 // );
 
-                                self.draw_instanced_batch(
-                                    &batch.instances,
-                                    VertexArrayKind::Primitive,
-                                    &batch.key.textures,
-                                    stats,
-                                );
+                                // self.draw_instanced_batch(
+                                //     &batch.instances,
+                                //     VertexArrayKind::Primitive,
+                                //     &batch.key.textures,
+                                //     stats,
+                                // );
                             }
                             BlendMode::SubpixelConstantTextColor(color) => {
                                 self.device.set_blend_mode_subpixel_constant_text_color(color);
+                                // TODO(zakorgy): Set blend constant
+                                let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                program.bind(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelConstantTextColor.into(),
+                                    &batch.instances.iter().map(|pi|
+                                        PrimitiveInstance::new(pi.data)
+                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -3955,12 +3976,12 @@ impl Renderer {
                                 //     &mut self.renderer_errors,
                                 // );
 
-                                self.draw_instanced_batch(
-                                    &batch.instances,
-                                    VertexArrayKind::Primitive,
-                                    &batch.key.textures,
-                                    stats,
-                                );
+                                // self.draw_instanced_batch(
+                                //     &batch.instances,
+                                //     VertexArrayKind::Primitive,
+                                //     &batch.key.textures,
+                                //     stats,
+                                // );
                             }
                             BlendMode::SubpixelVariableTextColor => {
                                 // Using the two pass component alpha rendering technique:
@@ -3968,6 +3989,16 @@ impl Renderer {
                                 // http://anholt.livejournal.com/32058.html
                                 //
                                 self.device.set_blend_mode_subpixel_pass0();
+                                let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                program.bind(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelPass0.into(),
+                                    &batch.instances.iter().map(|pi|
+                                        PrimitiveInstance::new(pi.data)
+                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -3978,14 +4009,20 @@ impl Renderer {
                                 //     &mut self.renderer_errors,
                                 // );
 
-                                self.draw_instanced_batch(
-                                    &batch.instances,
-                                    VertexArrayKind::Primitive,
-                                    &batch.key.textures,
-                                    stats,
-                                );
+                                //self.draw_instanced_batch(
+                                //    &batch.instances,
+                                //    VertexArrayKind::Primitive,
+                                //    &batch.key.textures,
+                                //    stats,
+                                //);
 
                                 self.device.set_blend_mode_subpixel_pass1();
+                                program.bind_locals(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelPass1.into(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -4000,8 +4037,8 @@ impl Renderer {
                                 // are all set up from the previous draw_instanced_batch call,
                                 // so just issue a draw call here to avoid re-uploading the
                                 // instances and re-binding textures etc.
-                                self.device
-                                    .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                                // self.device
+                                //     .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                             }
                             BlendMode::SubpixelWithBgColor => {
                                 // Using the three pass "component alpha with font smoothing
@@ -4010,6 +4047,16 @@ impl Renderer {
                                 // /webrender/doc/text-rendering.md
                                 //
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass0();
+                                let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                program.bind(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelWithBgColorPass0.into(),
+                                    &batch.instances.iter().map(|pi|
+                                        PrimitiveInstance::new(pi.data)
+                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -4020,14 +4067,20 @@ impl Renderer {
                                 //     &mut self.renderer_errors,
                                 // );
 
-                                self.draw_instanced_batch(
-                                    &batch.instances,
-                                    VertexArrayKind::Primitive,
-                                    &batch.key.textures,
-                                    stats,
-                                );
+                                // self.draw_instanced_batch(
+                                //     &batch.instances,
+                                //     VertexArrayKind::Primitive,
+                                //     &batch.key.textures,
+                                //     stats,
+                                // );
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass1();
+                                program.bind_locals(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelWithBgColorPass1.into(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -4042,10 +4095,16 @@ impl Renderer {
                                 // are all set up from the previous draw_instanced_batch call,
                                 // so just issue a draw call here to avoid re-uploading the
                                 // instances and re-binding textures etc.
-                                self.device
-                                    .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                                // self.device
+                                //     .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass2();
+                                program.bind_locals(
+                                    &self.device.device,
+                                    projection,
+                                    TextShaderMode::SubpixelWithBgColorPass2.into(),
+                                );
+                                self.device.draw(program);
 
                                 // self.ps_text_run.bind(
                                 //     &mut self.device,
@@ -4056,8 +4115,8 @@ impl Renderer {
                                 //     &mut self.renderer_errors,
                                 // );
 
-                                self.device
-                                    .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                                // self.device
+                                //     .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                             }
                             BlendMode::PremultipliedDestOut | BlendMode::None => {
                                 unreachable!("bug: bad blend mode for text");
@@ -4434,7 +4493,7 @@ impl Renderer {
                         ).collect::<Vec<ClipMaskInstance>>(),
                     );
                 } else {
-                    program.bind_instances_only(
+                    program.bind_instances(
                         &self.device.device,
                         &items.iter().map(|ci|
                             ClipMaskInstance::new(
@@ -5152,13 +5211,14 @@ impl Renderer {
         self.cs_clip_rectangle.deinit(&mut self.device);
         self.cs_clip_image.deinit(&mut self.device);
         self.cs_clip_border.deinit(&mut self.device);
-        // self.ps_text_run.deinit(&mut self.device);
-        // self.ps_text_run_dual_source.deinit(&mut self.device);
+        self.ps_text_run.deinit(&mut self.device);
+        self.ps_text_run_dual_source.deinit(&mut self.device);
         // for shader in self.ps_image {
         //     if let Some(shader) = shader {
         //         shader.deinit(&mut self.device);
         //     }
         // }
+
         // for shader in self.ps_yuv_image {
         //     if let Some(shader) = shader {
         //         shader.deinit(&mut self.device);

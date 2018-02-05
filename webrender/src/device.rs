@@ -940,34 +940,8 @@ impl<B: hal::Backend> Program<B> {
         }
     }
 
-    pub fn bind<T>(
-        &mut self,
-        device: &B::Device,
-        projection: &Transform3D<f32>,
-        u_mode: i32,
-        //instances: &[PrimitiveInstance],
-        instances: &[T],
-    ) where
-        T: Copy,
-    {
-        self.bind_instances_only(device, instances);
-        let locals_buffer_stride = mem::size_of::<Locals>();
-        let locals_data = vec![
-            Locals {
-                uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
-                uDevicePixelRatio: 1.0,
-                uMode: u_mode,
-            },
-        ];
-        self.locals_buffer.update(
-            device,
-            0,
-            (locals_data.len() * locals_buffer_stride) as u64,
-            &locals_data,
-        );
-    }
 
-    pub fn bind_instances_only<T>(
+    pub fn bind_instances<T>(
         &mut self,
         device: &B::Device,
         instances: &[T],
@@ -984,6 +958,42 @@ impl<B: hal::Backend> Program<B> {
         );
 
         self.instance_buffer.size += instances.len();
+    }
+
+    pub fn bind_locals(
+        &mut self,
+        device: &B::Device,
+        projection: &Transform3D<f32>,
+        u_mode: i32,
+    ) {
+        let locals_buffer_stride = mem::size_of::<Locals>();
+        let locals_data = vec![
+            Locals {
+                uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
+                uDevicePixelRatio: 1.0,
+                uMode: u_mode,
+            },
+        ];
+        self.locals_buffer.update(
+            device,
+            0,
+            (locals_data.len() * locals_buffer_stride) as u64,
+            &locals_data,
+        );
+    }
+
+    pub fn bind<T>(
+        &mut self,
+        device: &B::Device,
+        projection: &Transform3D<f32>,
+        u_mode: i32,
+        //instances: &[PrimitiveInstance],
+        instances: &[T],
+    ) where
+        T: Copy,
+    {
+        self.bind_instances(device, instances);
+        self.bind_locals(device, &projection, u_mode);
     }
 
     pub fn init_vertex_data<'a>(
