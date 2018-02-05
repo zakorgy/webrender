@@ -1594,7 +1594,7 @@ pub struct Renderer {
     brush_picture_rgba8_alpha_mask: BrushShader,
     brush_picture_a8: BrushShader,
     brush_solid: BrushShader,
-    brush_line: Program<back::Backend>,
+    brush_line: BrushShader,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
@@ -1779,7 +1779,14 @@ impl Renderer {
                 &mut pipeline_requirements,
             )?;
 
-        let brush_line = device.create_program(pipeline_requirements.remove("brush_line").unwrap(), "brush_line", &ShaderKind::Primitive);
+        let brush_line =
+            BrushShader::new(
+                "brush_line",
+                "brush_line_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements,
+            )?;
+
         let brush_picture_a8 =
             BrushShader::new(
                 "brush_picture_alpha_target",
@@ -1949,13 +1956,6 @@ impl Renderer {
                                       &[],
                                       &mut device,
                                       options.precache_shaders)
-        };
-
-        let brush_line = try!{
-            BrushShader::new("brush_line",
-                             &mut device,
-                             &[],
-                             options.precache_shaders)
         };
 
         let cs_clip_rectangle = try!{
@@ -3011,7 +3011,7 @@ impl Renderer {
     }
 
     fn flush(&mut self) {
-        self.brush_line.instance_buffer.reset();
+        self.brush_line.reset();
         self.brush_mask_corner.reset();
         self.brush_mask_rounded_rect.reset();
         self.brush_picture_rgba8.reset();
@@ -3234,7 +3234,7 @@ impl Renderer {
         framebuffer_size: DeviceUintSize,
         stats: &mut RendererStats,
     ) {
-        let mut program = match key.kind {
+        match key.kind {
             BatchKind::Composite { .. } => {
                 // self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
                 let mut program = self.ps_composite.get(
@@ -3352,6 +3352,17 @@ impl Renderer {
                         // );
                     }
                     BrushBatchKind::Line => {
+                        let mut program = self.brush_line.get(key.blend_mode, &mut self.device).unwrap();
+                        program.bind(
+                            &mut self.device.device,
+                            projection,
+                            0,
+                            &instances.iter().map(|pi|
+                                PrimitiveInstance::new(pi.data)
+                            ).collect::<Vec<PrimitiveInstance>>(),
+                        );
+                        self.device.draw(program);
+                        return;
                         // self.brush_line.bind(
                         //     &mut self.device.device,
                         //     //key.blend_mode,
@@ -3363,7 +3374,6 @@ impl Renderer {
                         //     //&mut self.renderer_errors,
                         // );
                         // self.device.draw(&mut self.brush_line);
-                        &mut self.brush_line
                     }
                 }
             }
@@ -3594,15 +3604,6 @@ impl Renderer {
         //    &key.textures,
         //    stats
         //);
-        program.bind(
-            &self.device.device,
-            projection,
-            0,
-            &instances.iter().map(|pi|
-                PrimitiveInstance::new(pi.data)
-            ).collect::<Vec<PrimitiveInstance>>(),
-        );
-        self.device.draw(&mut program);
     }
 
     fn handle_blits(
@@ -5058,7 +5059,7 @@ impl Renderer {
         self.brush_picture_rgba8_alpha_mask.deinit(&self.device);
         self.brush_picture_a8.deinit(&self.device);
         self.brush_solid.deinit(&self.device);
-        self.brush_line.deinit(&self.device.device);
+        self.brush_line.deinit(&self.device);
         // self.cs_clip_rectangle.deinit(&mut self.device);
         // self.cs_clip_image.deinit(&mut self.device);
         // self.cs_clip_border.deinit(&mut self.device);
