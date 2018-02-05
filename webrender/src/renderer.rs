@@ -1164,7 +1164,8 @@ impl LazilyCompiledShader {
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
         //precache: bool,
     ) -> Result<LazilyCompiledShader, ShaderError> {
-        let pipeline_requirements = pipeline_requirements.remove(name).unwrap();
+        let pipeline_requirements =
+            pipeline_requirements.remove(name).expect(&format!("Pipeline requirements not found for: {}", name));
         let mut shader = LazilyCompiledShader {
             program: None,
             name,
