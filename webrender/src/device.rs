@@ -1092,6 +1092,7 @@ impl<B: hal::Backend> Program<B> {
         frame_buffer: &B::Framebuffer,
         clear_values: &[hal::command::ClearValue],
         blend_state: &BlendState,
+        blend_color: ColorF,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
@@ -1108,6 +1109,10 @@ impl<B: hal::Backend> Program<B> {
             0,
             &self.descriptor_sets[0 .. 1],
         );
+
+        if *blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
+            cmd_buffer.set_blend_constants(blend_color.to_array());
+        }
 
         {
             let mut encoder = cmd_buffer.begin_renderpass_inline(
@@ -1157,6 +1162,7 @@ pub struct Device<B: hal::Backend, C> {
     pub upload_queue: Vec<hal::command::Submit<B, C, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
     current_blend_state: BlendState,
+    blend_color: ColorF,
     // device state
     bound_textures: [u32; 16],
     bound_program: u32,
@@ -1410,6 +1416,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             upload_queue: Vec::new(),
             current_frame_id: 0,
             current_blend_state: BlendState::Off,
+            blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
@@ -1539,6 +1546,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             &self.framebuffers[self.current_frame_id],
             &vec![],
             &self.current_blend_state,
+            self.blend_color
         );
 
         self.upload_queue.push(submit);
@@ -2468,6 +2476,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
     pub fn set_blend_mode_subpixel_constant_text_color(&mut self, color: ColorF) {
         self.current_blend_state = SUBPIXEL_CONSTANT_TEXT_COLOR;
+        self.blend_color = color;
     }
     pub fn set_blend_mode_subpixel_dual_source(&mut self) {
         self.current_blend_state = SUBPIXEL_DUAL_SOURCE;
