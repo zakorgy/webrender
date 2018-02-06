@@ -4463,16 +4463,26 @@ impl Renderer {
         // Draw any blurs for this target.
         if !target.horizontal_blurs.is_empty() {
             // let _timer = self.gpu_profile.start_timer(GPU_TAG_BLUR);
-
+            let mut program = self.cs_blur_a8.get(&mut self.device).unwrap();
+            program.bind(
+                &self.device.device,
+                &projection,
+                0,
+                &target.horizontal_blurs.iter().map(|hb|
+                    BlurInstance::new(
+                        [hb.task_address.0 as i32, hb.src_task_address.0 as i32, hb.blur_direction as i32])
+                ).collect::<Vec<BlurInstance>>(),
+            );
+            self.device.draw(&mut program);
             // self.cs_blur_a8
             //     .bind(&mut self.device, &projection, 0, &mut self.renderer_errors);
 
-            self.draw_instanced_batch(
-                &target.horizontal_blurs,
-                VertexArrayKind::Blur,
-                &BatchTextures::no_texture(),
-                stats,
-            );
+            // self.draw_instanced_batch(
+            //     &target.horizontal_blurs,
+            //     VertexArrayKind::Blur,
+            //     &BatchTextures::no_texture(),
+            //     stats,
+            // );
         }
     }
 
