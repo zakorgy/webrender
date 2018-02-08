@@ -623,7 +623,7 @@ struct SourceTextureResolver {
 impl SourceTextureResolver {
     fn new(device: &mut Device<back::Backend, hal::Graphics>) -> SourceTextureResolver {
         let mut dummy_cache_texture = device
-            .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
+            .create_texture(ImageFormat::BGRA8);
         device.init_texture(
             &mut dummy_cache_texture,
             1,
@@ -830,13 +830,13 @@ enum CacheBus {
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
 struct CacheTexture {
-    texture: Texture,
+    //texture: Texture,
     bus: CacheBus,
 }
 
 impl CacheTexture {
     fn new(device: &mut Device<back::Backend, hal::Graphics>, use_scatter: bool) -> Result<Self, RendererError> {
-        let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
+        //let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         let bus = if use_scatter {
             //let program = device
@@ -864,13 +864,13 @@ impl CacheTexture {
         };
 
         Ok(CacheTexture {
-            texture,
+            //texture,
             bus,
         })
     }
 
     fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
-        device.delete_texture(self.texture);
+        //device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { .. } => {
                 //device.delete_pbo(buffer);
@@ -885,7 +885,8 @@ impl CacheTexture {
     }
 
     fn get_height(&self) -> u32 {
-        self.texture.get_dimensions().height
+        //self.texture.get_dimensions().height
+        1024
     }
 
     fn prepare_for_updates(
@@ -895,12 +896,12 @@ impl CacheTexture {
         max_height: u32,
     ) {
         // See if we need to create or resize the texture.
-        let old_size = self.texture.get_dimensions();
-        let new_size = DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, max_height);
+        //let old_size = self.texture.get_dimensions();
+        //let new_size = DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, max_height);
 
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, .. } => {
-                if max_height > old_size.height {
+                /*if max_height > old_size.height {
                     // Create a f32 texture that can be used for the vertex shader
                     // to fetch data from.
                     device.init_texture(
@@ -919,7 +920,7 @@ impl CacheTexture {
                     for row in rows.iter_mut() {
                         row.is_dirty = true;
                     }
-                }
+                }*/
             }
             CacheBus::Scatter {
                 /*ref mut buf_position,
@@ -1079,73 +1080,6 @@ impl CacheTexture {
                 0
             }
         }
-    }
-}
-
-struct VertexDataTexture {
-    texture: Texture,
-    pbo: PBO,
-}
-
-impl VertexDataTexture {
-    fn new(device: &mut Device<back::Backend, hal::Graphics>) -> VertexDataTexture {
-        let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
-        let pbo = device.create_pbo();
-
-        VertexDataTexture { texture, pbo }
-    }
-
-    fn update<T>(&mut self, device: &mut Device<back::Backend, hal::Graphics>, data: &mut Vec<T>) {
-        if data.is_empty() {
-            return;
-        }
-
-        debug_assert!(mem::size_of::<T>() % 16 == 0);
-        let texels_per_item = mem::size_of::<T>() / 16;
-        let items_per_row = MAX_VERTEX_TEXTURE_WIDTH / texels_per_item;
-
-        // Extend the data array to be a multiple of the row size.
-        // This ensures memory safety when the array is passed to
-        // OpenGL to upload to the GPU.
-        if items_per_row != 0 {
-            while data.len() % items_per_row != 0 {
-                data.push(unsafe { mem::uninitialized() });
-            }
-        }
-
-        let width =
-            (MAX_VERTEX_TEXTURE_WIDTH - (MAX_VERTEX_TEXTURE_WIDTH % texels_per_item)) as u32;
-        let needed_height = (data.len() / items_per_row) as u32;
-
-        // Determine if the texture needs to be resized.
-        let texture_size = self.texture.get_dimensions();
-
-        if needed_height > texture_size.height {
-            let new_height = (needed_height + 127) & !127;
-
-            device.init_texture(
-                &mut self.texture,
-                width,
-                new_height,
-                TextureFilter::Nearest,
-                None,
-                1,
-                None,
-            );
-        }
-
-        let rect = DeviceUintRect::new(
-            DeviceUintPoint::zero(),
-            DeviceUintSize::new(width, needed_height),
-        );
-        device
-            .upload_texture(&self.texture, &self.pbo, 0)
-            .upload(rect, 0, None, data);
-    }
-
-    fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
-        device.delete_pbo(self.pbo);
-        device.delete_texture(self.texture);
     }
 }
 
@@ -2852,10 +2786,10 @@ impl Renderer {
 
         // Note: the texture might have changed during the `update`,
         // so we need to bind it here.
-        self.device.bind_texture(
+        /*self.device.bind_texture(
             TextureSampler::ResourceCache,
             &self.gpu_cache_texture.texture,
-        );
+        );*/
 
         let counters = &mut self.backend_profile_counters.resources.gpu_cache;
         counters.updated_rows.set(updated_rows);
@@ -2880,7 +2814,7 @@ impl Renderer {
                         let CacheTextureId(cache_texture_index) = update.id;
                         if self.texture_resolver.cache_texture_map.len() == cache_texture_index {
                             // Create a new native texture, as requested by the texture cache.
-                            let texture = self.device.create_texture(TextureTarget::Array, format);
+                            let texture = self.device.create_texture(format);
                             self.texture_resolver.cache_texture_map.push(texture);
                         }
                         let texture =
@@ -2907,21 +2841,21 @@ impl Renderer {
                         offset,
                     } => {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
-                        let mut uploader = self.device.upload_texture(
+                        /*let mut uploader = self.device.upload_texture(
                             texture,
                             &self.texture_cache_upload_pbo,
                             0,
-                        );
+                        );*/
 
                         match source {
                             TextureUpdateSource::Bytes { data } => {
-                                uploader.upload(
-                                    rect, layer_index, stride,
+                                self.device.upload_texture(
+                                    texture, rect, layer_index, stride,
                                     &data[offset as usize ..],
                                 );
                             }
                             TextureUpdateSource::External { id, channel_index } => {
-                                let handler = self.external_image_handler
+                                /*let handler = self.external_image_handler
                                     .as_mut()
                                     .expect("Found external image, but no handler set!");
                                 match handler.lock(id, channel_index).source {
@@ -2943,7 +2877,7 @@ impl Renderer {
                                     }
                                     _ => panic!("No external buffer found"),
                                 };
-                                handler.unlock(id, channel_index);
+                                handler.unlock(id, channel_index);*/
                             }
                         }
                     }
@@ -3134,9 +3068,15 @@ impl Renderer {
             self.device.bind_draw_target(render_target, None);
         }
 
-        // TODO: bind textures: key.textures
+        for i in 0 .. key.textures.colors.len() {
+            self.texture_resolver.bind(
+                &key.textures.colors[i],
+                TextureSampler::color(i),
+                &mut self.device,
+            );
+        }
         program.bind(
-            &self.device.device,
+            &self.device,
             projection,
             0,
             &instances.iter().map(|pi|
@@ -3299,7 +3239,7 @@ impl Renderer {
             if !target.vertical_blurs.is_empty() {
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.vertical_blurs.iter().map(|vb|
@@ -3313,7 +3253,7 @@ impl Renderer {
             if !target.horizontal_blurs.is_empty() {
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.vertical_blurs.iter().map(|hb|
@@ -3430,7 +3370,7 @@ impl Renderer {
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
                                 // TODO: bind textures: batch.key.textures
                                 program.bind(
-                                    &self.device.device,
+                                    &self.device,
                                     projection,
                                     TextShaderMode::from(glyph_format).into(),
                                     &batch.instances.iter().map(|pi|
@@ -3444,7 +3384,7 @@ impl Renderer {
                                 let mut program = self.ps_text_run_dual_source.get(glyph_format, transform_kind, &mut self.device).unwrap();
                                 // TODO: bind textures: batch.key.textures
                                 program.bind(
-                                    &self.device.device,
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelDualSource.into(),
                                     &batch.instances.iter().map(|pi|
@@ -3458,7 +3398,7 @@ impl Renderer {
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
                                 // TODO: bind textures: batch.key.textures
                                 program.bind(
-                                    &self.device.device,
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelConstantTextColor.into(),
                                     &batch.instances.iter().map(|pi|
@@ -3476,7 +3416,7 @@ impl Renderer {
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
                                 // TODO: bind textures: batch.key.textures
                                 program.bind(
-                                    &self.device.device,
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelPass0.into(),
                                     &batch.instances.iter().map(|pi|
@@ -3510,7 +3450,7 @@ impl Renderer {
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
                                 // TODO: bind textures: batch.key.textures
                                 program.bind(
-                                    &self.device.device,
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelWithBgColorPass0.into(),
                                     &batch.instances.iter().map(|pi|
@@ -3686,7 +3626,7 @@ impl Renderer {
             if !target.vertical_blurs.is_empty() {
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.vertical_blurs.iter().map(|vb|
@@ -3700,7 +3640,7 @@ impl Renderer {
             if !target.horizontal_blurs.is_empty() {
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.horizontal_blurs.iter().map(|hb|
@@ -3721,7 +3661,7 @@ impl Renderer {
             let mut program = self.brush_mask_corner.get(&mut self.device).unwrap();
             // NOTE: no need to bind textures here
             program.bind(
-                &self.device.device,
+                &self.device,
                 projection,
                 0,
                 &target.brush_mask_corners.iter().map(|pi|
@@ -3738,7 +3678,7 @@ impl Renderer {
             let mut program = self.brush_mask_rounded_rect.get(&mut self.device).unwrap();
             // NOTE: no need to bind textures here
             program.bind(
-                &self.device.device,
+                &self.device,
                 projection,
                 0,
                 &target.brush_mask_rounded_rects.iter().map(|pi|
@@ -3761,7 +3701,7 @@ impl Renderer {
                 let mut program = self.cs_clip_border.get(&mut self.device).unwrap();
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.clip_batcher.border_clears.iter().map(|ci|
@@ -3794,7 +3734,7 @@ impl Renderer {
                 let mut program = self.cs_clip_border.get(&mut self.device).unwrap();
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.clip_batcher.borders.iter().map(|ci|
@@ -3823,7 +3763,7 @@ impl Renderer {
                 let mut program = self.cs_clip_rectangle.get(&mut self.device).unwrap();
                 // NOTE: no need to bind textures here
                 program.bind(
-                    &self.device.device,
+                    &self.device,
                     projection,
                     0,
                     &target.clip_batcher.rectangles.iter().map(|ci|
@@ -3910,7 +3850,7 @@ impl Renderer {
             let mut program = self.cs_blur_a8.get(&mut self.device).unwrap();
             // NOTE: no need to bind textures here
             program.bind(
-                &self.device.device,
+                &self.device,
                 &projection,
                 0,
                 &target.horizontal_blurs.iter().map(|hb|
@@ -3961,7 +3901,7 @@ impl Renderer {
 
             let texture = match image.source {
                 ExternalImageSource::NativeTexture(texture_id) => {
-                    ExternalTexture::new(texture_id, texture_target)
+                    ExternalTexture::new(texture_id/*, texture_target*/)
                 }
                 ExternalImageSource::Invalid => {
                     warn!(
@@ -3970,7 +3910,7 @@ impl Renderer {
                         ext_image.channel_index
                     );
                     // Just use 0 as the gl handle for this failed case.
-                    ExternalTexture::new(0, texture_target)
+                    ExternalTexture::new(0/*, texture_target*/)
                 }
                 ExternalImageSource::RawData(_) => {
                     panic!("Raw external data is not expected for deferred resolves!");
@@ -4045,7 +3985,7 @@ impl Renderer {
                 .position(|texture| texture.get_format() == list.format);
             match index {
                 Some(pos) => self.texture_resolver.render_target_pool.swap_remove(pos),
-                None => self.device.create_texture(TextureTarget::Array, list.format),
+                None => self.device.create_texture(list.format),
             }
         };
 
@@ -4509,7 +4449,7 @@ impl Renderer {
         pixels
     }
 
-    pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
+    /*pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
         let size = self.gpu_cache_texture.texture.get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
         self.device.begin_frame();
@@ -4522,7 +4462,7 @@ impl Renderer {
         self.device.bind_read_target(None);
         self.device.end_frame();
         (size, texels)
-    }
+    }*/
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
     pub fn deinit(mut self) {
@@ -5018,7 +4958,7 @@ impl Renderer {
             }
             for texture in renderer.textures {
                 info!("\t{}", texture.data);
-                let mut t = self.device.create_texture(TextureTarget::Array, texture.format);
+                let mut t = self.device.create_texture(texture.format);
                 Self::load_texture(&mut t, &texture, &root, &mut self.device);
                 self.texture_resolver.cache_texture_map.push(t);
             }
@@ -5071,7 +5011,7 @@ impl Renderer {
                             filter,
                             render_target: None,
                         };
-                        let mut t = self.device.create_texture(target, plain_tex.format);
+                        let mut t = self.device.create_texture(/*target,*/ plain_tex.format);
                         Self::load_texture(&mut t, &plain_tex, &root, &mut self.device);
                         let extex = t.into_external();
                         self.capture.owned_external_images.insert(key, extex.clone());

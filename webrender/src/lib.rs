@@ -57,6 +57,7 @@ extern crate gfx_hal as hal;
 extern crate gfx_backend_vulkan as back;
 extern crate winit;
 extern crate ron;
+extern crate rand;
 
 mod batch;
 mod border;

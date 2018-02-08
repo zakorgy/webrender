@@ -5,10 +5,11 @@
 use super::shader_source;
 use api::{ColorF, ImageDescriptor, ImageFormat};
 use api::{DeviceIntPoint, DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
-use api::TextureTarget;
+//use api::TextureTarget;
 use euclid::Transform3D;
 //use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
+use rand::{self, Rng};
 use serde;
 use std::collections::HashMap;
 use smallvec::SmallVec;
@@ -32,7 +33,7 @@ use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, V
 use hal::pso::{BlendState, BlendOp, Factor};
 use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
 use hal::{Backbuffer, DescriptorPool, FrameSync, Gpu, Primitive, SwapchainConfig};
-use hal::format::{ChannelType, Swizzle};
+use hal::format::{ChannelType, Format, Swizzle};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
@@ -43,6 +44,8 @@ pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023; // 341 * ( 12 / 4 )
 pub const CLIP_RECTS_TEXTURE_WIDTH: usize = 1024;
 pub const TEXTURE_HEIGHT: usize = 8;
 pub const MAX_INSTANCE_COUNT: usize = 1024;
+
+pub type TextureId = u32;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::AspectFlags::COLOR,
@@ -245,14 +248,14 @@ pub trait FileWatcherHandler: Send {
 #[cfg_attr(feature = "capture", derive(Clone))]
 pub struct ExternalTexture {
     id: u32,
-    target: TextureTarget,
+    //target: TextureTarget,
 }
 
 impl ExternalTexture {
-    pub fn new(id: u32, target: TextureTarget) -> Self {
+    pub fn new(id: u32/*, target: TextureTarget*/) -> Self {
         ExternalTexture {
             id,
-            target,
+            //target,
         }
     }
 
@@ -264,7 +267,6 @@ impl ExternalTexture {
 
 pub struct Texture {
     id: u32,
-    target: TextureTarget,
     layer_count: i32,
     format: ImageFormat,
     width: u32,
@@ -495,11 +497,211 @@ const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
     },
 };
 
+pub struct ImageBuffer<B: hal::Backend> {
+    pub buffer: Buffer<B>,
+    pub offset: u64,
+}
+
+impl<B: hal::Backend> ImageBuffer<B> {
+    fn new(buffer: Buffer<B>) -> ImageBuffer<B> {
+        ImageBuffer {
+            buffer,
+            offset: 0,
+        }
+    }
+
+    pub fn update(&mut self, device: &B::Device, data: &[u8]) {
+        self.buffer
+            .update(device, self.offset, data.len() as u64, data);
+    }
+
+    pub fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.buffer.deinit(device);
+    }
+}
+
+pub struct Image<B: hal::Backend> {
+    pub image_upload_buffer: ImageBuffer<B>,
+    pub image: B::Image,
+    pub image_memory: B::Memory,
+    pub image_view: B::ImageView,
+    pub image_kind: hal::image::Kind,
+    pub image_format: ImageFormat,
+}
+
+impl<B: hal::Backend> Image<B> {
+    pub fn new(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        image_format: ImageFormat,
+        image_width: u32,
+        image_height: u32,
+        image_depth: i32,
+    ) -> Self {
+        let (data_stride, format) = match image_format {
+            ImageFormat::R8 => (1, hal::format::Format::R8Unorm),
+            ImageFormat::RG8 => (2, hal::format::Format::Rg8Unorm),
+            ImageFormat::BGRA8 => (4, hal::format::Format::Bgra8Unorm),
+            _ => unimplemented!("TODO image format missing"),
+        };
+        let upload_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::TRANSFER_SRC,
+            data_stride,
+            (image_width * image_height) as usize,
+        );
+        let image_upload_buffer = ImageBuffer::new(upload_buffer);
+        let image_kind = hal::image::Kind::D2Array(
+            image_width as hal::image::Size,
+            image_height as hal::image::Size,
+            image_depth as hal::image::Layer,
+            hal::image::AaMode::Single,
+        );
+        let image_unbound = device
+            .create_image(
+                image_kind,
+                1,
+                format,
+                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
+            )
+            .unwrap(); // TODO: usage
+        let image_req = device.get_image_requirements(&image_unbound);
+
+        let device_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mem_type)| {
+                image_req.type_mask & (1 << id) != 0
+                    && mem_type
+                    .properties
+                    .contains(hal::memory::Properties::DEVICE_LOCAL)
+            })
+            .unwrap()
+            .into();
+
+        let image_memory = device.allocate_memory(device_type, image_req.size).unwrap();
+
+        let image = device
+            .bind_image_memory(&image_memory, 0, image_unbound)
+            .unwrap();
+        let image_view = device
+            .create_image_view(
+                &image,
+                format,
+                Swizzle::NO,
+                COLOR_RANGE.clone(),
+            )
+            .unwrap();
+
+        Image {
+            image_upload_buffer,
+            image,
+            image_memory,
+            image_view,
+            image_kind,
+            image_format,
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        device: &mut B::Device,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        rect: DeviceUintRect,
+        layer_index: i32,
+        image_data: &[u8],
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
+    {
+        let (image_width, image_height, _, _) = self.image_kind.get_dimensions();
+        let pos = rect.origin;
+        let size = rect.size;
+        self.image_upload_buffer.update(device, image_data);
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
+
+        let image_barrier = hal::memory::Barrier::Image {
+            states: (
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            )
+                .. (
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            ),
+            target: &self.image,
+            range: COLOR_RANGE.clone(),
+        };
+        cmd_buffer.pipeline_barrier(
+            hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+            &[image_barrier],
+        );
+
+        cmd_buffer.copy_buffer_to_image(
+            &self.image_upload_buffer.buffer.buffer,
+            &self.image,
+            hal::image::ImageLayout::TransferDstOptimal,
+            &[
+                hal::command::BufferImageCopy {
+                    buffer_offset: self.image_upload_buffer.offset,
+                    buffer_width: size.width,
+                    buffer_height: size.height,
+                    image_layers: hal::image::SubresourceLayers {
+                        aspects: hal::format::AspectFlags::COLOR,
+                        level: 0,
+                        layers: 0 .. 1,
+                    },
+                    image_offset: hal::command::Offset {
+                        x: pos.x as i32,
+                        y: pos.y as i32,
+                        z: layer_index,
+                    },
+                    image_extent: hal::device::Extent {
+                        width: size.width as u32,
+                        height: size.height as u32,
+                        depth: 1,
+                    },
+                },
+            ],
+        );
+
+        let image_barrier = hal::memory::Barrier::Image {
+            states: (
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::ImageLayout::TransferDstOptimal,
+            )
+                .. (
+                hal::image::Access::SHADER_READ,
+                hal::image::ImageLayout::ShaderReadOnlyOptimal,
+            ),
+            target: &self.image,
+            range: COLOR_RANGE.clone(),
+        };
+        cmd_buffer.pipeline_barrier(
+            hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+            &[image_barrier],
+        );
+
+        self.image_upload_buffer.offset += image_data.len() as u64;
+        cmd_buffer.finish()
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.image_upload_buffer.deinit(device);
+        device.destroy_image(self.image);
+        device.destroy_image_view(self.image_view);
+        device.free_memory(self.image_memory);
+    }
+}
+
 pub struct VertexDataImage<B: hal::Backend> {
     pub image_upload_buffer: Buffer<B>,
     pub image: B::Image,
     pub image_memory: B::Memory,
-    pub image_srv: B::ImageView,
+    pub image_view: B::ImageView,
     pub image_stride: usize,
     pub mem_stride: usize,
     pub image_width: u32,
@@ -534,7 +736,6 @@ impl<B: hal::Backend> VertexDataImage<B> {
                 hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
             )
             .unwrap(); // TODO: usage
-        println!("{:?}", image_unbound);
         let image_req = device.get_image_requirements(&image_unbound);
 
         let device_type = memory_types
@@ -554,7 +755,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         let image = device
             .bind_image_memory(&image_memory, 0, image_unbound)
             .unwrap();
-        let image_srv = device
+        let image_view = device
             .create_image_view(
                 &image,
                 hal::format::Format::Rgba32Float,
@@ -567,7 +768,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             image_upload_buffer,
             image,
             image_memory,
-            image_srv,
+            image_view: image_view,
             image_stride: 4usize,              // Rgba
             mem_stride: mem::size_of::<f32>(), // Float
             image_width,
@@ -665,7 +866,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
     pub fn deinit(self, device: &B::Device) {
         self.image_upload_buffer.deinit(device);
         device.destroy_image(self.image);
-        device.destroy_image_view(self.image_srv);
+        device.destroy_image_view(self.image_view);
         device.free_memory(self.image_memory);
     }
 }
@@ -1009,17 +1210,46 @@ impl<B: hal::Backend> Program<B> {
         );
     }
 
+    pub fn bind_textures(
+        &mut self,
+        device: &Device<B, hal::Graphics>,
+    ) {
+        use std::ops::Range;
+        if device.bound_textures[0] != 0 {
+            device.device.update_descriptor_sets::<Range<_>>(&[
+                hal::pso::DescriptorSetWrite {
+                    set: &self.descriptor_sets[0],
+                    binding: self.bindings_map["tColor0"],
+                    array_offset: 0,
+                    write: hal::pso::DescriptorWrite::SampledImage(vec![
+                        (
+                            &device.images.get(&device.bound_textures[0]).unwrap().image_view,
+                            hal::image::ImageLayout::Undefined,
+                        ),
+                    ])
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &self.descriptor_sets[0],
+                    binding: self.bindings_map["sColor0"],
+                    array_offset: 0,
+                    write: hal::pso::DescriptorWrite::Sampler(vec![&device.sampler_nearest]),
+                },
+            ]);
+        }
+    }
+
     pub fn bind<T>(
         &mut self,
-        device: &B::Device,
+        device: &Device<B, hal::Graphics>,
         projection: &Transform3D<f32>,
         u_mode: i32,
         instances: &[T],
     ) where
         T: Copy,
     {
-        self.bind_instances(device, instances);
-        self.bind_locals(device, &projection, u_mode);
+        self.bind_instances(&device.device, instances);
+        self.bind_locals(&device.device, &projection, u_mode);
+        self.bind_textures(device);
     }
 
     pub fn init_vertex_data<'a>(
@@ -1148,6 +1378,7 @@ pub struct Device<B: hal::Backend, C> {
     pub upload_memory_type: hal::MemoryTypeId,
     pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
+    pub surface_format: Format,
     pub queue_group: hal::QueueGroup<B, C>,
     pub command_pool: hal::CommandPool<B, C>,
     pub swap_chain: Box<B::Swapchain>,
@@ -1166,6 +1397,7 @@ pub struct Device<B: hal::Backend, C> {
     current_blend_state: BlendState,
     blend_color: ColorF,
     // device state
+    images: FastHashMap<TextureId, Image<B>>,
     bound_textures: [u32; 16],
     bound_program: u32,
     //bound_vao: u32,
@@ -1402,6 +1634,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             memory_types,
             upload_memory_type,
             download_memory_type,
+            surface_format,
             queue_group,
             command_pool,
             swap_chain: Box::new(swap_chain),
@@ -1430,6 +1663,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 supports_multisampling: false, //TODO
             },
 
+            images: FastHashMap::default(),
             bound_textures: [0; 16],
             bound_program: 0,
             //bound_vao: 0,
@@ -1505,28 +1739,28 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             &self.device,
             hal::pso::DescriptorWrite::SampledImage(vec![
                 (
-                    &self.resource_cache.image_srv,
+                    &self.resource_cache.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
             hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
             hal::pso::DescriptorWrite::SampledImage(vec![
                 (
-                    &self.node_data.image_srv,
+                    &self.node_data.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
             hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
             hal::pso::DescriptorWrite::SampledImage(vec![
                 (
-                    &self.render_tasks.image_srv,
+                    &self.render_tasks.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
             hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
             hal::pso::DescriptorWrite::SampledImage(vec![
                 (
-                    &self.local_clip_rects.image_srv,
+                    &self.local_clip_rects.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
@@ -1583,6 +1817,13 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //self.bound_vao = 0;
         self.bound_read_fbo = FBOId(0);
         self.bound_draw_fbo = FBOId(0);
+        self.reset_image_buffer_offsets();
+    }
+
+    pub fn reset_image_buffer_offsets(&mut self) {
+        for img in self.images.values_mut() {
+            img.image_upload_buffer.reset();
+        }
     }
 
     pub fn begin_frame(&mut self) -> FrameId {
@@ -1624,7 +1865,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.frame_id
     }
 
-    fn bind_texture_impl(&mut self, slot: TextureSlot, id: u32, target: TextureTarget) {
+    fn bind_texture_impl(&mut self, slot: TextureSlot, id: u32) {
         debug_assert!(self.inside_frame);
 
         if self.bound_textures[slot.0] != id {
@@ -1639,14 +1880,14 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     where
         S: Into<TextureSlot>,
     {
-        self.bind_texture_impl(sampler.into(), texture.id, texture.target);
+        self.bind_texture_impl(sampler.into(), texture.id);
     }
 
     pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
     where
         S: Into<TextureSlot>,
     {
-        self.bind_texture_impl(sampler.into(), external_texture.id, external_texture.target);
+        self.bind_texture_impl(sampler.into(), external_texture.id);
     }
 
     pub fn bind_read_target_impl(&mut self, fbo_id: FBOId) {
@@ -1732,13 +1973,64 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             self.bound_program = program.id;
         }
     }*/
+    fn generate_texture_id(&mut self) -> TextureId {
+        let mut rng = rand::thread_rng();
+        let mut texture_id = 1; // 0 is used for invalid
+        while self.images.contains_key(&texture_id) {
+            texture_id = rng.gen_range::<u32>(1, u32::max_value());
+        }
+        texture_id
+    }
+
+    fn update_image(
+        &mut self,
+        texture: &mut Texture,
+        pixels: Option<&[u8]>,
+    ) {
+        if texture.id == 0 {
+            let id = self.generate_texture_id();
+            texture.id = id;
+        } else {
+            let old_image = self.images.remove(&texture.id).expect("Texture not found.");
+            old_image.deinit(&self.device);
+        }
+        assert_eq!(self.images.contains_key(&texture.id), false);
+        let img = Image::new(
+            &self.device,
+            &self.memory_types,
+            texture.format,
+            texture.width,
+            texture.height,
+            texture.layer_count
+        );
+        self.images.insert(texture.id, img);
+
+        if let Some(data) = pixels {
+            self.upload_queue
+                .push(
+                    self.images
+                        .get_mut(&texture.id)
+                        .expect("Texture not found.")
+                        .update(
+                            &mut self.device,
+                            &mut self.command_pool,
+                            DeviceUintRect::new(
+                                DeviceUintPoint::new(0, 0),
+                                DeviceUintSize::new(texture.width, texture.height),
+                            ),
+                            0,
+                            data,
+                        )
+                );
+        }
+    }
+
 
     pub fn create_texture(
-        &mut self, target: TextureTarget, format: ImageFormat,
+        &mut self, format: ImageFormat,
     ) -> Texture {
         Texture {
             id: 0,
-            target,
             width: 0,
             height: 0,
             layer_count: 0,
@@ -1750,7 +2042,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
     }
 
-    fn set_texture_parameters(&mut self, target: TextureTarget, filter: TextureFilter) {
+    fn set_texture_parameters(&mut self, /*target: TextureTarget,*/ filter: TextureFilter) {
         /*let filter = match filter {
             TextureFilter::Nearest => gl::NEAREST,
             TextureFilter::Linear => gl::LINEAR,
@@ -1787,7 +2079,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             .expect("Only renderable textures are expected for resize here");
 
         self.bind_texture(DEFAULT_TEXTURE, texture);
-        self.set_texture_parameters(texture.target, texture.filter);
+        self.set_texture_parameters(/*texture.target,*/ texture.filter);
         self.update_target_storage(texture, &rt_info, true, None);
 
         let rect = DeviceIntRect::new(DeviceIntPoint::zero(), old_size.to_i32());
@@ -1822,14 +2114,14 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         texture.render_target = render_target;
 
         self.bind_texture(DEFAULT_TEXTURE, texture);
-        self.set_texture_parameters(texture.target, filter);
+        self.set_texture_parameters(/*texture.target,*/ filter);
 
         match render_target {
             Some(info) => {
                 self.update_target_storage(texture, &info, is_resized, pixels);
             }
             None => {
-                self.update_texture_storage(texture, pixels);
+                self.update_image(texture, pixels);
             }
         }
     }
@@ -1842,46 +2134,17 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         is_resized: bool,
         pixels: Option<&[u8]>,
     ) {
-        /*assert!(texture.layer_count > 0 || texture.width + texture.height == 0);
+        println!("TODO update_target_storage");
+        assert!(texture.layer_count > 0 || texture.width + texture.height == 0);
 
         let needed_layer_count = texture.layer_count - texture.fbo_ids.len() as i32;
         let allocate_color = needed_layer_count != 0 || is_resized || pixels.is_some();
 
         if allocate_color {
-            let desc = gl_describe_format(self.gl(), texture.format);
-            match texture.target {
-                gl::TEXTURE_2D_ARRAY => {
-                    self.gl.tex_image_3d(
-                        texture.target,
-                        0,
-                        desc.internal,
-                        texture.width as _,
-                        texture.height as _,
-                        texture.layer_count,
-                        0,
-                        desc.external,
-                        desc.pixel_type,
-                        pixels,
-                    )
-                }
-                _ => {
-                    assert_eq!(texture.layer_count, 1);
-                    self.gl.tex_image_2d(
-                        texture.target,
-                        0,
-                        desc.internal,
-                        texture.width as _,
-                        texture.height as _,
-                        0,
-                        desc.external,
-                        desc.pixel_type,
-                        pixels,
-                    )
-                }
-            }
+            self.update_image(texture, pixels);
         }
 
-        if needed_layer_count > 0 {
+        /*if needed_layer_count > 0 {
             // Create more framebuffers to fill the gap
             let new_fbos = self.gl.gen_framebuffers(needed_layer_count);
             texture
@@ -1925,28 +2188,13 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let original_bound_fbo = self.bound_draw_fbo;
             for (fbo_index, &fbo_id) in texture.fbo_ids.iter().enumerate() {
                 self.bind_external_draw_target(fbo_id);
-                match texture.target {
-                    gl::TEXTURE_2D_ARRAY => {
-                        self.gl.framebuffer_texture_layer(
-                            gl::DRAW_FRAMEBUFFER,
-                            gl::COLOR_ATTACHMENT0,
-                            texture.id,
-                            0,
-                            fbo_index as _,
-                        )
-                    }
-                    _ => {
-                        assert_eq!(fbo_index, 0);
-                        self.gl.framebuffer_texture_2d(
-                            gl::DRAW_FRAMEBUFFER,
-                            gl::COLOR_ATTACHMENT0,
-                            texture.target,
-                            texture.id,
-                            0,
-                        )
-                    }
-                }
-
+                self.gl.framebuffer_texture_layer(
+                    gl::DRAW_FRAMEBUFFER,
+                    gl::COLOR_ATTACHMENT0,
+                    texture.id,
+                    0,
+                    fbo_index as _,
+                );
                 self.gl.framebuffer_renderbuffer(
                     gl::DRAW_FRAMEBUFFER,
                     gl::DEPTH_ATTACHMENT,
@@ -1955,40 +2203,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 );
             }
             self.bind_external_draw_target(original_bound_fbo);
-        }*/
-    }
-
-    fn update_texture_storage(&mut self, texture: &Texture, pixels: Option<&[u8]>) {
-        /*let desc = gl_describe_format(self.gl(), texture.format);
-        match texture.target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.tex_image_3d(
-                    gl::TEXTURE_2D_ARRAY,
-                    0,
-                    desc.internal,
-                    texture.width as _,
-                    texture.height as _,
-                    texture.layer_count,
-                    0,
-                    desc.external,
-                    desc.pixel_type,
-                    pixels,
-                );
-            }
-            gl::TEXTURE_2D | gl::TEXTURE_RECTANGLE | gl::TEXTURE_EXTERNAL_OES => {
-                self.gl.tex_image_2d(
-                    texture.target,
-                    0,
-                    desc.internal,
-                    texture.width as _,
-                    texture.height as _,
-                    0,
-                    desc.external,
-                    desc.pixel_type,
-                    pixels,
-                );
-            }
-            _ => panic!("BUG: Unexpected texture target!"),
         }*/
     }
 
@@ -2100,39 +2314,58 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         pbo.id = 0;
     }
 
-    pub fn upload_texture<'a, T>(
-        &'a mut self,
-        texture: &'a Texture,
-        pbo: &PBO,
-        upload_count: usize,
-    ) -> TextureUploader<'a, T> {
-        debug_assert!(self.inside_frame);
-        self.bind_texture(DEFAULT_TEXTURE, texture);
+    pub fn upload_texture(
+        &mut self,
+        texture: &Texture,
+        rect: DeviceUintRect,
+        layer_index: i32,
+        stride: Option<u32>,
+        data: &[u8],
+    ) {
+        let data_stride: usize = match texture.format {
+            ImageFormat::R8 => 1,
+            ImageFormat::RG8 => 2,
+            ImageFormat::BGRA8 => 4,
+            _ => unimplemented!("TODO image format missing"),
+         };
+        let width = rect.size.width as usize;
+        let height = rect.size.height as usize;
+        let size = width * height * data_stride;
+        let mut new_data = vec![0u8; size];
+        let data= if stride.is_some() {
+            let row_length = (stride.unwrap()) as usize;
 
-        let buffer = match self.upload_method {
-            UploadMethod::Immediate => None,
-            UploadMethod::PixelBuffer(hint) => {
-                let upload_size = upload_count * mem::size_of::<T>();
-                /*self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, pbo.id);
-                if upload_size != 0 {
-                    self.gl.buffer_data_untyped(
-                        gl::PIXEL_UNPACK_BUFFER,
-                        upload_size as _,
-                        ptr::null(),
-                        hint.to_gl(),
-                    );
-                }*/
-                Some(PixelBuffer::new(hint, upload_size))
-            },
+            for j in 0..height {
+                for i in 0..width {
+                    let offset = i * data_stride + j * data_stride * width;
+                    let src = &data[j * row_length + i * data_stride ..];
+                    assert!(offset + 3 < new_data.len()); // optimization
+                    // convert from BGRA
+                    new_data[offset + 0] = src[0];
+                    new_data[offset + 1] = src[1];
+                    new_data[offset + 2] = src[2];
+                    new_data[offset + 3] = src[3];
+                }
+            }
+
+            new_data.as_slice()
+        } else {
+            data
         };
-
-        TextureUploader {
-            target: UploadTarget {
-                texture,
-            },
-            buffer,
-            marker: PhantomData,
-        }
+        assert_eq!(data.len(), width * height * data_stride);
+        self.upload_queue
+            .push(
+                self.images
+                    .get_mut(&texture.id)
+                    .expect("Texture not found.")
+                    .update(
+                        &mut self.device,
+                        &mut self.command_pool,
+                        rect,
+                        layer_index,
+                        data,
+                    )
+            );
     }
 
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
@@ -2223,14 +2456,25 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.device.destroy_fence(copy_fence);
 
         let mut reader = self.device
-            .acquire_mapping_reader::<u8>(
+            .acquire_mapping_reader::<[u8; 4]>(
                 &download_buffer.memory,
                 0 .. (rect.size.width * rect.size.height * bytes_per_pixel as u32) as u64,
             )
             .unwrap();
-        assert_eq!(reader.len(), output.len());
+        assert_eq!(reader.len() * 4, output.len());
+        let mut offset = 0;
+        let (i0, i1, i2, i3) = match self.surface_format.base_format().0 {
+            hal::format::SurfaceType::B8_G8_R8_A8 => (2, 1, 0, 3),
+            //hal::format::SurfaceType::R8_G8_B8_A8 => (0, 1, 2, 3),
+            _ => (0, 1, 2, 3)
+        };
         for (i, d) in reader.iter().enumerate() {
-            output[i] = *d;
+            let data = *d;
+            output[offset + 0] = data[i0];
+            output[offset + 1] = data[i1];
+            output[offset + 2] = data[i2];
+            output[offset + 3] = data[i3];
+            offset += 4;
         }
         self.device.release_mapping_reader(reader);
     }
@@ -2255,39 +2499,27 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     /// Attaches the provided texture to the current Read FBO binding.
     fn attach_read_texture_raw(
-        &mut self, texture_id: u32, target: TextureTarget, layer_id: i32
+        &mut self, texture_id: u32, layer_id: i32
     ) {
-        /*match target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.framebuffer_texture_layer(
-                    gl::READ_FRAMEBUFFER,
-                    gl::COLOR_ATTACHMENT0,
-                    texture_id,
-                    0,
-                    layer_id,
-                )
-            }
-            _ => {
-                assert_eq!(layer_id, 0);
-                self.gl.framebuffer_texture_2d(
-                    gl::READ_FRAMEBUFFER,
-                    gl::COLOR_ATTACHMENT0,
-                    target,
-                    texture_id,
-                    0,
-                )
-            }
-        }*/
+        /*
+        self.gl.framebuffer_texture_layer(
+            gl::READ_FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            texture_id,
+            0,
+            layer_id,
+        )
+        */
     }
 
     pub fn attach_read_texture_external(
-        &mut self, texture_id: u32, target: TextureTarget, layer_id: i32
+        &mut self, texture_id: u32, layer_id: i32
     ) {
-        self.attach_read_texture_raw(texture_id, target, layer_id)
+        self.attach_read_texture_raw(texture_id, layer_id)
     }
 
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
-        self.attach_read_texture_raw(texture.id, texture.target, layer_id)
+        self.attach_read_texture_raw(texture.id, layer_id)
     }
 
     pub fn update_instances<V>(
@@ -2514,6 +2746,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
         self.upload_queue.clear();
         self.command_pool.reset();
+        self.reset_state();
         self.device.destroy_fence(frame_fence);
         self.device.destroy_semaphore(frame_semaphore);
     }
@@ -2536,205 +2769,3 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 }
 
-/*struct FormatDesc {
-    internal: gl::GLint,
-    external: u32,
-    pixel_type: u32,
-}*/
-
-/*fn gl_describe_format(gl: &gl::Gl, format: ImageFormat) -> FormatDesc {
-    match format {
-        ImageFormat::R8 => FormatDesc {
-            internal: gl::RED as _,
-            external: gl::RED,
-            pixel_type: gl::UNSIGNED_BYTE,
-        },
-        ImageFormat::BGRA8 => {
-            let external = get_gl_format_bgra(gl);
-            FormatDesc {
-                internal: match gl.get_type() {
-                    gl::GlType::Gl => gl::RGBA as _,
-                    gl::GlType::Gles => external as _,
-                },
-                external,
-                pixel_type: gl::UNSIGNED_BYTE,
-            }
-        },
-        ImageFormat::RGBAF32 => FormatDesc {
-            internal: gl::RGBA32F as _,
-            external: gl::RGBA,
-            pixel_type: gl::FLOAT,
-        },
-        ImageFormat::RG8 => FormatDesc {
-            internal: gl::RG8 as _,
-            external: gl::RG,
-            pixel_type: gl::UNSIGNED_BYTE,
-        },
-    }
-}*/
-
-struct UploadChunk {
-    rect: DeviceUintRect,
-    layer_index: i32,
-    stride: Option<u32>,
-    offset: usize,
-}
-
-struct PixelBuffer {
-    usage: VertexUsageHint,
-    size_allocated: usize,
-    size_used: usize,
-    // small vector avoids heap allocation for a single chunk
-    chunks: SmallVec<[UploadChunk; 1]>,
-}
-
-impl PixelBuffer {
-    fn new(
-        usage: VertexUsageHint,
-        size_allocated: usize,
-    ) -> Self {
-        PixelBuffer {
-            usage,
-            size_allocated,
-            size_used: 0,
-            chunks: SmallVec::new(),
-        }
-    }
-}
-
-struct UploadTarget<'a> {
-    //gl: &'a gl::Gl,
-    texture: &'a Texture,
-}
-
-pub struct TextureUploader<'a, T> {
-    target: UploadTarget<'a>,
-    buffer: Option<PixelBuffer>,
-    marker: PhantomData<T>,
-}
-
-impl<'a, T> Drop for TextureUploader<'a, T> {
-    fn drop(&mut self) {
-        if let Some(buffer) = self.buffer.take() {
-            for chunk in buffer.chunks {
-                self.target.update_impl(chunk);
-            }
-            //self.target.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, 0);
-        }
-    }
-}
-
-impl<'a, T> TextureUploader<'a, T> {
-    pub fn upload(
-        &mut self,
-        rect: DeviceUintRect,
-        layer_index: i32,
-        stride: Option<u32>,
-        data: &[T],
-    ) {
-        match self.buffer {
-            Some(ref mut buffer) => {
-                let upload_size = mem::size_of::<T>() * data.len();
-                if buffer.size_used + upload_size > buffer.size_allocated {
-                    // flush
-                    for chunk in buffer.chunks.drain() {
-                        self.target.update_impl(chunk);
-                    }
-                    buffer.size_used = 0;
-                }
-
-                if upload_size > buffer.size_allocated {
-                    /*gl::buffer_data(
-                        self.target.gl,
-                        gl::PIXEL_UNPACK_BUFFER,
-                        data,
-                        buffer.usage,
-                    );*/
-                    buffer.size_allocated = upload_size;
-                } else {
-                    /*gl::buffer_sub_data(
-                        self.target.gl,
-                        gl::PIXEL_UNPACK_BUFFER,
-                        buffer.size_used as _,
-                        data,
-                    );*/
-                }
-
-                buffer.chunks.push(UploadChunk {
-                    rect, layer_index, stride,
-                    offset: buffer.size_used,
-                });
-                buffer.size_used += upload_size;
-            }
-            None => {
-                self.target.update_impl(UploadChunk {
-                    rect, layer_index, stride,
-                    offset: data.as_ptr() as _,
-                });
-            }
-        }
-    }
-}
-
-impl<'a> UploadTarget<'a> {
-    fn update_impl(&mut self, chunk: UploadChunk) {
-        /*let (gl_format, bpp, data_type) = match self.texture.format {
-            ImageFormat::R8 => (gl::RED, 1, gl::UNSIGNED_BYTE),
-            ImageFormat::BGRA8 => (get_gl_format_bgra(self.gl), 4, gl::UNSIGNED_BYTE),
-            ImageFormat::RG8 => (gl::RG, 2, gl::UNSIGNED_BYTE),
-            ImageFormat::RGBAF32 => (gl::RGBA, 16, gl::FLOAT),
-        };
-
-        let row_length = match chunk.stride {
-            Some(value) => value / bpp,
-            None => self.texture.width,
-        };
-
-        if chunk.stride.is_some() {
-            self.gl.pixel_store_i(
-                gl::UNPACK_ROW_LENGTH,
-                row_length as _,
-            );
-        }
-
-        let pos = chunk.rect.origin;
-        let size = chunk.rect.size;
-
-        match self.texture.target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.tex_sub_image_3d_pbo(
-                    self.texture.target,
-                    0,
-                    pos.x as _,
-                    pos.y as _,
-                    chunk.layer_index,
-                    size.width as _,
-                    size.height as _,
-                    1,
-                    gl_format,
-                    data_type,
-                    chunk.offset,
-                );
-            }
-            gl::TEXTURE_2D | gl::TEXTURE_RECTANGLE | gl::TEXTURE_EXTERNAL_OES => {
-                self.gl.tex_sub_image_2d_pbo(
-                    self.texture.target,
-                    0,
-                    pos.x as _,
-                    pos.y as _,
-                    size.width as _,
-                    size.height as _,
-                    gl_format,
-                    data_type,
-                    chunk.offset,
-                );
-            }
-            _ => panic!("BUG: Unexpected texture target!"),
-        }
-
-        // Reset row length to 0, otherwise the stride would apply to all texture uploads.
-        if chunk.stride.is_some() {
-            self.gl.pixel_store_i(gl::UNPACK_ROW_LENGTH, 0 as _);
-        }*/
-    }
-}

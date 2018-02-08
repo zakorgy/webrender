@@ -41,11 +41,11 @@ ron = { version = "0.1.7" }
 winit = "0.10"
 gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "89f280e" , feature = "serde"}
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "89f280e", optional = true, features = ["glsl-to-spirv"] }
+rand = "0.4"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 env_logger = "0.4"
-rand = "0.3"                # for the benchmarks
 servo-glutin = "0.13"     # for the example apps
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]

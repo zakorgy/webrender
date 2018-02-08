@@ -82,7 +82,7 @@ impl DebugRenderer {
         //let line_vao = device.create_vao(&DESC_COLOR);
         //let tri_vao = device.create_vao(&DESC_COLOR);
 
-        let mut font_texture = device.create_texture(TextureTarget::Array, ImageFormat::R8);
+        let mut font_texture = device.create_texture(/*TextureTarget::Array,*/ ImageFormat::R8);
         device.init_texture(
             &mut font_texture,
             debug_font_data::BMP_WIDTH,
