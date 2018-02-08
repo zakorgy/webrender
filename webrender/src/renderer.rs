@@ -37,7 +37,7 @@ use frame_builder::FrameBuilderConfig;
 //use gleam::gl;
 use glyph_rasterizer::GlyphFormat;
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
-use gpu_types::PrimitiveInstance as GpuPrimitiveInstance;
+use gpu_types;
 use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use internal_types::{CacheTextureId, FastHashMap, RenderedDocument, ResultMsg, TextureUpdateOp};
 use internal_types::{DebugOutput, RenderPassIndex, RenderTargetInfo, TextureUpdateList, TextureUpdateSource};
@@ -316,6 +316,51 @@ impl From<GlyphFormat> for TextShaderMode {
             }
             GlyphFormat::Bitmap => TextShaderMode::Bitmap,
             GlyphFormat::ColorBitmap => TextShaderMode::ColorBitmap,
+        }
+    }
+}
+
+impl<'a> From<&'a gpu_types::BlurInstance> for BlurInstance {
+    fn from(instance: &'a gpu_types::BlurInstance) -> BlurInstance {
+        BlurInstance {
+            aBlurRenderTaskAddress: instance.task_address.0 as i32,
+            aBlurSourceTaskAddress: instance.src_task_address.0 as i32,
+            aBlurDirection: instance.blur_direction as i32,
+        }
+    }
+}
+
+impl<'a> From<&'a gpu_types::ClipMaskInstance> for ClipMaskInstance {
+    fn from(instance: &'a gpu_types::ClipMaskInstance) -> ClipMaskInstance {
+        ClipMaskInstance {
+            aClipRenderTaskAddress: instance.render_task_address.0 as i32,
+            aScrollNodeId: instance.scroll_node_data_index.0 as i32,
+            aClipSegment: instance.segment,
+            aClipDataResourceAddress: [
+                instance.clip_data_address.u as i32,
+                instance.clip_data_address.v as i32,
+                instance.resource_address.u as i32,
+                instance.resource_address.v as i32,
+            ],
+        }
+    }
+}
+
+impl<'a> From<&'a gpu_types::PrimitiveInstance> for PrimitiveInstance {
+    fn from(instance: &'a gpu_types::PrimitiveInstance) -> PrimitiveInstance {
+        PrimitiveInstance {
+            aData0: [
+                instance.data[0],
+                instance.data[1],
+                instance.data[2],
+                instance.data[3],
+            ],
+            aData1: [
+                instance.data[4],
+                instance.data[5],
+                instance.data[6],
+                instance.data[7],
+            ],
         }
     }
 }
@@ -2935,7 +2980,7 @@ impl Renderer {
     fn submit_batch(
         &mut self,
         key: &BatchKey,
-        instances: &[GpuPrimitiveInstance],
+        instances: &[gpu_types::PrimitiveInstance],
         projection: &Transform3D<f32>,
         render_tasks: &RenderTaskTree,
         render_target: Option<(&Texture, i32)>,
@@ -3079,9 +3124,7 @@ impl Renderer {
             &self.device,
             projection,
             0,
-            &instances.iter().map(|pi|
-                PrimitiveInstance::new(pi.data)
-            ).collect::<Vec<PrimitiveInstance>>(),
+            &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
         );
         self.device.draw(program);
     }
@@ -3242,10 +3285,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.vertical_blurs.iter().map(|vb|
-                        BlurInstance::new(
-                            [vb.task_address.0 as i32, vb.src_task_address.0 as i32, vb.blur_direction as i32])
-                    ).collect::<Vec<BlurInstance>>(),
+                    &target.vertical_blurs.iter().map(|vb| vb.into()).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3256,10 +3296,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.vertical_blurs.iter().map(|hb|
-                        BlurInstance::new(
-                            [hb.task_address.0 as i32, hb.src_task_address.0 as i32, hb.blur_direction as i32])
-                    ).collect::<Vec<BlurInstance>>(),
+                    &target.vertical_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3283,9 +3320,7 @@ impl Renderer {
                 // TODO: bind_texture: BatchTextures::color(*texture_id)
                     program.bind_instances(
                         &self.device.device,
-                        &instances.iter().map(|pi|
-                            PrimitiveInstance::new(pi.data)
-                        ).collect::<Vec<PrimitiveInstance>>(),
+                        &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                     );
                 self.device.draw(program);
             }
@@ -3373,9 +3408,7 @@ impl Renderer {
                                     &self.device,
                                     projection,
                                     TextShaderMode::from(glyph_format).into(),
-                                    &batch.instances.iter().map(|pi|
-                                        PrimitiveInstance::new(pi.data)
-                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
                             }
@@ -3387,9 +3420,7 @@ impl Renderer {
                                     &self.device,
                                     projection,
                                     TextShaderMode::SubpixelDualSource.into(),
-                                    &batch.instances.iter().map(|pi|
-                                        PrimitiveInstance::new(pi.data)
-                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
                             }
@@ -3401,9 +3432,7 @@ impl Renderer {
                                     &self.device,
                                     projection,
                                     TextShaderMode::SubpixelConstantTextColor.into(),
-                                    &batch.instances.iter().map(|pi|
-                                        PrimitiveInstance::new(pi.data)
-                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
                             }
@@ -3419,9 +3448,7 @@ impl Renderer {
                                     &self.device,
                                     projection,
                                     TextShaderMode::SubpixelPass0.into(),
-                                    &batch.instances.iter().map(|pi|
-                                        PrimitiveInstance::new(pi.data)
-                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
 
@@ -3453,9 +3480,7 @@ impl Renderer {
                                     &self.device,
                                     projection,
                                     TextShaderMode::SubpixelWithBgColorPass0.into(),
-                                    &batch.instances.iter().map(|pi|
-                                        PrimitiveInstance::new(pi.data)
-                                    ).collect::<Vec<PrimitiveInstance>>(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
 
@@ -3629,10 +3654,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.vertical_blurs.iter().map(|vb|
-                        BlurInstance::new(
-                            [vb.task_address.0 as i32, vb.src_task_address.0 as i32, vb.blur_direction as i32])
-                    ).collect::<Vec<BlurInstance>>(),
+                    &target.vertical_blurs.iter().map(|vb| vb.into()).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3643,10 +3665,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.horizontal_blurs.iter().map(|hb|
-                        BlurInstance::new(
-                            [hb.task_address.0 as i32, hb.src_task_address.0 as i32, hb.blur_direction as i32])
-                    ).collect::<Vec<BlurInstance>>(),
+                    &target.horizontal_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3664,9 +3683,7 @@ impl Renderer {
                 &self.device,
                 projection,
                 0,
-                &target.brush_mask_corners.iter().map(|pi|
-                    PrimitiveInstance::new(pi.data)
-                ).collect::<Vec<PrimitiveInstance>>(),
+                &target.brush_mask_corners.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
             );
             self.device.draw(&mut program);
         }
@@ -3681,9 +3698,7 @@ impl Renderer {
                 &self.device,
                 projection,
                 0,
-                &target.brush_mask_rounded_rects.iter().map(|pi|
-                    PrimitiveInstance::new(pi.data)
-                ).collect::<Vec<PrimitiveInstance>>(),
+                &target.brush_mask_rounded_rects.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
             );
             self.device.draw(&mut program);
         }
@@ -3704,19 +3719,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.clip_batcher.border_clears.iter().map(|ci|
-                        ClipMaskInstance::new(
-                            [
-                                ci.render_task_address.0 as i32,
-                                ci.scroll_node_data_index.0 as i32,
-                                ci.segment,
-                                ci.clip_data_address.u as i32,
-                                ci.clip_data_address.v as i32,
-                                ci.resource_address.u as i32,
-                                ci.resource_address.v as i32,
-                            ]
-                        )
-                    ).collect::<Vec<ClipMaskInstance>>(),
+                    &target.clip_batcher.border_clears.iter().map(|ci|ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3737,19 +3740,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.clip_batcher.borders.iter().map(|ci|
-                        ClipMaskInstance::new(
-                            [
-                                ci.render_task_address.0 as i32,
-                                ci.scroll_node_data_index.0 as i32,
-                                ci.segment,
-                                ci.clip_data_address.u as i32,
-                                ci.clip_data_address.v as i32,
-                                ci.resource_address.u as i32,
-                                ci.resource_address.v as i32,
-                            ]
-                        )
-                    ).collect::<Vec<ClipMaskInstance>>(),
+                    &target.clip_batcher.borders.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3766,19 +3757,7 @@ impl Renderer {
                     &self.device,
                     projection,
                     0,
-                    &target.clip_batcher.rectangles.iter().map(|ci|
-                        ClipMaskInstance::new(
-                            [
-                                ci.render_task_address.0 as i32,
-                                ci.scroll_node_data_index.0 as i32,
-                                ci.segment,
-                                ci.clip_data_address.u as i32,
-                                ci.clip_data_address.v as i32,
-                                ci.resource_address.u as i32,
-                                ci.resource_address.v as i32,
-                            ]
-                        )
-                    ).collect::<Vec<ClipMaskInstance>>(),
+                    &target.clip_batcher.rectangles.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
             }
@@ -3790,19 +3769,7 @@ impl Renderer {
                 // TODO: bind textures: textures
                     program.bind_instances(
                         &self.device.device,
-                        &items.iter().map(|ci|
-                            ClipMaskInstance::new(
-                                [
-                                    ci.render_task_address.0 as i32,
-                                    ci.scroll_node_data_index.0 as i32,
-                                    ci.segment,
-                                    ci.clip_data_address.u as i32,
-                                    ci.clip_data_address.v as i32,
-                                    ci.resource_address.u as i32,
-                                    ci.resource_address.v as i32,
-                                ]
-                            )
-                        ).collect::<Vec<ClipMaskInstance>>(),
+                        &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
                 self.device.draw(&mut program);
             }
@@ -3853,10 +3820,7 @@ impl Renderer {
                 &self.device,
                 &projection,
                 0,
-                &target.horizontal_blurs.iter().map(|hb|
-                    BlurInstance::new(
-                        [hb.task_address.0 as i32, hb.src_task_address.0 as i32, hb.blur_direction as i32])
-                ).collect::<Vec<BlurInstance>>(),
+                &target.horizontal_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
             );
             self.device.draw(&mut program);
         }

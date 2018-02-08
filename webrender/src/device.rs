@@ -72,55 +72,25 @@ struct Locals {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct PrimitiveInstance {
-    aData0: [i32; 4],
-    aData1: [i32; 4],
-}
-
-impl PrimitiveInstance {
-    pub fn new(data: [i32; 8]) -> PrimitiveInstance {
-        PrimitiveInstance {
-            aData0: [data[0], data[1], data[2], data[3]],
-            aData1: [data[4], data[5], data[6], data[7]],
-        }
-    }
+    pub aData0: [i32; 4],
+    pub aData1: [i32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct ClipMaskInstance {
-    aClipRenderTaskAddress: i32,
-    aScrollNodeId: i32,
-    aClipSegment: i32,
-    aClipDataResourceAddress: [i32; 4],
-}
-
-impl ClipMaskInstance {
-    pub fn new(data: [i32; 7]) -> ClipMaskInstance {
-        ClipMaskInstance {
-            aClipRenderTaskAddress: data[0],
-            aScrollNodeId: data[1],
-            aClipSegment: data[2],
-            aClipDataResourceAddress: [data[3], data[4], data[5], data[6]],
-        }
-    }
+    pub aClipRenderTaskAddress: i32,
+    pub aScrollNodeId: i32,
+    pub aClipSegment: i32,
+    pub aClipDataResourceAddress: [i32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct BlurInstance {
-    aBlurRenderTaskAddress: i32,
-    aBlurSourceTaskAddress: i32,
-    aBlurDirection: i32,
-}
-
-impl BlurInstance {
-    pub fn new(data: [i32; 3]) -> BlurInstance {
-        BlurInstance {
-            aBlurRenderTaskAddress: data[0],
-            aBlurSourceTaskAddress: data[1],
-            aBlurDirection: data[2],
-        }
-    }
+    pub aBlurRenderTaskAddress: i32,
+    pub aBlurSourceTaskAddress: i32,
+    pub aBlurDirection: i32,
 }
 
 #[derive(Clone, Deserialize)]
