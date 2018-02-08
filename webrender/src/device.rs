@@ -154,7 +154,7 @@ const QUAD: [Vertex; 6] = [
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
     let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
-    let mut file = File::open(path_str).expect(&format!("Unable top open shader file: {}", filename));
+    let mut file = File::open(path_str).expect(&format!("Unable to open shader file: {}", filename));
     let mut shader = Vec::new();
     file.read_to_end(&mut shader).unwrap();
     shader
@@ -972,6 +972,9 @@ impl<B: hal::Backend> Program<B> {
     ) where
         T: Copy,
     {
+        if instances.is_empty() {
+            return;
+        }
         let data_stride = self.instance_buffer.buffer.data_stride;
         let offset = self.instance_buffer.offset as u64;
         self.instance_buffer.buffer.update(
@@ -1011,7 +1014,6 @@ impl<B: hal::Backend> Program<B> {
         device: &B::Device,
         projection: &Transform3D<f32>,
         u_mode: i32,
-        //instances: &[PrimitiveInstance],
         instances: &[T],
     ) where
         T: Copy,
