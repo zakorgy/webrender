@@ -1162,7 +1162,6 @@ impl LazilyCompiledShader {
         name: &'static str,
         device: &mut Device<back::Backend, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-        //precache: bool,
     ) -> Result<LazilyCompiledShader, ShaderError> {
         let pipeline_requirements =
             pipeline_requirements.remove(name).expect(&format!("Pipeline requirements not found for: {}", name));
@@ -1175,30 +1174,6 @@ impl LazilyCompiledShader {
 
         Ok(shader)
     }
-
-    /*fn bind<M>(
-        &mut self,
-        device: &mut Device<back::Backend, hal::Graphics>,
-        projection: &Transform3D<f32>,
-        mode: M,
-        instances: &Vec<PrimitiveInstance>,
-        renderer_errors: &mut Vec<RendererError>,
-    ) where M: Into<ShaderMode> {
-        let program = match self.get(device) {
-            Ok(program) => program,
-            Err(e) => {
-                renderer_errors.push(RendererError::from(e));
-                return;
-            }
-        };
-
-        program.bind(
-            &device.device,
-            projection,
-            mode.into(),
-            &instances,
-        );
-    }*/
 
     fn get(
         &mut self,
@@ -1241,7 +1216,6 @@ impl PrimitiveShader {
         transform_name: &'static str,
         device: &mut Device<back::Backend, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-        //precache: bool,
     ) -> Result<Self, ShaderError> {
         let simple = try!{
             LazilyCompiledShader::new(
@@ -1249,7 +1223,6 @@ impl PrimitiveShader {
                 name,
                 device,
                 pipeline_requirements,
-                //precache
             )
         };
 
@@ -1259,7 +1232,6 @@ impl PrimitiveShader {
                 transform_name,
                 device,
                 pipeline_requirements,
-                //precache
             )
         };
 
@@ -1314,7 +1286,6 @@ impl BrushShader {
         alpha_name: &'static str,
         device: &mut Device<back::Backend, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-        //precache: bool,
     ) -> Result<Self, ShaderError> {
         let opaque = try!{
             LazilyCompiledShader::new(
@@ -1322,7 +1293,6 @@ impl BrushShader {
                 opaque_name,
                 device,
                 pipeline_requirements,
-                //precache,
             )
         };
 
@@ -1332,7 +1302,6 @@ impl BrushShader {
                 alpha_name,
                 device,
                 pipeline_requirements,
-                //precache,
             )
         };
 
@@ -1384,7 +1353,6 @@ impl TextShader {
         glyph_trasnform_name: &'static str,
         device: &mut Device<back::Backend, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-        //precache: bool,
     ) -> Result<Self, ShaderError> {
         let simple = try!{
             LazilyCompiledShader::new(
@@ -1392,7 +1360,6 @@ impl TextShader {
                 name,
                 device,
                 pipeline_requirements,
-                //precache,
             )
         };
 
@@ -1402,7 +1369,6 @@ impl TextShader {
                 trasnform_name,
                 device,
                 pipeline_requirements,
-                //precache,
             )
         };
 
@@ -1412,7 +1378,6 @@ impl TextShader {
                 glyph_trasnform_name,
                 device,
                 pipeline_requirements,
-                //precache,
             )
         };
 
@@ -1458,81 +1423,6 @@ impl TextShader {
         self.glyph_transform.deinit(device);
     }
 }
-
-/*fn create_prim_shader(
-    name: &'static str,
-    device: &mut Device,
-    features: &[&'static str],
-    vertex_format: VertexArrayKind,
-) -> Result<Program, ShaderError> {
-    let mut prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    for feature in features {
-        prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
-    }
-
-    debug!("PrimShader {}", name);
-
-    let vertex_descriptor = match vertex_format {
-        VertexArrayKind::Primitive => DESC_PRIM_INSTANCES,
-        VertexArrayKind::Blur => DESC_BLUR,
-        VertexArrayKind::Clip => DESC_CLIP,
-    };
-
-    let program = device.create_program(name, &prefix, &vertex_descriptor);
-
-    if let Ok(ref program) = program {
-        device.bind_shader_samplers(
-            program,
-            &[
-                ("sColor0", TextureSampler::Color0),
-                ("sColor1", TextureSampler::Color1),
-                ("sColor2", TextureSampler::Color2),
-                ("sDither", TextureSampler::Dither),
-                ("sCacheA8", TextureSampler::CacheA8),
-                ("sCacheRGBA8", TextureSampler::CacheRGBA8),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
-                ("sRenderTasks", TextureSampler::RenderTasks),
-                ("sResourceCache", TextureSampler::ResourceCache),
-                ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sLocalClipRects", TextureSampler::LocalClipRects),
-            ],
-        );
-    }
-
-    program
-}
-
-fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program, ShaderError> {
-    let prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
-                          #define WR_FEATURE_TRANSFORM\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    debug!("ClipShader {}", name);
-
-    let program = device.create_program(name, &prefix, &DESC_CLIP);
-
-    if let Ok(ref program) = program {
-        device.bind_shader_samplers(
-            program,
-            &[
-                ("sColor0", TextureSampler::Color0),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
-                ("sRenderTasks", TextureSampler::RenderTasks),
-                ("sResourceCache", TextureSampler::ResourceCache),
-                ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sLocalClipRects", TextureSampler::LocalClipRects),
-            ],
-        );
-    }
-
-    program
-}*/
 
 struct FileWatcher {
     notifier: Box<RenderNotifier>,
@@ -1856,6 +1746,7 @@ impl Renderer {
             &mut pipeline_requirements,
         )?;
 
+        // We only support one type of image shaders for now.
         let ps_image = PrimitiveShader::new(
             "ps_image",
             "ps_image_transform",
@@ -2015,156 +1906,6 @@ impl Renderer {
         register_thread_with_profiler("Compositor".to_owned());
 
         device.begin_frame();
-
-        /*
-        // All image configuration.
-        let mut image_features = Vec::new();
-        let mut ps_image: Vec<Option<PrimitiveShader>> = Vec::new();
-        // PrimitiveShader is not clonable. Use push() to initialize the vec.
-        for _ in 0 .. IMAGE_BUFFER_KINDS.len() {
-            ps_image.push(None);
-        }
-        for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
-                let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
-                if feature_string != "" {
-                    image_features.push(feature_string);
-                }
-                let shader = try!{
-                    PrimitiveShader::new("ps_image",
-                                         &mut device,
-                                         &image_features,
-                                         options.precache_shaders)
-                };
-                ps_image[buffer_kind] = Some(shader);
-            }
-            image_features.clear();
-        }
-
-        // All yuv_image configuration.
-        let mut yuv_features = Vec::new();
-        let yuv_shader_num = IMAGE_BUFFER_KINDS.len() * YUV_FORMATS.len() * YUV_COLOR_SPACES.len();
-        let mut ps_yuv_image: Vec<Option<PrimitiveShader>> = Vec::new();
-        // PrimitiveShader is not clonable. Use push() to initialize the vec.
-        for _ in 0 .. yuv_shader_num {
-            ps_yuv_image.push(None);
-        }
-        for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
-                for format_kind in 0 .. YUV_FORMATS.len() {
-                    for color_space_kind in 0 .. YUV_COLOR_SPACES.len() {
-                        let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string = YUV_FORMATS[format_kind].get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string =
-                            YUV_COLOR_SPACES[color_space_kind].get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-
-                        let shader = try!{
-                            PrimitiveShader::new("ps_yuv_image",
-                                                 &mut device,
-                                                 &yuv_features,
-                                                 options.precache_shaders)
-                        };
-                        let index = Renderer::get_yuv_shader_index(
-                            IMAGE_BUFFER_KINDS[buffer_kind],
-                            YUV_FORMATS[format_kind],
-                            YUV_COLOR_SPACES[color_space_kind],
-                        );
-                        ps_yuv_image[index] = Some(shader);
-                        yuv_features.clear();
-                    }
-                }
-            }
-        }
-
-        let ps_border_corner = try!{
-            PrimitiveShader::new("ps_border_corner",
-                                 &mut device,
-                                 &[],
-                                 options.precache_shaders)
-        };
-
-        let ps_border_edge = try!{
-            PrimitiveShader::new("ps_border_edge",
-                                 &mut device,
-                                 &[],
-                                 options.precache_shaders)
-        };
-
-        let dithering_feature = ["DITHERING"];
-
-        let ps_gradient = try!{
-            PrimitiveShader::new("ps_gradient",
-                                 &mut device,
-                                 if options.enable_dithering {
-                                    &dithering_feature
-                                 } else {
-                                    &[]
-                                 },
-                                 options.precache_shaders)
-        };
-
-        let ps_angle_gradient = try!{
-            PrimitiveShader::new("ps_angle_gradient",
-                                 &mut device,
-                                 if options.enable_dithering {
-                                    &dithering_feature
-                                 } else {
-                                    &[]
-                                 },
-                                 options.precache_shaders)
-        };
-
-        let ps_radial_gradient = try!{
-            PrimitiveShader::new("ps_radial_gradient",
-                                 &mut device,
-                                 if options.enable_dithering {
-                                    &dithering_feature
-                                 } else {
-                                    &[]
-                                 },
-                                 options.precache_shaders)
-        };
-
-        let ps_blend = try!{
-            LazilyCompiledShader::new(ShaderKind::Primitive,
-                                     "ps_blend",
-                                     &[],
-                                     &mut device,
-                                     options.precache_shaders)
-        };
-
-        let ps_composite = try!{
-            LazilyCompiledShader::new(ShaderKind::Primitive,
-                                      "ps_composite",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let ps_hw_composite = try!{
-            LazilyCompiledShader::new(ShaderKind::Primitive,
-                                     "ps_hardware_composite",
-                                     &[],
-                                     &mut device,
-                                     options.precache_shaders)
-        };
-
-        let ps_split_composite = try!{
-            LazilyCompiledShader::new(ShaderKind::Primitive,
-                                     "ps_split_composite",
-                                     &[],
-                                     &mut device,
-                                     options.precache_shaders)
-        };*/
 
         let texture_cache = TextureCache::new(max_device_size);
         let max_texture_size = texture_cache.max_texture_size();
@@ -3269,37 +3010,20 @@ impl Renderer {
     ) {
         let mut program = match key.kind {
             BatchKind::Composite { .. } => {
-                // self.ps_composite.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
                 self.ps_composite.get(&mut self.device).unwrap()
             }
             BatchKind::HardwareComposite => {
-                // self.ps_hw_composite
-                //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
                 self.ps_hw_composite.get(&mut self.device).unwrap()
             }
             BatchKind::SplitComposite => {
-                // self.ps_split_composite.bind(
-                //     &mut self.device,
-                //     projection,
-                //     0,
-                //     &mut self.renderer_errors,
-                // );
                 self.ps_split_composite.get(&mut self.device).unwrap()
             }
             BatchKind::Blend => {
-                // self.ps_blend.bind(&mut self.device, projection, 0, &mut self.renderer_errors);
                 self.ps_blend.get(&mut self.device).unwrap()
             }
             BatchKind::Brush(brush_kind) => {
                 match brush_kind {
                     BrushBatchKind::Solid => {
-                        // self.brush_solid.bind(
-                        //     &mut self.device,
-                        //     //key.blend_mode,
-                        //     projection,
-                        //     0,
-                        //     //&mut self.renderer_errors,
-                        // );
                         self.brush_solid.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::Picture(target_kind) => {
@@ -3308,26 +3032,8 @@ impl Renderer {
                              BrushImageSourceKind::Color => self.brush_picture_rgba8.get(key.blend_mode, &mut self.device).unwrap(),
                              BrushImageSourceKind::ColorAlphaMask => self.brush_picture_rgba8_alpha_mask.get(key.blend_mode, &mut self.device).unwrap(),
                         }
-                        // shader.bind(
-                        //     &mut self.device,
-                        //     key.blend_mode,
-                        //     projection,
-                        //     0,
-                        //     &mut self.renderer_errors,
-                        // );
                     }
                     BrushBatchKind::Line => {
-                        // self.brush_line.bind(
-                        //     &mut self.device.device,
-                        //     //key.blend_mode,
-                        //     projection,
-                        //     0,
-                        //     &instances.iter().map(|pi|
-                        //         PrimitiveInstance::new(pi.data)
-                        //     ).collect::<Vec<PrimitiveInstance>>(),
-                        //     //&mut self.renderer_errors,
-                        // );
-                        // self.device.draw(&mut self.brush_line);
                         self.brush_line.get(key.blend_mode, &mut self.device).unwrap()
                     }
                 }
@@ -3337,16 +3043,6 @@ impl Renderer {
                     unreachable!("bug: text batches are special cased");
                 }
                 TransformBatchKind::Image(image_buffer_kind) => {
-                    // self.ps_image[image_buffer_kind as usize]
-                    //     .as_mut()
-                    //     .expect("Unsupported image shader kind")
-                    //     .bind(
-                    //         &mut self.device,
-                    //         transform_kind,
-                    //         projection,
-                    //         0,
-                    //         &mut self.renderer_errors,
-                    //     );
                     self.ps_image.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
@@ -3356,74 +3052,21 @@ impl Renderer {
                             format,
                             color_space,
                         ) % self.ps_yuv_image.len();
-                    // self.ps_yuv_image[shader_index]
-                    //     .as_mut()
-                    //     .expect("Unsupported YUV shader kind")
-                    //     .bind(
-                    //         &mut self.device,
-                    //         transform_kind,
-                    //         projection,
-                    //         0,
-                    //         &mut self.renderer_errors,
-                    //     );
                     self.ps_yuv_image[shader_index].get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::BorderCorner => {
-                    //self.ps_border_corner.bind(
-                    //    &mut self.device.device,
-                    //    //transform_kind,
-                    //    projection,
-                    //    0,
-                    //    &instances.iter().map(|pi|
-                    //        PrimitiveInstance::new(pi.data)
-                    //    ).collect::<Vec<PrimitiveInstance>>(),
-                    //    //&mut self.renderer_errors,
-                    //);
-                    //self.device.draw(&mut self.ps_border_corner);
                     self.ps_border_corner.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::BorderEdge => {
-                    //self.ps_border_edge.bind(
-                    //    &mut self.device.device,
-                    //    //transform_kind,
-                    //    projection,
-                    //    0,
-                    //    &instances.iter().map(|pi|
-                    //        PrimitiveInstance::new(pi.data)
-                    //    ).collect::<Vec<PrimitiveInstance>>(),
-                    //    //&mut self.renderer_errors,
-                    //);
-                    //self.device.draw(&mut self.ps_border_edge);
                     self.ps_border_edge.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::AlignedGradient => {
-                    // self.ps_gradient.bind(
-                    //     &mut self.device,
-                    //     transform_kind,
-                    //     projection,
-                    //     0,
-                    //     &mut self.renderer_errors,
-                    // );
                     self.ps_gradient.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::AngleGradient => {
-                    // self.ps_angle_gradient.bind(
-                    //     &mut self.device,
-                    //     transform_kind,
-                    //     projection,
-                    //     0,
-                    //     &mut self.renderer_errors,
-                    // );
                     self.ps_angle_gradient.get(transform_kind, &mut self.device).unwrap()
                 }
                 TransformBatchKind::RadialGradient => {
-                    // self.ps_radial_gradient.bind(
-                    //     &mut self.device,
-                    //     transform_kind,
-                    //     projection,
-                    //     0,
-                    //     &mut self.renderer_errors,
-                    // );
                     self.ps_radial_gradient.get(transform_kind, &mut self.device).unwrap()
                 }
             },
@@ -3491,6 +3134,7 @@ impl Renderer {
             self.device.bind_draw_target(render_target, None);
         }
 
+        // TODO: bind textures: key.textures
         program.bind(
             &self.device.device,
             projection,
@@ -3500,13 +3144,6 @@ impl Renderer {
             ).collect::<Vec<PrimitiveInstance>>(),
         );
         self.device.draw(program);
-        // let _timer = self.gpu_profile.start_timer(key.kind.gpu_sampler_tag());
-        //self.draw_instanced_batch(
-        //    instances,
-        //    VertexArrayKind::Primitive,
-        //    &key.textures,
-        //    stats
-        //);
     }
 
     fn handle_blits(
@@ -3660,6 +3297,7 @@ impl Renderer {
             let mut program = self.cs_blur_rgba8.get(&mut self.device).unwrap();
 
             if !target.vertical_blurs.is_empty() {
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -3670,15 +3308,10 @@ impl Renderer {
                     ).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
-                //self.draw_instanced_batch(
-                //    &target.vertical_blurs,
-                //    VertexArrayKind::Blur,
-                //    &BatchTextures::no_texture(),
-                //    stats,
-                //);
             }
 
             if !target.horizontal_blurs.is_empty() {
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -3689,12 +3322,6 @@ impl Renderer {
                     ).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
-                // self.draw_instanced_batch(
-                //     &target.horizontal_blurs,
-                //     VertexArrayKind::Blur,
-                //     &BatchTextures::no_texture(),
-                //     stats,
-                // );
             }
         }
 
@@ -3713,6 +3340,7 @@ impl Renderer {
             let mut program = self.cs_text_run.get(&mut self.device).unwrap();
             program.bind_locals(&self.device.device, projection, 0);
             for (_texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
+                // TODO: bind_texture: BatchTextures::color(*texture_id)
                     program.bind_instances(
                         &self.device.device,
                         &instances.iter().map(|pi|
@@ -3721,17 +3349,6 @@ impl Renderer {
                     );
                 self.device.draw(program);
             }
-            // let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_TEXT_RUN);
-            // self.cs_text_run
-            //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            // for (texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
-            //     self.draw_instanced_batch(
-            //         instances,
-            //         VertexArrayKind::Primitive,
-            //         &BatchTextures::color(*texture_id),
-            //         stats,
-            //     );
-            // }
         }
 
         //TODO: record the pixel count for cached primitives
@@ -3811,6 +3428,7 @@ impl Renderer {
                             BlendMode::PremultipliedAlpha => {
                                 self.device.set_blend_mode_premultiplied_alpha();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                // TODO: bind textures: batch.key.textures
                                 program.bind(
                                     &self.device.device,
                                     projection,
@@ -3820,26 +3438,11 @@ impl Renderer {
                                     ).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
-
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::from(glyph_format),
-                                //     &mut self.renderer_errors,
-                                // );
-
-                                // self.draw_instanced_batch(
-                                //     &batch.instances,
-                                //     VertexArrayKind::Primitive,
-                                //     &batch.key.textures,
-                                //     stats,
-                                // );
                             }
                             BlendMode::SubpixelDualSource => {
                                 self.device.set_blend_mode_subpixel_dual_source();
                                 let mut program = self.ps_text_run_dual_source.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                // TODO: bind textures: batch.key.textures
                                 program.bind(
                                     &self.device.device,
                                     projection,
@@ -3849,27 +3452,11 @@ impl Renderer {
                                     ).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
-
-                                // self.ps_text_run_dual_source.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelDualSource,
-                                //     &mut self.renderer_errors,
-                                // );
-
-                                // self.draw_instanced_batch(
-                                //     &batch.instances,
-                                //     VertexArrayKind::Primitive,
-                                //     &batch.key.textures,
-                                //     stats,
-                                // );
                             }
                             BlendMode::SubpixelConstantTextColor(color) => {
                                 self.device.set_blend_mode_subpixel_constant_text_color(color);
-                                // TODO(zakorgy): Set blend constant
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                // TODO: bind textures: batch.key.textures
                                 program.bind(
                                     &self.device.device,
                                     projection,
@@ -3879,22 +3466,6 @@ impl Renderer {
                                     ).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
-
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelConstantTextColor,
-                                //     &mut self.renderer_errors,
-                                // );
-
-                                // self.draw_instanced_batch(
-                                //     &batch.instances,
-                                //     VertexArrayKind::Primitive,
-                                //     &batch.key.textures,
-                                //     stats,
-                                // );
                             }
                             BlendMode::SubpixelVariableTextColor => {
                                 // Using the two pass component alpha rendering technique:
@@ -3903,6 +3474,7 @@ impl Renderer {
                                 //
                                 self.device.set_blend_mode_subpixel_pass0();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                // TODO: bind textures: batch.key.textures
                                 program.bind(
                                     &self.device.device,
                                     projection,
@@ -3913,22 +3485,6 @@ impl Renderer {
                                 );
                                 self.device.draw(program);
 
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelPass0,
-                                //     &mut self.renderer_errors,
-                                // );
-
-                                //self.draw_instanced_batch(
-                                //    &batch.instances,
-                                //    VertexArrayKind::Primitive,
-                                //    &batch.key.textures,
-                                //    stats,
-                                //);
-
                                 self.device.set_blend_mode_subpixel_pass1();
                                 program.bind_locals(
                                     &self.device.device,
@@ -3936,15 +3492,6 @@ impl Renderer {
                                     TextShaderMode::SubpixelPass1.into(),
                                 );
                                 self.device.draw(program);
-
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelPass1,
-                                //     &mut self.renderer_errors,
-                                // );
 
                                 // When drawing the 2nd pass, we know that the VAO, textures etc
                                 // are all set up from the previous draw_instanced_batch call,
@@ -3961,6 +3508,7 @@ impl Renderer {
                                 //
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass0();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
+                                // TODO: bind textures: batch.key.textures
                                 program.bind(
                                     &self.device.device,
                                     projection,
@@ -3971,22 +3519,6 @@ impl Renderer {
                                 );
                                 self.device.draw(program);
 
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelWithBgColorPass0,
-                                //     &mut self.renderer_errors,
-                                // );
-
-                                // self.draw_instanced_batch(
-                                //     &batch.instances,
-                                //     VertexArrayKind::Primitive,
-                                //     &batch.key.textures,
-                                //     stats,
-                                // );
-
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                                 program.bind_locals(
                                     &self.device.device,
@@ -3995,21 +3527,10 @@ impl Renderer {
                                 );
                                 self.device.draw(program);
 
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelWithBgColorPass1,
-                                //     &mut self.renderer_errors,
-                                // );
-
                                 // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                                 // are all set up from the previous draw_instanced_batch call,
                                 // so just issue a draw call here to avoid re-uploading the
                                 // instances and re-binding textures etc.
-                                // self.device
-                                //     .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                                 program.bind_locals(
@@ -4018,18 +3539,6 @@ impl Renderer {
                                     TextShaderMode::SubpixelWithBgColorPass2.into(),
                                 );
                                 self.device.draw(program);
-
-                                // self.ps_text_run.bind(
-                                //     &mut self.device,
-                                //     glyph_format,
-                                //     transform_kind,
-                                //     projection,
-                                //     TextShaderMode::SubpixelWithBgColorPass2,
-                                //     &mut self.renderer_errors,
-                                // );
-
-                                // self.device
-                                //     .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                             }
                             BlendMode::PremultipliedDestOut | BlendMode::None => {
                                 unreachable!("bug: bad blend mode for text");
@@ -4175,6 +3684,7 @@ impl Renderer {
             let mut program = self.cs_blur_a8.get(&mut self.device).unwrap();
 
             if !target.vertical_blurs.is_empty() {
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -4185,15 +3695,10 @@ impl Renderer {
                     ).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
-                // self.draw_instanced_batch(
-                //     &target.vertical_blurs,
-                //     VertexArrayKind::Blur,
-                //     &BatchTextures::no_texture(),
-                //     stats,
-                // );
             }
 
             if !target.horizontal_blurs.is_empty() {
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -4204,12 +3709,6 @@ impl Renderer {
                     ).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(&mut program);
-                // self.draw_instanced_batch(
-                //     &target.horizontal_blurs,
-                //     VertexArrayKind::Blur,
-                //     &BatchTextures::no_texture(),
-                //     stats,
-                // );
             }
         }
 
@@ -4220,6 +3719,7 @@ impl Renderer {
 
             // let _timer = self.gpu_profile.start_timer(GPU_TAG_BRUSH_MASK);
             let mut program = self.brush_mask_corner.get(&mut self.device).unwrap();
+            // NOTE: no need to bind textures here
             program.bind(
                 &self.device.device,
                 projection,
@@ -4229,14 +3729,6 @@ impl Renderer {
                 ).collect::<Vec<PrimitiveInstance>>(),
             );
             self.device.draw(&mut program);
-            // self.brush_mask_corner
-            //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            // self.draw_instanced_batch(
-            //     &target.brush_mask_corners,
-            //     VertexArrayKind::Primitive,
-            //     &BatchTextures::no_texture(),
-            //     stats,
-            // );
         }
 
         if !target.brush_mask_rounded_rects.is_empty() {
@@ -4244,6 +3736,7 @@ impl Renderer {
 
             // let _timer = self.gpu_profile.start_timer(GPU_TAG_BRUSH_MASK);
             let mut program = self.brush_mask_rounded_rect.get(&mut self.device).unwrap();
+            // NOTE: no need to bind textures here
             program.bind(
                 &self.device.device,
                 projection,
@@ -4253,14 +3746,6 @@ impl Renderer {
                 ).collect::<Vec<PrimitiveInstance>>(),
             );
             self.device.draw(&mut program);
-            // self.brush_mask_rounded_rect
-            //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-            // self.draw_instanced_batch(
-            //     &target.brush_mask_rounded_rects,
-            //     VertexArrayKind::Primitive,
-            //     &BatchTextures::no_texture(),
-            //     stats,
-            // );
         }
 
         // Draw the clip items into the tiled alpha mask.
@@ -4274,6 +3759,7 @@ impl Renderer {
                 // let _gm2 = self.gpu_profile.start_marker("clip borders [clear]");
                 self.device.set_blend(false);
                 let mut program = self.cs_clip_border.get(&mut self.device).unwrap();
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -4293,14 +3779,6 @@ impl Renderer {
                     ).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
-                // self.cs_clip_border
-                //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                // self.draw_instanced_batch(
-                //     &target.clip_batcher.border_clears,
-                //     VertexArrayKind::Clip,
-                //     &BatchTextures::no_texture(),
-                //     stats,
-                // );
             }
 
             // Draw any dots or dashes for border corners.
@@ -4314,6 +3792,7 @@ impl Renderer {
                 self.device.set_blend_mode_max();
 
                 let mut program = self.cs_clip_border.get(&mut self.device).unwrap();
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -4333,14 +3812,6 @@ impl Renderer {
                     ).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
-                // self.cs_clip_border
-                //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                // self.draw_instanced_batch(
-                //     &target.clip_batcher.borders,
-                //     VertexArrayKind::Clip,
-                //     &BatchTextures::no_texture(),
-                //     stats,
-                // );
             }
 
             // switch to multiplicative blending
@@ -4350,6 +3821,7 @@ impl Renderer {
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
                 let mut program = self.cs_clip_rectangle.get(&mut self.device).unwrap();
+                // NOTE: no need to bind textures here
                 program.bind(
                     &self.device.device,
                     projection,
@@ -4369,25 +3841,13 @@ impl Renderer {
                     ).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
-                // let _gm2 = self.gpu_profile.start_marker("clip rectangles");
-                // self.cs_clip_rectangle.bind(
-                //     &mut self.device,
-                //     projection,
-                //     0,
-                //     &mut self.renderer_errors,
-                // );
-                // self.draw_instanced_batch(
-                //     &target.clip_batcher.rectangles,
-                //     VertexArrayKind::Clip,
-                //     &BatchTextures::no_texture(),
-                //     stats,
-                // );
             }
 
             // draw image masks
             let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
             program.bind_locals(&self.device.device, projection, 0);
             for (_mask_texture_id, items) in &target.clip_batcher.images {
+                // TODO: bind textures: textures
                     program.bind_instances(
                         &self.device.device,
                         &items.iter().map(|ci|
@@ -4405,22 +3865,6 @@ impl Renderer {
                         ).collect::<Vec<ClipMaskInstance>>(),
                     );
                 self.device.draw(&mut program);
-                // let _gm2 = self.gpu_profile.start_marker("clip images");
-                // let textures = BatchTextures {
-                //     colors: [
-                //         mask_texture_id.clone(),
-                //         SourceTexture::Invalid,
-                //         SourceTexture::Invalid,
-                //     ],
-                // };
-                // self.cs_clip_image
-                //     .bind(&mut self.device, projection, 0, &mut self.renderer_errors);
-                // self.draw_instanced_batch(
-                //     items,
-                //     VertexArrayKind::Clip,
-                //     &textures,
-                //     stats,
-                // );
             }
         }
 
@@ -4464,6 +3908,7 @@ impl Renderer {
         if !target.horizontal_blurs.is_empty() {
             // let _timer = self.gpu_profile.start_timer(GPU_TAG_BLUR);
             let mut program = self.cs_blur_a8.get(&mut self.device).unwrap();
+            // NOTE: no need to bind textures here
             program.bind(
                 &self.device.device,
                 &projection,
@@ -4474,15 +3919,6 @@ impl Renderer {
                 ).collect::<Vec<BlurInstance>>(),
             );
             self.device.draw(&mut program);
-            // self.cs_blur_a8
-            //     .bind(&mut self.device, &projection, 0, &mut self.renderer_errors);
-
-            // self.draw_instanced_batch(
-            //     &target.horizontal_blurs,
-            //     VertexArrayKind::Blur,
-            //     &BatchTextures::no_texture(),
-            //     stats,
-            // );
         }
     }
 
