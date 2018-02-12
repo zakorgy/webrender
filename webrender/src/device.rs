@@ -925,6 +925,24 @@ impl<B: hal::Backend> InstanceBuffer<B> {
         }
     }
 
+    fn update<T>(
+        &mut self,
+        device: &B::Device,
+        instances: &[T],
+    )where
+        T: Copy,
+    {
+        let data_stride = self.buffer.data_stride;
+        self.buffer.update(
+            device,
+            self.offset as u64,
+            (instances.len() * data_stride) as u64,
+            &instances.to_owned(),
+        );
+
+        self.size += instances.len();
+    }
+
     pub fn reset(&mut self) {
         self.size = 0;
         self.offset = 0;
@@ -1143,19 +1161,12 @@ impl<B: hal::Backend> Program<B> {
     ) where
         T: Copy,
     {
-        if instances.is_empty() {
-            return;
+        if !instances.is_empty() {
+            self.instance_buffer.update(
+                device,
+                instances,
+            );
         }
-        let data_stride = self.instance_buffer.buffer.data_stride;
-        let offset = self.instance_buffer.offset as u64;
-        self.instance_buffer.buffer.update(
-            device,
-            offset,
-            (instances.len() * data_stride) as u64,
-            &instances.to_owned(),
-        );
-
-        self.instance_buffer.size += instances.len();
     }
 
     pub fn bind_locals(
@@ -1331,7 +1342,7 @@ impl<B: hal::Backend> Program<B> {
 
     pub fn deinit(mut self, device: &B::Device) {
         self.vertex_buffer.deinit(device);
-        self.instance_buffer.buffer.deinit(device);
+        self.instance_buffer.deinit(device);
         self.locals_buffer.deinit(device);
         device.destroy_descriptor_pool(self.descriptor_pool);
         device.destroy_descriptor_set_layout(self.descriptor_set_layout);
