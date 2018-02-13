@@ -1162,7 +1162,7 @@ impl LazilyCompiledShader {
              let program = device.create_program(
                  self.pipeline_requirements.clone(),
                  self.name,
-                 &self.kind
+                 &self.kind,
              );
             self.program = Some(program);
         }
@@ -1522,8 +1522,6 @@ pub struct Renderer {
 
     // A PBO used to do asynchronous texture cache uploads.
     texture_cache_upload_pbo: PBO,
-
-    // dither_matrix_texture: Option<Texture>,
 
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
@@ -1891,91 +1889,6 @@ impl Renderer {
 
         let backend_profile_counters = BackendProfileCounters::new();
 
-        /*let dither_matrix_texture = if options.enable_dithering {
-            let dither_matrix: [u8; 64] = [
-                00,
-                48,
-                12,
-                60,
-                03,
-                51,
-                15,
-                63,
-                32,
-                16,
-                44,
-                28,
-                35,
-                19,
-                47,
-                31,
-                08,
-                56,
-                04,
-                52,
-                11,
-                59,
-                07,
-                55,
-                40,
-                24,
-                36,
-                20,
-                43,
-                27,
-                39,
-                23,
-                02,
-                50,
-                14,
-                62,
-                01,
-                49,
-                13,
-                61,
-                34,
-                18,
-                46,
-                30,
-                33,
-                17,
-                45,
-                29,
-                10,
-                58,
-                06,
-                54,
-                09,
-                57,
-                05,
-                53,
-                42,
-                26,
-                38,
-                22,
-                41,
-                25,
-                37,
-                21,
-            ];
-
-            let mut texture = device
-                .create_texture(TextureTarget::Default, ImageFormat::R8);
-            device.init_texture(
-                &mut texture,
-                8,
-                8,
-                TextureFilter::Nearest,
-                None,
-                1,
-                Some(&dither_matrix),
-            );
-
-            Some(texture)
-        } else {
-            None
-        };*/
-
         let debug_renderer = DebugRenderer::new(&mut device);
 
         let x0 = 0.0;
@@ -2139,7 +2052,6 @@ impl Renderer {
             // local_clip_rects_texture,
             // render_task_texture,
             pipeline_epoch_map: FastHashMap::default(),
-            // dither_matrix_texture,
             external_image_handler: None,
             output_image_handler: None,
             output_targets: FastHashMap::default(),
@@ -2949,11 +2861,6 @@ impl Renderer {
                 &mut self.device,
             );
         }
-
-        // TODO: this probably isn't the best place for this.
-        // if let Some(ref texture) = self.dither_matrix_texture {
-        //     self.device.bind_texture(TextureSampler::Dither, texture);
-        // }
 
         let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
 
@@ -4433,9 +4340,6 @@ impl Renderer {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
         self.gpu_cache_texture.deinit(&mut self.device);
-        // if let Some(dither_matrix_texture) = self.dither_matrix_texture {
-        //     self.device.delete_texture(dither_matrix_texture);
-        // }
         // self.node_data_texture.deinit(&mut self.device);
         // self.local_clip_rects_texture.deinit(&mut self.device);
         // self.render_task_texture.deinit(&mut self.device);
