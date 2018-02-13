@@ -2743,6 +2743,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             self.device.destroy_image_view(rtv);
             self.device.destroy_image(image);
         }
+        for (_, image) in self.images {
+            image.deinit(&self.device);
+        }
         self.resource_cache.deinit(&self.device);
         self.render_tasks.deinit(&self.device);
         self.local_clip_rects.deinit(&self.device);
