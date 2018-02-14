@@ -2854,9 +2854,9 @@ impl Renderer {
         textures: &BatchTextures,
         stats: &mut RendererStats,
     ) {
-        for i in 0 .. textures.colors.len() {
+        for (i, texture) in textures.colors.iter().enumerate() {
             self.texture_resolver.bind(
-                &textures.colors[i],
+                &texture,
                 TextureSampler::color(i),
                 &mut self.device,
             );
@@ -3021,9 +3021,9 @@ impl Renderer {
             self.device.bind_draw_target(render_target, None);
         }
 
-        for i in 0 .. key.textures.colors.len() {
+        for (i, texture) in key.textures.colors.iter().enumerate() {
             self.texture_resolver.bind(
-                &key.textures.colors[i],
+                &texture,
                 TextureSampler::color(i),
                 &mut self.device,
             );
@@ -3230,9 +3230,9 @@ impl Renderer {
             let mut program = self.cs_text_run.get(&mut self.device).unwrap();
             program.bind_locals(&self.device.device, projection, 0);
             for (texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
-                for i in 0 .. BatchTextures::color(*texture_id).colors.len() {
+                for (i, texture) in BatchTextures::color(*texture_id).colors.iter().enumerate() {
                     self.texture_resolver.bind(
-                        &BatchTextures::color(*texture_id).colors[i],
+                        &texture,
                         TextureSampler::color(i),
                         &mut self.device,
                     );
@@ -3322,9 +3322,9 @@ impl Renderer {
                             BlendMode::PremultipliedAlpha => {
                                 self.device.set_blend_mode_premultiplied_alpha();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                for i in 0 .. batch.key.textures.colors.len() {
+                                for (i, texture) in batch.key.textures.colors.iter().enumerate() {
                                     self.texture_resolver.bind(
-                                        &batch.key.textures.colors[i],
+                                        &texture,
                                         TextureSampler::color(i),
                                         &mut self.device,
                                     );
@@ -3340,9 +3340,9 @@ impl Renderer {
                             BlendMode::SubpixelDualSource => {
                                 self.device.set_blend_mode_subpixel_dual_source();
                                 let mut program = self.ps_text_run_dual_source.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                for i in 0 .. batch.key.textures.colors.len() {
+                                for (i, texture) in batch.key.textures.colors.iter().enumerate() {
                                     self.texture_resolver.bind(
-                                        &batch.key.textures.colors[i],
+                                        &texture,
                                         TextureSampler::color(i),
                                         &mut self.device,
                                     );
@@ -3358,9 +3358,9 @@ impl Renderer {
                             BlendMode::SubpixelConstantTextColor(color) => {
                                 self.device.set_blend_mode_subpixel_constant_text_color(color);
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                for i in 0 .. batch.key.textures.colors.len() {
+                                for (i, texture) in batch.key.textures.colors.iter().enumerate() {
                                     self.texture_resolver.bind(
-                                        &batch.key.textures.colors[i],
+                                        &texture,
                                         TextureSampler::color(i),
                                         &mut self.device,
                                     );
@@ -3380,9 +3380,9 @@ impl Renderer {
                                 //
                                 self.device.set_blend_mode_subpixel_pass0();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                for i in 0 .. batch.key.textures.colors.len() {
+                                for (i, texture) in batch.key.textures.colors.iter().enumerate() {
                                     self.texture_resolver.bind(
-                                        &batch.key.textures.colors[i],
+                                        &texture,
                                         TextureSampler::color(i),
                                         &mut self.device,
                                     );
@@ -3418,9 +3418,9 @@ impl Renderer {
                                 //
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass0();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                for i in 0 .. batch.key.textures.colors.len() {
+                                for (i, texture) in batch.key.textures.colors.iter().enumerate() {
                                     self.texture_resolver.bind(
-                                        &batch.key.textures.colors[i],
+                                        &texture,
                                         TextureSampler::color(i),
                                         &mut self.device,
                                     );
@@ -3722,9 +3722,9 @@ impl Renderer {
                         SourceTexture::Invalid,
                     ],
                 };
-                for i in 0 .. textures.colors.len() {
+                for (i, texture) in textures.colors.iter().enumerate() {
                     self.texture_resolver.bind(
-                        &textures.colors[i],
+                        &texture,
                         TextureSampler::color(i),
                         &mut self.device,
                     );
