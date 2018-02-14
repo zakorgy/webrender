@@ -2310,11 +2310,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         texture.filter = filter;
         texture.layer_count = layer_count;
         texture.render_target = render_target;
-        //println!("texture.width={:?}", texture.width);
-        //println!("texture.height={:?}", texture.height);
-        //println!("texture.filter={:?}", texture.filter);
-        //println!("texture.layer_count={:?}", texture.layer_count);
-        //println!("texture.render_target={:?}", texture.render_target);
 
         self.bind_texture(DEFAULT_TEXTURE, texture);
         self.set_texture_parameters(/*texture.target,*/ filter);
