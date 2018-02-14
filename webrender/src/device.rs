@@ -1176,7 +1176,7 @@ impl<B: hal::Backend> Program<B> {
         let locals_buffer_stride = mem::size_of::<Locals>();
         let locals_data = vec![
             Locals {
-                uTransform: projection.post_scale(1.0, -1.0, 1.0).to_row_arrays(),
+                uTransform: projection.to_row_arrays(),
                 uDevicePixelRatio: 1.0,
                 uMode: u_mode,
             },
