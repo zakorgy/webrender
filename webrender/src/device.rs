@@ -1200,23 +1200,11 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         device: &Device<B, hal::Graphics>,
     ) {
-        if device.bound_textures[0] != 0 {
-            self.bind_texture(device, &device.bound_textures[0], &device.bound_sampler[0], "Color0");
-        }
-        if device.bound_textures[1] != 0 {
-            self.bind_texture(device, &device.bound_textures[1], &device.bound_sampler[1], "Color1");
-        }
-        if device.bound_textures[2] != 0 {
-            self.bind_texture(device, &device.bound_textures[2], &device.bound_sampler[2], "Color2");
-        }
-        if device.bound_textures[3] != 0 {
-            self.bind_texture(device, &device.bound_textures[3], &device.bound_sampler[3], "CacheA8");
-        }
-        if device.bound_textures[4] != 0 {
-            self.bind_texture(device, &device.bound_textures[4], &device.bound_sampler[4], "CacheRGBA8");
-        }
-        if device.bound_textures[9] != 0 {
-            self.bind_texture(device, &device.bound_textures[9], &device.bound_sampler[9], "SharedCacheA8");
+        const samplers: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
+        for &(index, sampler) in samplers.iter() {
+            if device.bound_textures[index] != 0 {
+                self.bind_texture(device, &device.bound_textures[index], &device.bound_sampler[index], sampler);
+            }
         }
     }
 
