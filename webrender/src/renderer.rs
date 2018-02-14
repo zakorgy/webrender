@@ -2960,6 +2960,7 @@ impl Renderer {
 
         // Handle special case readback for composites.
         if let BatchKind::Composite { task_id, source_id, backdrop_id } = key.kind {
+            println!("TODO Composite");
             // composites can't be grouped together because
             // they may overlap and affect each other.
             debug_assert_eq!(instances.len(), 1);
@@ -3096,6 +3097,11 @@ impl Renderer {
             let (source_rect, source_layer) = source.get_target_rect();
             let (dest_rect, _) = dest.get_target_rect();
 
+            if source_rect.size != dest_rect.size {
+                println!("TODO handle_scaling");
+                continue;
+            }
+
             let cache_draw_target = (cache_texture, source_layer.0 as i32);
             self.device
                 .bind_read_target(Some(cache_draw_target));
@@ -3223,12 +3229,18 @@ impl Renderer {
 
             let mut program = self.cs_text_run.get(&mut self.device).unwrap();
             program.bind_locals(&self.device.device, projection, 0);
-            for (_texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
-                // TODO: bind_texture: BatchTextures::color(*texture_id)
-                    program.bind_instances(
-                        &self.device.device,
-                        &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
+            for (texture_id, instances) in &target.alpha_batcher.text_run_cache_prims {
+                for i in 0 .. BatchTextures::color(*texture_id).colors.len() {
+                    self.texture_resolver.bind(
+                        &BatchTextures::color(*texture_id).colors[i],
+                        TextureSampler::color(i),
+                        &mut self.device,
                     );
+                }
+                program.bind_instances(
+                    &self.device.device,
+                    &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
+                );
                 self.device.draw(program);
             }
         }
@@ -3310,7 +3322,13 @@ impl Renderer {
                             BlendMode::PremultipliedAlpha => {
                                 self.device.set_blend_mode_premultiplied_alpha();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                // TODO: bind textures: batch.key.textures
+                                for i in 0 .. batch.key.textures.colors.len() {
+                                    self.texture_resolver.bind(
+                                        &batch.key.textures.colors[i],
+                                        TextureSampler::color(i),
+                                        &mut self.device,
+                                    );
+                                }
                                 program.bind(
                                     &self.device,
                                     projection,
@@ -3322,7 +3340,13 @@ impl Renderer {
                             BlendMode::SubpixelDualSource => {
                                 self.device.set_blend_mode_subpixel_dual_source();
                                 let mut program = self.ps_text_run_dual_source.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                // TODO: bind textures: batch.key.textures
+                                for i in 0 .. batch.key.textures.colors.len() {
+                                    self.texture_resolver.bind(
+                                        &batch.key.textures.colors[i],
+                                        TextureSampler::color(i),
+                                        &mut self.device,
+                                    );
+                                }
                                 program.bind(
                                     &self.device,
                                     projection,
@@ -3334,7 +3358,13 @@ impl Renderer {
                             BlendMode::SubpixelConstantTextColor(color) => {
                                 self.device.set_blend_mode_subpixel_constant_text_color(color);
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                // TODO: bind textures: batch.key.textures
+                                for i in 0 .. batch.key.textures.colors.len() {
+                                    self.texture_resolver.bind(
+                                        &batch.key.textures.colors[i],
+                                        TextureSampler::color(i),
+                                        &mut self.device,
+                                    );
+                                }
                                 program.bind(
                                     &self.device,
                                     projection,
@@ -3350,7 +3380,13 @@ impl Renderer {
                                 //
                                 self.device.set_blend_mode_subpixel_pass0();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                // TODO: bind textures: batch.key.textures
+                                for i in 0 .. batch.key.textures.colors.len() {
+                                    self.texture_resolver.bind(
+                                        &batch.key.textures.colors[i],
+                                        TextureSampler::color(i),
+                                        &mut self.device,
+                                    );
+                                }
                                 program.bind(
                                     &self.device,
                                     projection,
@@ -3382,7 +3418,13 @@ impl Renderer {
                                 //
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass0();
                                 let mut program = self.ps_text_run.get(glyph_format, transform_kind, &mut self.device).unwrap();
-                                // TODO: bind textures: batch.key.textures
+                                for i in 0 .. batch.key.textures.colors.len() {
+                                    self.texture_resolver.bind(
+                                        &batch.key.textures.colors[i],
+                                        TextureSampler::color(i),
+                                        &mut self.device,
+                                    );
+                                }
                                 program.bind(
                                     &self.device,
                                     projection,
@@ -3672,12 +3714,25 @@ impl Renderer {
             // draw image masks
             let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
             program.bind_locals(&self.device.device, projection, 0);
-            for (_mask_texture_id, items) in &target.clip_batcher.images {
-                // TODO: bind textures: textures
-                    program.bind_instances(
-                        &self.device.device,
-                        &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
+            for (mask_texture_id, items) in &target.clip_batcher.images {
+                let textures = BatchTextures {
+                    colors: [
+                        mask_texture_id.clone(),
+                        SourceTexture::Invalid,
+                        SourceTexture::Invalid,
+                    ],
+                };
+                for i in 0 .. textures.colors.len() {
+                    self.texture_resolver.bind(
+                        &textures.colors[i],
+                        TextureSampler::color(i),
+                        &mut self.device,
                     );
+                }
+                program.bind_instances(
+                    &self.device.device,
+                    &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
+                );
                 self.device.draw(&mut program);
             }
         }
@@ -4066,7 +4121,7 @@ impl Renderer {
                             alpha.max_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
-                        );
+                        ).post_scale(1.0, -1.0, 1.0);
 
                         self.draw_alpha_target(
                             (alpha.texture.as_ref().unwrap(), target_index as i32),
