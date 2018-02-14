@@ -46,12 +46,10 @@ pub const TEXTURE_HEIGHT: usize = 8;
 pub const MAX_INSTANCE_COUNT: usize = 1024;
 
 pub type TextureId = u32;
-pub type FBOId = u32;
-pub type RBOId = u32;
 
 pub const INVALID_TEXTURE_ID: TextureId = 0;
-pub const DEFAULT_READ_FBO: FBOId = 0;
-pub const DEFAULT_DRAW_FBO: FBOId = 1;
+pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
+pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::AspectFlags::COLOR,
@@ -316,6 +314,15 @@ impl Drop for PBO {
         );
     }
 }
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct FBOId(u32);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct RBOId(u32);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+struct IBOId(u32);
 
 #[derive(Debug, Copy, Clone)]
 pub enum VertexUsageHint {
@@ -1480,8 +1487,6 @@ pub struct Device<B: hal::Backend, C> {
     //bound_vao: u32,
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
-    default_read_fbo: u32,
-    default_draw_fbo: u32,
 
     device_pixel_ratio: f32,
     upload_method: UploadMethod,
@@ -1748,10 +1753,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             bound_sampler: [TextureFilter::Linear; 16],
             bound_program: 0,
             //bound_vao: 0,
-            bound_read_fbo: 0,
-            bound_draw_fbo: 0,
-            default_read_fbo: DEFAULT_READ_FBO,
-            default_draw_fbo: DEFAULT_DRAW_FBO,
+            bound_read_fbo: DEFAULT_READ_FBO,
+            bound_draw_fbo: DEFAULT_DRAW_FBO,
 
             max_texture_size,
             renderer_name,
@@ -2032,8 +2035,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //self.gl.bind_vertex_array(0);
 
         // FBO state
-        self.bound_read_fbo = self.default_read_fbo;
-        self.bound_draw_fbo = self.default_draw_fbo;
+        self.bound_read_fbo = DEFAULT_READ_FBO;
+        self.bound_draw_fbo = DEFAULT_DRAW_FBO;
 
         // Pixel op state
         //self.gl.pixel_store_i(gl::UNPACK_ALIGNMENT, 1);
@@ -2080,7 +2083,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
-        let fbo_id = texture_and_layer.map_or(self.default_read_fbo, |texture_and_layer| {
+        let fbo_id = texture_and_layer.map_or(DEFAULT_READ_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
 
@@ -2100,7 +2103,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         texture_and_layer: Option<(&Texture, i32)>,
         dimensions: Option<DeviceUintSize>,
     ) {
-        let fbo_id = texture_and_layer.map_or(self.default_draw_fbo, |texture_and_layer| {
+        let fbo_id = texture_and_layer.map_or(DEFAULT_DRAW_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
 
@@ -2134,7 +2137,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         );
         self.bound_draw_fbo.bind(self.gl(), FBOTarget::Draw);
         fbo*/
-        0
+        FBOId(0)
     }
 
     pub fn delete_fbo(&mut self, fbo: FBOId) {
@@ -2170,10 +2173,10 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     fn generate_fbo_ids(&mut self, count: i32) -> Vec<FBOId> {
         let mut rng = rand::thread_rng();
         let mut fboids = vec!();
-        let mut fbo_id = DEFAULT_DRAW_FBO + 1;
+        let mut fbo_id = FBOId(DEFAULT_DRAW_FBO.0 + 1);
         for _ in 0..count {
             while self.fbos.contains_key(&fbo_id) || fboids.contains(&fbo_id) {
-                fbo_id = rng.gen_range::<u32>(DEFAULT_DRAW_FBO + 1, u32::max_value());
+                fbo_id = FBOId(rng.gen_range::<u32>(DEFAULT_DRAW_FBO.0 + 1, u32::max_value()));
             }
             fboids.push(fbo_id);
         }
@@ -2182,9 +2185,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     fn generate_rbo_id(&mut self) -> RBOId {
         let mut rng = rand::thread_rng();
-        let mut rbo_id = 1; // 0 is used for invalid
+        let mut rbo_id = RBOId(1); // 0 is used for invalid
         while self.rbos.contains_key(&rbo_id) {
-            rbo_id = rng.gen_range::<u32>(1, u32::max_value());
+            rbo_id = RBOId(rng.gen_range::<u32>(1, u32::max_value()));
         }
         rbo_id
     }
