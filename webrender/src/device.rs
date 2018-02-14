@@ -1221,7 +1221,7 @@ impl<B: hal::Backend> Program<B> {
                 array_offset: 0,
                 write: hal::pso::DescriptorWrite::SampledImage(vec![
                     (
-                        &device.images.get(id).unwrap().image_view,
+                        &device.images[id].image_view,
                         hal::image::ImageLayout::Undefined,
                     ),
                 ])
@@ -1946,7 +1946,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //enable_depth_write: bool
     ) {
         let ref fb = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            &self.fbos.get(&self.bound_draw_fbo).unwrap().fbo
+            &self.fbos[&self.bound_draw_fbo].fbo
         } else {
             &self.framebuffers[self.current_frame_id]
         };
@@ -2402,8 +2402,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
         debug_assert!(self.inside_frame);
         let (src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
-            let fbo = self.fbos.get(&self.bound_read_fbo).unwrap();
-            let img = self.images.get(&fbo.texture).unwrap();
+            let fbo = &self.fbos[&self.bound_read_fbo];
+            let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
             (&img.image, layer)
         } else {
@@ -2411,8 +2411,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         };
 
         let (dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            let fbo = self.fbos.get(&self.bound_draw_fbo).unwrap();
-            let img = self.images.get(&fbo.texture).unwrap();
+            let fbo = &self.fbos[&self.bound_draw_fbo];
+            let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
             (&img.image, layer)
         } else {
@@ -2819,8 +2819,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
 
         let (img, layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            let fbo = self.fbos.get(&self.bound_draw_fbo).unwrap();
-            let img = self.images.get(&fbo.texture).unwrap();
+            let fbo = &self.fbos[&self.bound_draw_fbo];
+            let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
             (&img.image, layer)
         } else {
