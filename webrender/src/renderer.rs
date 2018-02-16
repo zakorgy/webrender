@@ -3128,7 +3128,7 @@ impl Renderer {
 
         // sanity check for the depth buffer
         if let Some((texture, _)) = render_target {
-            //assert!(texture.has_depth() >= target.needs_depth());
+            assert!(texture.has_depth() >= target.needs_depth());
         }
 
         {

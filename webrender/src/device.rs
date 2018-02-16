@@ -30,7 +30,7 @@ use winit;
 
 // gfx-hal
 use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
-use hal::pso::{BlendState, BlendOp, Factor};
+use hal::pso::{BlendState, BlendOp, Comparison, DepthTest, Factor};
 use hal::{Device as BackendDevice, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
 use hal::{Backbuffer, DescriptorPool, FrameSync, Gpu, Primitive, SwapchainConfig};
 use hal::format::{ChannelType, Format, Swizzle};
@@ -470,6 +470,16 @@ const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
         src: Factor::One,
         dst: Factor::OneMinusSrc1Color,
     },
+};
+
+const LESS_EQUAL_TEST: DepthTest = DepthTest::On {
+    fun: Comparison::LessEqual,
+    write: false,
+};
+
+const LESS_EQUAL_WRITE: DepthTest = DepthTest::On {
+    fun: Comparison::LessEqual,
+    write: true,
 };
 
 pub struct ImageBuffer<B: hal::Backend> {
@@ -964,7 +974,7 @@ pub struct Program<B: hal::Backend> {
     pub descriptor_pool: B::DescriptorPool,
     pub descriptor_sets: Vec<B::DescriptorSet>,
     pub pipeline_layout: B::PipelineLayout,
-    pub pipelines: HashMap<BlendState, B::GraphicsPipeline>,
+    pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
     pub instance_buffer: InstanceBuffer<B>,
     pub locals_buffer: Buffer<B>,
@@ -978,7 +988,7 @@ impl<B: hal::Backend> Program<B> {
         memory_types: &[hal::MemoryType],
         shader_name: &str,
         shader_kind: &ShaderKind,
-        render_pass: &B::RenderPass,
+        render_pass: &(B::RenderPass, B::RenderPass),
     ) -> Program<B> {
         #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
         let vs_module = device
@@ -1023,53 +1033,90 @@ impl<B: hal::Backend> Program<B> {
 
             let subpass = Subpass {
                 index: 0,
-                main_pass: render_pass,
+                main_pass: &render_pass.0,
             };
 
-            let blend_states = match *shader_kind {
-                ShaderKind::Brush if shader_name.starts_with("brush_mask") => vec![BlendState::Off],
-                ShaderKind::Cache(VertexArrayKind::Blur) => vec![BlendState::Off],
-                ShaderKind::Cache(VertexArrayKind::Primitive) => vec![BlendState::PREMULTIPLIED_ALPHA],
+            let subpass_depth = Subpass {
+                index: 0,
+                main_pass: &render_pass.1,
+            };
+
+            let pipeline_states = match *shader_kind {
+                ShaderKind::Brush if shader_name.starts_with("brush_mask") => vec![(BlendState::Off, DepthTest::Off)],
+                ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
+                ShaderKind::Cache(VertexArrayKind::Primitive) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
                 ShaderKind::ClipCache => {
                     if shader_name.starts_with("cs_clip_border") {
-                        vec![BlendState::Off, MAX]
+                        vec![
+                            (BlendState::Off, DepthTest::Off),
+                            (MAX, DepthTest::Off)
+                        ]
                     } else {
-                        vec![BlendState::MULTIPLY]
+                        vec![(BlendState::MULTIPLY, DepthTest::Off)]
                     }
                 },
                 ShaderKind::Text => vec![
-                    BlendState::PREMULTIPLIED_ALPHA,
-                    SUBPIXEL_DUAL_SOURCE,
-                    SUBPIXEL_CONSTANT_TEXT_COLOR,
-                    SUBPIXEL_PASS0,
-                    SUBPIXEL_PASS1,
-                    SUBPIXEL_WITH_BG_COLOR_PASS0,
-                    SUBPIXEL_WITH_BG_COLOR_PASS1,
-                    SUBPIXEL_WITH_BG_COLOR_PASS2,
+                    (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                    (SUBPIXEL_DUAL_SOURCE, DepthTest::Off),
+                    (SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST),
+                    (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
+                    (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
+                    (SUBPIXEL_PASS0, DepthTest::Off),
+                    (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
+                    (SUBPIXEL_PASS1, DepthTest::Off),
+                    (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
                 ],
                 _ => vec![
-                    BlendState::Off,
-                    ALPHA,
-                    BlendState::PREMULTIPLIED_ALPHA,
-                    PREMULTIPLIED_DEST_OUT,
+                        (BlendState::Off, DepthTest::Off),
+                        (BlendState::Off, LESS_EQUAL_TEST),
+                        (BlendState::Off, LESS_EQUAL_WRITE),
+                        (ALPHA, DepthTest::Off),
+                        (ALPHA, LESS_EQUAL_TEST),
+                        (ALPHA, LESS_EQUAL_WRITE),
+                        (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                        (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                        (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_WRITE),
+                        (PREMULTIPLIED_DEST_OUT, DepthTest::Off),
+                        (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_TEST),
+                        (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
                 ],
             };
 
-            let pipelines_descriptors = blend_states.iter().map(|blend_state| {
+            let pipelines_descriptors = pipeline_states.iter().map(|&(blend_state, depth_test)| {
+                let sp = if depth_test == DepthTest::Off {
+                    subpass
+                } else {
+                    subpass_depth
+                };
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
                     shader_entries.clone(),
                     Primitive::TriangleList,
                     hal::pso::Rasterizer::FILL,
                     &pipeline_layout,
-                    subpass,
+                    sp,
                 );
                 pipeline_descriptor
                     .blender
                     .targets
                     .push(hal::pso::ColorBlendDesc(
                         hal::pso::ColorMask::ALL,
-                        *blend_state,
+                        blend_state,
                     ));
+
+                pipeline_descriptor.depth_stencil = Some(
+                    hal::pso::DepthStencilDesc {
+                        depth: depth_test,
+                        depth_bounds: false,
+                        stencil: hal::pso::StencilTest::Off,
+                    }
+                );
 
                 pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors.clone();
                 pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors.clone();
@@ -1081,10 +1128,10 @@ impl<B: hal::Backend> Program<B> {
                 .create_graphics_pipelines(pipelines_descriptors.as_slice())
                 .into_iter();
 
-            blend_states.iter()
+            pipeline_states.iter()
                 .cloned()
                 .zip(pipelines.map(|pipeline| pipeline.unwrap()))
-                .collect::<HashMap<BlendState, B::GraphicsPipeline>>()
+                .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
         };
 
         device.destroy_shader_module(vs_module);
@@ -1339,18 +1386,19 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         viewport: hal::command::Viewport,
-        render_pass: &B::RenderPass,
+        render_pass: &(B::RenderPass, B::RenderPass),
         frame_buffer: &B::Framebuffer,
         clear_values: &[hal::command::ClearValue],
-        blend_state: &BlendState,
+        blend_state: BlendState,
         blend_color: ColorF,
+        depth_test: DepthTest,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         cmd_buffer.set_viewports(&[viewport.clone()]);
         cmd_buffer.set_scissors(&[viewport.rect]);
         cmd_buffer.bind_graphics_pipeline(
-            &self.pipelines.get(blend_state).expect(&format!("The blend state {:?} not found for {} program!", blend_state, self.shader_name)));
+            &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
         cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![
             (&self.vertex_buffer.buffer, 0),
             (&self.instance_buffer.buffer.buffer, 0),
@@ -1361,13 +1409,18 @@ impl<B: hal::Backend> Program<B> {
             &self.descriptor_sets[0 .. 1],
         );
 
-        if *blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
+        if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
             cmd_buffer.set_blend_constants(blend_color.to_array());
         }
 
         {
+            let rp = if depth_test == DepthTest::Off {
+                &render_pass.0
+            } else {
+                &render_pass.1
+            };
             let mut encoder = cmd_buffer.begin_renderpass_inline(
-                render_pass,
+                rp,
                 frame_buffer,
                 viewport.rect,
                 clear_values,
@@ -1396,10 +1449,11 @@ pub struct Framebuffer<B: hal::Backend> {
     pub layer_index: u16,
     pub image_view: B::ImageView,
     pub fbo: B::Framebuffer,
+    pub rbo: RBOId,
 }
 
 impl<B: hal::Backend> Framebuffer<B> {
-    pub fn new(device: &B::Device, texture: &Texture, image: &Image<B>, layer_index: u16, render_pass: &B::RenderPass) -> Self {
+    pub fn new(device: &B::Device, texture: &Texture, image: &Image<B>, layer_index: u16, render_pass: &(B::RenderPass, B::RenderPass), rbo: RBOId, depth: Option<&B::ImageView>) -> Self {
         let extent = hal::device::Extent {
             width: texture.width as _,
             height: texture.height as _,
@@ -1423,14 +1477,22 @@ impl<B: hal::Backend> Framebuffer<B> {
                 },
             )
             .unwrap();
-        let fbo = device
-            .create_framebuffer(render_pass, &[&image_view], extent)
-            .unwrap();
+        let fbo = if rbo != RBOId(0) {
+            device
+                .create_framebuffer(&render_pass.1, &[&image_view, depth.unwrap()], extent)
+                .unwrap()
+        } else {
+            device
+                .create_framebuffer(&render_pass.0, &[&image_view], extent)
+                .unwrap()
+        };
+
         Framebuffer {
             texture: texture.id,
             layer_index,
             image_view,
             fbo,
+            rbo,
         }
     }
 
@@ -1440,6 +1502,42 @@ impl<B: hal::Backend> Framebuffer<B> {
     }
 }
 
+fn create_depth<B: hal::Backend>(device: &B::Device, memory_types: &[hal::MemoryType], pixel_width: u16, pixel_height: u16, depth_format: hal::format::Format) -> (B::Image, B::ImageView, B::Memory) {
+    let depth_image = device.create_image(
+        hal::image::Kind::D2(pixel_width, pixel_height, hal::image::AaMode::Single),
+        1,
+        depth_format,
+        hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
+    ).unwrap();
+
+    let depth_mem_reqs = device.get_image_requirements(&depth_image);
+
+    let mem_type = memory_types
+        .iter()
+        .enumerate()
+        .position(|(id, mem_type)| {
+            depth_mem_reqs.type_mask & (1 << id) != 0 &&
+                mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
+        })
+        .unwrap()
+        .into();
+
+    let depth_memory = device.allocate_memory(mem_type, depth_mem_reqs.size).unwrap();
+    let depth_image = device.bind_image_memory(&depth_memory, 0, depth_image).unwrap();
+
+    let depth_view = device.create_image_view(
+        &depth_image,
+        depth_format,
+        hal::format::Swizzle::NO,
+        hal::image::SubresourceRange {
+            aspects: hal::format::AspectFlags::DEPTH,
+            levels: 0 .. 1,
+            layers: 0 .. 1,
+        },
+    ).unwrap();
+    (depth_image, depth_view, depth_memory)
+}
+
 pub struct Device<B: hal::Backend, C> {
     pub device: B::Device,
     pub memory_types: Vec<hal::MemoryType>,
@@ -1447,12 +1545,14 @@ pub struct Device<B: hal::Backend, C> {
     pub download_memory_type: hal::MemoryTypeId,
     pub limits: hal::Limits,
     pub surface_format: Format,
+    pub depth_format: Format,
     pub queue_group: hal::QueueGroup<B, C>,
     pub command_pool: hal::CommandPool<B, C>,
     pub swap_chain: Box<B::Swapchain>,
-    pub render_pass: B::RenderPass,
+    pub render_pass: (B::RenderPass, B::RenderPass),
     pub framebuffers: Vec<B::Framebuffer>,
     pub frame_images: Vec<(B::Image, B::ImageView)>,
+    pub frame_depth: (B::Image, B::ImageView, B::Memory),
     pub viewport: hal::command::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -1465,10 +1565,11 @@ pub struct Device<B: hal::Backend, C> {
     pub current_frame_id: usize,
     current_blend_state: BlendState,
     blend_color: ColorF,
+    current_depth_test: DepthTest,
     // device state
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
-    rbos: FastHashMap<RBOId, B::Image>,
+    rbos: FastHashMap<RBOId, (B::Image, B::ImageView, B::Memory)>,
     bound_textures: [u32; 16],
     bound_sampler: [TextureFilter; 16],
     bound_program: u32,
@@ -1577,6 +1678,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let swap_config = SwapchainConfig::new().with_color(surface_format);
         let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
         println!("backbuffer={:?}", backbuffer);
+        let depth_format = hal::format::Format::D32Float; //maybe d24s8?
 
         let render_pass = {
             let attachment = hal::pass::Attachment {
@@ -1589,9 +1691,26 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::Present,
             };
 
+            let attachment_depth = hal::pass::Attachment {
+                format: Some(depth_format),
+                ops: hal::pass::AttachmentOps::new(
+                    hal::pass::AttachmentLoadOp::Load,
+                    hal::pass::AttachmentStoreOp::Store,
+                ),
+                stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+                layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::DepthStencilAttachmentOptimal,
+            };
+
             let subpass = hal::pass::SubpassDesc {
                 colors: &[(0, hal::image::ImageLayout::ColorAttachmentOptimal)],
                 depth_stencil: None,
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let subpass_depth = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::ImageLayout::ColorAttachmentOptimal)],
+                depth_stencil: Some(&(1, hal::image::ImageLayout::DepthStencilAttachmentOptimal)),
                 inputs: &[],
                 preserves: &[],
             };
@@ -1605,8 +1724,14 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     | hal::image::Access::COLOR_ATTACHMENT_WRITE),
             };
 
-            device.create_render_pass(&[attachment], &[subpass], &[dependency])
+            (
+                device.create_render_pass(&[attachment.clone()], &[subpass], &[/*dependency.clone()*/]),
+                device.create_render_pass(&[attachment, attachment_depth], &[subpass_depth], &[/*dependency*/])
+            )
         };
+
+        // TODO refactor this
+        let (depth_image, depth_view, depth_memory) = create_depth::<B>(&device, &memory_types, pixel_width, pixel_height, depth_format);
 
         // Framebuffer and render target creation
         let (frame_images, framebuffers) = match backbuffer {
@@ -1634,7 +1759,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     .iter()
                     .map(|&(_, ref rtv)| {
                         device
-                            .create_framebuffer(&render_pass, &[rtv], extent)
+                            .create_framebuffer(&render_pass.1, &[rtv, &depth_view], extent)
                             .unwrap()
                     })
                     .collect();
@@ -1705,12 +1830,14 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             upload_memory_type,
             download_memory_type,
             surface_format,
+            depth_format,
             queue_group,
             command_pool,
             swap_chain: Box::new(swap_chain),
             render_pass,
             framebuffers,
             frame_images,
+            frame_depth: (depth_image, depth_view, depth_memory),
             viewport,
             sampler_linear,
             sampler_nearest,
@@ -1722,6 +1849,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             upload_queue: Vec::new(),
             current_frame_id: 0,
             current_blend_state: BlendState::Off,
+            current_depth_test: DepthTest::Off,
             blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
@@ -1956,8 +2084,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             &self.render_pass,
             &fb,
             &vec![],
-            &self.current_blend_state,
-            self.blend_color
+            self.current_blend_state,
+            self.blend_color,
+            self.current_depth_test,
         );
 
         self.upload_queue.push(submit);
@@ -2180,38 +2309,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         rbo_id
     }
 
-    fn update_image(
-        &mut self,
-        texture: &mut Texture,
-    ) {
-        if texture.id == 0 {
-            let id = self.generate_texture_id();
-            texture.id = id;
-        } else {
-            self.free_image(texture);
-        }
-        assert_eq!(self.images.contains_key(&texture.id), false);
-        let img = Image::new(
-            &self.device,
-            &self.memory_types,
-            texture.format,
-            texture.width,
-            texture.height,
-            texture.layer_count
-        );
-
-        assert_eq!(texture.fbo_ids.len(), 0);
-        let new_fbos = self.generate_fbo_ids(texture.layer_count);
-
-        for i in 0..texture.layer_count as u16 {
-            let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass);
-            self.fbos.insert(new_fbos[i as usize],fbo);
-            texture.fbo_ids.push(new_fbos[i as usize]);
-        }
-
-        self.images.insert(texture.id, img);
-    }
-
     pub fn create_texture(
         &mut self, format: ImageFormat,
     ) -> Texture {
@@ -2247,7 +2344,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     /// Resizes a texture with enabled render target views,
     /// preserves the data by blitting the old texture contents over.
-    pub fn resize_renderable_texture(
+    /*pub fn resize_renderable_texture(
         &mut self,
         texture: &mut Texture,
         new_size: DeviceUintSize,
@@ -2277,7 +2374,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
         //self.gl.delete_textures(&[old_texture_id]);
         self.bind_read_target(None);
-    }
+    }*/
 
     pub fn init_texture(
         &mut self,
@@ -2302,14 +2399,76 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.bind_texture(DEFAULT_TEXTURE, texture);
         self.set_texture_parameters(/*texture.target,*/ filter);
 
-        match render_target {
-            Some(info) => {
-                self.update_target_storage(texture, &info, is_resized);
+        let rt_info = render_target.unwrap_or(RenderTargetInfo { has_depth: false});
+
+        if texture.id == 0 {
+            let id = self.generate_texture_id();
+            texture.id = id;
+        } else {
+            self.free_image(texture);
+        }
+        assert_eq!(self.images.contains_key(&texture.id), false);
+        let img = Image::new(
+            &self.device,
+            &self.memory_types,
+            texture.format,
+            texture.width,
+            texture.height,
+            texture.layer_count
+        );
+
+        assert_eq!(texture.fbo_ids.len(), 0);
+
+        let (mut depth_rb, allocate_depth) = match texture.depth_rb {
+            Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
+            None if rt_info.has_depth => {
+                let depth_rb = self.generate_rbo_id();
+                texture.depth_rb = Some(depth_rb);
+                (depth_rb, true)
+            },
+            None => (RBOId(0), false),
+        };
+
+        if allocate_depth {
+            if self.rbos.contains_key(&depth_rb) {
+                let old_rbo = self.rbos.remove(&depth_rb).unwrap();
+                self.device.destroy_image(old_rbo.0);
+                self.device.destroy_image_view(old_rbo.1);
+                self.device.free_memory(old_rbo.2);
             }
-            None => {
-                self.update_image(texture);
+            if rt_info.has_depth {
+                let rbo = create_depth::<B>(
+                    &self.device,
+                    &self.memory_types,
+                    texture.width as u16,
+                    texture.height as u16,
+                    self.depth_format
+                );
+                self.rbos.insert(depth_rb, rbo);
+            } else {
+                //let old_rbo = self.rbos.remove(&depth_rb).unwrap();
+                //self.device.destroy_image(old_rbo.0);
+                //self.device.destroy_image_view(old_rbo.1);
+                //self.device.free_memory(old_rbo.2);
+                depth_rb = RBOId(0);
+                texture.depth_rb = None;
             }
         }
+
+        let new_fbos = self.generate_fbo_ids(texture.layer_count);
+
+        for i in 0..texture.layer_count as u16 {
+            let (rbo_id, depth) = match texture.depth_rb {
+                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].1)),
+                None => (RBOId(0), None)
+            };
+            let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(),depth);
+            self.fbos.insert(new_fbos[i as usize],fbo);
+            texture.fbo_ids.push(new_fbos[i as usize]);
+        }
+
+        self.images.insert(texture.id, img);
+
 
         if let Some(data) = pixels {
             self.upload_queue
@@ -2332,7 +2491,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     /// Updates the render target storage for the texture, creating FBOs as required.
-    fn update_target_storage(
+    /*fn update_target_storage(
         &mut self,
         texture: &mut Texture,
         rt_info: &RenderTargetInfo,
@@ -2342,62 +2501,56 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         let allocate_color = texture.layer_count != texture.fbo_ids.len() as i32 || is_resized;
 
-        if allocate_color {
-            self.update_image(texture);
-        }
-
-        if rt_info.has_depth {
-            println!("TODO update_target_storage depth");
-        }
-        /*let (mut depth_rb, allocate_depth) = match texture.depth_rb {
+        let (mut depth_rb, allocate_depth) = match texture.depth_rb {
             Some(rbo) => (rbo.0, is_resized || !rt_info.has_depth),
             None if rt_info.has_depth => {
-                let renderbuffer_ids = self.gl.gen_renderbuffers(1);
-                let depth_rb = renderbuffer_ids[0];
-                texture.depth_rb = Some(RBOId(depth_rb));
-                (depth_rb, true)
+                let depth_rb = self.generate_rbo_id();
+                texture.depth_rb = Some(depth_rb);
+                (depth_rb.0, true)
             },
             None => (0, false),
         };
 
         if allocate_depth {
             if rt_info.has_depth {
-                self.gl.bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
+                /*self.gl.bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
                 self.gl.renderbuffer_storage(
                     gl::RENDERBUFFER,
                     gl::DEPTH_COMPONENT24,
                     texture.width as _,
                     texture.height as _,
-                );
+                );*/
+                println!("TODO update_target_storage depth");
             } else {
-                self.gl.delete_renderbuffers(&[depth_rb]);
+                //self.gl.delete_renderbuffers(&[depth_rb]);
                 depth_rb = 0;
                 texture.depth_rb = None;
             }
-        }*/
+        }
 
-        /*if allocate_color || allocate_depth {
-            let original_bound_fbo = self.bound_draw_fbo;
+        if allocate_color || allocate_depth {
+            //let original_bound_fbo = self.bound_draw_fbo;
             for (fbo_index, &fbo_id) in texture.fbo_ids.iter().enumerate() {
-                self.bind_external_draw_target(fbo_id);
-                self.gl.framebuffer_texture_layer(
+                //self.bind_external_draw_target(fbo_id);
+                /*self.gl.framebuffer_texture_layer(
                     gl::DRAW_FRAMEBUFFER,
                     gl::COLOR_ATTACHMENT0,
                     texture.id,
                     0,
                     fbo_index as _,
-                );
+                );*/
 
-                self.gl.framebuffer_renderbuffer(
+                /*self.gl.framebuffer_renderbuffer(
                     gl::DRAW_FRAMEBUFFER,
                     gl::DEPTH_ATTACHMENT,
                     gl::RENDERBUFFER,
                     depth_rb,
-                );
+                );*/
+                self.fbos.get_mut(&fbo_id).unwrap().rbo = RBOId(depth_rb);
             }
-            self.bind_external_draw_target(original_bound_fbo);
-        }*/
-    }
+            //self.bind_external_draw_target(original_bound_fbo);
+        }
+    }*/
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
         debug_assert!(self.inside_frame);
@@ -2818,13 +2971,18 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ]);
         }
 
-        let (img, layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture];
+            let dimg = if depth.is_some() {
+                Some(&self.rbos[&fbo.rbo].0)
+            } else {
+                None
+            };
             let layer = fbo.layer_index;
-            (&img.image, layer)
+            (&img.image, layer, dimg)
         } else {
-            (&self.frame_images[self.current_frame_id].0, 0)
+            (&self.frame_images[self.current_frame_id].0, 0, Some(&self.frame_depth.0))
         };
 
         if let Some(color) = color {
@@ -2840,10 +2998,10 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             );
         }
 
-        // TODO enable it when the crash is resolved
-        /*if let Some(depth) = depth {
+        if let Some(depth) = depth {
+            assert_ne!(self.current_depth_test, DepthTest::Off);
             cmd_buffer.clear_depth_stencil_image(
-                &self.frame_images[self.current_frame_id].0,
+                dimg.unwrap(),
                 hal::image::ImageLayout::DepthStencilAttachmentOptimal,
                 hal::image::SubresourceRange {
                             aspects: hal::format::AspectFlags::DEPTH,
@@ -2852,28 +3010,29 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         },
                 hal::command::ClearDepthStencil(depth, 0)
             );
-        }*/
+        }
         self.upload_queue.push(cmd_buffer.finish());
     }
 
-    pub fn enable_depth(&self) {
-        //self.gl.enable(gl::DEPTH_TEST);
+    pub fn enable_depth(&mut self) {
+        self.current_depth_test = LESS_EQUAL_TEST;
     }
 
-    pub fn disable_depth(&self) {
-        //self.gl.disable(gl::DEPTH_TEST);
+    pub fn disable_depth(&mut self) {
+        self.current_depth_test = DepthTest::Off;
     }
 
-    pub fn set_depth_func(&self, depth_func: DepthFunction) {
-        //self.gl.depth_func(depth_func as u32);
+    pub fn set_depth_func(&self, _depth_func: DepthFunction) {
     }
 
-    pub fn enable_depth_write(&self) {
-        //self.gl.depth_mask(true);
+    pub fn enable_depth_write(&mut self) {
+        self.current_depth_test = LESS_EQUAL_WRITE;
     }
 
-    pub fn disable_depth_write(&self) {
-        //self.gl.depth_mask(false);
+    pub fn disable_depth_write(&mut self) {
+        if self.current_depth_test != DepthTest::Off {
+            self.current_depth_test = LESS_EQUAL_TEST;
+        }
     }
 
     pub fn disable_stencil(&self) {
@@ -2975,7 +3134,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
         self.device
             .destroy_command_pool(self.command_pool.downgrade());
-        self.device.destroy_renderpass(self.render_pass);
+        self.device.destroy_renderpass(self.render_pass.0);
+        self.device.destroy_renderpass(self.render_pass.1);
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
         }
