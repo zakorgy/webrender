@@ -980,6 +980,7 @@ impl<B: hal::Backend> Program<B> {
         shader_name: &str,
         shader_kind: &ShaderKind,
         render_pass: &B::RenderPass,
+        render_pass_a8: &B::RenderPass,
     ) -> Program<B> {
         #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
         let vs_module = device
@@ -1022,10 +1023,6 @@ impl<B: hal::Backend> Program<B> {
                 fragment: Some(fs_entry),
             };
 
-            let subpass = Subpass {
-                index: 0,
-                main_pass: render_pass,
-            };
 
             let blend_states = match *shader_kind {
                 ShaderKind::Brush if shader_name.starts_with("brush_mask") => vec![BlendState::Off],
@@ -1054,6 +1051,22 @@ impl<B: hal::Backend> Program<B> {
                     BlendState::PREMULTIPLIED_ALPHA,
                     PREMULTIPLIED_DEST_OUT,
                 ],
+            };
+
+            let main_pass = {
+                if shader_name.starts_with("cs_blur_a8") |
+                    shader_name.starts_with("brush_mask") |
+                    shader_name.starts_with("brush_picture_a8") |
+                    shader_name.starts_with("cs_clip") {
+                    render_pass_a8
+                } else {
+                    render_pass
+                }
+            };
+
+            let subpass = Subpass {
+                index: 0,
+                main_pass: main_pass,
             };
 
             let pipelines_descriptors = blend_states.iter().map(|blend_state| {
@@ -1409,9 +1422,16 @@ pub struct Framebuffer<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> Framebuffer<B> {
-    pub fn new(device: &B::Device, texture: &Texture, image: &Image<B>, layer_index: u16, render_pass: &B::RenderPass) -> Self {
-        println!("FRAMEBUFFER::NEW texture={:?}, layer_index={:?}, render_pass={:?}",
-                  texture, layer_index, render_pass);
+    pub fn new(
+        device: &B::Device,
+        texture: &Texture,
+        image: &Image<B>,
+        layer_index: u16,
+        render_pass_rgba8: &B::RenderPass,
+        render_pass_a8: &B::RenderPass,
+    ) -> Self {
+        println!("FRAMEBUFFER::NEW\n\ttexture={:?},\n\tlayer_index={:?},\n\trender_pass_rgba8={:?},\n\trender_pass_a8={:?}",
+                  texture, layer_index, render_pass_rgba8,render_pass_a8);
         let extent = hal::device::Extent {
             width: texture.width as _,
             height: texture.height as _,
@@ -1435,6 +1455,14 @@ impl<B: hal::Backend> Framebuffer<B> {
                 },
             )
             .unwrap();
+
+        let render_pass = match texture.format {
+            ImageFormat::R8 => render_pass_a8,
+            ImageFormat::BGRA8 => render_pass_rgba8,
+            ImageFormat::RG8 => unimplemented!("TODO add render pass to RG8 surface format"),
+            ImageFormat::RGBAF32 => unreachable!(),
+        };
+
         let fbo = device
             .create_framebuffer(render_pass, Some(&image_view), extent)
             .unwrap();
@@ -1464,6 +1492,7 @@ pub struct Device<B: hal::Backend, C> {
     pub command_pool: hal::CommandPool<B, C>,
     pub swap_chain: Box<B::Swapchain>,
     pub render_pass: B::RenderPass,
+    pub render_pass_a8: B::RenderPass,
     pub framebuffers: Vec<B::Framebuffer>,
     pub frame_images: Vec<(B::Image, B::ImageView)>,
     pub viewport: hal::command::Viewport,
@@ -1617,7 +1646,35 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     .. (hal::image::Access::COLOR_ATTACHMENT_READ
                     | hal::image::Access::COLOR_ATTACHMENT_WRITE),
             };
+            device.create_render_pass(&[attachment], &[subpass], &[dependency])
+        };
 
+        let render_pass_a8 = {
+            let attachment = hal::pass::Attachment {
+                format: Some(hal::format::Format::R8Unorm),
+                ops: hal::pass::AttachmentOps::new(
+                    hal::pass::AttachmentLoadOp::Load,
+                    hal::pass::AttachmentStoreOp::Store,
+                ),
+                stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+                layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::Present,
+            };
+
+            let subpass = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::ImageLayout::ColorAttachmentOptimal)],
+                depth_stencil: None,
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let dependency = hal::pass::SubpassDependency {
+                passes: hal::pass::SubpassRef::External .. hal::pass::SubpassRef::Pass(0),
+                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                    .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                accesses: hal::image::Access::empty()
+                    .. (hal::image::Access::COLOR_ATTACHMENT_READ
+                    | hal::image::Access::COLOR_ATTACHMENT_WRITE),
+            };
             device.create_render_pass(&[attachment], &[subpass], &[dependency])
         };
 
@@ -1722,6 +1779,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             command_pool,
             swap_chain: Box::new(swap_chain),
             render_pass,
+            render_pass_a8,
             framebuffers,
             frame_images,
             viewport,
@@ -1819,6 +1877,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             shader_name,
             shader_kind,
             &self.render_pass,
+            &self.render_pass_a8,
         );
         program.init_vertex_data(
             &self.device,
@@ -1959,17 +2018,26 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //enable_depth_write: bool
     ) {
         print!("DRAW");
-        let ref fb = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (ref fb, ref render_pass) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             println!(" with no default fbo");
-            &self.fbos[&self.bound_draw_fbo].fbo
+            let texture_id = &self.fbos[&self.bound_draw_fbo].texture;
+            let image = &self.images[texture_id];
+            let render_pass = match image.image_format {
+                ImageFormat::R8 => &self.render_pass_a8,
+                ImageFormat::BGRA8 => &self.render_pass,
+                ImageFormat::RG8 => unimplemented!("TODO add render pass to RG8 surface format"),
+                ImageFormat::RGBAF32 => unreachable!(),
+            };
+
+            (&self.fbos[&self.bound_draw_fbo].fbo, render_pass)
         } else {
             println!(" with default fbo");
-            &self.framebuffers[self.current_frame_id]
+            (&self.framebuffers[self.current_frame_id], &self.render_pass)
         };
         let submit = program.submit(
             &mut self.command_pool,
             self.viewport.clone(),
-            &self.render_pass,
+            render_pass,
             &fb,
             &vec![],
             &self.current_blend_state,
@@ -2229,7 +2297,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let new_fbos = self.generate_fbo_ids(texture.layer_count);
 
         for i in 0..texture.layer_count as u16 {
-            let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass);
+            let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, &self.render_pass_a8);
             self.fbos.insert(new_fbos[i as usize],fbo);
             texture.fbo_ids.push(new_fbos[i as usize]);
         }
@@ -3009,6 +3077,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.device
             .destroy_command_pool(self.command_pool.downgrade());
         self.device.destroy_render_pass(self.render_pass);
+        self.device.destroy_render_pass(self.render_pass_a8);
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
         }
