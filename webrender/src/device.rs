@@ -963,7 +963,7 @@ pub struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, usize>,
     pub descriptor_set_layout: B::DescriptorSetLayout,
     pub descriptor_pool: B::DescriptorPool,
-    pub descriptor_sets: Vec<B::DescriptorSet>,
+    pub descriptor_set: B::DescriptorSet,
     pub pipeline_layout: B::PipelineLayout,
     pub pipelines: HashMap<BlendState, B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
@@ -996,9 +996,9 @@ impl<B: hal::Backend> Program<B> {
                 1, //The number of descriptor sets
                 pipeline_requirements.descriptor_range_descriptors.as_slice(),
             );
-        let descriptor_sets = descriptor_pool.allocate_sets(&[&descriptor_set_layout]);
+        let descriptor_set = descriptor_pool.allocate_set(&descriptor_set_layout);
 
-        let pipeline_layout = device.create_pipeline_layout(&[&descriptor_set_layout], &[]);
+        let pipeline_layout = device.create_pipeline_layout(Some(&descriptor_set_layout), &[]);
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -1135,12 +1135,12 @@ impl<B: hal::Backend> Program<B> {
         );
 
         let bindings_map = pipeline_requirements.bindings_map;
-        device.update_descriptor_sets(&[
+        device.write_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
-                set: &descriptor_sets[0],
+                set: &descriptor_set,
                 binding: bindings_map["Locals"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::UniformBuffer(vec![
+                write: hal::pso::DescriptorWrite::UniformBuffer(&vec![
                     (&locals_buffer.buffer, 0 .. mem::size_of::<Locals>() as u64),
                 ]),
             },
@@ -1150,7 +1150,7 @@ impl<B: hal::Backend> Program<B> {
             bindings_map,
             descriptor_set_layout,
             descriptor_pool,
-            descriptor_sets,
+            descriptor_set,
             pipeline_layout,
             pipelines,
             vertex_buffer,
@@ -1217,12 +1217,12 @@ impl<B: hal::Backend> Program<B> {
             &TextureFilter::Linear => &device.sampler_linear,
             &TextureFilter::Nearest=> &device.sampler_nearest,
         };
-        device.device.update_descriptor_sets::<Range<_>>(&[
+        device.device.write_descriptor_sets::<_, Range<_>>(&[
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map[&("t".to_owned() + binding)],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(vec![
+                write: hal::pso::DescriptorWrite::SampledImage(&vec![
                     (
                         &device.images[id].image_view,
                         hal::image::ImageLayout::Undefined,
@@ -1230,10 +1230,10 @@ impl<B: hal::Backend> Program<B> {
                 ])
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map[&("s".to_owned() + binding)],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(vec![sampler]),
+                write: hal::pso::DescriptorWrite::Sampler(&vec![sampler]),
             },
         ]);
     }
@@ -1264,51 +1264,51 @@ impl<B: hal::Backend> Program<B> {
         local_clip_rects: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
         local_clip_rects_sampler: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
     ) {
-        device.update_descriptor_sets(&[
+        device.write_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["tResourceCache"],
                 array_offset: 0,
                 write: resource_cache,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["sResourceCache"],
                 array_offset: 0,
                 write: resource_cache_sampler,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["tClipScrollNodes"],
                 array_offset: 0,
                 write: node_data,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["sClipScrollNodes"],
                 array_offset: 0,
                 write: node_data_sampler,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["tRenderTasks"],
                 array_offset: 0,
                 write: render_tasks,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["sRenderTasks"],
                 array_offset: 0,
                 write: render_tasks_sampler,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["tLocalClipRects"],
                 array_offset: 0,
                 write: local_clip_rects,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["sLocalClipRects"],
                 array_offset: 0,
                 write: local_clip_rects_sampler,
@@ -1322,15 +1322,15 @@ impl<B: hal::Backend> Program<B> {
         dither: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
         dither_sampler: hal::pso::DescriptorWrite<'a, B, (Option<u64>, Option<u64>)>,
     ) {
-        device.update_descriptor_sets(&[
+        device.write_descriptor_sets(&[
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["tDither"],
                 array_offset: 0,
                 write: dither,
             },
             hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_sets[0],
+                set: &self.descriptor_set,
                 binding: self.bindings_map["sDither"],
                 array_offset: 0,
                 write: dither_sampler,
@@ -1362,7 +1362,7 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
-            &self.descriptor_sets[0 .. 1],
+            Some(&self.descriptor_set),
         );
 
         if *blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
@@ -1374,7 +1374,7 @@ impl<B: hal::Backend> Program<B> {
             println!("\tbegin_render_pass_inline");
             println!("\trender_pass={:?},\n\tframe_buffer={:?},\n\tviewport_rect={:?},\n\tclear_values={:?}",
                       render_pass, frame_buffer, viewport.rect, clear_values);
-            let mut encoder = cmd_buffer.begin_renderpass_inline(
+            let mut encoder = cmd_buffer.begin_render_pass_inline(
                 render_pass,
                 frame_buffer,
                 viewport.rect,
@@ -1436,7 +1436,7 @@ impl<B: hal::Backend> Framebuffer<B> {
             )
             .unwrap();
         let fbo = device
-            .create_framebuffer(render_pass, &[&image_view], extent)
+            .create_framebuffer(render_pass, Some(&image_view), extent)
             .unwrap();
         Framebuffer {
             texture: texture.id,
@@ -1647,7 +1647,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     .iter()
                     .map(|&(_, ref rtv)| {
                         device
-                            .create_framebuffer(&render_pass, &[rtv], extent)
+                            .create_framebuffer(&render_pass, Some(rtv), extent)
                             .unwrap()
                     })
                     .collect();
@@ -1822,34 +1822,34 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         );
         program.init_vertex_data(
             &self.device,
-            hal::pso::DescriptorWrite::SampledImage(vec![
+            hal::pso::DescriptorWrite::SampledImage(&vec![
                 (
                     &self.resource_cache.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
-            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
-            hal::pso::DescriptorWrite::SampledImage(vec![
+            hal::pso::DescriptorWrite::Sampler(&vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(&vec![
                 (
                     &self.node_data.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
-            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
-            hal::pso::DescriptorWrite::SampledImage(vec![
+            hal::pso::DescriptorWrite::Sampler(&vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(&vec![
                 (
                     &self.render_tasks.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
-            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
-            hal::pso::DescriptorWrite::SampledImage(vec![
+            hal::pso::DescriptorWrite::Sampler(&vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::SampledImage(&vec![
                 (
                     &self.local_clip_rects.image_view,
                     hal::image::ImageLayout::Undefined,
                 ),
             ]),
-            hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+            hal::pso::DescriptorWrite::Sampler(&vec![&self.sampler_nearest]),
         );
 
         if shader_name.contains("dithering") {
@@ -1859,13 +1859,13 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let dither_text_id = self.dither_texture.as_ref().unwrap().id;
             program.init_dither_data(
                 &self.device,
-                hal::pso::DescriptorWrite::SampledImage(vec![
+                hal::pso::DescriptorWrite::SampledImage(&vec![
                     (
                         &self.images[&dither_text_id].image_view,
                         hal::image::ImageLayout::ShaderReadOnlyOptimal,
                     ),
                 ]),
-                hal::pso::DescriptorWrite::Sampler(vec![&self.sampler_nearest]),
+                hal::pso::DescriptorWrite::Sampler(&vec![&self.sampler_nearest]),
             );
         }
         program
@@ -2693,7 +2693,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             .submit(Some(copy_submit));
         self.queue_group.queues[0].submit(submission, Some(&copy_fence));
         //queue.destroy_command_pool(command_pool);
-        self.device.wait_for_fences(&[&copy_fence], hal::device::WaitFor::Any, !0);
+        self.device.wait_for_fence(&copy_fence, !0);
         self.device.destroy_fence(copy_fence);
 
         let mut reader = self.device
@@ -2975,20 +2975,20 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let mut frame_semaphore = self.device.create_semaphore();
         let mut frame_fence = self.device.create_fence(false); // TODO: remove
         {
-            self.device.reset_fences(&[&frame_fence]);
+            self.device.reset_fence(&frame_fence);
 
             let frame = self.swap_chain
                 .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
             assert_eq!(frame.id(), self.current_frame_id);
 
             let submission = Submission::new()
-                .wait_on(&[(&mut frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
+                .wait_on(&[(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .submit(&self.upload_queue);
             self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
 
             // TODO: replace with semaphore
             self.device
-                .wait_for_fences(&[&frame_fence], hal::device::WaitFor::All, !0);
+                .wait_for_fence(&frame_fence, !0);
 
             // present frame
             self.swap_chain
@@ -3008,7 +3008,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
         self.device
             .destroy_command_pool(self.command_pool.downgrade());
-        self.device.destroy_renderpass(self.render_pass);
+        self.device.destroy_render_pass(self.render_pass);
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
         }

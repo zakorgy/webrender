@@ -28,8 +28,8 @@ webrender = {path = "../webrender"}
 webrender_api = {path = "../webrender_api", features=["debug-serialization"]}
 winit = "0.10"
 serde = {version = "1.0", features = ["derive"] }
-gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "89f280e" }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "89f280e", optional = true, features = ["glsl-to-spirv"] }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "c379703" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "c379703", optional = true, features = ["glsl-to-spirv"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.12.4"
