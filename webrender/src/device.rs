@@ -1526,40 +1526,58 @@ impl<B: hal::Backend> Framebuffer<B> {
     }
 }
 
-fn create_depth<B: hal::Backend>(device: &B::Device, memory_types: &[hal::MemoryType], pixel_width: u16, pixel_height: u16, depth_format: hal::format::Format) -> (B::Image, B::ImageView, B::Memory) {
-    let depth_image = device.create_image(
-        hal::image::Kind::D2(pixel_width, pixel_height, hal::image::AaMode::Single),
-        1,
-        depth_format,
-        hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
-    ).unwrap();
+pub struct Depthbuffer<B: hal::Backend> {
+    pub image: B::Image,
+    pub memory: B::Memory,
+    pub image_view: B::ImageView,
+}
 
-    let depth_mem_reqs = device.get_image_requirements(&depth_image);
+impl<B: hal::Backend> Depthbuffer<B> {
+    pub fn new(device: &B::Device, memory_types: &[hal::MemoryType], pixel_width: u16, pixel_height: u16, depth_format: hal::format::Format) -> Self {
+        let image_unbound = device.create_image(
+            hal::image::Kind::D2(pixel_width, pixel_height, hal::image::AaMode::Single),
+            1,
+            depth_format,
+            hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
+        ).unwrap();
 
-    let mem_type = memory_types
-        .iter()
-        .enumerate()
-        .position(|(id, mem_type)| {
-            depth_mem_reqs.type_mask & (1 << id) != 0 &&
-                mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
-        })
-        .unwrap()
-        .into();
+        let depth_mem_reqs = device.get_image_requirements(&image_unbound);
 
-    let depth_memory = device.allocate_memory(mem_type, depth_mem_reqs.size).unwrap();
-    let depth_image = device.bind_image_memory(&depth_memory, 0, depth_image).unwrap();
+        let mem_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mem_type)| {
+                depth_mem_reqs.type_mask & (1 << id) != 0 &&
+                    mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
+            })
+            .unwrap()
+            .into();
 
-    let depth_view = device.create_image_view(
-        &depth_image,
-        depth_format,
-        hal::format::Swizzle::NO,
-        hal::image::SubresourceRange {
-            aspects: hal::format::AspectFlags::DEPTH,
-            levels: 0 .. 1,
-            layers: 0 .. 1,
-        },
-    ).unwrap();
-    (depth_image, depth_view, depth_memory)
+        let memory = device.allocate_memory(mem_type, depth_mem_reqs.size).unwrap();
+        let image = device.bind_image_memory(&memory, 0, image_unbound).unwrap();
+
+        let image_view = device.create_image_view(
+            &image,
+            depth_format,
+            hal::format::Swizzle::NO,
+            hal::image::SubresourceRange {
+                aspects: hal::format::AspectFlags::DEPTH,
+                levels: 0..1,
+                layers: 0..1,
+            },
+        ).unwrap();
+        Depthbuffer {
+            image,
+            memory,
+            image_view,
+        }
+    }
+
+    pub fn deinit(mut self, device: &B::Device) {
+        device.destroy_image(self.image);
+        device.destroy_image_view(self.image_view);
+        device.free_memory(self.memory);
+    }
 }
 
 pub struct Device<B: hal::Backend, C> {
@@ -1576,7 +1594,7 @@ pub struct Device<B: hal::Backend, C> {
     pub render_pass: (B::RenderPass, B::RenderPass),
     pub framebuffers: Vec<B::Framebuffer>,
     pub frame_images: Vec<(B::Image, B::ImageView)>,
-    pub frame_depth: (B::Image, B::ImageView, B::Memory),
+    pub frame_depth: Depthbuffer<B>,
     pub viewport: hal::command::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -1593,7 +1611,7 @@ pub struct Device<B: hal::Backend, C> {
     // device state
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
-    rbos: FastHashMap<RBOId, (B::Image, B::ImageView, B::Memory)>,
+    rbos: FastHashMap<RBOId, Depthbuffer<B>>,
     bound_textures: [u32; 16],
     bound_sampler: [TextureFilter; 16],
     bound_program: u32,
@@ -1754,8 +1772,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             )
         };
 
-        // TODO refactor this
-        let (depth_image, depth_view, depth_memory) = create_depth::<B>(&device, &memory_types, pixel_width, pixel_height, depth_format);
+        let frame_depth = Depthbuffer::new(&device, &memory_types, pixel_width, pixel_height, depth_format);
 
         // Framebuffer and render target creation
         let (frame_images, framebuffers) = match backbuffer {
@@ -1783,7 +1800,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     .iter()
                     .map(|&(_, ref rtv)| {
                         device
-                            .create_framebuffer(&render_pass.1, vec![rtv, &depth_view], extent)
+                            .create_framebuffer(&render_pass.1, vec![rtv, &frame_depth.image_view], extent)
                             .unwrap()
                     })
                     .collect();
@@ -1861,7 +1878,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             render_pass,
             framebuffers,
             frame_images,
-            frame_depth: (depth_image, depth_view, depth_memory),
+            frame_depth,
             viewport,
             sampler_linear,
             sampler_nearest,
@@ -2431,12 +2448,10 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         if allocate_depth {
             if self.rbos.contains_key(&depth_rb) {
                 let old_rbo = self.rbos.remove(&depth_rb).unwrap();
-                self.device.destroy_image(old_rbo.0);
-                self.device.destroy_image_view(old_rbo.1);
-                self.device.free_memory(old_rbo.2);
+                old_rbo.deinit(&self.device);
             }
             if rt_info.has_depth {
-                let rbo = create_depth::<B>(
+                let rbo = Depthbuffer::new(
                     &self.device,
                     &self.memory_types,
                     texture.width as u16,
@@ -2454,7 +2469,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         for i in 0..texture.layer_count as u16 {
             let (rbo_id, depth) = match texture.depth_rb {
-                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].1)),
+                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].image_view)),
                 None => (RBOId(0), None)
             };
             let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(),depth);
@@ -2908,14 +2923,14 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture];
             let dimg = if depth.is_some() {
-                Some(&self.rbos[&fbo.rbo].0)
+                Some(&self.rbos[&fbo.rbo].image)
             } else {
                 None
             };
             let layer = fbo.layer_index;
             (&img.image, layer, dimg)
         } else {
-            (&self.frame_images[self.current_frame_id].0, 0, Some(&self.frame_depth.0))
+            (&self.frame_images[self.current_frame_id].0, 0, Some(&self.frame_depth.image))
         };
 
         if let Some(color) = color {
@@ -3078,6 +3093,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
         for (_, image) in self.images {
             image.deinit(&self.device);
+        }
+        for (_, rbo) in self.rbos {
+            rbo.deinit(&self.device);
         }
         self.resource_cache.deinit(&self.device);
         self.render_tasks.deinit(&self.device);
