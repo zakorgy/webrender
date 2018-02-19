@@ -61,7 +61,7 @@ pub enum SourceTexture {
 }
 
 pub const ORTHO_NEAR_PLANE: f32 = -1000000.0;
-pub const ORTHO_FAR_PLANE: f32 = 1000000.0;
+pub const ORTHO_FAR_PLANE: f32 = 0000000.0;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
