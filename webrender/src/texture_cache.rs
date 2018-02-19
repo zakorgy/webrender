@@ -621,7 +621,7 @@ impl TextureCache {
                     //           texture, and then we can remove this
                     //           memory allocation (same for the other
                     //           standalone texture below).
-                    render_target: None,//Some(RenderTargetInfo { has_depth: false }),
+                    render_target: Some(RenderTargetInfo { has_depth: false }),
                     layer_count: texture_array.layer_count as i32,
                 },
             };

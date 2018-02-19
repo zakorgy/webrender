@@ -1749,8 +1749,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             };
 
             (
-                device.create_render_pass(&[attachment.clone()], &[subpass], &[/*dependency.clone()*/]),
-                device.create_render_pass(&[attachment, attachment_depth], &[subpass_depth], &[/*dependency*/])
+                device.create_render_pass(&[attachment.clone()], &[subpass], &[dependency.clone()]),
+                device.create_render_pass(&[attachment, attachment_depth], &[subpass_depth], &[dependency])
             )
         };
 
@@ -2445,10 +2445,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 );
                 self.rbos.insert(depth_rb, rbo);
             } else {
-                //let old_rbo = self.rbos.remove(&depth_rb).unwrap();
-                //self.device.destroy_image(old_rbo.0);
-                //self.device.destroy_image_view(old_rbo.1);
-                //self.device.free_memory(old_rbo.2);
                 depth_rb = RBOId(0);
                 texture.depth_rb = None;
             }
@@ -2488,68 +2484,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 );
         }
     }
-
-    /// Updates the render target storage for the texture, creating FBOs as required.
-    /*fn update_target_storage(
-        &mut self,
-        texture: &mut Texture,
-        rt_info: &RenderTargetInfo,
-        is_resized: bool,
-    ) {
-        assert!(texture.layer_count > 0 || texture.width + texture.height == 0);
-
-        let allocate_color = texture.layer_count != texture.fbo_ids.len() as i32 || is_resized;
-
-        let (mut depth_rb, allocate_depth) = match texture.depth_rb {
-            Some(rbo) => (rbo.0, is_resized || !rt_info.has_depth),
-            None if rt_info.has_depth => {
-                let depth_rb = self.generate_rbo_id();
-                texture.depth_rb = Some(depth_rb);
-                (depth_rb.0, true)
-            },
-            None => (0, false),
-        };
-
-        if allocate_depth {
-            if rt_info.has_depth {
-                /*self.gl.bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
-                self.gl.renderbuffer_storage(
-                    gl::RENDERBUFFER,
-                    gl::DEPTH_COMPONENT24,
-                    texture.width as _,
-                    texture.height as _,
-                );*/
-                println!("TODO update_target_storage depth");
-            } else {
-                //self.gl.delete_renderbuffers(&[depth_rb]);
-                depth_rb = 0;
-                texture.depth_rb = None;
-            }
-        }
-
-        if allocate_color || allocate_depth {
-            //let original_bound_fbo = self.bound_draw_fbo;
-            for (fbo_index, &fbo_id) in texture.fbo_ids.iter().enumerate() {
-                //self.bind_external_draw_target(fbo_id);
-                /*self.gl.framebuffer_texture_layer(
-                    gl::DRAW_FRAMEBUFFER,
-                    gl::COLOR_ATTACHMENT0,
-                    texture.id,
-                    0,
-                    fbo_index as _,
-                );*/
-
-                /*self.gl.framebuffer_renderbuffer(
-                    gl::DRAW_FRAMEBUFFER,
-                    gl::DEPTH_ATTACHMENT,
-                    gl::RENDERBUFFER,
-                    depth_rb,
-                );*/
-                self.fbos.get_mut(&fbo_id).unwrap().rbo = RBOId(depth_rb);
-            }
-            //self.bind_external_draw_target(original_bound_fbo);
-        }
-    }*/
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
         debug_assert!(self.inside_frame);
