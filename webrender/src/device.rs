@@ -155,6 +155,7 @@ impl Add<usize> for FrameId {
     }
 }
 
+#[derive(Debug)]
 pub struct TextureSlot(pub usize);
 
 // In some places we need to temporarily bind a texture to any slot.
@@ -1080,6 +1081,7 @@ impl<B: hal::Backend> Program<B> {
             let pipelines = device
                 .create_graphics_pipelines(pipelines_descriptors.as_slice())
                 .into_iter();
+            println!("Shader name ={:?}", shader_name);
 
             blend_states.iter()
                 .cloned()
@@ -1209,6 +1211,7 @@ impl<B: hal::Backend> Program<B> {
     }
 
     fn bind_texture(&mut self, device: &Device<B, hal::Graphics>, id: &TextureId, sampler: &TextureFilter, binding: &'static str) {
+        println!("BIND_TEXTURE: binding = {:?}, texture_id = {:?}, sampler = {:?}", binding, id, sampler);
         use std::ops::Range;
         let sampler = match sampler {
             &TextureFilter::Linear => &device.sampler_linear,
@@ -1345,6 +1348,7 @@ impl<B: hal::Backend> Program<B> {
         blend_state: &BlendState,
         blend_color: ColorF,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
+        println!("SUBMIT");
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         cmd_buffer.set_viewports(&[viewport.clone()]);
@@ -1362,19 +1366,25 @@ impl<B: hal::Backend> Program<B> {
         );
 
         if *blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
+            println!("\tset_blend_constants");
             cmd_buffer.set_blend_constants(blend_color.to_array());
         }
 
         {
+            println!("\tbegin_render_pass_inline");
+            println!("\trender_pass={:?},\n\tframe_buffer={:?},\n\tviewport_rect={:?},\n\tclear_values={:?}",
+                      render_pass, frame_buffer, viewport.rect, clear_values);
             let mut encoder = cmd_buffer.begin_renderpass_inline(
                 render_pass,
                 frame_buffer,
                 viewport.rect,
                 clear_values,
             );
+            println!("\tdraw");
             encoder.draw(0 .. 6, 0 .. self.instance_buffer.size as u32);
         }
 
+        println!("\tfinish");
         cmd_buffer.finish()
     }
 
@@ -1400,6 +1410,8 @@ pub struct Framebuffer<B: hal::Backend> {
 
 impl<B: hal::Backend> Framebuffer<B> {
     pub fn new(device: &B::Device, texture: &Texture, image: &Image<B>, layer_index: u16, render_pass: &B::RenderPass) -> Self {
+        println!("FRAMEBUFFER::NEW texture={:?}, layer_index={:?}, render_pass={:?}",
+                  texture, layer_index, render_pass);
         let extent = hal::device::Extent {
             width: texture.width as _,
             height: texture.height as _,
@@ -1435,6 +1447,7 @@ impl<B: hal::Backend> Framebuffer<B> {
     }
 
     pub fn deinit(mut self, device: &B::Device) {
+        println!("Deinit Framebuffer");
         device.destroy_framebuffer(self.fbo);
         device.destroy_image_view(self.image_view);
     }
@@ -1945,9 +1958,12 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //blend_mode: &BlendMode,
         //enable_depth_write: bool
     ) {
+        print!("DRAW");
         let ref fb = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            println!(" with no default fbo");
             &self.fbos[&self.bound_draw_fbo].fbo
         } else {
+            println!(" with default fbo");
             &self.framebuffers[self.current_frame_id]
         };
         let submit = program.submit(
@@ -2038,6 +2054,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     fn bind_texture_impl(&mut self, slot: TextureSlot, id: u32, sampler: TextureFilter) {
         debug_assert!(self.inside_frame);
+        println!("BIND_TEXTURE_IMPL slot={:?}, id={:?}, sampler={:?}", slot, id, sampler);
 
         if self.bound_textures[slot.0] != id {
             self.bound_textures[slot.0] = id;
@@ -2064,6 +2081,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     pub fn bind_read_target_impl(&mut self, fbo_id: FBOId) {
         debug_assert!(self.inside_frame);
+        println!("BIND_READ_TARGET_IMPL");
 
         if self.bound_read_fbo != fbo_id {
             self.bound_read_fbo = fbo_id;
@@ -2071,6 +2089,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
+        println!("BIND_READ_TARGET");
         let fbo_id = texture_and_layer.map_or(DEFAULT_READ_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
@@ -2080,6 +2099,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     fn bind_draw_target_impl(&mut self, fbo_id: FBOId) {
         debug_assert!(self.inside_frame);
+        println!("BIND_DRAW_TARGET_IMPL, fbo_id={:?}", fbo_id);
 
         if self.bound_draw_fbo != fbo_id {
             self.bound_draw_fbo = fbo_id;
@@ -2091,6 +2111,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         texture_and_layer: Option<(&Texture, i32)>,
         dimensions: Option<DeviceUintSize>,
     ) {
+        println!("BIND_DRAW_TARGET, texture={:?}", texture_and_layer);
         let fbo_id = texture_and_layer.map_or(DEFAULT_DRAW_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
@@ -2098,6 +2119,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.bind_draw_target_impl(fbo_id);
 
         if let Some(dimensions) = dimensions {
+            println!("Set viewport rect");
             self.viewport.rect = hal::command::Rect {
                 x: 0,
                 y: 0,
@@ -2159,6 +2181,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     fn generate_fbo_ids(&mut self, count: i32) -> Vec<FBOId> {
+        println!("GENERATE_FBO_IDS");
         let mut rng = rand::thread_rng();
         let mut fboids = vec!();
         let mut fbo_id = FBOId(DEFAULT_DRAW_FBO.0 + 1);
@@ -2172,6 +2195,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     fn generate_rbo_id(&mut self) -> RBOId {
+        println!("GENERATE_RBO_ID");
         let mut rng = rand::thread_rng();
         let mut rbo_id = RBOId(1); // 0 is used for invalid
         while self.rbos.contains_key(&rbo_id) {
@@ -2184,6 +2208,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         &mut self,
         texture: &mut Texture,
     ) {
+        println!("UPDATE_IMAGE");
         if texture.id == 0 {
             let id = self.generate_texture_id();
             texture.id = id;
@@ -2289,6 +2314,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         layer_count: i32,
         pixels: Option<&[u8]>,
     ) {
+        println!("INIT_TEXTURE: texture={:?}, width={:?}, height={:?}, filter={:?}, render_target={:?}, layer_count={:?}, pixels={:?}",
+                 texture, width, height, filter, render_target, layer_count, pixels.is_some());
         debug_assert!(self.inside_frame);
 
         let is_resized = texture.width != width || texture.height != height;
@@ -2338,6 +2365,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         rt_info: &RenderTargetInfo,
         is_resized: bool,
     ) {
+        println!("UPDATE_TARGET_STORAGE: texture={:?}, rt_info={:?}, is_resized={:?}",
+                texture, rt_info, is_resized);
         assert!(texture.layer_count > 0 || texture.width + texture.height == 0);
 
         let allocate_color = texture.layer_count != texture.fbo_ids.len() as i32 || is_resized;
@@ -2400,6 +2429,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
+        println!("BLIT_RENDER_TARGET");
         debug_assert!(self.inside_frame);
         let (src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
@@ -2467,6 +2497,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn free_texture_storage(&mut self, texture: &mut Texture) {
+        println!("FREE_TEXTURE_STORAGE");
         debug_assert!(self.inside_frame);
         if texture.width + texture.height == 0 {
             return;
@@ -2481,6 +2512,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn free_image(&mut self, texture: &mut Texture) {
+        println!("FREE_IMAGE");
         /*if let Some(RBOId(depth_rb)) = texture.depth_rb.take() {
             self.gl.delete_renderbuffers(&[depth_rb]);
         }*/
@@ -2805,6 +2837,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
     ) {
+        println!("CLEAR_TARGET");
         let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
 
         if let Some(rect) = rect {
