@@ -1560,8 +1560,10 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let pixel_width = window_size.0 as u16;
         let pixel_height = window_size.1 as u16;
 
-        let surface_format = surface
-            .capabilities_and_formats(&adapter.physical_device)
+        let capabilities_and_formats = surface
+            .capabilities_and_formats(&adapter.physical_device);
+        println!("CAPS AND FORMATS: {:?}", capabilities_and_formats);
+        let surface_format = capabilities_and_formats
             .1
             .map_or(
                 //hal::format::Format::Rgba8Srgb,
@@ -2019,14 +2021,25 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     ) {
         print!("DRAW");
         let (ref fb, ref render_pass) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            println!(" with no default fbo");
+            print!(" with no default fbo");
             let texture_id = &self.fbos[&self.bound_draw_fbo].texture;
             let image = &self.images[texture_id];
             let render_pass = match image.image_format {
-                ImageFormat::R8 => &self.render_pass_a8,
-                ImageFormat::BGRA8 => &self.render_pass,
-                ImageFormat::RG8 => unimplemented!("TODO add render pass to RG8 surface format"),
-                ImageFormat::RGBAF32 => unreachable!(),
+                ImageFormat::R8 => {
+                    println!(" format: R8");
+                    &self.render_pass_a8
+                },
+                ImageFormat::BGRA8 => {
+                    println!(" format: BGRA8");
+                    &self.render_pass,
+                }
+                ImageFormat::RG8 => {
+                    println!(" format: RG8");
+                    unimplemented!("TODO add render pass to RG8 surface format"),
+                }
+                ImageFormat::RGBAF32 => {
+                    unreachable!(),
+                }
             };
 
             (&self.fbos[&self.bound_draw_fbo].fbo, render_pass)
