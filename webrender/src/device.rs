@@ -2524,50 +2524,80 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         };
 
         let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
-        use std::ops::Range;
-        cmd_buffer.copy_image(
-            src_img,
-            hal::image::ImageLayout::ColorAttachmentOptimal,
-            dest_img,
-            hal::image::ImageLayout::ColorAttachmentOptimal,
-            &[
-                hal::command::ImageCopy {
-                    aspect_mask: hal::format::AspectFlags::COLOR,
-                    src_subresource: (0, 0),
-                    src_offset: hal::command::Offset {
-                        x: src_rect.origin.x as i32,
-                        y: src_rect.origin.y as i32,
-                        z: src_layer as i32,
-                    },
-                    dst_subresource: (0, 0),
-                    dst_offset: hal::command::Offset {
-                        x: dest_rect.origin.x as i32,
-                        y: dest_rect.origin.y as i32,
-                        z: dest_layer as i32,
-                    },
-                    extent: hal::device::Extent {
-                        width: src_rect.size.width as u32,
-                        height: src_rect.size.height as u32,
-                        depth: 1,
-                    },
-                    num_layers: 1,
-                }
-            ],
-        );
+        // TODO remove this cfg if other platforms are supported
+        if cfg!(feature = "vulkan") && src_rect.size != dest_rect.size {
+            cmd_buffer.blit_image(
+                src_img,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+                dest_img,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+                hal::command::BlitFilter::Linear,
+                &[
+                    hal::command::ImageBlit {
+                        src_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::AspectFlags::COLOR,
+                            level: 0,
+                            layers: src_layer .. src_layer + 1,
+                        },
+                        src_bounds: hal::command::Offset {
+                            x: src_rect.origin.x as i32,
+                            y: src_rect.origin.y as i32,
+                            z: 0 as i32,
+                        } .. hal::command::Offset {
+                            x: src_rect.origin.x as i32 + src_rect.size.width as i32,
+                            y: src_rect.origin.y as i32 + src_rect.size.height as i32,
+                            z: 1 as i32,
+                        },
+                        dst_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::AspectFlags::COLOR,
+                            level: 0,
+                            layers: dest_layer .. dest_layer + 1,
+                        },
+                        dst_bounds: hal::command::Offset {
+                            x: dest_rect.origin.x as i32,
+                            y: dest_rect.origin.y as i32,
+                            z: 0 as i32,
+                        } .. hal::command::Offset {
+                            x: dest_rect.origin.x as i32 + dest_rect.size.width as i32,
+                            y: dest_rect.origin.y as i32 + dest_rect.size.height as i32,
+                            z: 1 as i32,
+                        },
+                    }
+                ],
+            );
+        } else {
+            cmd_buffer.copy_image(
+                src_img,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+                dest_img,
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+                &[
+                    hal::command::ImageCopy {
+                        aspect_mask: hal::format::AspectFlags::COLOR,
+                        src_subresource: (0, 0),
+                        src_offset: hal::command::Offset {
+                            x: src_rect.origin.x as i32,
+                            y: src_rect.origin.y as i32,
+                            z: src_layer as i32,
+                        },
+                        dst_subresource: (0, 0),
+                        dst_offset: hal::command::Offset {
+                            x: dest_rect.origin.x as i32,
+                            y: dest_rect.origin.y as i32,
+                            z: dest_layer as i32,
+                        },
+                        extent: hal::device::Extent {
+                            width: src_rect.size.width as u32,
+                            height: src_rect.size.height as u32,
+                            depth: 1,
+                        },
+                        num_layers: 1,
+                    }
+                ],
+            );
+        }
 
         self.upload_queue.push(cmd_buffer.finish());
-        /*self.gl.blit_framebuffer(
-            src_rect.origin.x,
-            src_rect.origin.y,
-            src_rect.origin.x + src_rect.size.width,
-            src_rect.origin.y + src_rect.size.height,
-            dest_rect.origin.x,
-            dest_rect.origin.y,
-            dest_rect.origin.x + dest_rect.size.width,
-            dest_rect.origin.y + dest_rect.size.height,
-            gl::COLOR_BUFFER_BIT,
-            gl::LINEAR,
-        );*/
     }
 
     pub fn free_texture_storage(&mut self, texture: &mut Texture) {

@@ -3097,11 +3097,6 @@ impl Renderer {
             let (source_rect, source_layer) = source.get_target_rect();
             let (dest_rect, _) = dest.get_target_rect();
 
-            if source_rect.size != dest_rect.size {
-                println!("TODO handle_scaling");
-                continue;
-            }
-
             let cache_draw_target = (cache_texture, source_layer.0 as i32);
             self.device
                 .bind_read_target(Some(cache_draw_target));
