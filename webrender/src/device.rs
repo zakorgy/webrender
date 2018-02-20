@@ -520,7 +520,7 @@ impl<B: hal::Backend> Image<B> {
         let (data_stride, format) = match image_format {
             ImageFormat::R8 => (1, hal::format::Format::R8Unorm),
             ImageFormat::RG8 => (2, hal::format::Format::Rg8Unorm),
-            ImageFormat::BGRA8 => (4, hal::format::Format::Bgra8Unorm),
+            ImageFormat::BGRA8 => (4, hal::format::Format::Rgba8Unorm),
             _ => unimplemented!("TODO image format missing"),
         };
         let upload_buffer = Buffer::create(
@@ -542,7 +542,7 @@ impl<B: hal::Backend> Image<B> {
                 image_kind,
                 1,
                 format,
-                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
+                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             )
             .unwrap(); // TODO: usage
         let image_req = device.get_image_requirements(&image_unbound);
@@ -1428,7 +1428,7 @@ impl<B: hal::Backend> Framebuffer<B> {
         let format = match texture.format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
             ImageFormat::RG8 => hal::format::Format::Rg8Unorm,
-            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
+            ImageFormat::BGRA8 => hal::format::Format::Rgba8Unorm,
             _ => unimplemented!("TODO image format missing"),
         };
         let image_view = device
@@ -1439,7 +1439,7 @@ impl<B: hal::Backend> Framebuffer<B> {
                 hal::image::SubresourceRange {
                     aspects: hal::format::AspectFlags::COLOR,
                     levels: 0 .. 1,
-                    layers: layer_index .. layer_index+1,
+                    layers: 0 .. 1,
                 },
             )
             .unwrap();
@@ -2006,9 +2006,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //blend_mode: &BlendMode,
         //enable_depth_write: bool
     ) {
-        print!("DRAW");
+        //print!("DRAW");
         let (ref fb, ref render_pass) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            print!(" with no default fbo");
+            //print!(" with no default fbo");
             let texture_id = &self.fbos[&self.bound_draw_fbo].texture;
             let image = &self.images[texture_id];
             let render_pass = match image.image_format {
