@@ -950,12 +950,13 @@ impl<B: hal::Backend> InstanceBuffer<B> {
         let data_stride = self.buffer.data_stride;
         self.buffer.update(
             device,
-            self.offset as u64,
+            (self.offset * data_stride) as u64,
             (instances.len() * data_stride) as u64,
             &instances.to_owned(),
         );
 
-        self.size += instances.len();
+        self.size = instances.len();
+        self.offset += self.size;
     }
 
     pub fn reset(&mut self) {
@@ -1438,7 +1439,7 @@ impl<B: hal::Backend> Program<B> {
                 viewport.rect,
                 clear_values,
             );
-            encoder.draw(0 .. 6, 0 .. self.instance_buffer.size as u32);
+            encoder.draw(0 .. 6, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32);
         }
 
         cmd_buffer.finish()

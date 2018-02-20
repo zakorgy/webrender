@@ -2072,6 +2072,7 @@ impl Renderer {
 
     pub fn swap_buffers(&mut self) {
         self.device.swap_buffers();
+        self.flush();
     }
 
     pub fn get_max_texture_size(&self) -> u32 {
@@ -2599,7 +2600,6 @@ impl Renderer {
                     cpu_frame_id,
                     &mut stats
                 );
-                self.flush();
 
                 if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
                     frame_profiles.push(frame.profile_counters.clone());
@@ -3007,11 +3007,11 @@ impl Renderer {
 
             // Need to invert the y coordinates and flip the image vertically when
             // reading back from the framebuffer.
-            if render_target.is_none() {
+            /*if render_target.is_none() {
                 src.origin.y = framebuffer_size.height as i32 - src.size.height - src.origin.y;
                 dest.origin.y += dest.size.height;
                 dest.size.height = -dest.size.height;
-            }
+            }*/
 
             self.device.bind_read_target(render_target);
             self.device.blit_render_target(src, dest);
@@ -4134,8 +4134,8 @@ impl Renderer {
                         let projection = Transform3D::ortho(
                             0.0,
                             color.max_size.width as f32,
-                            color.max_size.height as f32,
                             0.0,
+                            color.max_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
                         );
@@ -4536,7 +4536,7 @@ impl Default for RendererOptions {
             renderer_kind: RendererKind::Native,
             enable_subpixel_aa: false,
             clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
-            enable_clear_scissor: true,
+            enable_clear_scissor: false,
             max_texture_size: None,
             // Scattered GPU cache updates haven't met a test that would show their superiority yet.
             scatter_gpu_cache_updates: false,
