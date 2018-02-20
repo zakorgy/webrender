@@ -1031,16 +1031,6 @@ impl<B: hal::Backend> Program<B> {
                 fragment: Some(fs_entry),
             };
 
-            let subpass = Subpass {
-                index: 0,
-                main_pass: &render_pass.0,
-            };
-
-            let subpass_depth = Subpass {
-                index: 0,
-                main_pass: &render_pass.1,
-            };
-
             let pipeline_states = match *shader_kind {
                 ShaderKind::Brush if shader_name.starts_with("brush_mask") => vec![(BlendState::Off, DepthTest::Off)],
                 ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
@@ -1090,17 +1080,16 @@ impl<B: hal::Backend> Program<B> {
             };
 
             let pipelines_descriptors = pipeline_states.iter().map(|&(blend_state, depth_test)| {
-                let sp = if depth_test == DepthTest::Off {
-                    subpass
-                } else {
-                    subpass_depth
+                let subpass = Subpass {
+                    index: 0,
+                    main_pass: if depth_test == DepthTest::Off {&render_pass.0} else {&render_pass.1},
                 };
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
                     shader_entries.clone(),
                     Primitive::TriangleList,
                     hal::pso::Rasterizer::FILL,
                     &pipeline_layout,
-                    sp,
+                    subpass,
                 );
                 pipeline_descriptor
                     .blender
@@ -1477,7 +1466,15 @@ pub struct Framebuffer<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> Framebuffer<B> {
-    pub fn new(device: &B::Device, texture: &Texture, image: &Image<B>, layer_index: u16, render_pass: &(B::RenderPass, B::RenderPass), rbo: RBOId, depth: Option<&B::ImageView>) -> Self {
+    pub fn new(
+        device: &B::Device,
+        texture: &Texture,
+        image: &Image<B>,
+        layer_index: u16,
+        render_pass: &(B::RenderPass, B::RenderPass),
+        rbo: RBOId,
+        depth: Option<&B::ImageView>
+    ) -> Self {
         let extent = hal::device::Extent {
             width: texture.width as _,
             height: texture.height as _,
@@ -1533,7 +1530,13 @@ pub struct Depthbuffer<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> Depthbuffer<B> {
-    pub fn new(device: &B::Device, memory_types: &[hal::MemoryType], pixel_width: u16, pixel_height: u16, depth_format: hal::format::Format) -> Self {
+    pub fn new(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        pixel_width: u16,
+        pixel_height: u16,
+        depth_format: hal::format::Format
+    ) -> Self {
         let image_unbound = device.create_image(
             hal::image::Kind::D2(pixel_width, pixel_height, hal::image::AaMode::Single),
             1,
