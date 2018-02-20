@@ -552,7 +552,7 @@ impl<B: hal::Backend> Image<B> {
                 image_kind,
                 1,
                 format,
-                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
+                hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             )
             .unwrap(); // TODO: usage
         let image_req = device.get_image_requirements(&image_unbound);
