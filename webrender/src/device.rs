@@ -561,16 +561,15 @@ impl<B: hal::Backend> Image<B> {
             .iter()
             .enumerate()
             .position(|(id, mem_type)| {
-                image_req.type_mask & (1 << id) != 0
-                    && mem_type
-                    .properties
-                    .contains(hal::memory::Properties::DEVICE_LOCAL)
+                image_req.type_mask & (1 << id) != 0 &&
+                mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
             })
             .unwrap()
             .into();
 
-        let image_memory = device.allocate_memory(device_type, image_req.size).unwrap();
-
+        let image_memory = device
+            .allocate_memory(device_type, image_req.size)
+            .unwrap();
         let image = device
             .bind_image_memory(&image_memory, 0, image_unbound)
             .unwrap();
@@ -869,27 +868,26 @@ impl<B: hal::Backend> Buffer<B> {
         usage: hal::buffer::Usage,
         data_stride: usize,
         data_len: usize,
-    ) -> Buffer<B> {
+    ) -> Self {
         let buffer_size = data_stride * data_len;
-        let buffer_type: hal::MemoryTypeId = memory_types
+        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
+        let requirements = device.get_buffer_requirements(&unbound_buffer);
+        let mem_type = memory_types
             .iter()
-            .position(|mt| {
+            .enumerate()
+            .position(|(id, mt)| {
+                requirements.type_mask & (1 << id) != 0 &&
                 mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
                 //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
             })
             .unwrap()
             .into();
-        let (memory, buffer) = {
-            let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
-            let buffer_req = device.get_buffer_requirements(&unbound_buffer);
-            let buffer_memory = device
-                .allocate_memory(buffer_type, buffer_req.size)
-                .unwrap();
-            let buffer = device
-                .bind_buffer_memory(&buffer_memory, 0, unbound_buffer)
-                .unwrap();
-            (buffer_memory, buffer)
-        };
+        let memory = device
+            .allocate_memory(mem_type, requirements.size)
+            .unwrap();
+        let buffer = device
+            .bind_buffer_memory(&memory, 0, unbound_buffer)
+            .unwrap();
         Buffer {
             memory,
             buffer,
