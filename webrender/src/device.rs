@@ -14,6 +14,7 @@ use serde;
 use std::collections::HashMap;
 use smallvec::SmallVec;
 use std::cell::RefCell;
+use std::cmp::max;
 use std::fs::File;
 use std::io::Read;
 use std::marker::PhantomData;
@@ -808,7 +809,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             &[
                 hal::command::BufferImageCopy {
                     buffer_offset,
-                    buffer_width: buffer_width as u32,
+                    buffer_width: max((buffer_width as usize / self.image_upload_buffer.data_stride) as u32, self.image_width),
                     buffer_height: buffer_height as u32,
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::AspectFlags::COLOR,
@@ -821,7 +822,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
                         z: 0,
                     },
                     image_extent: hal::device::Extent {
-                        width: buffer_width as u32,
+                        width: max((buffer_width as usize / self.image_upload_buffer.data_stride) as u32, self.image_width),
                         height: buffer_height as u32,
                         depth: 1,
                     },
