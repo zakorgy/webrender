@@ -60,6 +60,7 @@ use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::Entry;
 use std::f32;
 use std::fs::File;
+use std::marker::PhantomData;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -635,7 +636,7 @@ impl CpuProfile {
 
 struct RenderTargetPoolId(usize);
 
-struct SourceTextureResolver {
+struct SourceTextureResolver<B> {
     /// A vector for fast resolves of texture cache IDs to
     /// native texture IDs. This maps to a free-list managed
     /// by the backend thread / texture cache. We free the
@@ -662,10 +663,11 @@ struct SourceTextureResolver {
     pass_a8_textures: FastHashMap<RenderPassIndex, RenderTargetPoolId>,
 
     render_target_pool: Vec<Texture>,
+    phantom: PhantomData<B>,
 }
 
-impl SourceTextureResolver {
-    fn new<B: hal::Backend>(device: &mut Device<B, hal::Graphics>) -> SourceTextureResolver {
+impl<B: hal::Backend> SourceTextureResolver<B> {
+    fn new(device: &mut Device<B, hal::Graphics>) -> Self {
         let mut dummy_cache_texture = device
             .create_texture(ImageFormat::BGRA8);
         device.init_texture(
@@ -687,10 +689,11 @@ impl SourceTextureResolver {
             pass_rgba8_textures: FastHashMap::default(),
             pass_a8_textures: FastHashMap::default(),
             render_target_pool: Vec::new(),
+            phantom: PhantomData,
         }
     }
 
-    fn deinit<B: hal::Backend>(self, device: &mut Device<B, hal::Graphics>) {
+    fn deinit(self, device: &mut Device<B, hal::Graphics>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -742,7 +745,7 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind<B: hal::Backend>(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B, hal::Graphics>) {
+    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B, hal::Graphics>) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
@@ -873,13 +876,14 @@ enum CacheBus {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct CacheTexture {
+struct CacheTexture<B> {
     //texture: Texture,
     bus: CacheBus,
+    phantom: PhantomData<B>,
 }
 
-impl CacheTexture {
-    fn new<B: hal::Backend>(device: &mut Device<B, hal::Graphics>, use_scatter: bool) -> Result<Self, RendererError> {
+impl<B: hal::Backend> CacheTexture<B> {
+    fn new(device: &mut Device<B, hal::Graphics>, use_scatter: bool) -> Result<Self, RendererError> {
         //let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         let bus = if use_scatter {
@@ -910,10 +914,11 @@ impl CacheTexture {
         Ok(CacheTexture {
             //texture,
             bus,
+            phantom: PhantomData,
         })
     }
 
-    fn deinit<B: hal::Backend>(self, device: &mut Device<B, hal::Graphics>) {
+    fn deinit(self, device: &mut Device<B, hal::Graphics>) {
         //device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { .. } => {
@@ -933,7 +938,7 @@ impl CacheTexture {
         1024
     }
 
-    fn prepare_for_updates<B: hal::Backend>(
+    fn prepare_for_updates(
         &mut self,
         device: &mut Device<B, hal::Graphics>,
         total_block_count: usize,
@@ -1000,7 +1005,7 @@ impl CacheTexture {
         }
     }
 
-    fn update<B: hal::Backend>(&mut self, device: &mut Device<B, hal::Graphics>, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, device: &mut Device<B, hal::Graphics>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1072,7 +1077,7 @@ impl CacheTexture {
         }
     }
 
-    fn flush<B: hal::Backend>(&mut self, device: &mut Device<B, hal::Graphics>) -> usize {
+    fn flush(&mut self, device: &mut Device<B, hal::Graphics>) -> usize {
         match self.bus {
             CacheBus::PixelBuffer { /*ref buffer,*/ ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
@@ -1512,12 +1517,12 @@ pub struct Renderer<B: hal::Backend> {
     // node_data_texture: VertexDataTexture,
     // local_clip_rects_texture: VertexDataTexture,
     // render_task_texture: VertexDataTexture,
-    gpu_cache_texture: CacheTexture,
+    gpu_cache_texture: CacheTexture<B>,
 
     pipeline_epoch_map: FastHashMap<PipelineId, Epoch>,
 
     // Manages and resolves source textures IDs to real texture IDs.
-    texture_resolver: SourceTextureResolver,
+    texture_resolver: SourceTextureResolver<B>,
 
     // A PBO used to do asynchronous texture cache uploads.
     texture_cache_upload_pbo: PBO,
