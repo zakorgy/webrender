@@ -635,9 +635,9 @@ impl<B: hal::Backend> Image<B> {
         );
 
         let kind = hal::image::Kind::D2Array(
-            image_width as hal::image::Size,
-            image_height as hal::image::Size,
-            image_depth as hal::image::Layer,
+            image_width as _,
+            image_height as _,
+            image_depth as _,
             hal::image::AaMode::Single,
         );
         let core = ImageCore::create(
@@ -698,12 +698,12 @@ impl<B: hal::Backend> Image<B> {
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::AspectFlags::COLOR,
                         level: 0,
-                        layers: 0 .. 1,
+                        layers: layer_index as _ .. (layer_index + 1) as _,
                     },
                     image_offset: hal::command::Offset {
                         x: pos.x as i32,
                         y: pos.y as i32,
-                        z: layer_index,
+                        z: 0,
                     },
                     image_extent: hal::device::Extent {
                         width: size.width as u32,
@@ -2443,7 +2443,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             texture.format,
             texture.width,
             texture.height,
-            texture.layer_count
+            texture.layer_count,
         );
 
         assert_eq!(texture.fbo_ids.len(), 0);
@@ -2561,11 +2561,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         src_bounds: hal::command::Offset {
                             x: src_rect.origin.x as i32,
                             y: src_rect.origin.y as i32,
-                            z: 0 as i32,
+                            z: 0,
                         } .. hal::command::Offset {
                             x: src_rect.origin.x as i32 + src_rect.size.width as i32,
                             y: src_rect.origin.y as i32 + src_rect.size.height as i32,
-                            z: 1 as i32,
+                            z: 1,
                         },
                         dst_subresource: hal::image::SubresourceLayers {
                             aspects: hal::format::AspectFlags::COLOR,
@@ -2575,11 +2575,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         dst_bounds: hal::command::Offset {
                             x: dest_rect.origin.x as i32,
                             y: dest_rect.origin.y as i32,
-                            z: 0 as i32,
+                            z: 0,
                         } .. hal::command::Offset {
                             x: dest_rect.origin.x as i32 + dest_rect.size.width as i32,
                             y: dest_rect.origin.y as i32 + dest_rect.size.height as i32,
-                            z: 1 as i32,
+                            z: 1,
                         },
                     }
                 ],
@@ -2593,17 +2593,17 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 &[
                     hal::command::ImageCopy {
                         aspect_mask: hal::format::AspectFlags::COLOR,
-                        src_subresource: (0, 0),
+                        src_subresource: (0, src_layer as _),
                         src_offset: hal::command::Offset {
                             x: src_rect.origin.x as i32,
                             y: src_rect.origin.y as i32,
-                            z: src_layer as i32,
+                            z: 0,
                         },
-                        dst_subresource: (0, 0),
+                        dst_subresource: (0, dest_layer as _),
                         dst_offset: hal::command::Offset {
                             x: dest_rect.origin.x as i32,
                             y: dest_rect.origin.y as i32,
-                            z: dest_layer as i32,
+                            z: 0,
                         },
                         extent: hal::device::Extent {
                             width: src_rect.size.width as u32,
@@ -2614,6 +2614,14 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     }
                 ],
             );
+        }
+
+        // the blit caller code expects to be able to render to the target
+        if let Some(barrier) = dest_img.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::ImageLayout::ColorAttachmentOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &[barrier]);
         }
 
         self.upload_queue.push(cmd_buffer.finish());
@@ -3043,7 +3051,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::DepthStencilAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
                     &[barrier],
                 );
             }

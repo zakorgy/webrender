@@ -70,6 +70,7 @@ use std::ffi::CString;
 use std::mem;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::ptr;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
@@ -361,7 +362,6 @@ fn main() {
         return;
     } else if let Some(subargs) = args.subcommand_matches("reftest") {
         let dim = window.get_inner_size();
-        let harness = ReftestHarness::new(&mut wrench, &mut window, rx.unwrap());
         let base_manifest = Path::new("reftests/reftest.list");
         let specific_reftest = subargs.value_of("REFTEST").map(|x| Path::new(x));
         let mut reftest_options = ReftestOptions::default();
@@ -369,8 +369,11 @@ fn main() {
             reftest_options.allow_max_difference = allow_max_diff.parse().unwrap_or(1);
             reftest_options.allow_num_differences = dim.width as usize * dim.height as usize;
         }
-        harness.run(base_manifest, specific_reftest, &reftest_options);
-        return;
+        let num_failures = ReftestHarness::new(&mut wrench, &mut window, rx.unwrap())
+            .run(base_manifest, specific_reftest, &reftest_options);
+        wrench.renderer.deinit();
+        // return an error code so that we fail CI
+        process::exit(num_failures as _);
     } else if let Some(_) = args.subcommand_matches("rawtest") {
         {
             let harness = RawtestHarness::new(&mut wrench, &mut window, rx.unwrap());
