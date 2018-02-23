@@ -10,7 +10,6 @@ use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use std::f32;
 
-use back;
 use hal;
 
 #[derive(Debug, Copy, Clone)]
@@ -70,7 +69,7 @@ pub struct DebugRenderer {
 }
 
 impl DebugRenderer {
-    pub fn new(device: &mut Device<back::Backend, hal::Graphics>) -> Self {
+    pub fn new<B: hal::Backend>(device: &mut Device<B, hal::Graphics>) -> Self {
         //let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
         //device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
 
@@ -108,7 +107,7 @@ impl DebugRenderer {
         }
     }
 
-    pub fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B, hal::Graphics>) {
         device.delete_texture(self.font_texture);
         //device.delete_program(self.font_program);
         //device.delete_program(self.color_program);
@@ -226,9 +225,9 @@ impl DebugRenderer {
         self.add_line(p0.x, p1.y, color, p0.x, p0.y, color);
     }
 
-    pub fn render(
+    pub fn render<B: hal::Backend>(
         &mut self,
-        device: &mut Device<back::Backend, hal::Graphics>,
+        device: &mut Device<B, hal::Graphics>,
         viewport_size: Option<DeviceUintSize>,
     ) {
         if let Some(viewport_size) = viewport_size {

@@ -12,7 +12,7 @@ freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "image", "base64"]
 capture = ["webrender_api/debug-serialization"]
-vulkan = ["gfx-backend-vulkan"]
+vulkan = []
 
 [dependencies]
 app_units = "0.6"
@@ -40,13 +40,13 @@ base64 = { optional = true, version = "0.3.0" }
 ron = { version = "0.1.7" }
 winit = "0.10"
 gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "58e931e" , feature = "serde"}
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "58e931e", optional = true, features = ["glsl-to-spirv"] }
 rand = "0.4"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 env_logger = "0.4"
 servo-glutin = "0.13"     # for the example apps
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "58e931e", features = ["glsl-to-spirv"] }
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }

@@ -53,8 +53,6 @@ extern crate thread_profiler;
 extern crate serde;
 #[macro_use]
 extern crate gfx_hal as hal;
-#[cfg(feature = "vulkan")]
-extern crate gfx_backend_vulkan as back;
 extern crate winit;
 extern crate ron;
 extern crate rand;

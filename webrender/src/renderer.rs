@@ -76,7 +76,6 @@ use util::TransformedRectKind;
 
 use hal;
 use winit;
-use back;
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 /// Enabling this toggle would force the GPU cache scattered texture to
@@ -666,7 +665,7 @@ struct SourceTextureResolver {
 }
 
 impl SourceTextureResolver {
-    fn new(device: &mut Device<back::Backend, hal::Graphics>) -> SourceTextureResolver {
+    fn new<B: hal::Backend>(device: &mut Device<B, hal::Graphics>) -> SourceTextureResolver {
         let mut dummy_cache_texture = device
             .create_texture(ImageFormat::BGRA8);
         device.init_texture(
@@ -691,7 +690,7 @@ impl SourceTextureResolver {
         }
     }
 
-    fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B, hal::Graphics>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -743,7 +742,7 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<back::Backend, hal::Graphics>) {
+    fn bind<B: hal::Backend>(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B, hal::Graphics>) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
@@ -880,7 +879,7 @@ struct CacheTexture {
 }
 
 impl CacheTexture {
-    fn new(device: &mut Device<back::Backend, hal::Graphics>, use_scatter: bool) -> Result<Self, RendererError> {
+    fn new<B: hal::Backend>(device: &mut Device<B, hal::Graphics>, use_scatter: bool) -> Result<Self, RendererError> {
         //let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         let bus = if use_scatter {
@@ -914,7 +913,7 @@ impl CacheTexture {
         })
     }
 
-    fn deinit(self, device: &mut Device<back::Backend, hal::Graphics>) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B, hal::Graphics>) {
         //device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { .. } => {
@@ -934,9 +933,9 @@ impl CacheTexture {
         1024
     }
 
-    fn prepare_for_updates(
+    fn prepare_for_updates<B: hal::Backend>(
         &mut self,
-        device: &mut Device<back::Backend, hal::Graphics>,
+        device: &mut Device<B, hal::Graphics>,
         total_block_count: usize,
         max_height: u32,
     ) {
@@ -1001,7 +1000,7 @@ impl CacheTexture {
         }
     }
 
-    fn update(&mut self, device: &mut Device<back::Backend, hal::Graphics>, updates: &GpuCacheUpdateList) {
+    fn update<B: hal::Backend>(&mut self, device: &mut Device<B, hal::Graphics>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1073,7 +1072,7 @@ impl CacheTexture {
         }
     }
 
-    fn flush(&mut self, device: &mut Device<back::Backend, hal::Graphics>) -> usize {
+    fn flush<B: hal::Backend>(&mut self, device: &mut Device<B, hal::Graphics>) -> usize {
         match self.bus {
             CacheBus::PixelBuffer { /*ref buffer,*/ ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
@@ -1128,20 +1127,20 @@ impl CacheTexture {
     }
 }
 
-struct LazilyCompiledShader {
-    program: Option<Program<back::Backend>>,
+struct LazilyCompiledShader<B: hal::Backend> {
+    program: Option<Program<B>>,
     name: &'static str,
     kind: ShaderKind,
     pipeline_requirements: PipelineRequirements,
 }
 
-impl LazilyCompiledShader {
+impl<B: hal::Backend> LazilyCompiledShader<B> {
     fn new(
         kind: ShaderKind,
         name: &'static str,
-        device: &mut Device<back::Backend, hal::Graphics>,
+        device: &mut Device<B, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-    ) -> Result<LazilyCompiledShader, ShaderError> {
+    ) -> Result<Self, ShaderError> {
         let pipeline_requirements =
             pipeline_requirements.remove(name).expect(&format!("Pipeline requirements not found for: {}", name));
         let mut shader = LazilyCompiledShader {
@@ -1156,8 +1155,8 @@ impl LazilyCompiledShader {
 
     fn get(
         &mut self,
-        device: &mut Device<back::Backend, hal::Graphics>,
-    ) -> Result<&mut Program<back::Backend>, ShaderError> {
+        device: &mut Device<B, hal::Graphics>,
+    ) -> Result<&mut Program<B>, ShaderError> {
         if self.program.is_none() {
              let program = device.create_program(
                  self.pipeline_requirements.clone(),
@@ -1176,7 +1175,7 @@ impl LazilyCompiledShader {
         }
     }
 
-    fn deinit(self, device: &Device<back::Backend, hal::Graphics>,) {
+    fn deinit(self, device: &Device<B, hal::Graphics>,) {
         if let Some(program) = self.program {
             program.deinit(&device.device)
         }
@@ -1184,16 +1183,16 @@ impl LazilyCompiledShader {
 
 }
 
-struct PrimitiveShader {
-    simple: LazilyCompiledShader,
-    transform: LazilyCompiledShader,
+struct PrimitiveShader<B: hal::Backend> {
+    simple: LazilyCompiledShader<B>,
+    transform: LazilyCompiledShader<B>,
 }
 
-impl PrimitiveShader {
+impl<B: hal::Backend> PrimitiveShader<B> {
     fn new(
         name: &'static str,
         transform_name: &'static str,
-        device: &mut Device<back::Backend, hal::Graphics>,
+        device: &mut Device<B, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
     ) -> Result<Self, ShaderError> {
         let simple = try!{
@@ -1220,8 +1219,8 @@ impl PrimitiveShader {
     fn get(
         &mut self,
         transform_kind: TransformedRectKind,
-        device: &mut Device<back::Backend, hal::Graphics>,
-    ) -> Result<&mut Program<back::Backend>, ShaderError> {
+        device: &mut Device<B, hal::Graphics>,
+    ) -> Result<&mut Program<B>, ShaderError> {
         match transform_kind {
             TransformedRectKind::AxisAligned => {
                 self.simple.get(device)
@@ -1237,7 +1236,7 @@ impl PrimitiveShader {
         self.transform.reset();
     }
 
-    fn deinit(self, device: &Device<back::Backend, hal::Graphics>) {
+    fn deinit(self, device: &Device<B, hal::Graphics>) {
         self.simple.deinit(device);
         self.transform.deinit(device);
     }
@@ -1254,16 +1253,16 @@ impl PrimitiveShader {
 //   pass. Assumes that AA should be applied
 //   along the primitive edge, and also that
 //   clip mask is present.
-struct BrushShader {
-    opaque: LazilyCompiledShader,
-    alpha: LazilyCompiledShader,
+struct BrushShader<B: hal::Backend> {
+    opaque: LazilyCompiledShader<B>,
+    alpha: LazilyCompiledShader<B>,
 }
 
-impl BrushShader {
+impl<B: hal::Backend> BrushShader<B> {
     fn new(
         opaque_name: &'static str,
         alpha_name: &'static str,
-        device: &mut Device<back::Backend, hal::Graphics>,
+        device: &mut Device<B, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
     ) -> Result<Self, ShaderError> {
         let opaque = try!{
@@ -1290,8 +1289,8 @@ impl BrushShader {
     fn get(
         &mut self,
         blend_mode: BlendMode,
-        device: &mut Device<back::Backend, hal::Graphics>,
-    ) -> Result<&mut Program<back::Backend>, ShaderError> {
+        device: &mut Device<B, hal::Graphics>,
+    ) -> Result<&mut Program<B>, ShaderError> {
         match blend_mode {
             BlendMode::None => {
                 self.opaque.get(device)
@@ -1313,24 +1312,24 @@ impl BrushShader {
         self.alpha.reset();
     }
 
-    fn deinit(self, device: &Device<back::Backend, hal::Graphics>) {
+    fn deinit(self, device: &Device<B, hal::Graphics>) {
         self.opaque.deinit(device);
         self.alpha.deinit(device);
     }
 }
 
-struct TextShader {
-    simple: LazilyCompiledShader,
-    transform: LazilyCompiledShader,
-    glyph_transform: LazilyCompiledShader,
+struct TextShader<B: hal::Backend> {
+    simple: LazilyCompiledShader<B>,
+    transform: LazilyCompiledShader<B>,
+    glyph_transform: LazilyCompiledShader<B>,
 }
 
-impl TextShader {
+impl<B: hal::Backend> TextShader<B> {
     fn new(
         name: &'static str,
         trasnform_name: &'static str,
         glyph_trasnform_name: &'static str,
-        device: &mut Device<back::Backend, hal::Graphics>,
+        device: &mut Device<B, hal::Graphics>,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
     ) -> Result<Self, ShaderError> {
         let simple = try!{
@@ -1367,8 +1366,8 @@ impl TextShader {
         &mut self,
         glyph_format: GlyphFormat,
         transform_kind: TransformedRectKind,
-        device: &mut Device<back::Backend, hal::Graphics>,
-    ) -> Result<&mut Program<back::Backend>, ShaderError> {
+        device: &mut Device<B, hal::Graphics>,
+    ) -> Result<&mut Program<B>, ShaderError> {
         match glyph_format {
             GlyphFormat::Alpha |
             GlyphFormat::Subpixel |
@@ -1396,7 +1395,7 @@ impl TextShader {
         self.glyph_transform.reset()
     }
 
-    fn deinit(self, device: &Device<back::Backend, hal::Graphics>) {
+    fn deinit(self, device: &Device<B, hal::Graphics>) {
         self.simple.deinit(device);
         self.transform.deinit(device);
         self.glyph_transform.deinit(device);
@@ -1440,10 +1439,10 @@ struct RendererCapture;
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
-pub struct Renderer {
+pub struct Renderer<B: hal::Backend> {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
-    device: Device<back::Backend, hal::Graphics>,
+    device: Device<B, hal::Graphics>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
@@ -1452,25 +1451,25 @@ pub struct Renderer {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    cs_text_run: LazilyCompiledShader,
-    cs_blur_a8: LazilyCompiledShader,
-    cs_blur_rgba8: LazilyCompiledShader,
+    cs_text_run: LazilyCompiledShader<B>,
+    cs_blur_a8: LazilyCompiledShader<B>,
+    cs_blur_rgba8: LazilyCompiledShader<B>,
 
     // Brush shaders
-    brush_mask_corner: LazilyCompiledShader,
-    brush_mask_rounded_rect: LazilyCompiledShader,
-    brush_picture_rgba8: BrushShader,
-    brush_picture_rgba8_alpha_mask: BrushShader,
-    brush_picture_a8: BrushShader,
-    brush_solid: BrushShader,
-    brush_line: BrushShader,
+    brush_mask_corner: LazilyCompiledShader<B>,
+    brush_mask_rounded_rect: LazilyCompiledShader<B>,
+    brush_picture_rgba8: BrushShader<B>,
+    brush_picture_rgba8_alpha_mask: BrushShader<B>,
+    brush_picture_a8: BrushShader<B>,
+    brush_solid: BrushShader<B>,
+    brush_line: BrushShader<B>,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    cs_clip_rectangle: LazilyCompiledShader,
-    cs_clip_image: LazilyCompiledShader,
-    cs_clip_border: LazilyCompiledShader,
+    cs_clip_rectangle: LazilyCompiledShader<B>,
+    cs_clip_image: LazilyCompiledShader<B>,
+    cs_clip_border: LazilyCompiledShader<B>,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -1479,22 +1478,22 @@ pub struct Renderer {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    ps_text_run: TextShader,
-    ps_text_run_dual_source: TextShader,
+    ps_text_run: TextShader<B>,
+    ps_text_run_dual_source: TextShader<B>,
     //ps_image: Vec<Option<PrimitiveShader>>,
-    ps_image: PrimitiveShader,
+    ps_image: PrimitiveShader<B>,
     //ps_yuv_image: Vec<Option<PrimitiveShader>>,
-    ps_yuv_image: Vec<PrimitiveShader>,
-    ps_border_corner: PrimitiveShader,
-    ps_border_edge: PrimitiveShader,
-    ps_gradient: PrimitiveShader,
-    ps_angle_gradient: PrimitiveShader,
-    ps_radial_gradient: PrimitiveShader,
+    ps_yuv_image: Vec<PrimitiveShader<B>>,
+    ps_border_corner: PrimitiveShader<B>,
+    ps_border_edge: PrimitiveShader<B>,
+    ps_gradient: PrimitiveShader<B>,
+    ps_angle_gradient: PrimitiveShader<B>,
+    ps_radial_gradient: PrimitiveShader<B>,
 
-    ps_blend: LazilyCompiledShader,
-    ps_hw_composite: LazilyCompiledShader,
-    ps_split_composite: LazilyCompiledShader,
-    ps_composite: LazilyCompiledShader,
+    ps_blend: LazilyCompiledShader<B>,
+    ps_hw_composite: LazilyCompiledShader<B>,
+    ps_split_composite: LazilyCompiledShader<B>,
+    ps_composite: LazilyCompiledShader<B>,
 
     max_texture_size: u32,
 
@@ -1565,7 +1564,7 @@ impl From<std::io::Error> for RendererError {
     }
 }
 
-impl Renderer {
+impl<B: hal::Backend> Renderer<B> {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
     /// # Examples
@@ -1587,9 +1586,9 @@ impl Renderer {
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
         mut window: &winit::Window,
-        adapter: hal::Adapter<back::Backend>,
-        surface: &mut <back::Backend as hal::Backend>::Surface,
-    ) -> Result<(Renderer, RenderApiSender), RendererError> {
+        adapter: hal::Adapter<B>,
+        surface: &mut B::Surface,
+    ) -> Result<(Renderer<B>, RenderApiSender), RendererError> {
         let (api_tx, api_rx) = try!{ channel::msg_channel() };
         let (payload_tx, payload_rx) = try!{ channel::payload_channel() };
         let (result_tx, result_rx) = channel();
@@ -2933,7 +2932,7 @@ impl Renderer {
                 }
                 TransformBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                     let shader_index =
-                        Renderer::get_yuv_shader_index(
+                        <Renderer<B>>::get_yuv_shader_index(
                             image_buffer_kind,
                             format,
                             color_space,
