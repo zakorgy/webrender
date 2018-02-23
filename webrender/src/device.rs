@@ -602,7 +602,7 @@ impl<B: hal::Backend> Image<B> {
         image_data: &[u8],
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
     {
-        let (image_width, image_height, _, _) = self.image_kind.get_dimensions();
+        let (image_width, image_height, _, _) = self.image_kind.dimensions();
         let pos = rect.origin;
         let size = rect.size;
         self.image_upload_buffer.update(device, image_data);
@@ -1688,7 +1688,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             .memory_types;
         let limits = adapter
             .physical_device
-            .get_limits();
+            .limits();
 
         let upload_memory_type: hal::MemoryTypeId = memory_types
             .iter()
