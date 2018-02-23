@@ -407,7 +407,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
 fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
         "\tlayout(set = 0, binding = 0) uniform Locals {\n\
-         \t\tmat4 uTransform;       // Orthographic projection\n\
+         \t\tuniform mat4 uTransform;       // Orthographic projection\n\
          \t\tuniform float uDevicePixelRatio;\n\
          \t\t// A generic uniform that shaders can optionally use to configure\n\
          \t\t// an operation mode for this batch.\n\

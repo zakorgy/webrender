@@ -994,6 +994,59 @@ impl<B: hal::Backend> InstanceBuffer<B> {
     }
 }
 
+pub struct UniformBuffer<B: hal::Backend> {
+    pub buffers: Vec<Buffer<B>>,
+    pub stride: usize,
+    pub memory_types: Vec<hal::MemoryType>,
+    pub size: usize,
+}
+
+impl<B: hal::Backend> UniformBuffer<B> {
+    fn new(stride: usize, memory_types: Vec<hal::MemoryType>) -> UniformBuffer<B> {
+        UniformBuffer {
+            buffers: vec![],
+            stride,
+            memory_types,
+            size: 0,
+        }
+    }
+
+    fn add<T>(
+        &mut self,
+        device: &B::Device,
+        instances: &[T],
+    ) where T: Copy,
+    {
+        if self.buffers.len() == self.size {
+            let buffer = Buffer::create(
+                device,
+                &self.memory_types,
+                hal::buffer::Usage::UNIFORM,
+                self.stride,
+                1,
+            );
+            self.buffers.push(buffer);
+        }
+        self.buffers[self.size].update(
+            device,
+            0 as u64,
+            (instances.len() * self.stride) as u64,
+            &instances.to_owned(),
+        );
+        self.size += 1;
+    }
+
+    pub fn reset(&mut self) {
+        self.size = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        for buffer in self.buffers {
+            buffer.deinit(device);
+        }
+    }
+}
+
 pub struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, usize>,
     pub descriptor_set_layout: B::DescriptorSetLayout,
@@ -1003,7 +1056,7 @@ pub struct Program<B: hal::Backend> {
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
     pub instance_buffer: InstanceBuffer<B>,
-    pub locals_buffer: Buffer<B>,
+    pub locals_buffer: UniformBuffer<B>,
     shader_name: String,
 }
 
@@ -1184,27 +1237,9 @@ impl<B: hal::Backend> Program<B> {
         );
 
         let locals_buffer_stride = mem::size_of::<Locals>();
-        let locals_buffer_len = locals_buffer_stride;
-
-        let locals_buffer = Buffer::create(
-            device,
-            memory_types,
-            hal::buffer::Usage::UNIFORM,
-            locals_buffer_stride,
-            locals_buffer_len,
-        );
+        let locals_buffer = UniformBuffer::new(locals_buffer_stride, memory_types.to_vec());
 
         let bindings_map = pipeline_requirements.bindings_map;
-        device.write_descriptor_sets::<_, Range<_>>(vec![
-            hal::pso::DescriptorSetWrite {
-                set: &descriptor_set,
-                binding: bindings_map["Locals"],
-                array_offset: 0,
-                write: hal::pso::DescriptorWrite::UniformBuffer(&[
-                    (&locals_buffer.buffer, 0 .. mem::size_of::<Locals>() as u64),
-                ]),
-            },
-        ]);
 
         Program {
             bindings_map,
@@ -1242,7 +1277,6 @@ impl<B: hal::Backend> Program<B> {
         projection: &Transform3D<f32>,
         u_mode: i32,
     ) {
-        let locals_buffer_stride = mem::size_of::<Locals>();
         let locals_data = vec![
             Locals {
                 uTransform: projection.to_row_arrays(),
@@ -1250,12 +1284,20 @@ impl<B: hal::Backend> Program<B> {
                 uMode: u_mode,
             },
         ];
-        self.locals_buffer.update(
+        self.locals_buffer.add(
             device,
-            0,
-            (locals_data.len() * locals_buffer_stride) as u64,
             &locals_data,
         );
+        device.write_descriptor_sets::<_, Range<_>>(vec![
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["Locals"],
+                array_offset: 0,
+                write: hal::pso::DescriptorWrite::UniformBuffer(&[
+                    (&self.locals_buffer.buffers[self.locals_buffer.size - 1].buffer, 0..self.locals_buffer.stride as u64),
+                ]),
+             },
+        ]);
     }
 
     pub fn bind_textures(
