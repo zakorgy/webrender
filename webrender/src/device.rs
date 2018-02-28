@@ -1467,7 +1467,7 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         viewport: hal::command::Viewport,
-        render_pass: &(B::RenderPass, B::RenderPass),
+        render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         clear_values: &[hal::command::ClearValue],
         blend_state: BlendState,
@@ -1495,13 +1495,8 @@ impl<B: hal::Backend> Program<B> {
         }
 
         {
-            let rp = if depth_test == DepthTest::Off {
-                &render_pass.0
-            } else {
-                &render_pass.1
-            };
             let mut encoder = cmd_buffer.begin_render_pass_inline(
-                rp,
+                render_pass,
                 frame_buffer,
                 viewport.rect,
                 clear_values,
@@ -1634,6 +1629,7 @@ pub struct Device<B: hal::Backend, C> {
     pub swap_chain: Box<B::Swapchain>,
     pub render_pass: (B::RenderPass, B::RenderPass),
     pub framebuffers: Vec<B::Framebuffer>,
+    pub framebuffers_depth: Vec<B::Framebuffer>,
     pub frame_images: Vec<ImageCore<B>>,
     pub frame_depth: DepthBuffer<B>,
     pub viewport: hal::command::Viewport,
@@ -1816,7 +1812,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let frame_depth = DepthBuffer::new(&device, &memory_types, pixel_width, pixel_height, depth_format);
 
         // Framebuffer and render target creation
-        let (frame_images, framebuffers) = match backbuffer {
+        let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
             Backbuffer::Images(images) => {
                 let extent = hal::device::Extent {
                     width: pixel_width as _,
@@ -1834,6 +1830,18 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     .map(|core| {
                         device
                             .create_framebuffer(
+                                &render_pass.0,
+                                Some(&core.view),
+                                extent,
+                            )
+                            .unwrap()
+                    })
+                    .collect();
+                let fbos_depth = cores
+                    .iter()
+                    .map(|core| {
+                        device
+                            .create_framebuffer(
                                 &render_pass.1,
                                 vec![&core.view, &frame_depth.core.view],
                                 extent,
@@ -1841,9 +1849,10 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                             .unwrap()
                     })
                     .collect();
-                (cores, fbos)
+                (cores, fbos, fbos_depth)
             }
-            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
+            // TODO fix depth fbos
+            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo], vec![]),
         };
 
         // Rendering setup
@@ -1914,6 +1923,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             swap_chain: Box::new(swap_chain),
             render_pass,
             framebuffers,
+            framebuffers_depth,
             frame_images,
             frame_depth,
             viewport,
@@ -2126,15 +2136,24 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //blend_mode: &BlendMode,
         //enable_depth_write: bool
     ) {
+        let rp = if self.current_depth_test == DepthTest::Off {
+            &self.render_pass.0
+        } else {
+            &self.render_pass.1
+        };
         let fb = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             &self.fbos[&self.bound_draw_fbo].fbo
         } else {
-            &self.framebuffers[self.current_frame_id]
+            if self.current_depth_test == DepthTest::Off {
+                &self.framebuffers[self.current_frame_id]
+            } else {
+                &self.framebuffers_depth[self.current_frame_id]
+            }
         };
         let submit = program.submit(
             &mut self.command_pool,
             self.viewport.clone(),
-            &self.render_pass,
+            &rp,
             &fb,
             &vec![],
             self.current_blend_state,
