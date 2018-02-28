@@ -3057,11 +3057,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         if let Some(color) = color {
             if let Some(barrier) = img.transit(
-                hal::image::Access::TRANSFER_WRITE,
+                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                 hal::image::ImageLayout::TransferDstOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     &[barrier],
                 );
             }
@@ -3076,11 +3076,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]]),
             );
             if let Some(barrier) = img.transit(
-                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                hal::image::Access::empty(),
                 hal::image::ImageLayout::ColorAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
                     &[barrier],
                 );
             }
@@ -3089,11 +3089,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         if let (Some(depth), Some(dimg)) = (depth, dimg) {
             assert_ne!(self.current_depth_test, DepthTest::Off);
             if let Some(barrier) = dimg.transit(
-                hal::image::Access::TRANSFER_WRITE,
+                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 hal::image::ImageLayout::TransferDstOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
                     &[barrier],
                 );
             }
@@ -3108,11 +3108,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::command::ClearDepthStencil(depth, 0)
             );
             if let Some(barrier) = dimg.transit(
-                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                hal::image::Access::empty(),
                 hal::image::ImageLayout::DepthStencilAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
                     &[barrier],
                 );
             }
