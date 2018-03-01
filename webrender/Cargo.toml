@@ -39,14 +39,14 @@ image = { optional = true, version = "0.17" }
 base64 = { optional = true, version = "0.3.0" }
 ron = { version = "0.1.7" }
 winit = "0.10"
-gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "58e931e" , feature = "serde"}
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "d78bd11" , feature = "serde"}
 rand = "0.4"
 
 [dev-dependencies]
 angle = {git = "https://github.com/servo/angle", branch = "servo"}
 env_logger = "0.4"
 servo-glutin = "0.13"     # for the example apps
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "58e931e", features = ["glsl-to-spirv"] }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev= "d78bd11", features = ["glsl-to-spirv"] }
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }
@@ -60,6 +60,6 @@ core-graphics = "0.12.3"
 core-text = { version = "8.0", default-features = false }
 
 [build-dependencies]
-gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "58e931e" , feature = "serde"}
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev= "d78bd11" , feature = "serde"}
 ron = "0.1.7"
 serde = { version = "1", features = ["serde_derive"] }
