@@ -681,7 +681,7 @@ impl<B: hal::Backend> Image<B> {
             hal::image::ImageLayout::TransferDstOptimal,
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
                 &[barrier],
             );
         }
@@ -738,7 +738,7 @@ pub struct VertexDataImage<B: hal::Backend> {
     pub core: ImageCore<B>,
     pub image_upload_buffer: Buffer<B>,
     pub image_stride: usize,
-    pub mem_stride: usize,
+    pub vecs_per_data: usize,
     pub image_width: u32,
     pub image_height: u32,
 }
@@ -771,18 +771,19 @@ impl<B: hal::Backend> VertexDataImage<B> {
             data_stride,
             (image_width * image_height) as usize,
         );
+        let image_stride = 4usize * mem::size_of::<f32>(); // Rgba32Float;
 
         VertexDataImage {
             core,
             image_upload_buffer,
-            image_stride: 4usize,              // Rgba
-            mem_stride: mem::size_of::<f32>(), // Float
+            image_stride,
+            vecs_per_data: data_stride / image_stride,
             image_width,
             image_height,
         }
     }
 
-    pub fn update_buffer_and_submit_upload<T>(
+    pub fn update<T>(
         &mut self,
         device: &mut B::Device,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
@@ -792,13 +793,14 @@ impl<B: hal::Backend> VertexDataImage<B> {
         where
             T: Copy,
     {
-        let needed_height = (image_data.len() * self.image_upload_buffer.data_stride)
-            / (self.image_width as usize * self.image_stride) + 1;
-        if needed_height > self.image_height as usize {
+        let image_data_length = image_data.len() as u32;
+        let image_row_length = self.image_width / self.vecs_per_data as u32;
+        let mut needed_height = image_data_length / image_row_length;
+        if image_data_length % image_row_length != 0 { needed_height += 1};
+        if needed_height > self.image_height {
             unimplemented!("TODO: implement resize");
         }
-        let buffer_height = needed_height as u64;
-        let buffer_width = (image_data.len() * self.image_upload_buffer.data_stride) as u64;
+        let buffer_width = (image_data_length as usize * self.image_upload_buffer.data_stride) as u64;
         let buffer_offset = (image_offset.y * buffer_width as u32) as u64;
         self.image_upload_buffer
             .update(device, buffer_offset, buffer_width, image_data);
@@ -810,7 +812,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             hal::image::ImageLayout::TransferDstOptimal
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::TRANSFER,
+                hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
                 &[barrier],
             );
         }
@@ -822,8 +824,8 @@ impl<B: hal::Backend> VertexDataImage<B> {
             &[
                 hal::command::BufferImageCopy {
                     buffer_offset,
-                    buffer_width: buffer_width as u32,
-                    buffer_height: buffer_height as u32,
+                    buffer_width: self.image_width as u32,
+                    buffer_height: needed_height,
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::AspectFlags::COLOR,
                         level: 0,
@@ -835,8 +837,8 @@ impl<B: hal::Backend> VertexDataImage<B> {
                         z: 0,
                     },
                     image_extent: hal::device::Extent {
-                        width: buffer_width as u32,
-                        height: buffer_height as u32,
+                        width: self.image_width as u32,
+                        height: needed_height,
                         depth: 1,
                     },
                 },
@@ -1689,7 +1691,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         adapter: hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
     ) -> Self {
-        let max_texture_size = 2048u32;
+        let max_texture_size = 1024u32;
         let renderer_name = "WIP".to_owned();
 
         let mut extensions = Vec::new();
@@ -1971,7 +1973,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
         debug_assert_eq!(gpu_data.len(), 1024);
         self.upload_queue
-            .push(self.resource_cache.update_buffer_and_submit_upload(
+            .push(self.resource_cache.update(
                 &mut self.device,
                 &mut self.command_pool,
                 rect.origin,
@@ -1981,7 +1983,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     pub fn update_render_tasks(&mut self, task_data: &[[f32; 12]]) {
         self.upload_queue
-            .push(self.render_tasks.update_buffer_and_submit_upload(
+            .push(self.render_tasks.update(
                 &mut self.device,
                 &mut self.command_pool,
                 DeviceUintPoint::zero(),
@@ -1991,7 +1993,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     pub fn update_local_rects(&mut self, local_data: &[[f32; 4]]) {
         self.upload_queue
-            .push(self.local_clip_rects.update_buffer_and_submit_upload(
+            .push(self.local_clip_rects.update(
                 &mut self.device,
                 &mut self.command_pool,
                 DeviceUintPoint::zero(),
@@ -2001,7 +2003,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
     pub fn update_node_data(&mut self, node_data: &[[f32; 20]]) {
         self.upload_queue
-            .push(self.node_data.update_buffer_and_submit_upload(
+            .push(self.node_data.update(
                 &mut self.device,
                 &mut self.command_pool,
                 DeviceUintPoint::zero(),
