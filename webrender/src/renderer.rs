@@ -2074,11 +2074,6 @@ impl<B: hal::Backend> Renderer<B> {
         Ok((renderer, sender))
     }
 
-    pub fn swap_buffers(&mut self) {
-        self.device.swap_buffers();
-        self.flush();
-    }
-
     pub fn get_max_texture_size(&self) -> u32 {
         self.max_texture_size
     }
@@ -2532,6 +2527,7 @@ impl<B: hal::Backend> Renderer<B> {
             samplers
         };
 
+        let mut frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             // let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2659,6 +2655,9 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.end_frame();
         });
         self.last_time = current_time;
+
+        self.device.swap_buffers(frame_semaphore);
+        self.flush();
 
         if self.renderer_errors.is_empty() {
             Ok(stats)

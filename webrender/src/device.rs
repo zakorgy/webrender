@@ -1700,9 +1700,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let pixel_width = window_size.0 as u16;
         let pixel_height = window_size.1 as u16;
 
-        let surface_format = surface
-            .capabilities_and_formats(&adapter.physical_device)
-            .1
+        let (caps, formats) = surface.capabilities_and_formats(&adapter.physical_device);
+        let surface_format = formats
             .map_or(
                 //hal::format::Format::Rgba8Srgb,
                 hal::format::Format::Rgba8Unorm,
@@ -1756,7 +1755,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         command_pool.reset();
 
         println!("{:?}", surface_format);
-        let swap_config = SwapchainConfig::new().with_color(surface_format);
+        let min_image_count = caps.image_count.start;
+        let swap_config = SwapchainConfig::new().with_color(surface_format).with_image_count(min_image_count);
         let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
@@ -2826,7 +2826,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         };
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
-        let image = &self.frame_images[(self.current_frame_id + 1) % self.framebuffers.len()];
+        let image = &self.frame_images[self.current_frame_id];
         let download_buffer: Buffer<B> = Buffer::create(
             &self.device,
             &self.memory_types,
@@ -3205,7 +3205,15 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.extensions.iter().any(|s| s == extension)
     }
 
-    pub fn swap_buffers(&mut self) {
+    pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {
+        let mut frame_semaphore = self.device.create_semaphore();
+        let frame = self.swap_chain
+            .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
+        self.current_frame_id = frame.id();
+        frame_semaphore
+    }
+
+    pub fn swap_buffers(&mut self, frame_semaphore: B::Semaphore) {
         {
             let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
             let image = &self.frame_images[self.current_frame_id];
@@ -3221,15 +3229,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             self.upload_queue.push(cmd_buffer.finish());
         }
 
-        let mut frame_semaphore = self.device.create_semaphore();
         let mut frame_fence = self.device.create_fence(false); // TODO: remove
         {
             self.device.reset_fence(&frame_fence);
-
-            let frame = self.swap_chain
-                .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
-            assert_eq!(frame.id(), self.current_frame_id);
-
             let submission = Submission::new()
                 .wait_on(&[(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
                 .submit(&self.upload_queue);
@@ -3242,7 +3244,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             // present frame
             self.swap_chain
                 .present(&mut self.queue_group.queues[0], &[]);
-            self.current_frame_id = (self.current_frame_id + 1) % self.framebuffers.len();
         }
         self.upload_queue.clear();
         self.command_pool.reset();

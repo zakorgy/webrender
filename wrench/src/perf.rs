@@ -158,7 +158,6 @@ impl<'a> PerfHarness<'a> {
             reader.do_frame(self.wrench);
             self.rx.recv().unwrap();
             self.wrench.render();
-            self.window.swap_buffers();
             let (cpu_profiles, gpu_profiles) = self.wrench.get_frame_profiles();
             cpu_frame_profiles.extend(cpu_profiles);
             gpu_frame_profiles.extend(gpu_profiles);

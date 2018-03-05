@@ -566,7 +566,6 @@ fn main() {
             }
 
             wrench.render();
-            wrench.renderer.swap_buffers();
 
             if do_loop {
                 thing.next_frame();

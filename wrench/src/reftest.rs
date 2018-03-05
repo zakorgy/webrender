@@ -479,7 +479,6 @@ impl<'a> ReftestHarness<'a> {
         // taking the bottom left sub-rectangle
         // let rect = DeviceUintRect::new(DeviceUintPoint::new(0, window_size.height - size.height), size);
         let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
-        self.wrench.renderer.swap_buffers();
         let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
 
         let write_debug_images = false;

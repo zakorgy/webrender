@@ -207,7 +207,6 @@ pub fn main_wrapper<E: Example>(
                 }
                 renderer.update();
                 renderer.render(framebuffer_size).unwrap();
-                renderer.swap_buffers();
                 winit::ControlFlow::Continue
             },
         }
