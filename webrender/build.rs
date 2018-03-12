@@ -441,6 +441,7 @@ fn extend_non_uniform_variables_with_location_info(
     write_ron: bool,
 ) {
     let layout_str;
+    let location_size = calculate_location_size(line);
     if line.starts_with("in") {
         layout_str = format!("layout(location = {}) {}\n", in_location, line);
         if write_ron {
@@ -452,17 +453,24 @@ fn extend_non_uniform_variables_with_location_info(
                 vertex_offset,
             );
         }
-        *in_location += 1;
+        *in_location += location_size;
     } else if line.starts_with("out") {
         layout_str = format!("layout(location = {}) {}\n", out_location, line);
-        *out_location += 1;
+        *out_location += location_size;
     } else {
         let location = max(*in_location, *out_location);
         layout_str = format!("layout(location = {}) {}\n", location, line);
-        *in_location = location + 1;
-        *out_location = location + 1;
+        *in_location = location + location_size;
+        *out_location = location + location_size;
     }
     new_data.push_str(&layout_str)
+}
+
+fn calculate_location_size(line: &str) -> u32 {
+    match line.split_whitespace().rev().nth(1).unwrap() {
+        "mat4" => 4,
+        _ => 1,
+    }
 }
 
 fn add_attribute_descriptors(

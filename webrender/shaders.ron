@@ -21,80 +21,97 @@
         ],
     ),// [2]
     (
-        name: "brush_line",
-        source_name: "brush_line",
-        features: [
-            "",// [0]
-            "ALPHA_PASS",// [1]
-        ],
-    ),// [6]
-    (
         name: "brush_solid",
         source_name: "brush_solid",
         features: [
             "",// [0]
             "ALPHA_PASS",// [1]
         ],
+    ),// [3]
+    (
+        name: "brush_line",
+        source_name: "brush_line",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [4]
+    (
+        name: "brush_image",
+        source_name: "brush_image",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [5]
+    (
+        name: "brush_blend",
+        source_name: "brush_blend",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [6]
+    (
+        name: "brush_mix_blend",
+        source_name: "brush_mix_blend",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
     ),// [7]
+    (
+        name: "brush_yuv_image",
+        source_name: "brush_yuv_image",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [8]
+    (
+        name: "brush_radial_gradient",
+        source_name: "brush_radial_gradient",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [9]
+    (
+        name: "brush_linear_gradient",
+        source_name: "brush_linear_gradient",
+        features: [
+            "",// [0]
+            "ALPHA_PASS",// [1]
+        ],
+    ),// [10]
     (
         name: "cs_clip_rectangle",
         source_name: "cs_clip_rectangle",
         features: [
             "TRANSFORM",// [0]
         ],
-    ),// [8]
+    ),// [11]
+    (
+        name: "cs_clip_box_shadow",
+        source_name: "cs_clip_box_shadow",
+        features: [
+            "TRANSFORM",// [0]
+        ],
+    ),// [12]
     (
         name: "cs_clip_image",
         source_name: "cs_clip_image",
         features: [
             "TRANSFORM",// [0]
         ],
-    ),// [9]
+    ),// [13]
     (
         name: "cs_clip_border",
         source_name: "cs_clip_border",
         features: [
             "TRANSFORM",// [0]
         ],
-    ),// [10]
-    (
-        name: "ps_border_corner",
-        source_name: "ps_border_corner",
-        features: [
-            "",// [0]
-            "TRANSFORM",// [1]
-        ],
-    ),// [11]
-    (
-        name: "ps_border_edge",
-        source_name: "ps_border_edge",
-        features: [
-            "",// [0]
-            "TRANSFORM",// [1]
-        ],
-    ),// [12]
-    (
-        name: "ps_hardware_composite",
-        source_name: "ps_hardware_composite",
-        features: [
-            "",// [0]
-        ],
-    ),// [18]
-    (
-        name: "ps_split_composite",
-        source_name: "ps_split_composite",
-        features: [
-            "",// [0]
-        ],
-    ),// [19]
-    (
-        name: "ps_image",
-        source_name: "ps_image",
-        features: [
-            "",// [0]
-            "TRANSFORM",// [1]
-        ],
-    ),// [20]
+    ),// [14]
     (
         name: "ps_text_run",
         source_name: "ps_text_run",
@@ -106,19 +123,57 @@
             "DUAL_SOURCE_BLENDING,TRANSFORM",// [4]
             "DUAL_SOURCE_BLENDING,GLYPH_TRANSFORM",// [5]
         ],
-    ),// [22]
+    ),// [15]
+    (
+        name: "ps_image",
+        source_name: "ps_image",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+        ],
+    ),// [16]
+    (
+        name: "ps_border_corner",
+        source_name: "ps_border_corner",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+        ],
+    ),// [17]
+    (
+        name: "ps_border_edge",
+        source_name: "ps_border_edge",
+        features: [
+            "",// [0]
+            "TRANSFORM",// [1]
+        ],
+    ),// [18]
+    (
+        name: "ps_hardware_composite",
+        source_name: "ps_hardware_composite",
+        features: [
+            "",// [0]
+        ],
+    ),// [19]
+    (
+        name: "ps_split_composite",
+        source_name: "ps_split_composite",
+        features: [
+            "",// [0]
+        ],
+    ),// [20]
     (
         name: "debug_color",
         source_name: "debug_color",
         features: [
             "",// [0]
         ],
-    ),// [23]
+    ),// [21]
     (
         name: "debug_font",
         source_name: "debug_font",
         features: [
             "",// [0]
         ],
-    ),// [24]
+    ),// [22]
 ]
