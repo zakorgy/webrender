@@ -1457,19 +1457,19 @@ pub struct Renderer<B: hal::Backend> {
     brush_solid: BrushShader<B>,
     brush_line: BrushShader<B>,
     // brush_image: Vec<Option<BrushShader<B>>>,
-    // brush_image: BrushShader<B>,
-    // brush_blend: BrushShader<B>,
-    // brush_mix_blend: BrushShader<B>,
+    brush_image: BrushShader<B>,
+    brush_blend: BrushShader<B>,
+    brush_mix_blend: BrushShader<B>,
     // brush_yuv_image: Vec<Option<BrushShader<B>>>,
     // brush_yuv_image: Vec<BrushShader<B>>,
-    // brush_radial_gradient: BrushShader<B>,
-    // brush_linear_gradient: BrushShader<B>,
+    brush_radial_gradient: BrushShader<B>,
+    brush_linear_gradient: BrushShader<B>,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
     cs_clip_rectangle: LazilyCompiledShader<B>,
-    // cs_clip_box_shadow: LazilyCompiledShader<B>,
+    cs_clip_box_shadow: LazilyCompiledShader<B>,
     cs_clip_image: LazilyCompiledShader<B>,
     cs_clip_border: LazilyCompiledShader<B>,
 
@@ -1644,41 +1644,41 @@ impl<B: hal::Backend> Renderer<B> {
             &mut pipeline_requirements,
         )?;
 
-        /*let brush_blend = try!{
-            BrushShader::new("brush_blend",
-                             &mut device,
-                             &[],
-                             options.precache_shaders)
-        };
+        let brush_image = BrushShader::new(
+            "brush_image",
+            "brush_image_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_mix_blend = try!{
-            BrushShader::new("brush_mix_blend",
-                             &mut device,
-                             &[],
-                             options.precache_shaders)
-        };
+        let brush_blend = BrushShader::new(
+            "brush_blend",
+            "brush_blend_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_radial_gradient = try!{
-            BrushShader::new("brush_radial_gradient",
-                             &mut device,
-                             if options.enable_dithering {
-                                &dithering_feature
-                             } else {
-                                &[]
-                             },
-                             options.precache_shaders)
-        };
+        let brush_mix_blend = BrushShader::new(
+            "brush_mix_blend",
+            "brush_mix_blend_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
 
-        let brush_linear_gradient = try!{
-            BrushShader::new("brush_linear_gradient",
-                             &mut device,
-                             if options.enable_dithering {
-                                &dithering_feature
-                             } else {
-                                &[]
-                             },
-                             options.precache_shaders)
-        };*/
+        let brush_radial_gradient = BrushShader::new(
+            "brush_radial_gradient",
+            "brush_radial_gradient_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
+
+        let brush_linear_gradient = BrushShader::new(
+            "brush_linear_gradient",
+            "brush_linear_gradient_alpha_pass",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
+
         let cs_blur_a8 = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Blur),
             "cs_blur_a8",
@@ -1696,6 +1696,13 @@ impl<B: hal::Backend> Renderer<B> {
         let cs_clip_rectangle = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
             "cs_clip_rectangle_transform",
+            &mut device,
+            &mut pipeline_requirements,
+        )?;
+
+        let cs_clip_box_shadow = LazilyCompiledShader::new(
+            ShaderKind::ClipCache,
+            "cs_clip_box_shadow_transform",
             &mut device,
             &mut pipeline_requirements,
         )?;
@@ -1722,21 +1729,6 @@ impl<B: hal::Backend> Renderer<B> {
             &mut pipeline_requirements,
         )?;
 
-        /*let cs_clip_box_shadow = try!{
-            LazilyCompiledShader::new(ShaderKind::ClipCache,
-                                      "cs_clip_box_shadow",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };
-
-        let cs_clip_image = try!{
-            LazilyCompiledShader::new(ShaderKind::ClipCache,
-                                      "cs_clip_image",
-                                      &[],
-                                      &mut device,
-                                      options.precache_shaders)
-        };*/
         let ps_text_run_dual_source = TextShader::new(
             "ps_text_run_dual_source_blending",
             "ps_text_run_dual_source_blending_transform",
@@ -2039,14 +2031,14 @@ impl<B: hal::Backend> Renderer<B> {
             cs_blur_rgba8,
             brush_solid,
             brush_line,
-            // brush_image,
-            // brush_blend,
-            // brush_mix_blend,
+            brush_image,
+            brush_blend,
+            brush_mix_blend,
             // brush_yuv_image,
-            // brush_radial_gradient,
-            // brush_linear_gradient,
+            brush_radial_gradient,
+            brush_linear_gradient,
             cs_clip_rectangle,
-            // cs_clip_box_shadow,
+            cs_clip_box_shadow,
             cs_clip_border,
             cs_clip_image,
             ps_text_run,
@@ -2947,25 +2939,25 @@ impl<B: hal::Backend> Renderer<B> {
                         self.brush_solid.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::Image(image_buffer_kind) => {
-                        unimplemented!();
+                        self.brush_image.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::Line => {
                         self.brush_line.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::Blend => {
-                        unimplemented!();
+                        self.brush_blend.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::MixBlend { .. } => {
-                        unimplemented!();
+                        self.brush_mix_blend.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::RadialGradient => {
-                        unimplemented!();
+                        self.brush_radial_gradient.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::LinearGradient => {
-                        unimplemented!();
+                        self.brush_linear_gradient.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
-                        unimplemented!();
+                        unimplemented!("TODO: yuv shaders");
                         /*let shader_index =
                             <Renderer<B>>::get_yuv_shader_index(
                                 image_buffer_kind,
@@ -3722,7 +3714,7 @@ impl<B: hal::Backend> Renderer<B> {
                 self.device.draw(&mut program);
             }
             // draw box-shadow clips
-            /*let mut program = self.cs_clip_box_shadow.get(&mut self.device).unwrap();
+            let mut program = self.cs_clip_box_shadow.get(&mut self.device).unwrap();
             program.bind_locals(&self.device.device, projection, 0);
             for (mask_texture_id, items) in target.clip_batcher.box_shadows.iter() {
                 // let _gm2 = self.gpu_profile.start_marker("box-shadows");
@@ -3745,7 +3737,7 @@ impl<B: hal::Backend> Renderer<B> {
                     &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
                 self.device.draw(&mut program);
-            }*/
+            }
 
             // draw image masks
             let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
@@ -4432,12 +4424,12 @@ impl<B: hal::Backend> Renderer<B> {
         self.cs_blur_rgba8.deinit(&mut self.device);
         self.brush_solid.deinit(&mut self.device);
         self.brush_line.deinit(&mut self.device);
-        // self.brush_blend.deinit(&mut self.device);
-        // self.brush_mix_blend.deinit(&mut self.device);
-        // self.brush_radial_gradient.deinit(&mut self.device);
-        // self.brush_linear_gradient.deinit(&mut self.device);
+        self.brush_blend.deinit(&mut self.device);
+        self.brush_mix_blend.deinit(&mut self.device);
+        self.brush_radial_gradient.deinit(&mut self.device);
+        self.brush_linear_gradient.deinit(&mut self.device);
         self.cs_clip_rectangle.deinit(&mut self.device);
-        // self.cs_clip_box_shadow.deinit(&mut self.device);
+        self.cs_clip_box_shadow.deinit(&mut self.device);
         self.cs_clip_image.deinit(&mut self.device);
         self.cs_clip_border.deinit(&mut self.device);
         self.ps_text_run.deinit(&mut self.device);
@@ -4447,7 +4439,7 @@ impl<B: hal::Backend> Renderer<B> {
         //         shader.deinit(&mut self.device);
         //     }
         // }
-        // self.brush_image.deinit(&mut self.device);
+        self.brush_image.deinit(&mut self.device);
         // for shader in self.ps_image {
         //     if let Some(shader) = shader {
         //         shader.deinit(&mut self.device);
