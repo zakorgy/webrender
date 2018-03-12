@@ -3979,7 +3979,7 @@ impl<B: hal::Backend> Renderer<B> {
 
         let node_data_blocks = frame.node_data.iter().map(
             |block| {
-                let mut res_block: [f32; 20] = [0.0; 20];
+                let mut res_block: [f32; 36] = [0.0; 36];
                 let transform = block.transform.to_row_major_array();
                 res_block[0] = transform[0];
                 res_block[1] = transform[1];
@@ -3998,15 +3998,33 @@ impl<B: hal::Backend> Renderer<B> {
                 res_block[14] = transform[14];
                 res_block[15] = transform[15];
 
-                res_block[16] = block.transform_kind;
+                let transform = block.inv_transform.to_row_major_array();
+                res_block[16] = transform[0];
+                res_block[17] = transform[1];
+                res_block[18] = transform[2];
+                res_block[19] = transform[3];
+                res_block[20] = transform[4];
+                res_block[21] = transform[5];
+                res_block[22] = transform[6];
+                res_block[23] = transform[7];
+                res_block[24] = transform[8];
+                res_block[25] = transform[9];
+                res_block[26] = transform[10];
+                res_block[27] = transform[11];
+                res_block[28] = transform[12];
+                res_block[29] = transform[13];
+                res_block[30] = transform[14];
+                res_block[31] = transform[15];
 
-                res_block[17] = block.padding[0];
-                res_block[18] = block.padding[1];
-                res_block[19] = block.padding[2];
+                res_block[32] = block.transform_kind;
+
+                res_block[33] = block.padding[0];
+                res_block[34] = block.padding[1];
+                res_block[35] = block.padding[2];
 
                 res_block
             }
-        ).collect::<Vec<[f32; 20]>>();
+        ).collect::<Vec<[f32; 36]>>();
         self.device.update_node_data(&node_data_blocks);
 
         // self.local_clip_rects_texture.update(

@@ -36,7 +36,7 @@ use hal::pso::PipelineStage;
 use hal::queue::Submission;
 use ron::de::from_reader;
 
-pub const NODE_TEXTURE_WIDTH: usize = 1020; // 204 * ( 20 / 4)
+pub const NODE_TEXTURE_WIDTH: usize = 1017; // 113 * ( 36 / 4)
 pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023; // 341 * ( 12 / 4 )
 pub const CLIP_RECTS_TEXTURE_WIDTH: usize = 1024;
 pub const TEXTURE_HEIGHT: usize = 8;
@@ -1916,7 +1916,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let node_data = VertexDataImage::create(
             &device,
             &memory_types,
-            mem::size_of::<[f32; 20]>(),
+            mem::size_of::<[f32; 36]>(),
             NODE_TEXTURE_WIDTH as u32,
             TEXTURE_HEIGHT as u32,
         );
@@ -2010,7 +2010,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ));
     }
 
-    pub fn update_node_data(&mut self, node_data: &[[f32; 20]]) {
+    pub fn update_node_data(&mut self, node_data: &[[f32; 36]]) {
         self.upload_queue
             .push(self.node_data.update(
                 &mut self.device,
