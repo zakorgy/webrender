@@ -260,6 +260,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             {
                 extend_non_uniform_variables_with_location_info(
                     &mut attribute_descriptors,
+                    file_name,
                     &mut in_location,
                     &mut instance_offset,
                     trimmed,
@@ -432,6 +433,7 @@ fn add_locals_to_descriptor_set_layout(
 
 fn extend_non_uniform_variables_with_location_info(
     attribute_descriptors: &mut Vec<AttributeDesc>,
+    file_name: &str,
     in_location: &mut u32,
     instance_offset: &mut u32,
     line: &str,
@@ -447,6 +449,7 @@ fn extend_non_uniform_variables_with_location_info(
         if write_ron {
             add_attribute_descriptors(
                 attribute_descriptors,
+                file_name,
                 in_location,
                 instance_offset,
                 line,
@@ -475,6 +478,7 @@ fn calculate_location_size(line: &str) -> u32 {
 
 fn add_attribute_descriptors(
     attribute_descriptors: &mut Vec<AttributeDesc>,
+    file_name: &str,
     in_location: &mut u32,
     instance_offset: &mut u32,
     line: &str,
@@ -503,6 +507,24 @@ fn add_attribute_descriptors(
                 }
             );
             *vertex_offset += offset;
+        }
+        // All shader files contain aData0 and aData1 variables.
+        // We must remove them from the attribute descriptors of blur and clip shaders,
+        // because they are not used in these and we don't want them when calculating offsets.
+        "aData0" | "aData1" => {
+            if !(file_name.starts_with("cs_blur") || file_name.starts_with("cs_clip")) {
+                attribute_descriptors.push(
+                    AttributeDesc {
+                        location: *in_location,
+                        binding: 1,
+                        element: Element {
+                            format: format,
+                            offset: *instance_offset,
+                        }
+                    }
+                );
+                *instance_offset += offset;
+            }
         }
         _ => {
             attribute_descriptors.push(
