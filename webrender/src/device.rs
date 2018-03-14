@@ -42,6 +42,7 @@ pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1023; // 341 * ( 12 / 4 )
 pub const CLIP_RECTS_TEXTURE_WIDTH: usize = 1024;
 pub const TEXTURE_HEIGHT: usize = 8;
 pub const MAX_INSTANCE_COUNT: usize = 1024;
+const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
 pub type TextureId = u32;
 
@@ -2021,8 +2022,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             &device,
             &memory_types,
             mem::size_of::<[f32; 4]>(),
-            max_texture_size as u32,
-            max_texture_size as u32,
+            MAX_VERTEX_TEXTURE_WIDTH as u32,
+            MAX_VERTEX_TEXTURE_WIDTH as u32,
             limits.min_buffer_copy_pitch_alignment,
         );
 
