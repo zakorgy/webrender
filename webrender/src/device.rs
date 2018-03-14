@@ -1326,7 +1326,7 @@ impl<B: hal::Backend> Program<B> {
         let sampler = match sampler {
             &TextureFilter::Linear => &device.sampler_linear,
             &TextureFilter::Nearest => &device.sampler_nearest,
-            &TextureFilter::Trilinear => unimplemented!(),
+            &TextureFilter::Trilinear => &device.sampler_trilinear,
         };
         device.device.write_descriptor_sets::<_, Range<_>>(vec![
             hal::pso::DescriptorSetWrite {
@@ -1646,6 +1646,7 @@ pub struct Device<B: hal::Backend, C> {
     pub viewport: hal::command::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
+    pub sampler_trilinear: B::Sampler,
     pub resource_cache: VertexDataImage<B>,
     pub render_tasks: VertexDataImage<B>,
     pub local_clip_rects: VertexDataImage<B>,
@@ -1889,6 +1890,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             hal::image::WrapMode::Tile,
         ));
 
+        let sampler_trilinear = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::FilterMethod::Trilinear,
+            hal::image::WrapMode::Tile,
+        ));
+
         let resource_cache = VertexDataImage::create(
             &device,
             &memory_types,
@@ -1940,6 +1946,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             viewport,
             sampler_linear,
             sampler_nearest,
+            sampler_trilinear,
             resource_cache,
             render_tasks,
             local_clip_rects,
