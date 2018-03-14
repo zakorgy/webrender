@@ -1702,7 +1702,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         adapter: hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
     ) -> Self {
-        let max_texture_size = 2048u32;
+        let max_texture_size = 4096u32;
         let renderer_name = "WIP".to_owned();
 
         let mut extensions = Vec::new();
