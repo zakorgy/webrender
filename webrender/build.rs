@@ -620,7 +620,12 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashM
         #[cfg(any(target_os = "android", target_os = "linux"))]
         glslang_validator.pop(); // remove \n
         #[cfg(any(target_os = "android", target_os = "linux"))]
-        let mut glslang_cmd = Command::new(Path::new(&glslang_validator));
+        let mut glslang_cmd = if glslang_validator.is_empty() {
+            // Use the glslangValidator binary from tools, if glslang_validator is not found.
+            Command::new(Path::new("./tools/glslangValidator"))
+        } else {
+            Command::new(Path::new(&glslang_validator))
+        };
         #[cfg(target_os = "windows")]
         let mut glslang_cmd = Command::new(Path::new("./tools/glslangValidator.exe"));
         glslang_cmd
