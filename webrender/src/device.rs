@@ -50,12 +50,12 @@ pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
-    aspects: hal::format::AspectFlags::COLOR,
+    aspects: hal::format::Aspects::COLOR,
     levels: 0 .. 1,
     layers: 0 .. 1,
 };
 const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
-    aspects: hal::format::AspectFlags::DEPTH,
+    aspects: hal::format::Aspects::DEPTH,
     levels: 0 .. 1,
     layers: 0 .. 1,
 };
@@ -103,7 +103,7 @@ pub struct BlurInstance {
 #[derive(Clone, Deserialize)]
 pub struct PipelineRequirements {
     pub attribute_descriptors: Vec<AttributeDesc>,
-    pub bindings_map: HashMap<String, usize>,
+    pub bindings_map: HashMap<String, u32>,
     pub descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
     pub descriptor_set_layouts: Vec<DescriptorSetLayoutBinding>,
     pub vertex_buffer_descriptors: Vec<VertexBufferDesc>,
@@ -656,7 +656,7 @@ impl<B: hal::Backend> Image<B> {
             format,
             hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             hal::image::SubresourceRange {
-                aspects: hal::format::AspectFlags::COLOR,
+                aspects: hal::format::Aspects::COLOR,
                 levels: 0 .. 1,
                 layers: 0 .. image_depth as _,
             },
@@ -691,6 +691,7 @@ impl<B: hal::Backend> Image<B> {
         ) {
             cmd_buffer.pipeline_barrier(
                 hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
                 &[barrier],
             );
         }
@@ -705,11 +706,11 @@ impl<B: hal::Backend> Image<B> {
                     buffer_width: size.width,
                     buffer_height: size.height,
                     image_layers: hal::image::SubresourceLayers {
-                        aspects: hal::format::AspectFlags::COLOR,
+                        aspects: hal::format::Aspects::COLOR,
                         level: 0,
                         layers: layer_index as _ .. (layer_index + 1) as _,
                     },
-                    image_offset: hal::command::Offset {
+                    image_offset: hal::image::Offset {
                         x: pos.x as i32,
                         y: pos.y as i32,
                         z: 0,
@@ -729,6 +730,7 @@ impl<B: hal::Backend> Image<B> {
         ) {
             cmd_buffer.pipeline_barrier(
                 hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                hal::memory::Dependencies::empty(),
                 &[barrier],
             );
         }
@@ -822,6 +824,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         ) {
             cmd_buffer.pipeline_barrier(
                 hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
                 &[barrier],
             );
         }
@@ -836,11 +839,11 @@ impl<B: hal::Backend> VertexDataImage<B> {
                     buffer_width: self.image_width as u32,
                     buffer_height: needed_height,
                     image_layers: hal::image::SubresourceLayers {
-                        aspects: hal::format::AspectFlags::COLOR,
+                        aspects: hal::format::Aspects::COLOR,
                         level: 0,
                         layers: 0 .. 1,
                     },
-                    image_offset: hal::command::Offset {
+                    image_offset: hal::image::Offset {
                         x: image_offset.x as i32,
                         y: image_offset.y as i32,
                         z: 0,
@@ -860,6 +863,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
         ) {
             cmd_buffer.pipeline_barrier(
                 hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                hal::memory::Dependencies::empty(),
                 &[barrier],
             );
         }
@@ -1059,7 +1063,7 @@ impl<B: hal::Backend> UniformBuffer<B> {
 }
 
 pub struct Program<B: hal::Backend> {
-    pub bindings_map: HashMap<String, usize>,
+    pub bindings_map: HashMap<String, u32>,
     pub descriptor_set_layout: B::DescriptorSetLayout,
     pub descriptor_pool: B::DescriptorPool,
     pub descriptor_set: B::DescriptorSet,
@@ -1299,14 +1303,14 @@ impl<B: hal::Backend> Program<B> {
             device,
             &locals_data,
         );
-        device.write_descriptor_sets::<_, Range<_>>(vec![
+        device.write_descriptor_sets(vec![
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["Locals"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::UniformBuffer(&[
-                    (&self.locals_buffer.buffers[self.locals_buffer.size - 1].buffer, 0..self.locals_buffer.stride as u64),
-                ]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Buffer(&self.locals_buffer.buffers[self.locals_buffer.size - 1].buffer, Some(0)..Some(self.locals_buffer.stride as u64))
+                ),
              },
         ]);
     }
@@ -1324,28 +1328,26 @@ impl<B: hal::Backend> Program<B> {
     }
 
     fn bind_texture(&mut self, device: &Device<B, hal::Graphics>, id: &TextureId, sampler: &TextureFilter, binding: &'static str) {
-        let sampler = match sampler {
-            &TextureFilter::Linear => &device.sampler_linear,
-            &TextureFilter::Nearest => &device.sampler_nearest,
-            &TextureFilter::Trilinear => &device.sampler_trilinear,
+        let sampler = match *sampler {
+            TextureFilter::Linear | TextureFilter::Trilinear => &device.sampler_linear,
+            TextureFilter::Nearest => &device.sampler_nearest,
         };
-        device.device.write_descriptor_sets::<_, Range<_>>(vec![
+        device.device.write_descriptor_sets(vec![
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map[&("t".to_owned() + binding)],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(&[
-                    (
-                        &device.images[id].core.view,
-                        hal::image::ImageLayout::Undefined,
-                    ),
-                ])
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(&device.images[id].core.view,  hal::image::ImageLayout::Undefined)
+                ),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map[&("s".to_owned() + binding)],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(&[sampler]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Sampler(sampler)
+                )
             },
         ]);
     }
@@ -1376,74 +1378,62 @@ impl<B: hal::Backend> Program<B> {
         local_clip_rects: &B::ImageView,
         local_clip_rects_sampler: &B::Sampler,
     ) {
-        device.write_descriptor_sets::<_, Range<_>>(vec![
+        device.write_descriptor_sets(vec![
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["tResourceCache"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(&[
-                    (
-                        resource_cache,
-                        hal::image::ImageLayout::Undefined,
-                    ),
-                ]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(resource_cache, hal::image::ImageLayout::Undefined)
+                ),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["sResourceCache"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(&[resource_cache_sampler]),
+                descriptors: Some(hal::pso::Descriptor::Sampler(resource_cache_sampler)),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["tClipScrollNodes"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(&[
-                    (
-                        node_data,
-                        hal::image::ImageLayout::Undefined,
-                    ),
-                ]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(node_data, hal::image::ImageLayout::Undefined)
+                ),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["sClipScrollNodes"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(&[node_data_sampler]),
+                descriptors: Some(hal::pso::Descriptor::Sampler(node_data_sampler)),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["tRenderTasks"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(&[
-                    (
-                        render_tasks,
-                        hal::image::ImageLayout::Undefined,
-                    ),
-                ]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(render_tasks, hal::image::ImageLayout::Undefined)
+                ),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["sRenderTasks"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(&[render_tasks_sampler]),
+                descriptors: Some(hal::pso::Descriptor::Sampler(render_tasks_sampler)),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["tLocalClipRects"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(&[
-                    (
-                        local_clip_rects,
-                        hal::image::ImageLayout::Undefined,
-                    ),
-                ]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(local_clip_rects, hal::image::ImageLayout::Undefined)
+                ),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["sLocalClipRects"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(&[local_clip_rects_sampler]),
+                descriptors: Some(hal::pso::Descriptor::Sampler(local_clip_rects_sampler)),
             },
         ]);
     }
@@ -1454,23 +1444,20 @@ impl<B: hal::Backend> Program<B> {
         dither: &B::ImageView,
         dither_sampler: &B::Sampler,
     ) {
-        device.write_descriptor_sets::<_, Range<_>>(vec![
+        device.write_descriptor_sets(vec![
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["tDither"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::SampledImage(&[
-                    (
-                        dither,
-                        hal::image::ImageLayout::ShaderReadOnlyOptimal,
-                    ),
-                ]),
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(dither, hal::image::ImageLayout::ShaderReadOnlyOptimal)
+                ),
             },
             hal::pso::DescriptorSetWrite {
                 set: &self.descriptor_set,
                 binding: self.bindings_map["sDither"],
                 array_offset: 0,
-                write: hal::pso::DescriptorWrite::Sampler(&[dither_sampler]),
+                descriptors: Some(hal::pso::Descriptor::Sampler(dither_sampler)),
             },
         ]);
     }
@@ -1567,7 +1554,7 @@ impl<B: hal::Backend> Framebuffer<B> {
                 format,
                 Swizzle::NO,
                 hal::image::SubresourceRange {
-                    aspects: hal::format::AspectFlags::COLOR,
+                    aspects: hal::format::Aspects::COLOR,
                     levels: 0 .. 1,
                     layers: layer_index .. layer_index+1,
                 },
@@ -1647,7 +1634,6 @@ pub struct Device<B: hal::Backend, C> {
     pub viewport: hal::command::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    pub sampler_trilinear: B::Sampler,
     pub resource_cache: VertexDataImage<B>,
     pub render_tasks: VertexDataImage<B>,
     pub local_clip_rects: VertexDataImage<B>,
@@ -1882,17 +1868,12 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         // Samplers
 
         let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
-            hal::image::FilterMethod::Bilinear,
+            hal::image::Filter::Linear,
             hal::image::WrapMode::Tile,
         ));
 
         let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
-            hal::image::FilterMethod::Scale,
-            hal::image::WrapMode::Tile,
-        ));
-
-        let sampler_trilinear = device.create_sampler(hal::image::SamplerInfo::new(
-            hal::image::FilterMethod::Trilinear,
+            hal::image::Filter::Nearest,
             hal::image::WrapMode::Tile,
         ));
 
@@ -1947,7 +1928,6 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             viewport,
             sampler_linear,
             sampler_nearest,
-            sampler_trilinear,
             resource_cache,
             render_tasks,
             local_clip_rects,
@@ -2329,7 +2309,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             )));
 
             let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
-            cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::COLOR_ATTACHMENT_OUTPUT, &barriers);
+            cmd_buffer.pipeline_barrier(
+                PipelineStage::TOP_OF_PIPE .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                hal::memory::Dependencies::empty(),
+                &barriers,
+            );
             self.upload_queue.push(cmd_buffer.finish())
         }
 
@@ -2632,7 +2616,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             barriers.extend(src_img.transit(hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal));
             barriers.extend(dest_img.transit(hal::image::Access::TRANSFER_WRITE, hal::image::ImageLayout::TransferDstOptimal));
             if !barriers.is_empty() {
-                cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &barriers);
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER,
+                    hal::memory::Dependencies::empty(),
+                    &barriers,
+                );
             }
         }
         // TODO remove this cfg if other platforms are supported
@@ -2642,33 +2630,33 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::TransferSrcOptimal,
                 &dest_img.image,
                 hal::image::ImageLayout::TransferDstOptimal,
-                hal::command::BlitFilter::Linear,
+                hal::image::Filter::Linear,
                 &[
                     hal::command::ImageBlit {
                         src_subresource: hal::image::SubresourceLayers {
-                            aspects: hal::format::AspectFlags::COLOR,
+                            aspects: hal::format::Aspects::COLOR,
                             level: 0,
                             layers: src_layer .. src_layer + 1,
                         },
-                        src_bounds: hal::command::Offset {
+                        src_bounds: hal::image::Offset {
                             x: src_rect.origin.x as i32,
                             y: src_rect.origin.y as i32,
                             z: 0,
-                        } .. hal::command::Offset {
+                        } .. hal::image::Offset {
                             x: src_rect.origin.x as i32 + src_rect.size.width as i32,
                             y: src_rect.origin.y as i32 + src_rect.size.height as i32,
                             z: 1,
                         },
                         dst_subresource: hal::image::SubresourceLayers {
-                            aspects: hal::format::AspectFlags::COLOR,
+                            aspects: hal::format::Aspects::COLOR,
                             level: 0,
                             layers: dest_layer .. dest_layer + 1,
                         },
-                        dst_bounds: hal::command::Offset {
+                        dst_bounds: hal::image::Offset {
                             x: dest_rect.origin.x as i32,
                             y: dest_rect.origin.y as i32,
                             z: 0,
-                        } .. hal::command::Offset {
+                        } .. hal::image::Offset {
                             x: dest_rect.origin.x as i32 + dest_rect.size.width as i32,
                             y: dest_rect.origin.y as i32 + dest_rect.size.height as i32,
                             z: 1,
@@ -2684,15 +2672,15 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::TransferDstOptimal,
                 &[
                     hal::command::ImageCopy {
-                        aspect_mask: hal::format::AspectFlags::COLOR,
+                        aspects: hal::format::Aspects::COLOR,
                         src_subresource: (0, src_layer as _),
-                        src_offset: hal::command::Offset {
+                        src_offset: hal::image::Offset {
                             x: src_rect.origin.x as i32,
                             y: src_rect.origin.y as i32,
                             z: 0,
                         },
                         dst_subresource: (0, dest_layer as _),
-                        dst_offset: hal::command::Offset {
+                        dst_offset: hal::image::Offset {
                             x: dest_rect.origin.x as i32,
                             y: dest_rect.origin.y as i32,
                             z: 0,
@@ -2713,7 +2701,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
             hal::image::ImageLayout::ColorAttachmentOptimal,
         ) {
-            cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &[barrier]);
+            cmd_buffer.pipeline_barrier(
+                PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
         }
 
         self.upload_queue.push(cmd_buffer.finish());
@@ -2871,7 +2863,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             barriers.extend(download_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
             barriers.extend(image.transit(hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal));
             if !barriers.is_empty() {
-                cmd_buffer.pipeline_barrier(PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER, &barriers);
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER,
+                    hal::memory::Dependencies::empty(),
+                    &barriers
+                );
             }
 
             let buffer_width = rect.size.width * bytes_per_pixel as u32;
@@ -2884,11 +2880,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                     buffer_width: rect.size.width,
                     buffer_height: rect.size.height,
                     image_layers: hal::image::SubresourceLayers {
-                        aspects: hal::format::AspectFlags::COLOR,
+                        aspects: hal::format::Aspects::COLOR,
                         level: 0,
                         layers: 0 .. 1,
                     },
-                    image_offset: hal::command::Offset {
+                    image_offset: hal::image::Offset {
                         x: rect.origin.x as i32,
                         y: rect.origin.y as i32,
                         z: 0,
@@ -3093,6 +3089,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ) {
                 cmd_buffer.pipeline_barrier(
                     hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
@@ -3100,7 +3097,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 &img.image,
                 hal::image::ImageLayout::TransferDstOptimal,
                 hal::image::SubresourceRange {
-                    aspects: hal::format::AspectFlags::COLOR,
+                    aspects: hal::format::Aspects::COLOR,
                     levels: 0 .. 1,
                     layers: layer .. layer+1,
                 },
@@ -3112,6 +3109,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ) {
                 cmd_buffer.pipeline_barrier(
                     hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
@@ -3125,6 +3123,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ) {
                 cmd_buffer.pipeline_barrier(
                     hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
@@ -3132,7 +3131,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 &dimg.image,
                 hal::image::ImageLayout::TransferDstOptimal,
                 hal::image::SubresourceRange {
-                    aspects: hal::format::AspectFlags::DEPTH,
+                    aspects: hal::format::Aspects::DEPTH,
                     levels: 0 .. 1,
                     layers: 0 .. 1,
                 },
@@ -3144,6 +3143,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ) {
                 cmd_buffer.pipeline_barrier(
                     hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
@@ -3265,6 +3265,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             ) {
                 cmd_buffer.pipeline_barrier(
                     hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }

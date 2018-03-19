@@ -368,7 +368,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
         if write_ron {
             descriptor_set_layouts.push(
                 DescriptorSetLayoutBinding {
-                    binding: *binding as usize,
+                    binding: *binding as u32,
                     ty: DescriptorType::SampledImage,
                     count: 1,
                     stage_flags: ShaderStageFlags::ALL,
@@ -392,7 +392,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
         if write_ron {
             descriptor_set_layouts.push(
                 DescriptorSetLayoutBinding {
-                    binding: *binding as usize,
+                    binding: *binding as u32,
                     ty: DescriptorType::Sampler,
                     count: 1,
                     stage_flags: ShaderStageFlags::ALL,
