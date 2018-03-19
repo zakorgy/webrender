@@ -1461,7 +1461,7 @@ pub struct Renderer<B: hal::Backend> {
     brush_blend: BrushShader<B>,
     brush_mix_blend: BrushShader<B>,
     // brush_yuv_image: Vec<Option<BrushShader<B>>>,
-    // brush_yuv_image: Vec<BrushShader<B>>,
+    brush_yuv_image: Vec<BrushShader<B>>,
     brush_radial_gradient: BrushShader<B>,
     brush_linear_gradient: BrushShader<B>,
 
@@ -1678,6 +1678,44 @@ impl<B: hal::Backend> Renderer<B> {
             &mut device,
             &mut pipeline_requirements,
         )?;
+        let brush_yuv_image = vec![
+            BrushShader::new(
+                "brush_yuv_image_nv12",
+                "brush_yuv_image_nv12_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_nv12_yuv_rec709",
+                "brush_yuv_image_nv12_yuv_rec709_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            BrushShader::new(
+                "brush_yuv_image",
+                "brush_yuv_image_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_yuv_rec709",
+                "brush_yuv_image_yuv_rec709_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_interleaved_y_cb_cr",
+                "brush_yuv_image_interleaved_y_cb_cr_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_interleaved_y_cb_cr_yuv_rec709",
+                "brush_yuv_image_interleaved_y_cb_cr_yuv_rec709_alpha_pass",
+                &mut device,
+                &mut pipeline_requirements
+            )?,
+        ];
 
         let cs_blur_a8 = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Blur),
@@ -1751,84 +1789,6 @@ impl<B: hal::Backend> Renderer<B> {
             &mut device,
             &mut pipeline_requirements,
         )?;
-
-        // All image configuration.
-        /*let mut image_features = Vec::new();
-        let mut ps_image = Vec::new();
-        let mut brush_image = Vec::new();
-        // PrimitiveShader is not clonable. Use push() to initialize the vec.
-        for _ in 0 .. IMAGE_BUFFER_KINDS.len() {
-            ps_image.push(None);
-            brush_image.push(None);
-        }
-        for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
-                let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
-                if feature_string != "" {
-                    image_features.push(feature_string);
-                }
-                let shader = try!{
-                    PrimitiveShader::new("ps_image",
-                                         &mut device,
-                                         &image_features,
-                                         options.precache_shaders)
-                };
-                ps_image[buffer_kind] = Some(shader);
-
-                let shader = try!{
-                    BrushShader::new("brush_image",
-                                     &mut device,
-                                     &image_features,
-                                     options.precache_shaders)
-                };
-                brush_image[buffer_kind] = Some(shader);
-            }
-            image_features.clear();
-        }
-
-        // All yuv_image configuration.
-        let mut yuv_features = Vec::new();
-        let yuv_shader_num = IMAGE_BUFFER_KINDS.len() * YUV_FORMATS.len() * YUV_COLOR_SPACES.len();
-        let mut brush_yuv_image = Vec::new();
-        // PrimitiveShader is not clonable. Use push() to initialize the vec.
-        for _ in 0 .. yuv_shader_num {
-            brush_yuv_image.push(None);
-        }
-        for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
-                for format_kind in 0 .. YUV_FORMATS.len() {
-                    for color_space_kind in 0 .. YUV_COLOR_SPACES.len() {
-                        let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string = YUV_FORMATS[format_kind].get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string =
-                            YUV_COLOR_SPACES[color_space_kind].get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-
-                        let shader = try!{
-                            BrushShader::new("brush_yuv_image",
-                                             &mut device,
-                                             &yuv_features,
-                                             options.precache_shaders)
-                        };
-                        let index = Renderer::get_yuv_shader_index(
-                            IMAGE_BUFFER_KINDS[buffer_kind],
-                            YUV_FORMATS[format_kind],
-                            YUV_COLOR_SPACES[color_space_kind],
-                        );
-                        brush_yuv_image[index] = Some(shader);
-                        yuv_features.clear();
-                    }
-                }
-            }
-        }*/
 
         let ps_border_edge = PrimitiveShader::new(
             "ps_border_edge",
@@ -2034,7 +1994,7 @@ impl<B: hal::Backend> Renderer<B> {
             brush_image,
             brush_blend,
             brush_mix_blend,
-            // brush_yuv_image,
+            brush_yuv_image,
             brush_radial_gradient,
             brush_linear_gradient,
             cs_clip_rectangle,
@@ -2697,15 +2657,15 @@ impl<B: hal::Backend> Renderer<B> {
         self.cs_blur_rgba8.reset();
         self.brush_solid.reset();
         self.brush_line.reset();
+        for mut program in &mut self.brush_yuv_image {
+            program.reset();
+        }
         self.cs_clip_rectangle.reset();
         self.cs_clip_image.reset();
         self.cs_clip_border.reset();
         self.ps_text_run.reset();
         self.ps_text_run_dual_source.reset();
         self.ps_image.reset();
-        // for mut program in &mut self.brush_yuv_image {
-        //     program.reset();
-        // }
         self.ps_border_corner.reset();
         self.ps_border_edge.reset();
         self.ps_hw_composite.reset();
@@ -2957,14 +2917,13 @@ impl<B: hal::Backend> Renderer<B> {
                         self.brush_linear_gradient.get(key.blend_mode, &mut self.device).unwrap()
                     }
                     BrushBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
-                        unimplemented!("TODO: yuv shaders");
-                        /*let shader_index =
+                        let shader_index =
                             <Renderer<B>>::get_yuv_shader_index(
                                 image_buffer_kind,
                                 format,
                                 color_space,
                             ) % self.brush_yuv_image.len();
-                        self.brush_yuv_image[shader_index].get(transform_kind, &mut self.device).unwrap()*/
+                        self.brush_yuv_image[shader_index].get(key.blend_mode, &mut self.device).unwrap()
                     }
                 }
             }

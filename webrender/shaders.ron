@@ -64,8 +64,18 @@
         name: "brush_yuv_image",
         source_name: "brush_yuv_image",
         features: [
-            "",// [0]
-            "ALPHA_PASS",// [1]
+            "NV12",// [0]
+            "",// [1]
+            "INTERLEAVED_Y_CB_CR",// [2]
+            "NV12,YUV_REC709",// [3]
+            "YUV_REC709",// [4]
+            "INTERLEAVED_Y_CB_CR,YUV_REC709",// [5]
+            "NV12,ALPHA_PASS",// [6]
+            "ALPHA_PASS",// [7]
+            "INTERLEAVED_Y_CB_CR,ALPHA_PASS",// [8]
+            "NV12,YUV_REC709,ALPHA_PASS",// [9]
+            "YUV_REC709,ALPHA_PASS",// [10]
+            "INTERLEAVED_Y_CB_CR,YUV_REC709,ALPHA_PASS",// [11]
         ],
     ),// [8]
     (
