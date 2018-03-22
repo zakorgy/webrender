@@ -1680,38 +1680,38 @@ impl<B: hal::Backend> Renderer<B> {
         )?;
         let brush_yuv_image = vec![
             BrushShader::new(
-                "brush_yuv_image_nv12",
-                "brush_yuv_image_nv12_alpha_pass",
+                "brush_yuv_image_yuv_nv12_yuv_601",
+                "brush_yuv_image_yuv_nv12_yuv_601_alpha_pass",
                 &mut device,
                 &mut pipeline_requirements
             )?,
             BrushShader::new(
-                "brush_yuv_image_nv12_yuv_rec709",
-                "brush_yuv_image_nv12_yuv_rec709_alpha_pass",
+                "brush_yuv_image_yuv_nv12_yuv_709",
+                "brush_yuv_image_yuv_nv12_yuv_709_alpha_pass",
                 &mut device,
                 &mut pipeline_requirements
             )?,
             BrushShader::new(
-                "brush_yuv_image",
-                "brush_yuv_image_alpha_pass",
+                "brush_yuv_image_yuv_planar_yuv_601",
+                "brush_yuv_image_yuv_planar_yuv_601_alpha_pass",
                 &mut device,
                 &mut pipeline_requirements
             )?,
             BrushShader::new(
-                "brush_yuv_image_yuv_rec709",
-                "brush_yuv_image_yuv_rec709_alpha_pass",
+                "brush_yuv_image_yuv_planar_yuv_709",
+                "brush_yuv_image_yuv_planar_yuv_709_alpha_pass",
                 &mut device,
                 &mut pipeline_requirements
             )?,
             BrushShader::new(
-                "brush_yuv_image_interleaved_y_cb_cr",
-                "brush_yuv_image_interleaved_y_cb_cr_alpha_pass",
+                "brush_yuv_image_yuv_interleaved_yuv_601",
+                "brush_yuv_image_yuv_interleaved_yuv_601_alpha_pass",
                 &mut device,
                 &mut pipeline_requirements
             )?,
             BrushShader::new(
-                "brush_yuv_image_interleaved_y_cb_cr_yuv_rec709",
-                "brush_yuv_image_interleaved_y_cb_cr_yuv_rec709_alpha_pass",
+                "brush_yuv_image_yuv_interleaved_yuv_709",
+                "brush_yuv_image_yuv_interleaved_yuv_709_alpha_pass",
                 &mut device,
                 &mut pipeline_requirements
             )?,

@@ -270,7 +270,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                     write_ron,
                 );
                 // Replacing sampler variables with the corresponding expression from sampler_mapping.
-            } else if l.contains("TEX_SAMPLE(") || l.contains("TEXEL_FETCH(")
+            } else if l.contains("TEX_SAMPLE(") || l.contains("TEXEL_FETCH(") || l.contains("TEX_SIZE(")
             || l.contains("texelFetch(") || l.contains("texture(")
             || l.contains("textureLod(") || l.contains("textureSize(")
             {
