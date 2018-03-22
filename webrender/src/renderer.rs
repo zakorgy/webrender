@@ -1543,6 +1543,7 @@ pub struct Renderer<B: hal::Backend> {
     read_fbo: FBOId,
     #[cfg(feature = "replay")]
     owned_external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
+    correction_matrix: Transform3D<f32>,
 }
 
 #[derive(Debug)]
@@ -1978,6 +1979,13 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo_for_external_texture(0);
 
+        let correction_matrix = Transform3D::row_major(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.5, 0.0,
+            0.0, 0.0, 0.5, 1.0,
+        );
+
         let mut renderer = Renderer {
             result_rx,
             debug_server,
@@ -2034,6 +2042,7 @@ impl<B: hal::Backend> Renderer<B> {
             read_fbo,
             #[cfg(feature = "replay")]
             owned_external_images: FastHashMap::default(),
+            correction_matrix,
         };
 
         renderer.set_debug_flags(options.debug_flags);
@@ -3754,8 +3763,9 @@ impl<B: hal::Backend> Renderer<B> {
                 target_size.height as f32,
                 ORTHO_NEAR_PLANE,
                 ORTHO_FAR_PLANE,
-            )
+            ).post_mul(&self.correction_matrix)
         };
+        println!("Texture cache target");
 
         // Handle any blits to this texture from child tasks.
         self.handle_blits(&target.blits, render_tasks);
@@ -4069,14 +4079,16 @@ impl<B: hal::Backend> Renderer<B> {
                         stats.color_target_count += 1;
 
                         let clear_color = frame.background_color.map(|color| color.to_array());
+                        println!("MainFramebuffer");
                         let projection = Transform3D::ortho(
                             0.0,
                             framebuffer_size.width as f32,
-                            0.0,
                             framebuffer_size.height as f32,
+                            0.0,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
-                        );
+                        ).post_mul(&self.correction_matrix.pre_scale(1.0, -1.0, 1.0));
+
 
                         self.draw_color_target(
                             None,
@@ -4116,6 +4128,7 @@ impl<B: hal::Backend> Renderer<B> {
                     for (target_index, target) in alpha.targets.iter().enumerate() {
                         stats.alpha_target_count += 1;
 
+                        println!("Alpha target");
                         let projection = Transform3D::ortho(
                             0.0,
                             alpha.max_size.width as f32,
@@ -4123,7 +4136,7 @@ impl<B: hal::Backend> Renderer<B> {
                             alpha.max_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
-                        );
+                        ).post_mul(&self.correction_matrix);
 
                         self.draw_alpha_target(
                             (&alpha_tex.as_ref().unwrap().texture, target_index as i32),
@@ -4138,6 +4151,7 @@ impl<B: hal::Backend> Renderer<B> {
                     for (target_index, target) in color.targets.iter().enumerate() {
                         stats.color_target_count += 1;
 
+                        println!("Color target");
                         let projection = Transform3D::ortho(
                             0.0,
                             color.max_size.width as f32,
@@ -4145,7 +4159,7 @@ impl<B: hal::Backend> Renderer<B> {
                             color.max_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
-                        );
+                        ).post_mul(&self.correction_matrix);
 
                         self.draw_color_target(
                             Some((&color_tex.as_ref().unwrap().texture, target_index as i32)),
