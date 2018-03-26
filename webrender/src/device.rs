@@ -1338,7 +1338,7 @@ impl<B: hal::Backend> Program<B> {
                 binding: self.bindings_map[&("t".to_owned() + binding)],
                 array_offset: 0,
                 descriptors: Some(
-                    hal::pso::Descriptor::Image(&device.images[id].core.view,  hal::image::ImageLayout::Undefined)
+                    hal::pso::Descriptor::Image(&device.images[id].core.view, device.images[id].core.state.get().1)
                 ),
             },
             hal::pso::DescriptorSetWrite {
