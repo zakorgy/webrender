@@ -30,18 +30,20 @@ webrender = {path = "../webrender"}
 webrender_api = {path = "../webrender_api", features=["serialize","deserialize"]}
 winit = "0.10"
 serde = {version = "1.0", features = ["derive"] }
-gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev="1f880b8" }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev="1f880b8", optional = true }
+gfx-hal = { git = "https://github.com/zakorgy/gfx.git", branch = "dx12" }
+gfx-backend-vulkan = { git = "https://github.com/zakorgy/gfx.git", branch = "dx12", optional = true }
+gfx-backend-dx12 = { git = "https://github.com/zakorgy/gfx.git", branch = "dx12", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.13"
 core-foundation = "0.5"
 
 [features]
-default = ["vulkan"]
+default = ["dx12"]
 headless = [ "osmesa-sys", "osmesa-src" ]
 logging = [ "env_logger" ]
 vulkan = [ "gfx-backend-vulkan" ]
+dx12 = [ "gfx-backend-dx12" ]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 dwrote = "0.4.1"

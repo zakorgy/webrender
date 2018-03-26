@@ -681,6 +681,7 @@ impl<B: hal::Backend> Image<B> {
         rect: DeviceUintRect,
         layer_index: i32,
         image_data: &[u8],
+        pitch_alignment: usize,
         offset_alignemt: usize,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
     {
@@ -701,6 +702,10 @@ impl<B: hal::Backend> Image<B> {
             );
         }
 
+        debug!("## Image update");
+        debug!("### upload buffer size = {} x {}", self.upload_buffer.buffer.row_pitch(), self.upload_buffer.buffer.data_height);
+        debug!("### size = {} x {}", size.width, size.height);
+        debug!("### upload buffer offset = {}", self.upload_buffer.offset);
         cmd_buffer.copy_buffer_to_image(
             &self.upload_buffer.buffer.buffer,
             &self.core.image,
@@ -708,7 +713,8 @@ impl<B: hal::Backend> Image<B> {
             &[
                 hal::command::BufferImageCopy {
                     buffer_offset: self.upload_buffer.offset,
-                    buffer_width: size.width,
+                    //buffer_width: size.width,
+                    buffer_width: (size.width + pitch_alignment as u32) & !pitch_alignment as u32,
                     buffer_height: size.height,
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
@@ -838,6 +844,10 @@ impl<B: hal::Backend> VertexDataImage<B> {
             );
         }
 
+        debug!("## Vertex data image update");
+        debug!("### image_upload_buffer size = {} x {}", self.image_upload_buffer.row_pitch(), self.image_upload_buffer.data_height);
+        debug!("### needed_height = {}", needed_height);
+        debug!("### upload buffer offset = {}", buffer_offset);
         cmd_buffer.copy_buffer_to_image(
             &self.image_upload_buffer.buffer,
             &self.core.image,
@@ -845,7 +855,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             &[
                 hal::command::BufferImageCopy {
                     buffer_offset,
-                    buffer_width: self.image_width as u32,
+                    buffer_width: self.image_upload_buffer.row_pitch() as u32,
                     buffer_height: needed_height,
                     image_layers: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
@@ -994,7 +1004,10 @@ impl<B: hal::Backend> CopyBuffer<B> {
         data_height: usize,
         pitch_alignment: usize,
     ) -> Self {
-        let row_pitch_in_bytes = (data_width * data_stride + pitch_alignment) & !pitch_alignment;
+        debug!("## Creating Copy buffer with alignment = {}", pitch_alignment);
+        debug!("### data size = {} x {}\n### data stride = {}", data_width, data_height, data_stride);
+        let row_pitch_in_bytes = ((data_width + pitch_alignment) & !pitch_alignment) * data_stride;
+        debug!("### row_pitch_in_bytes = {:?}", row_pitch_in_bytes);
         let buffer_size = row_pitch_in_bytes * data_height;
         let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
         let requirements = device.get_buffer_requirements(&unbound_buffer);
@@ -1079,6 +1092,10 @@ impl<B: hal::Backend> CopyBuffer<B> {
                 target: &self.buffer,
             })
         }
+    }
+
+    fn row_pitch(&self) -> usize {
+        self.row_pitch_in_bytes / self.data_stride
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -1841,7 +1858,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let limits = adapter
             .physical_device
             .limits();
-        let max_texture_size = limits.max_texture_size as u32;
+        debug!("LIMITS = {:?}", limits);
+        let max_texture_size = 4096_u32;
 
         let upload_memory_type: hal::MemoryTypeId = memory_types
             .iter()
@@ -2005,7 +2023,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             mem::size_of::<[f32; 4]>(),
             MAX_VERTEX_TEXTURE_WIDTH as u32,
             MAX_VERTEX_TEXTURE_WIDTH as u32,
-            limits.min_buffer_copy_pitch_alignment,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         let render_tasks = VertexDataImage::create(
@@ -2014,7 +2032,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             mem::size_of::<[f32; 12]>(),
             RENDER_TASK_TEXTURE_WIDTH as u32,
             TEXTURE_HEIGHT as u32,
-            limits.min_buffer_copy_pitch_alignment,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         let local_clip_rects = VertexDataImage::create(
@@ -2023,7 +2041,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             mem::size_of::<[f32; 4]>(),
             CLIP_RECTS_TEXTURE_WIDTH as u32,
             TEXTURE_HEIGHT as u32,
-            limits.min_buffer_copy_pitch_alignment,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         let node_data = VertexDataImage::create(
@@ -2032,7 +2050,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             mem::size_of::<[f32; 36]>(),
             NODE_TEXTURE_WIDTH as u32,
             TEXTURE_HEIGHT as u32,
-            limits.min_buffer_copy_pitch_alignment,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         Device {
@@ -2094,47 +2112,51 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
-        debug_assert_eq!(gpu_data.len(), 1024);
+        debug!("# UPDATE_RESOURCE_CACHE");
+        //debug_assert_eq!(gpu_data.len(), 1024);
         self.upload_queue
             .push(self.resource_cache.update(
                 &mut self.device,
                 &mut self.command_pool,
                 rect.origin,
                 gpu_data,
-                self.limits.min_buffer_copy_offset_alignment,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize
             ));
     }
 
     pub fn update_render_tasks(&mut self, task_data: &[[f32; 12]]) {
+        debug!("# UPDATE_RENDER_TASKS");
         self.upload_queue
             .push(self.render_tasks.update(
                 &mut self.device,
                 &mut self.command_pool,
                 DeviceUintPoint::zero(),
                 task_data,
-                self.limits.min_buffer_copy_offset_alignment,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize
             ));
     }
 
     pub fn update_local_rects(&mut self, local_data: &[[f32; 4]]) {
+        debug!("# UPDATE_LOCAL_RECTS");
         self.upload_queue
             .push(self.local_clip_rects.update(
                 &mut self.device,
                 &mut self.command_pool,
                 DeviceUintPoint::zero(),
                 local_data,
-                self.limits.min_buffer_copy_offset_alignment,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize
             ));
     }
 
     pub fn update_node_data(&mut self, node_data: &[[f32; 36]]) {
+        debug!("# UPDATE_NODE_DATA");
         self.upload_queue
             .push(self.node_data.update(
                 &mut self.device,
                 &mut self.command_pool,
                 DeviceUintPoint::zero(),
                 node_data,
-                self.limits.min_buffer_copy_offset_alignment,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize
             ));
     }
 
@@ -2650,7 +2672,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             texture.width,
             texture.height,
             texture.layer_count,
-            self.limits.min_buffer_copy_pitch_alignment,
+            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         assert_eq!(texture.fbo_ids.len(), 0);
@@ -2701,6 +2723,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
 
         if let Some(data) = pixels {
+            debug!("@@@@ Init texture upload");
             self.upload_queue
                 .push(
                     self.images
@@ -2715,7 +2738,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                             ),
                             0,
                             data,
-                            self.limits.min_buffer_copy_offset_alignment,
+                            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                            (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                         )
                 );
         }
@@ -2939,6 +2963,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             data
         };
         assert_eq!(data.len(), width * height * data_stride);
+        debug!("@@@@ Upload texture upload");
         self.upload_queue
             .push(
                 self.images
@@ -2950,7 +2975,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         rect,
                         layer_index,
                         data,
-                        self.limits.min_buffer_copy_offset_alignment,
+                        (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                        (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                     )
             );
     }
@@ -2988,7 +3014,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             1,
             (rect.size.width * bytes_per_pixel) as usize,
             rect.size.height as usize,
-            self.limits.min_buffer_copy_pitch_alignment,
+            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
         let copy_submit = {
@@ -3033,6 +3059,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             cmd_buffer.finish()
         };
 
+        debug!("Read pixels fence");
         let copy_fence = self.device.create_fence(false);
         let submission = hal::queue::Submission::new()
             .submit(Some(copy_submit));
@@ -3407,7 +3434,9 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             self.upload_queue.push(cmd_buffer.finish());
         }
 
+        debug!("Attempt to create fence");
         let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        debug!("Fence created");
         {
             self.device.reset_fence(&frame_fence);
             let submission = Submission::new()
@@ -3426,8 +3455,11 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.upload_queue.clear();
         self.command_pool.reset();
         self.reset_state();
+        debug!("Destroying fence");
         self.device.destroy_fence(frame_fence);
+        debug!("Destroying semaphore");
         self.device.destroy_semaphore(frame_semaphore);
+        debug!("Semaphore destroyed");
     }
 
     pub fn deinit(self) {

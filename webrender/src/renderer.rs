@@ -1099,7 +1099,7 @@ impl<B: hal::Backend> CacheTexture<B> {
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
                 );*/
 
-                for (row_index, row) in rows.iter_mut().enumerate() {
+                /*for (row_index, row) in rows.iter_mut().enumerate() {
                     if !row.is_dirty {
                         continue;
                     }
@@ -1117,7 +1117,24 @@ impl<B: hal::Backend> CacheTexture<B> {
                     //uploader.upload(rect, 0, None, cpu_blocks);
 
                     row.is_dirty = false;
+                }*/
+                let mut data_blocks = Vec::new();
+                for (row_index, row) in rows.iter_mut().enumerate() {
+                    let block_index = row_index * MAX_VERTEX_TEXTURE_WIDTH;
+                    let cpu_blocks =
+                        &cpu_blocks[block_index .. (block_index + MAX_VERTEX_TEXTURE_WIDTH)];
+
+                    data_blocks.extend_from_slice(&cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>());
+                    //uploader.upload(rect, 0, None, cpu_blocks);
+
+                    row.is_dirty = false;
                 }
+                let rect = DeviceUintRect::new(
+                    DeviceUintPoint::new(0, 0),
+                    DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as u32, rows.len() as u32),
+                );
+                device.update_resource_cache(rect, &data_blocks);
+
 
                 rows_dirty
             }
@@ -2514,7 +2531,9 @@ impl<B: hal::Backend> Renderer<B> {
             samplers
         };
 
+        debug!("XX Acquiring semaphore");
         let mut frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
+        debug!("XX Semaphore acquired");
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             // let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2641,7 +2660,9 @@ impl<B: hal::Backend> Renderer<B> {
         });
         self.last_time = current_time;
 
+        debug!("XX Swapping buffers");
         self.device.swap_buffers(frame_semaphore);
+        debug!("XX buffers swapped");
         self.flush();
 
         if self.renderer_errors.is_empty() {

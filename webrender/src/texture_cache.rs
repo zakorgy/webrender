@@ -19,7 +19,7 @@ use std::mem;
 
 // The fixed number of layers for the shared texture cache.
 // There is one array texture per image format, allocated lazily.
-const TEXTURE_ARRAY_LAYERS_LINEAR: usize = 4;
+const TEXTURE_ARRAY_LAYERS_LINEAR: usize = 1;
 const TEXTURE_ARRAY_LAYERS_NEAREST: usize = 1;
 
 // The dimensions of each layer in the texture cache.
