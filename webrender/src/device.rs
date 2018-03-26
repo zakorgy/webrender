@@ -1869,12 +1869,12 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
             hal::image::Filter::Linear,
-            hal::image::WrapMode::Tile,
+            hal::image::WrapMode::Clamp,
         ));
 
         let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
             hal::image::Filter::Nearest,
-            hal::image::WrapMode::Tile,
+            hal::image::WrapMode::Clamp,
         ));
 
         let resource_cache = VertexDataImage::create(
