@@ -3673,54 +3673,57 @@ impl<B: hal::Backend> Renderer<B> {
                 self.device.draw(&mut program);
             }
             // draw box-shadow clips
-            let mut program = self.cs_clip_box_shadow.get(&mut self.device).unwrap();
-            program.bind_locals(&self.device.device, projection, 0);
-            for (mask_texture_id, items) in target.clip_batcher.box_shadows.iter() {
-                // let _gm2 = self.gpu_profile.start_marker("box-shadows");
-                let textures = BatchTextures {
-                    colors: [
-                        mask_texture_id.clone(),
-                        SourceTexture::Invalid,
-                        SourceTexture::Invalid,
-                    ],
-                };
-                for (i, texture) in textures.colors.iter().enumerate() {
-                    self.texture_resolver.bind(
-                        &texture,
-                        TextureSampler::color(i),
-                        &mut self.device,
+            if !target.clip_batcher.box_shadows.is_empty() {
+                let mut program = self.cs_clip_box_shadow.get(&mut self.device).unwrap();
+                program.bind_locals(&self.device.device, projection, 0);
+                for (mask_texture_id, items) in target.clip_batcher.box_shadows.iter() {
+                    // let _gm2 = self.gpu_profile.start_marker("box-shadows");
+                    let textures = BatchTextures {
+                        colors: [
+                            mask_texture_id.clone(),
+                            SourceTexture::Invalid,
+                            SourceTexture::Invalid,
+                        ],
+                    };
+                    for (i, texture) in textures.colors.iter().enumerate() {
+                        self.texture_resolver.bind(
+                            &texture,
+                            TextureSampler::color(i),
+                            &mut self.device,
+                        );
+                    }
+                    program.bind_instances(
+                        &self.device.device,
+                        &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
+                    self.device.draw(&mut program);
                 }
-                program.bind_instances(
-                    &self.device.device,
-                    &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
-                );
-                self.device.draw(&mut program);
             }
-
             // draw image masks
-            let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
-            program.bind_locals(&self.device.device, projection, 0);
-            for (mask_texture_id, items) in &target.clip_batcher.images {
-                let textures = BatchTextures {
-                    colors: [
-                        mask_texture_id.clone(),
-                        SourceTexture::Invalid,
-                        SourceTexture::Invalid,
-                    ],
-                };
-                for (i, texture) in textures.colors.iter().enumerate() {
-                    self.texture_resolver.bind(
-                        &texture,
-                        TextureSampler::color(i),
-                        &mut self.device,
+            if !target.clip_batcher.images.is_empty() {
+                let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
+                program.bind_locals(&self.device.device, projection, 0);
+                for (mask_texture_id, items) in &target.clip_batcher.images {
+                    let textures = BatchTextures {
+                        colors: [
+                            mask_texture_id.clone(),
+                            SourceTexture::Invalid,
+                            SourceTexture::Invalid,
+                        ],
+                    };
+                    for (i, texture) in textures.colors.iter().enumerate() {
+                        self.texture_resolver.bind(
+                            &texture,
+                            TextureSampler::color(i),
+                            &mut self.device,
+                        );
+                    }
+                    program.bind_instances(
+                        &self.device.device,
+                        &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
+                    self.device.draw(&mut program);
                 }
-                program.bind_instances(
-                    &self.device.device,
-                    &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
-                );
-                self.device.draw(&mut program);
             }
         }
 
