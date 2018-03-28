@@ -1792,27 +1792,27 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             let attachment_r8 = hal::pass::Attachment {
                 format: Some(hal::format::Format::R8Unorm),
                 ops: hal::pass::AttachmentOps::new(
-                    hal::pass::AttachmentLoadOp::Load,
+                    hal::pass::AttachmentLoadOp::DontCare,
                     hal::pass::AttachmentStoreOp::Store,
                 ),
                 stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-                layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::Present,
+                layouts: hal::image::ImageLayout::ColorAttachmentOptimal .. hal::image::ImageLayout::ColorAttachmentOptimal,
             };
 
             let attachment_bgra8 = hal::pass::Attachment {
                 format: Some(hal::format::Format::Bgra8Unorm),
                 ops: hal::pass::AttachmentOps::new(
-                    hal::pass::AttachmentLoadOp::Load,
+                    hal::pass::AttachmentLoadOp::DontCare,
                     hal::pass::AttachmentStoreOp::Store,
                 ),
                 stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-                layouts: hal::image::ImageLayout::Undefined .. hal::image::ImageLayout::Present,
+                layouts: hal::image::ImageLayout::ColorAttachmentOptimal .. hal::image::ImageLayout::ColorAttachmentOptimal,
             };
 
             let attachment_depth = hal::pass::Attachment {
                 format: Some(depth_format),
                 ops: hal::pass::AttachmentOps::new(
-                    hal::pass::AttachmentLoadOp::Load,
+                    hal::pass::AttachmentLoadOp::DontCare,
                     hal::pass::AttachmentStoreOp::Store,
                 ),
                 stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
@@ -2749,15 +2749,17 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         }
 
         // the blit caller code expects to be able to render to the target
-        if let Some(barrier) = dest_img.transit(
-            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-            hal::image::ImageLayout::ColorAttachmentOptimal,
-        ) {
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER,
-                hal::memory::Dependencies::empty(),
-                &[barrier],
-            );
+        {
+            let mut barriers = Vec::new();
+            barriers.extend(src_img.transit(hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal));
+            barriers.extend(dest_img.transit(hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal));
+            if !barriers.is_empty() {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::TRANSFER .. PipelineStage::BOTTOM_OF_PIPE,
+                    hal::memory::Dependencies::empty(),
+                    &barriers,
+                );
+            }
         }
 
         self.upload_queue.push(cmd_buffer.finish());
