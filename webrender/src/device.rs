@@ -2207,28 +2207,31 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         //blend_mode: &BlendMode,
         //enable_depth_write: bool
     ) {
-        let (fb, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            (&self.fbos[&self.bound_draw_fbo].fbo, self.fbos[&self.bound_draw_fbo].format)
-        } else {
-            if self.current_depth_test == DepthTest::Off {
-                (&self.framebuffers[self.current_frame_id], ImageFormat::BGRA8)
+        let submit = {
+            let (fb, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+                (&self.fbos[&self.bound_draw_fbo].fbo, self.fbos[&self.bound_draw_fbo].format)
             } else {
-                (&self.framebuffers_depth[self.current_frame_id], ImageFormat::BGRA8)
-            }
+                if self.current_depth_test == DepthTest::Off {
+                    (&self.framebuffers[self.current_frame_id], ImageFormat::BGRA8)
+                } else {
+                    (&self.framebuffers_depth[self.current_frame_id], ImageFormat::BGRA8)
+                }
+            };
+            let rp = self.render_pass.get_render_pass(format, self.current_depth_test != DepthTest::Off);
+            program.submit(
+                &mut self.command_pool,
+                self.viewport.clone(),
+                rp,
+                &fb,
+                &vec![],
+                self.current_blend_state,
+                self.blend_color,
+                self.current_depth_test,
+            )
         };
-        let rp = self.render_pass.get_render_pass(format, self.current_depth_test != DepthTest::Off);
-        let submit = program.submit(
-            &mut self.command_pool,
-            self.viewport.clone(),
-            rp,
-            &fb,
-            &vec![],
-            self.current_blend_state,
-            self.blend_color,
-            self.current_depth_test,
-        );
 
         self.upload_queue.push(submit);
+        self.submit_to_gpu();
     }
 
     /*pub fn gl(&self) -> &gl::Gl {
@@ -3329,6 +3332,23 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
         self.current_frame_id = frame.id();
         frame_semaphore
+    }
+
+    pub fn submit_to_gpu(&mut self) {
+        let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        {
+            self.device.reset_fence(&frame_fence);
+            let submission = Submission::new()
+                .submit(&self.upload_queue);
+            self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
+
+            // TODO: replace with semaphore
+            self.device
+                .wait_for_fence(&frame_fence, !0);
+        }
+        self.upload_queue.clear();
+        self.command_pool.reset();
+        self.device.destroy_fence(frame_fence);
     }
 
     pub fn swap_buffers(&mut self, frame_semaphore: B::Semaphore) {
