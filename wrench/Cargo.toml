@@ -28,10 +28,10 @@ osmesa-src = { git = "https://github.com/servo/osmesa-src", optional = true }
 #webrender = {path = "../webrender", features=["capture","replay","debugger","png","profiler"]}
 webrender = {path = "../webrender"}
 webrender_api = {path = "../webrender_api", features=["serialize","deserialize"]}
-winit = "0.10"
+winit = "0.11"
 serde = {version = "1.0", features = ["derive"] }
-gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev="1f880b8" }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev="1f880b8", optional = true }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx.git", rev="b75b8f5" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", rev="b75b8f5", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.13"

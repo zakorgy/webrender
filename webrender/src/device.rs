@@ -532,11 +532,13 @@ impl<B: hal::Backend> ImageCore<B> {
     fn from_image(
         device: &B::Device,
         image: B::Image,
+        view_kind: hal::image::ViewKind,
         format: hal::format::Format,
         subresource_range: hal::image::SubresourceRange,
     ) -> Self {
         let view = device.create_image_view(
             &image,
+            view_kind,
             format,
             hal::format::Swizzle::NO,
             subresource_range.clone(),
@@ -554,12 +556,13 @@ impl<B: hal::Backend> ImageCore<B> {
         device: &B::Device,
         memory_types: &[hal::MemoryType],
         kind: hal::image::Kind,
+        view_kind: hal::image::ViewKind,
         format: hal::format::Format,
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
     ) -> Self {
         let image_unbound = device
-            .create_image(kind, 1, format, usage)
+            .create_image(kind, 1, format, usage, hal::image::StorageFlags::empty())
             .unwrap();
         let requirements = device.get_image_requirements(&image_unbound);
 
@@ -578,7 +581,7 @@ impl<B: hal::Backend> ImageCore<B> {
 
         ImageCore {
             memory: Some(memory),
-            .. Self::from_image(device, image, format, subresource_range)
+            .. Self::from_image(device, image, view_kind, format, subresource_range)
         }
     }
 
@@ -643,16 +646,17 @@ impl<B: hal::Backend> Image<B> {
             (image_width * image_height) as usize,
         );
 
-        let kind = hal::image::Kind::D2Array(
+        let kind = hal::image::Kind::D2(
             image_width as _,
             image_height as _,
             image_depth as _,
-            hal::image::AaMode::Single,
+            1,
         );
         let core = ImageCore::create(
             device,
             memory_types,
             kind,
+            hal::image::ViewKind::D2Array,
             format,
             hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             hal::image::SubresourceRange {
@@ -679,7 +683,7 @@ impl<B: hal::Backend> Image<B> {
         image_data: &[u8],
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
     {
-        let (image_width, image_height, _, _) = self.kind.dimensions();
+        //let (image_width, image_height, _, _) = self.kind.dimensions();
         let pos = rect.origin;
         let size = rect.size;
         self.upload_buffer.update(device, image_data);
@@ -715,7 +719,7 @@ impl<B: hal::Backend> Image<B> {
                         y: pos.y as i32,
                         z: 0,
                     },
-                    image_extent: hal::device::Extent {
+                    image_extent: hal::image::Extent {
                         width: size.width as u32,
                         height: size.height as u32,
                         depth: 1,
@@ -765,12 +769,14 @@ impl<B: hal::Backend> VertexDataImage<B> {
         let kind = hal::image::Kind::D2(
             image_width as hal::image::Size,
             image_height as hal::image::Size,
-            hal::image::AaMode::Single,
+            1,
+            1,
         );
         let core = ImageCore::create(
             device,
             memory_types,
             kind,
+            hal::image::ViewKind::D2,
             hal::format::Format::Rgba32Float,
             hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
             COLOR_RANGE,
@@ -848,7 +854,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
                         y: image_offset.y as i32,
                         z: 0,
                     },
-                    image_extent: hal::device::Extent {
+                    image_extent: hal::image::Extent {
                         width: self.image_width as u32,
                         height: needed_height,
                         depth: 1,
@@ -1466,7 +1472,7 @@ impl<B: hal::Backend> Program<B> {
     pub fn submit(
         &mut self,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
-        viewport: hal::command::Viewport,
+        viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         clear_values: &[hal::command::ClearValue],
@@ -1539,7 +1545,7 @@ impl<B: hal::Backend> Framebuffer<B> {
         rbo: RBOId,
         depth: Option<&B::ImageView>
     ) -> Self {
-        let extent = hal::device::Extent {
+        let extent = hal::image::Extent {
             width: texture.width as _,
             height: texture.height as _,
             depth: 1,
@@ -1552,6 +1558,7 @@ impl<B: hal::Backend> Framebuffer<B> {
         let image_view = device
             .create_image_view(
                 &image.core.image,
+                hal::image::ViewKind::D2Array,
                 format,
                 Swizzle::NO,
                 hal::image::SubresourceRange {
@@ -1595,14 +1602,15 @@ impl<B: hal::Backend> DepthBuffer<B> {
     pub fn new(
         device: &B::Device,
         memory_types: &[hal::MemoryType],
-        pixel_width: u16,
-        pixel_height: u16,
+        pixel_width: u32,
+        pixel_height: u32,
         depth_format: hal::format::Format
     ) -> Self {
         let core = ImageCore::create(
             device,
             memory_types,
-            hal::image::Kind::D2(pixel_width, pixel_height, hal::image::AaMode::Single),
+            hal::image::Kind::D2(pixel_width, pixel_height, 1, 1),
+            hal::image::ViewKind::D2,
             depth_format,
             hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
             DEPTH_RANGE,
@@ -1659,7 +1667,7 @@ pub struct Device<B: hal::Backend, C> {
     pub framebuffers_depth: Vec<B::Framebuffer>,
     pub frame_images: Vec<ImageCore<B>>,
     pub frame_depth: DepthBuffer<B>,
-    pub viewport: hal::command::Viewport,
+    pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
     pub resource_cache: VertexDataImage<B>,
@@ -1722,8 +1730,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let mut extensions = Vec::new();
 
         let window_size = window.get_inner_size().unwrap();
-        let pixel_width = window_size.0 as u16;
-        let pixel_height = window_size.1 as u16;
+        let pixel_width = window_size.0;
+        let pixel_height = window_size.1;
 
         let (caps, formats) = surface.capabilities_and_formats(&adapter.physical_device);
         let surface_format = formats
@@ -1869,7 +1877,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         // Framebuffer and render target creation
         let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
             Backbuffer::Images(images) => {
-                let extent = hal::device::Extent {
+                let extent = hal::image::Extent {
                     width: pixel_width as _,
                     height: pixel_height as _,
                     depth: 1,
@@ -1877,7 +1885,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 let cores = images
                     .into_iter()
                     .map(|image| {
-                        ImageCore::from_image(&device, image, surface_format, COLOR_RANGE.clone())
+                        ImageCore::from_image(&device, image, hal::image::ViewKind::D2Array, surface_format, COLOR_RANGE.clone())
                     })
                     .collect::<Vec<_>>();
                 let fbos = cores
@@ -1911,12 +1919,12 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         };
 
         // Rendering setup
-        let viewport = hal::command::Viewport {
-            rect: hal::command::Rect {
+        let viewport = hal::pso::Viewport {
+            rect: hal::pso::Rect {
                 x: 0,
                 y: 0,
-                w: pixel_width,
-                h: pixel_height,
+                w: pixel_width as u16,
+                h: pixel_height as u16,
             },
             depth: 0.0 .. 1.0,
         };
@@ -2372,7 +2380,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.bind_draw_target_impl(fbo_id);
 
         if let Some(dimensions) = dimensions {
-            self.viewport.rect = hal::command::Rect {
+            self.viewport.rect = hal::pso::Rect {
                 x: 0,
                 y: 0,
                 w: dimensions.width as _,
@@ -2595,8 +2603,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 let rbo = DepthBuffer::new(
                     &self.device,
                     &self.memory_types,
-                    texture.width as u16,
-                    texture.height as u16,
+                    texture.width,
+                    texture.height,
                     self.depth_format
                 );
                 self.rbos.insert(depth_rb, rbo);
@@ -2724,25 +2732,31 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::TransferDstOptimal,
                 &[
                     hal::command::ImageCopy {
-                        aspects: hal::format::Aspects::COLOR,
-                        src_subresource: (0, src_layer as _),
+                        src_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: src_layer .. src_layer + 1,
+                        },
                         src_offset: hal::image::Offset {
                             x: src_rect.origin.x as i32,
                             y: src_rect.origin.y as i32,
                             z: 0,
                         },
-                        dst_subresource: (0, dest_layer as _),
+                        dst_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: dest_layer as _ .. (dest_layer + 1) as _,
+                        },
                         dst_offset: hal::image::Offset {
                             x: dest_rect.origin.x as i32,
                             y: dest_rect.origin.y as i32,
                             z: 0,
                         },
-                        extent: hal::device::Extent {
+                        extent: hal::image::Extent {
                             width: src_rect.size.width as u32,
                             height: src_rect.size.height as u32,
                             depth: 1,
                         },
-                        num_layers: 1,
                     }
                 ],
             );
@@ -2943,7 +2957,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         y: rect.origin.y as i32,
                         z: 0,
                     },
-                    image_extent: hal::device::Extent {
+                    image_extent: hal::image::Extent {
                         width: rect.size.width as _,
                         height: rect.size.height as _,
                         depth: 1 as _,
@@ -3110,7 +3124,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
 
         if let Some(rect) = rect {
             cmd_buffer.set_scissors(&[
-                hal::command::Rect {
+                hal::pso::Rect {
                     x: rect.origin.x as u16,
                     y: rect.origin.y as u16,
                     w: rect.size.width as u16,
