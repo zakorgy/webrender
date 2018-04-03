@@ -1272,7 +1272,7 @@ impl<B: hal::Backend> Program<B> {
     }
 
 
-    pub fn bind_instances<T>(
+    fn bind_instances<T>(
         &mut self,
         device: &B::Device,
         instances: &[T],
@@ -1287,7 +1287,7 @@ impl<B: hal::Backend> Program<B> {
         }
     }
 
-    pub fn bind_locals(
+    fn bind_locals(
         &mut self,
         device: &B::Device,
         projection: &Transform3D<f32>,
@@ -1316,7 +1316,7 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    pub fn bind_textures(
+    fn bind_textures(
         &mut self,
         device: &Device<B, hal::Graphics>,
     ) {

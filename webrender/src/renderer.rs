@@ -3216,7 +3216,6 @@ impl<B: hal::Backend> Renderer<B> {
 
                 // let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_TEXT_RUN);
                 let mut program = self.cs_text_run.get(&mut self.device).unwrap();
-                program.bind_locals(&self.device.device, projection, 0);
                 for (texture_id, instances) in &alpha_batch_container.text_run_cache_prims {
                     for (i, texture) in BatchTextures::color(*texture_id).colors.iter().enumerate() {
                         self.texture_resolver.bind(
@@ -3225,8 +3224,10 @@ impl<B: hal::Backend> Renderer<B> {
                             &mut self.device,
                         );
                     }
-                    program.bind_instances(
-                        &self.device.device,
+                    program.bind(
+                        &self.device,
+                        projection,
+                        0,
                         &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                     );
                     self.device.draw(program);
@@ -3383,10 +3384,11 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.device.draw(program);
 
                                 self.device.set_blend_mode_subpixel_pass1();
-                                program.bind_locals(
-                                    &self.device.device,
+                                program.bind(
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelPass1.into(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
 
@@ -3421,10 +3423,11 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.device.draw(program);
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass1();
-                                program.bind_locals(
-                                    &self.device.device,
+                                program.bind(
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelWithBgColorPass1.into(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
 
@@ -3434,10 +3437,11 @@ impl<B: hal::Backend> Renderer<B> {
                                 // instances and re-binding textures etc.
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass2();
-                                program.bind_locals(
-                                    &self.device.device,
+                                program.bind(
+                                    &self.device,
                                     projection,
                                     TextShaderMode::SubpixelWithBgColorPass2.into(),
+                                    &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
                             }
@@ -3675,7 +3679,6 @@ impl<B: hal::Backend> Renderer<B> {
             // draw box-shadow clips
             if !target.clip_batcher.box_shadows.is_empty() {
                 let mut program = self.cs_clip_box_shadow.get(&mut self.device).unwrap();
-                program.bind_locals(&self.device.device, projection, 0);
                 for (mask_texture_id, items) in target.clip_batcher.box_shadows.iter() {
                     // let _gm2 = self.gpu_profile.start_marker("box-shadows");
                     let textures = BatchTextures {
@@ -3692,8 +3695,10 @@ impl<B: hal::Backend> Renderer<B> {
                             &mut self.device,
                         );
                     }
-                    program.bind_instances(
-                        &self.device.device,
+                    program.bind(
+                        &self.device,
+                        projection,
+                        0,
                         &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
                     self.device.draw(&mut program);
@@ -3702,7 +3707,7 @@ impl<B: hal::Backend> Renderer<B> {
             // draw image masks
             if !target.clip_batcher.images.is_empty() {
                 let mut program = self.cs_clip_image.get(&mut self.device).unwrap();
-                program.bind_locals(&self.device.device, projection, 0);
+
                 for (mask_texture_id, items) in &target.clip_batcher.images {
                     let textures = BatchTextures {
                         colors: [
@@ -3718,8 +3723,10 @@ impl<B: hal::Backend> Renderer<B> {
                             &mut self.device,
                         );
                     }
-                    program.bind_instances(
-                        &self.device.device,
+                    program.bind(
+                        &self.device,
+                        &projection,
+                        0,
                         &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
                     self.device.draw(&mut program);
