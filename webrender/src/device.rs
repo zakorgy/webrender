@@ -1178,7 +1178,11 @@ impl<B: hal::Backend> Program<B> {
                         (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
                 ],
             };
-            let format = if shader_name.contains("cs_") { ImageFormat::R8 } else { ImageFormat::BGRA8 };
+            let format = match *shader_kind {
+                ShaderKind::ClipCache => ImageFormat::R8,
+                ShaderKind::Cache(VertexArrayKind::Blur) if shader_name.contains("_a8") => ImageFormat::R8,
+                _ => ImageFormat::BGRA8,
+            };
 
             let pipelines_descriptors = pipeline_states.iter().map(|&(blend_state, depth_test)| {
                 let subpass = Subpass {
