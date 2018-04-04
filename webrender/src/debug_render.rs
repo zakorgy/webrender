@@ -82,7 +82,7 @@ impl DebugRenderer {
         //let tri_vao = device.create_vao(&DESC_COLOR);
 
         let mut font_texture = device.create_texture(/*TextureTarget::Array,*/ ImageFormat::R8);
-        device.init_texture(
+        /*device.init_texture(
             &mut font_texture,
             debug_font_data::BMP_WIDTH,
             debug_font_data::BMP_HEIGHT,
@@ -90,7 +90,7 @@ impl DebugRenderer {
             None,
             1,
             Some(&debug_font_data::FONT_BITMAP),
-        );
+        );*/
 
         DebugRenderer {
             font_vertices: Vec::new(),
