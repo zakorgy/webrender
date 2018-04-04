@@ -7,13 +7,14 @@ repository = "https://github.com/servo/webrender"
 build = "build.rs"
 
 [features]
-default = ["freetype-lib", "vulkan", "gfx-hal/serde"]
+default = ["freetype-lib", "gfx-hal/serde"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
 debugger = ["ws", "serde_json", "image", "base64"]
 capture = ["webrender_api/serialize"]
 replay = ["webrender_api/deserialize"]
-vulkan = []
+vulkan = ["gfx-backend-vulkan"]
+dx12 = ["gfx-backend-dx12"]
 
 [dependencies]
 app_units = "0.6"
@@ -42,13 +43,14 @@ ron = { version = "0.1.7" }
 winit = "0.11"
 gfx-hal = { git = "https://github.com/gfx-rs/gfx.git" }
 rand = "0.4"
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 
 [dev-dependencies]
 mozangle = "0.1"
 env_logger = "0.5"
 rand = "0.3"                # for the benchmarks
 glutin = "0.12"             # for the example apps
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git" }
 
 [target.'cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = { version = "0.3", default-features = false }
