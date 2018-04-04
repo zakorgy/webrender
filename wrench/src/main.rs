@@ -22,6 +22,8 @@ extern crate euclid;
 extern crate font_loader;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
 extern crate gfx_hal as hal;
 extern crate image;
 #[macro_use]
