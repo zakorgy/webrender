@@ -7,6 +7,8 @@ extern crate euclid;
 extern crate gfx_hal;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
 
 use std::env;
 use std::path::PathBuf;
