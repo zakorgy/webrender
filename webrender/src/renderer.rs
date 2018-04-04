@@ -2890,7 +2890,7 @@ impl<B: hal::Backend> Renderer<B> {
         stats: &mut RendererStats,
         scissor_rect: Option<DeviceIntRect>,
     ) {
-        let mut program = match key.kind {
+        let program = match key.kind {
             BatchKind::HardwareComposite => {
                 self.ps_hw_composite.get(&mut self.device).unwrap()
             }
@@ -3030,6 +3030,7 @@ impl<B: hal::Backend> Renderer<B> {
             &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
         );
         self.device.draw(program);
+        stats.total_draw_calls += 1;
     }
 
     fn handle_blits(
@@ -3190,7 +3191,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.vertical_blurs.iter().map(|vb| vb.into()).collect::<Vec<BlurInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
 
             if !target.horizontal_blurs.is_empty() {
@@ -3201,7 +3203,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.vertical_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
         }
 
@@ -3235,6 +3238,7 @@ impl<B: hal::Backend> Renderer<B> {
                         &instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                     );
                     self.device.draw(program);
+                    stats.total_draw_calls += 1;
                 }
             }
         }
@@ -3328,6 +3332,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
                             }
                             BlendMode::SubpixelDualSource => {
                                 self.device.set_blend_mode_subpixel_dual_source();
@@ -3346,6 +3351,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
                             }
                             BlendMode::SubpixelConstantTextColor(color) => {
                                 self.device.set_blend_mode_subpixel_constant_text_color(color);
@@ -3364,6 +3370,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
                             }
                             BlendMode::SubpixelVariableTextColor => {
                                 // Using the two pass component alpha rendering technique:
@@ -3386,6 +3393,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
 
                                 self.device.set_blend_mode_subpixel_pass1();
                                 program.bind(
@@ -3395,6 +3403,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
 
                                 // When drawing the 2nd pass, we know that the VAO, textures etc
                                 // are all set up from the previous draw_instanced_batch call,
@@ -3425,6 +3434,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                                 program.bind(
@@ -3434,6 +3444,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
 
                                 // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                                 // are all set up from the previous draw_instanced_batch call,
@@ -3448,6 +3459,7 @@ impl<B: hal::Backend> Renderer<B> {
                                     &batch.instances.iter().map(|pi| pi.into()).collect::<Vec<PrimitiveInstance>>(),
                                 );
                                 self.device.draw(program);
+                                stats.total_draw_calls += 1;
                             }
                             BlendMode::PremultipliedDestOut | BlendMode::None => {
                                 unreachable!("bug: bad blend mode for text");
@@ -3605,7 +3617,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.vertical_blurs.iter().map(|vb| vb.into()).collect::<Vec<BlurInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
 
             if !target.horizontal_blurs.is_empty() {
@@ -3616,7 +3629,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.horizontal_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
         }
 
@@ -3640,7 +3654,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.clip_batcher.border_clears.iter().map(|ci|ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
 
             // Draw any dots or dashes for border corners.
@@ -3661,7 +3676,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.clip_batcher.borders.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
 
             // switch to multiplicative blending
@@ -3678,7 +3694,8 @@ impl<B: hal::Backend> Renderer<B> {
                     0,
                     &target.clip_batcher.rectangles.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                 );
-                self.device.draw(&mut program);
+                self.device.draw(program);
+                stats.total_draw_calls += 1;
             }
             // draw box-shadow clips
             if !target.clip_batcher.box_shadows.is_empty() {
@@ -3705,7 +3722,8 @@ impl<B: hal::Backend> Renderer<B> {
                         0,
                         &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
-                    self.device.draw(&mut program);
+                    self.device.draw(program);
+                    stats.total_draw_calls += 1;
                 }
             }
             // draw image masks
@@ -3733,7 +3751,8 @@ impl<B: hal::Backend> Renderer<B> {
                         0,
                         &items.iter().map(|ci| ci.into()).collect::<Vec<ClipMaskInstance>>(),
                     );
-                    self.device.draw(&mut program);
+                    self.device.draw(program);
+                    stats.total_draw_calls += 1;
                 }
             }
         }
@@ -3785,7 +3804,8 @@ impl<B: hal::Backend> Renderer<B> {
                 0,
                 &target.horizontal_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
             );
-            self.device.draw(&mut program);
+            self.device.draw(program);
+            stats.total_draw_calls += 1;
         }
     }
 
