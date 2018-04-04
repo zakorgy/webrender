@@ -86,6 +86,8 @@ pub struct PrimitiveInstance {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct ClipMaskInstance {
+    pub aData0: [i32; 4],
+    pub aData1: [i32; 4],
     pub aClipRenderTaskAddress: i32,
     pub aScrollNodeId: i32,
     pub aClipSegment: i32,
@@ -95,6 +97,8 @@ pub struct ClipMaskInstance {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct BlurInstance {
+    pub aData0: [i32; 4],
+    pub aData1: [i32; 4],
     pub aBlurRenderTaskAddress: i32,
     pub aBlurSourceTaskAddress: i32,
     pub aBlurDirection: i32,

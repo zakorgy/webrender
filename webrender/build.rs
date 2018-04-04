@@ -508,24 +508,6 @@ fn add_attribute_descriptors(
             );
             *vertex_offset += offset;
         }
-        // All shader files contain aData0 and aData1 variables.
-        // We must remove them from the attribute descriptors of blur and clip shaders,
-        // because they are not used in these and we don't want them when calculating offsets.
-        "aData0" | "aData1" => {
-            if !(file_name.starts_with("cs_blur") || file_name.starts_with("cs_clip")) {
-                attribute_descriptors.push(
-                    AttributeDesc {
-                        location: *in_location,
-                        binding: 1,
-                        element: Element {
-                            format: format,
-                            offset: *instance_offset,
-                        }
-                    }
-                );
-                *instance_offset += offset;
-            }
-        }
         _ => {
             attribute_descriptors.push(
                 AttributeDesc {
@@ -569,14 +551,14 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     if file_name.starts_with("cs_blur") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 12, // size of Bluerinstance 3 * 4
+                stride: 12 + 32, // size of Bluerinstance 3 * 4 + PrimitiveInstance 8 * 4
                 rate: 1,
             }
         );
     } else if file_name.starts_with("cs_clip") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 28, // size of ClipMaskInstance 3 * 4 + 4 * 4
+                stride: 28 + 32, // size of ClipMaskInstance 3 * 4 + 4 * 4 + PrimitiveInstance 8 * 4
                 rate: 1,
             }
         );

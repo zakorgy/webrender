@@ -315,6 +315,8 @@ impl From<GlyphFormat> for TextShaderMode {
 impl<'a> From<&'a gpu_types::BlurInstance> for BlurInstance {
     fn from(instance: &'a gpu_types::BlurInstance) -> BlurInstance {
         BlurInstance {
+            aData0: [0, 0, 0, 0],
+            aData1: [0, 0, 0, 0],
             aBlurRenderTaskAddress: instance.task_address.0 as i32,
             aBlurSourceTaskAddress: instance.src_task_address.0 as i32,
             aBlurDirection: instance.blur_direction as i32,
@@ -325,6 +327,8 @@ impl<'a> From<&'a gpu_types::BlurInstance> for BlurInstance {
 impl<'a> From<&'a gpu_types::ClipMaskInstance> for ClipMaskInstance {
     fn from(instance: &'a gpu_types::ClipMaskInstance) -> ClipMaskInstance {
         ClipMaskInstance {
+            aData0: [0, 0, 0, 0],
+            aData1: [0, 0, 0, 0],
             aClipRenderTaskAddress: instance.render_task_address.0 as i32,
             aScrollNodeId: instance.scroll_node_data_index.0 as i32,
             aClipSegment: instance.segment,
