@@ -24,6 +24,8 @@ extern crate font_loader;
 extern crate gfx_backend_vulkan as back;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as back;
+#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+extern crate gfx_backend_empty as back;
 extern crate gfx_hal as hal;
 extern crate image;
 #[macro_use]
@@ -283,6 +285,7 @@ fn create_notifier() -> (Box<RenderNotifier>, Receiver<()>) {
     (Box::new(Notifier { tx: tx }), rx)
 }
 
+#[cfg(any(feature = "vulkan", feature = "dx12"))]
 fn main() {
     #[cfg(feature = "logging")]
     env_logger::init();
@@ -584,4 +587,9 @@ fn main() {
     }
 
     wrench.renderer.deinit();
+}
+
+#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+fn main() {
+    println!("You need to enable native API features (vulkan/dx12) in order to test webrender");
 }
