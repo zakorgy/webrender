@@ -2044,6 +2044,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn update_render_tasks(&mut self, task_data: &[[f32; 12]]) {
+        println!("# UPDATE_RENDER_TASKS #");
         self.upload_queue
             .push(self.render_tasks.update(
                 &mut self.device,
@@ -2054,6 +2055,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn update_local_rects(&mut self, local_data: &[[f32; 4]]) {
+        println!("# UPDATE_LOCAL_RECTS #");
         self.upload_queue
             .push(self.local_clip_rects.update(
                 &mut self.device,
@@ -2064,6 +2066,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn update_node_data(&mut self, node_data: &[[f32; 36]]) {
+        println!("# UPDATE_NODE_DATA #");
         self.upload_queue
             .push(self.node_data.update(
                 &mut self.device,
