@@ -85,6 +85,7 @@ pub trait Example {
     }
 }
 
+#[cfg(any(feature = "vulkan", feature = "dx12"))]
 pub fn main_wrapper<E: Example>(
     example: &mut E,
     options: Option<webrender::RendererOptions>,
@@ -215,4 +216,12 @@ pub fn main_wrapper<E: Example>(
     });
 
     renderer.deinit();
+}
+
+#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+pub fn main_wrapper<E: Example>(
+    _example: &mut E,
+    _options: Option<webrender::RendererOptions>,
+) {
+    println!("You need to enable native API features (vulkan/dx12) in order to test webrender");
 }

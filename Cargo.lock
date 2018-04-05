@@ -505,6 +505,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gfx-backend-empty"
+version = "0.1.0"
+source = "git+https://github.com/gfx-rs/gfx.git#d09e24dc951a19b0561d384c15d88275afb29851"
+dependencies = [
+ "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+]
+
+[[package]]
 name = "gfx-backend-vulkan"
 version = "0.1.0"
 source = "git+https://github.com/gfx-rs/gfx.git#211613c95f678aa7573835313a15facc8adac60d"
@@ -1610,6 +1618,7 @@ dependencies = [
  "euclid 0.17.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "font-loader 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+ "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gleam 0.4.31 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1763,6 +1772,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum gdi32-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0912515a8ff24ba900422ecda800b52f4016a56251922d397c576bf92c690518"
 "checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)" = "<none>"
+"checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)" = "<none>"
 "checksum gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"

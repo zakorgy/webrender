@@ -1094,11 +1094,9 @@ impl<B: hal::Backend> Program<B> {
         shader_kind: &ShaderKind,
         render_pass: &RenderPass<B>,
     ) -> Program<B> {
-        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
         let vs_module = device
             .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
             .unwrap();
-        #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
         let fs_module = device
             .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
             .unwrap();
