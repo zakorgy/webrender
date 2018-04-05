@@ -1099,7 +1099,7 @@ impl<B: hal::Backend> CacheTexture<B> {
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
                 );*/
 
-                for (row_index, row) in rows.iter_mut().enumerate() {
+                /*for (row_index, row) in rows.iter_mut().enumerate() {
                     if !row.is_dirty {
                         continue;
                     }
@@ -1117,7 +1117,24 @@ impl<B: hal::Backend> CacheTexture<B> {
                     //uploader.upload(rect, 0, None, cpu_blocks);
 
                     row.is_dirty = false;
+                }*/
+
+                let mut data_blocks = Vec::new();
+                for (row_index, row) in rows.iter_mut().enumerate() {
+                    let block_index = row_index * MAX_VERTEX_TEXTURE_WIDTH;
+                    let cpu_blocks =
+                        &cpu_blocks[block_index .. (block_index + MAX_VERTEX_TEXTURE_WIDTH)];
+
+                    data_blocks.extend_from_slice(&cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>());
+                    //uploader.upload(rect, 0, None, cpu_blocks);
+
+                    row.is_dirty = false;
                 }
+                let rect = DeviceUintRect::new(
+                    DeviceUintPoint::new(0, 0),
+                    DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as u32, rows.len() as u32),
+                );
+                device.update_resource_cache(rect, &data_blocks);
 
                 rows_dirty
             }

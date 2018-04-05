@@ -2032,7 +2032,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
     }
 
     pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
-        debug_assert_eq!(gpu_data.len(), 1024);
+        println!("# UPDATE_RESOURCE_CACHE #");
+        debug_assert_eq!(gpu_data.len() % 1024, 0);
         self.upload_queue
             .push(self.resource_cache.update(
                 &mut self.device,
