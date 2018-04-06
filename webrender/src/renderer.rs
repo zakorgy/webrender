@@ -3201,7 +3201,7 @@ impl<B: hal::Backend> Renderer<B> {
                     &self.device,
                     projection,
                     0,
-                    &target.vertical_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
+                    &target.horizontal_blurs.iter().map(|hb| hb.into()).collect::<Vec<BlurInstance>>(),
                 );
                 self.device.draw(program);
                 stats.total_draw_calls += 1;
