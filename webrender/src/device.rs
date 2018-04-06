@@ -2693,7 +2693,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             }
         }
         // TODO remove this cfg if other platforms are supported
-        if cfg!(feature = "vulkan") && src_rect.size != dest_rect.size {
+        if src_rect.size != dest_rect.size {
             cmd_buffer.blit_image(
                 &src_img.image,
                 hal::image::ImageLayout::TransferSrcOptimal,
