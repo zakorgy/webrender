@@ -17,3 +17,4 @@ panic = "abort"
 "https://github.com/gfx-rs/gfx.git#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="b75b8f5"}
 "https://github.com/gfx-rs/gfx.git#gfx-backend-vulkan:0.1.0"= { git = "https://github.com/gfx-rs/gfx.git", rev="b75b8f5" }
 "https://github.com/gfx-rs/gfx.git#gfx-backend-dx12:0.1.0"= { git = "https://github.com/gfx-rs/gfx.git", rev="b75b8f5" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-empty:0.1.0"= { git = "https://github.com/gfx-rs/gfx.git", rev="b75b8f5" }
