@@ -508,8 +508,14 @@ dependencies = [
 name = "gfx-backend-empty"
 version = "0.1.0"
 source = "git+https://github.com/gfx-rs/gfx.git#d09e24dc951a19b0561d384c15d88275afb29851"
+replace = "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)"
+
+[[package]]
+name = "gfx-backend-empty"
+version = "0.1.0"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5#b75b8f5e5db8983eb55363a41c58bd55312f9c9b"
 dependencies = [
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+ "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)",
 ]
 
 [[package]]
@@ -1773,6 +1779,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)" = "<none>"
 "checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
+"checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b75b8f5)" = "<none>"
 "checksum gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
