@@ -1816,7 +1816,7 @@ impl<B: hal::Backend> Renderer<B> {
         )?;
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
-            device.supports_extension("GL_ARB_blend_func_extended");
+            device.supports_features(hal::Features::DUAL_SRC_BLENDING);
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.

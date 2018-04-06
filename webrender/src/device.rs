@@ -1717,8 +1717,8 @@ pub struct Device<B: hal::Backend, C> {
     // frames and GPU frames.
     frame_id: FrameId,
 
-    // GL extensions
-    extensions: Vec<String>,
+    // Supported features
+    features: hal::Features,
 }
 
 impl<B: hal::Backend> Device<B, hal::Graphics> {
@@ -1733,7 +1733,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         let max_texture_size = 4096u32;
         let renderer_name = "WIP".to_owned();
 
-        let mut extensions = Vec::new();
+        let features = adapter.physical_device.features();
 
         let window_size = window.get_inner_size().unwrap();
         let pixel_width = window_size.0;
@@ -2033,7 +2033,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             renderer_name,
             //cached_programs,
             frame_id: FrameId(0),
-            extensions,
+            features,
         }
     }
 
@@ -3320,8 +3320,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         self.current_blend_state = SUBPIXEL_DUAL_SOURCE;
     }
 
-    pub fn supports_extension(&self, extension: &str) -> bool {
-        self.extensions.iter().any(|s| s == extension)
+    pub fn supports_features(&self, features: hal::Features) -> bool {
+        self.features.contains(features)
     }
 
     pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {
