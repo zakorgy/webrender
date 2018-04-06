@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use time;
 use webrender;
 use webrender::api::*;
-use webrender::{DebugFlags, RendererStats};
+use webrender::{ApiCapabilities, DebugFlags, RendererStats};
 use winit::EventsLoopProxy;
 use yaml_frame_writer::YamlFrameWriterReceiver;
 use {WindowWrapper, BLACK_COLOR, WHITE_COLOR};
@@ -205,6 +205,11 @@ impl Wrench {
         debug_flags.set(DebugFlags::DISABLE_BATCHING, no_batch);
         let callbacks = Arc::new(Mutex::new(blob::BlobCallbacks::new()));
 
+        let mut api_capabilities = ApiCapabilities::empty();
+        if cfg!(feature = "vulkan") {
+            api_capabilities.insert(ApiCapabilities::BLITTING);
+        }
+
         let opts = webrender::RendererOptions {
             device_pixel_ratio: dp_ratio,
             resource_override_path: shader_override_path,
@@ -217,6 +222,7 @@ impl Wrench {
             precache_shaders,
             blob_image_renderer: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
             disable_dual_source_blending,
+            api_capabilities,
             ..Default::default()
         };
 

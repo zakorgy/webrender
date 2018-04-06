@@ -350,6 +350,12 @@ pub struct Capabilities {
     pub supports_multisampling: bool,
 }
 
+bitflags!(
+    pub struct ApiCapabilities: u8 {
+        const BLITTING = 0x1;
+    }
+);
+
 #[derive(Clone, Debug)]
 pub enum ShaderError {
     Compilation(String, String), // name, error mssage
@@ -1719,6 +1725,7 @@ pub struct Device<B: hal::Backend, C> {
 
     // Supported features
     features: hal::Features,
+    api_capabilities: ApiCapabilities,
 }
 
 impl<B: hal::Backend> Device<B, hal::Graphics> {
@@ -1729,6 +1736,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         window: &winit::Window,
         adapter: hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
+        api_capabilities: ApiCapabilities,
     ) -> Self {
         let max_texture_size = 4096u32;
         let renderer_name = "WIP".to_owned();
@@ -2034,6 +2042,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             //cached_programs,
             frame_id: FrameId(0),
             features,
+            api_capabilities,
         }
     }
 
@@ -2692,8 +2701,8 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 );
             }
         }
-        // TODO remove this cfg if other platforms are supported
-        if src_rect.size != dest_rect.size {
+        // TODO remove the first condition if other platforms are supported
+        if self.api_capabilities.contains(ApiCapabilities::BLITTING) && src_rect.size != dest_rect.size {
             cmd_buffer.blit_image(
                 &src_img.image,
                 hal::image::ImageLayout::TransferSrcOptimal,

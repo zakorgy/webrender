@@ -28,8 +28,8 @@ use debug_colors;
 use debug_render::DebugRenderer;
 #[cfg(feature = "debugger")]
 use debug_server::{self, DebugServer};
-use device::{BlurInstance, ClipMaskInstance, DepthFunction, Device, FrameId, Program, UploadMethod, Texture,
-             VertexDescriptor, PBO};
+use device::{ApiCapabilities, BlurInstance, ClipMaskInstance, DepthFunction, Device, FrameId, Program, UploadMethod,
+             Texture, VertexDescriptor, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot, VertexAttribute, VertexAttributeKind};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, VertexUsageHint};
 use device::{PipelineRequirements, PrimitiveInstance, ReadPixelsFormat, ShaderKind, VertexArrayKind};
@@ -1620,6 +1620,7 @@ impl<B: hal::Backend> Renderer<B> {
             window,
             adapter,
             surface,
+            options.api_capabilities,
         );
 
         let file =
@@ -4557,6 +4558,7 @@ pub struct RendererOptions {
     pub debug_flags: DebugFlags,
     pub renderer_id: Option<u64>,
     pub disable_dual_source_blending: bool,
+    pub api_capabilities: ApiCapabilities,
 }
 
 impl Default for RendererOptions {
@@ -4589,6 +4591,7 @@ impl Default for RendererOptions {
             renderer_id: None,
             //cached_programs: None,
             disable_dual_source_blending: false,
+            api_capabilities: ApiCapabilities::empty(),
         }
     }
 }

@@ -170,7 +170,7 @@ extern crate png;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::{ReadPixelsFormat, UploadMethod, VertexUsageHint};
+pub use device::{ApiCapabilities, ReadPixelsFormat, UploadMethod, VertexUsageHint};
 pub use renderer::{CpuProfile, DebugFlags, GpuProfile, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, Renderer, RendererOptions};
