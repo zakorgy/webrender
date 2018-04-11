@@ -1671,15 +1671,31 @@ impl<B: hal::Backend> Renderer<B> {
         )?;
 
         let brush_radial_gradient = BrushShader::new(
-            "brush_radial_gradient",
-            "brush_radial_gradient_alpha_pass",
+            if options.enable_dithering {
+                "brush_radial_gradient_dithering"
+            } else {
+                "brush_radial_gradient"
+            },
+            if options.enable_dithering {
+                "brush_radial_gradient_dithering_alpha_pass"
+            } else {
+                "brush_radial_gradient_alpha_pass"
+            },
             &mut device,
             &mut pipeline_requirements,
         )?;
 
         let brush_linear_gradient = BrushShader::new(
-            "brush_linear_gradient",
-            "brush_linear_gradient_alpha_pass",
+            if options.enable_dithering {
+                "brush_linear_gradient_dithering"
+            } else {
+                "brush_linear_gradient"
+            },
+            if options.enable_dithering {
+                "brush_linear_gradient_dithering_alpha_pass"
+            } else {
+                "brush_linear_gradient_alpha_pass"
+            },
             &mut device,
             &mut pipeline_requirements,
         )?;
