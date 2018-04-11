@@ -84,6 +84,8 @@
         features: [
             "",// [0]
             "ALPHA_PASS",// [1]
+            "DITHERING",// [2]
+            "DITHERING,ALPHA_PASS",// [3]
         ],
     ),// [9]
     (
@@ -92,6 +94,8 @@
         features: [
             "",// [0]
             "ALPHA_PASS",// [1]
+            "DITHERING",// [2]
+            "DITHERING,ALPHA_PASS",// [3]
         ],
     ),// [10]
     (
