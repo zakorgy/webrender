@@ -704,7 +704,7 @@ impl<B: hal::Backend> Image<B> {
             hal::image::ImageLayout::TransferDstOptimal,
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
+                hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::TRANSFER,
                 hal::memory::Dependencies::empty(),
                 &[barrier],
             );
@@ -739,11 +739,11 @@ impl<B: hal::Backend> Image<B> {
         );
 
         if let Some(barrier) = self.core.transit(
-            hal::image::Access::SHADER_READ,
-            hal::image::ImageLayout::ShaderReadOnlyOptimal,
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::ImageLayout::ColorAttachmentOptimal,
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                 hal::memory::Dependencies::empty(),
                 &[barrier],
             );
@@ -2374,24 +2374,31 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
         });
 
         if let Some((texture, _layer)) = texture_and_layer {
-            let mut barriers = Vec::new();
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
             let rbos = &self.rbos;
             //TODO: transit only specific layer
-            barriers.extend(self.images[&texture.id].core.transit(
+            if let Some(barrier) = self.images[&texture.id].core.transit(
                 hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                 hal::image::ImageLayout::ColorAttachmentOptimal,
-            ));
-            barriers.extend(texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+
+            if let Some(barrier) = texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
                 hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 hal::image::ImageLayout::DepthStencilAttachmentOptimal,
-            )));
+            )) {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
 
-            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::TOP_OF_PIPE .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                hal::memory::Dependencies::empty(),
-                &barriers,
-            );
             self.upload_queue.push(cmd_buffer.finish())
         }
 
@@ -2695,7 +2702,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             barriers.extend(dest_img.transit(hal::image::Access::TRANSFER_WRITE, hal::image::ImageLayout::TransferDstOptimal));
             if !barriers.is_empty() {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER,
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
                     &barriers,
                 );
@@ -2787,7 +2794,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             barriers.extend(dest_img.transit(hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::ImageLayout::ColorAttachmentOptimal));
             if !barriers.is_empty() {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. PipelineStage::BOTTOM_OF_PIPE,
+                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &barriers,
                 );
@@ -2950,7 +2957,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
             barriers.extend(image.transit(hal::image::Access::TRANSFER_READ, hal::image::ImageLayout::TransferSrcOptimal));
             if !barriers.is_empty() {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TOP_OF_PIPE .. PipelineStage::TRANSFER,
+                    PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
                     &barriers
                 );
@@ -2981,6 +2988,16 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                         depth: 1 as _,
                     },
                 }]);
+            if let Some(barrier) = image.transit(
+                hal::image::Access::empty(),
+                hal::image::ImageLayout::ColorAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
             cmd_buffer.finish()
         };
 
@@ -3174,7 +3191,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::TransferDstOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3194,7 +3211,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::ColorAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3208,7 +3225,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::TransferDstOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3228,7 +3245,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::DepthStencilAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3367,7 +3384,7 @@ impl<B: hal::Backend> Device<B, hal::Graphics> {
                 hal::image::ImageLayout::Present,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TOP_OF_PIPE .. hal::pso::PipelineStage::BOTTOM_OF_PIPE,
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
