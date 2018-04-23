@@ -260,7 +260,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             {
                 extend_non_uniform_variables_with_location_info(
                     &mut attribute_descriptors,
-                    file_name,
                     &mut in_location,
                     &mut instance_offset,
                     trimmed,
@@ -433,7 +432,6 @@ fn add_locals_to_descriptor_set_layout(
 
 fn extend_non_uniform_variables_with_location_info(
     attribute_descriptors: &mut Vec<AttributeDesc>,
-    file_name: &str,
     in_location: &mut u32,
     instance_offset: &mut u32,
     line: &str,
@@ -449,7 +447,6 @@ fn extend_non_uniform_variables_with_location_info(
         if write_ron {
             add_attribute_descriptors(
                 attribute_descriptors,
-                file_name,
                 in_location,
                 instance_offset,
                 line,
@@ -479,7 +476,6 @@ fn calculate_location_size(line: &str) -> u32 {
 
 fn add_attribute_descriptors(
     attribute_descriptors: &mut Vec<AttributeDesc>,
-    file_name: &str,
     in_location: &mut u32,
     instance_offset: &mut u32,
     line: &str,
