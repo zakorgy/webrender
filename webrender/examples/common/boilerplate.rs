@@ -4,20 +4,27 @@
 
 extern crate env_logger;
 extern crate euclid;
+extern crate gfx_hal;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
 
-use gleam::gl;
-use glutin::{self, GlContext};
 use std::env;
 use std::path::PathBuf;
 use webrender;
 use webrender::api::*;
+use webrender::ApiCapabilities;
+use winit;
+
+use self::gfx_hal::Instance;
 
 struct Notifier {
-    events_proxy: glutin::EventsLoopProxy,
+    events_proxy: winit::EventsLoopProxy,
 }
 
 impl Notifier {
-    fn new(events_proxy: glutin::EventsLoopProxy) -> Notifier {
+    fn new(events_proxy: winit::EventsLoopProxy) -> Notifier {
         Notifier { events_proxy }
     }
 }
@@ -76,20 +83,20 @@ pub trait Example {
         pipeline_id: PipelineId,
         document_id: DocumentId,
     );
-    fn on_event(&mut self, glutin::WindowEvent, &RenderApi, DocumentId) -> bool {
+    fn on_event(&mut self, winit::WindowEvent, &RenderApi, DocumentId) -> bool {
         false
     }
     fn get_image_handlers(
         &mut self,
-        _gl: &gl::Gl,
     ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
         (None, None)
     }
-    fn draw_custom(&self, _gl: &gl::Gl) {
+    fn draw_custom(&self) {
     }
 }
 
+#[cfg(any(feature = "vulkan", feature = "dx12"))]
 pub fn main_wrapper<E: Example>(
     example: &mut E,
     options: Option<webrender::RendererOptions>,
@@ -103,38 +110,24 @@ pub fn main_wrapper<E: Example>(
         None
     };
 
-    let mut events_loop = glutin::EventsLoop::new();
-    let context_builder = glutin::ContextBuilder::new()
-        .with_gl(glutin::GlRequest::GlThenGles {
-            opengl_version: (3, 2),
-            opengles_version: (3, 0),
-        });
-    let window_builder = glutin::WindowBuilder::new()
+    let mut events_loop = winit::EventsLoop::new();
+
+    let wb = winit::WindowBuilder::new()
         .with_title(E::TITLE)
         .with_multitouch()
         .with_dimensions(E::WIDTH, E::HEIGHT);
-    let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+    let window = wb
+        .build(&events_loop)
         .unwrap();
 
-    unsafe {
-        window.make_current().ok();
-    }
-
-    let gl = match window.get_api() {
-        glutin::Api::OpenGl => unsafe {
-            gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-        },
-        glutin::Api::OpenGlEs => unsafe {
-            gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-        },
-        glutin::Api::WebGl => unimplemented!(),
-    };
-
-    println!("OpenGL version {}", gl.get_string(gl::VERSION));
     println!("Shader resource path: {:?}", res_path);
     let device_pixel_ratio = window.hidpi_factor();
     println!("Device pixel ratio: {}", device_pixel_ratio);
 
+    let mut api_capabilities = ApiCapabilities::empty();
+    if cfg!(feature = "vulkan") {
+        api_capabilities.insert(ApiCapabilities::BLITTING);
+    }
     println!("Loading shaders...");
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
@@ -143,6 +136,7 @@ pub fn main_wrapper<E: Example>(
         clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
         //scatter_gpu_cache_updates: false,
         debug_flags: webrender::DebugFlags::ECHO_DRIVER_MESSAGES,
+        api_capabilities,
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
@@ -151,11 +145,16 @@ pub fn main_wrapper<E: Example>(
         DeviceUintSize::new(width, height)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts).unwrap();
+    let instance = back::Instance::create("gfx-rs instance", 1);
+    let mut adapters = instance.enumerate_adapters();
+    let adapter = adapters.remove(0);
+    let mut surface = instance.create_surface(&window);
+    let window_size = window.get_inner_size().unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(notifier, &adapter, &mut surface, window_size, opts).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 
-    let (external, output) = example.get_image_handlers(&*gl);
+    let (external, output) = example.get_image_handlers();
 
     if let Some(output_image_handler) = output {
         renderer.set_output_image_handler(output_image_handler);
@@ -198,11 +197,11 @@ pub fn main_wrapper<E: Example>(
         let mut custom_event = true;
 
         match global_event {
-            glutin::Event::WindowEvent { event: glutin::WindowEvent::Closed, .. } => return glutin::ControlFlow::Break,
-            glutin::Event::WindowEvent {
-                event: glutin::WindowEvent::KeyboardInput {
-                    input: glutin::KeyboardInput {
-                        state: glutin::ElementState::Pressed,
+            winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => return winit::ControlFlow::Break,
+            winit::Event::WindowEvent {
+                event: winit::WindowEvent::KeyboardInput {
+                    input: winit::KeyboardInput {
+                        state: winit::ElementState::Pressed,
                         virtual_keycode: Some(key),
                         ..
                     },
@@ -210,43 +209,43 @@ pub fn main_wrapper<E: Example>(
                 },
                 ..
             } => match key {
-                glutin::VirtualKeyCode::Escape => return glutin::ControlFlow::Break,
-                glutin::VirtualKeyCode::P => renderer.toggle_debug_flags(webrender::DebugFlags::PROFILER_DBG),
-                glutin::VirtualKeyCode::O => renderer.toggle_debug_flags(webrender::DebugFlags::RENDER_TARGET_DBG),
-                glutin::VirtualKeyCode::I => renderer.toggle_debug_flags(webrender::DebugFlags::TEXTURE_CACHE_DBG),
-                glutin::VirtualKeyCode::S => renderer.toggle_debug_flags(webrender::DebugFlags::COMPACT_PROFILER),
-                glutin::VirtualKeyCode::Q => renderer.toggle_debug_flags(
+                winit::VirtualKeyCode::Escape => return winit::ControlFlow::Break,
+                winit::VirtualKeyCode::P => renderer.toggle_debug_flags(webrender::DebugFlags::PROFILER_DBG),
+                winit::VirtualKeyCode::O => renderer.toggle_debug_flags(webrender::DebugFlags::RENDER_TARGET_DBG),
+                winit::VirtualKeyCode::I => renderer.toggle_debug_flags(webrender::DebugFlags::TEXTURE_CACHE_DBG),
+                winit::VirtualKeyCode::S => renderer.toggle_debug_flags(webrender::DebugFlags::COMPACT_PROFILER),
+                winit::VirtualKeyCode::Q => renderer.toggle_debug_flags(
                     webrender::DebugFlags::GPU_TIME_QUERIES | webrender::DebugFlags::GPU_SAMPLE_QUERIES
                 ),
-                glutin::VirtualKeyCode::Key1 => txn.set_window_parameters(
+                winit::VirtualKeyCode::Key1 => txn.set_window_parameters(
                     framebuffer_size,
                     DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
                     1.0
                 ),
-                glutin::VirtualKeyCode::Key2 => txn.set_window_parameters(
+                winit::VirtualKeyCode::Key2 => txn.set_window_parameters(
                     framebuffer_size,
                     DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
                     2.0
                 ),
-                glutin::VirtualKeyCode::M => api.notify_memory_pressure(),
+                winit::VirtualKeyCode::M => api.notify_memory_pressure(),
                 #[cfg(feature = "capture")]
-                glutin::VirtualKeyCode::C => {
+                winit::VirtualKeyCode::C => {
                     let path: PathBuf = "../captures/example".into();
                     //TODO: switch between SCENE/FRAME capture types
-                    // based on "shift" modifier, when `glutin` is updated.
+                    // based on "shift" modifier, when `winit` is updated.
                     let bits = CaptureBits::all();
                     api.save_capture(path, bits);
                 },
                 _ => {
                     let win_event = match global_event {
-                        glutin::Event::WindowEvent { event, .. } => event,
+                        winit::Event::WindowEvent { event, .. } => event,
                         _ => unreachable!()
                     };
                     custom_event = example.on_event(win_event, &api, document_id)
                 },
             },
-            glutin::Event::WindowEvent { event, .. } => custom_event = example.on_event(event, &api, document_id),
-            _ => return glutin::ControlFlow::Continue,
+            winit::Event::WindowEvent { event, .. } => custom_event = example.on_event(event, &api, document_id),
+            _ => return winit::ControlFlow::Continue,
         };
 
         if custom_event {
@@ -276,11 +275,19 @@ pub fn main_wrapper<E: Example>(
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
         let _ = renderer.flush_pipeline_info();
-        example.draw_custom(&*gl);
-        window.swap_buffers().ok();
+        example.draw_custom();
+        //window.swap_buffers().ok();
 
-        glutin::ControlFlow::Continue
+        winit::ControlFlow::Continue
     });
 
     renderer.deinit();
+}
+
+#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+pub fn main_wrapper<E: Example>(
+    _example: &mut E,
+    _options: Option<webrender::RendererOptions>,
+) {
+    println!("You need to enable native API features (vulkan/dx12) in order to test webrender");
 }
