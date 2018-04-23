@@ -4,16 +4,19 @@
 
 use super::shader_source;
 use api::{ColorF, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
 use euclid::Transform3D;
-use gleam::gl;
+//use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use log::Level;
+use rand::{self, Rng};
 use smallvec::SmallVec;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::cmp;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::marker::PhantomData;
@@ -24,6 +27,123 @@ use std::ptr;
 use std::rc::Rc;
 use std::slice;
 use std::thread;
+
+use hal;
+
+// gfx-hal
+use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
+use hal::pso::{BlendState, BlendOp, Comparison, DepthTest, Factor};
+use hal::{Device as BackendDevice, PhysicalDevice, QueueFamily, Surface, Swapchain};
+use hal::{Backbuffer, DescriptorPool, FrameSync, Primitive, SwapchainConfig};
+use hal::format::{ChannelType, Format, Swizzle};
+use hal::pass::Subpass;
+use hal::pso::PipelineStage;
+use hal::queue::Submission;
+//use ron::de::from_reader;
+
+pub const NODE_TEXTURE_WIDTH: usize = 1017; // 113 * ( 36 / 4)
+pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1024; // 512 * ( 8 / 4 )
+pub const CLIP_RECTS_TEXTURE_WIDTH: usize = 1024;
+pub const TEXTURE_HEIGHT: usize = 8;
+pub const MAX_INSTANCE_COUNT: usize = 1024;
+const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
+
+pub type TextureId = u32;
+
+pub const INVALID_TEXTURE_ID: TextureId = 0;
+pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
+pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
+
+const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
+    aspects: hal::format::Aspects::COLOR,
+    levels: 0 .. 1,
+    layers: 0 .. 1,
+};
+const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
+    aspects: hal::format::Aspects::DEPTH,
+    levels: 0 .. 1,
+    layers: 0 .. 1,
+};
+
+const ENTRY_NAME: &str = "main";
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct Vertex {
+    aPosition: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+struct Locals {
+    uTransform: [[f32; 4]; 4],
+    uDevicePixelRatio: f32,
+    uMode: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct PrimitiveInstance {
+    pub aData0: [i32; 4],
+    pub aData1: [i32; 4],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct ClipMaskInstance {
+    pub aClipRenderTaskAddress: i32,
+    pub aScrollNodeId: i32,
+    pub aClipSegment: i32,
+    pub aClipDataResourceAddress: [i32; 4],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct BlurInstance {
+    pub aBlurRenderTaskAddress: i32,
+    pub aBlurSourceTaskAddress: i32,
+    pub aBlurDirection: i32,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PipelineRequirements {
+    pub attribute_descriptors: Vec<AttributeDesc>,
+    pub bindings_map: HashMap<String, u32>,
+    pub descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
+    pub descriptor_set_layouts: Vec<DescriptorSetLayoutBinding>,
+    pub vertex_buffer_descriptors: Vec<VertexBufferDesc>,
+}
+
+
+const QUAD: [Vertex; 6] = [
+    Vertex {
+        aPosition: [0.0, 0.0, 0.0],
+    },
+    Vertex {
+        aPosition: [1.0, 0.0, 0.0],
+    },
+    Vertex {
+        aPosition: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        aPosition: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        aPosition: [1.0, 0.0, 0.0],
+    },
+    Vertex {
+        aPosition: [1.0, 1.0, 0.0],
+    },
+];
+
+fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
+    use std::io::Read;
+    let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
+    let mut file = File::open(path_str).expect(&format!("Unable to open shader file: {}", filename));
+    let mut shader = Vec::new();
+    file.read_to_end(&mut shader).unwrap();
+    shader
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -44,7 +164,7 @@ impl Add<usize> for FrameId {
     }
 }
 
-const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
+/*const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
 
 const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
 
@@ -53,7 +173,7 @@ const SHADER_VERSION_GLES: &str = "#version 300 es\n";
 
 const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
 const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
-const SHADER_IMPORT: &str = "#include ";
+const SHADER_IMPORT: &str = "#include ";*/
 
 pub struct TextureSlot(pub usize);
 
@@ -63,8 +183,8 @@ const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 #[repr(u32)]
 pub enum DepthFunction {
     #[cfg(feature = "debug_renderer")]
-    Less = gl::LESS,
-    LessEqual = gl::LEQUAL,
+    Less,
+    LessEqual,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -110,7 +230,7 @@ pub enum UploadMethod {
     /// Just call `glTexSubImage` directly with the CPU data pointer
     Immediate,
     /// Accumulate the changes in PBO first before transferring to a texture.
-    PixelBuffer(VertexUsageHint),
+    PixelBuffer,
 }
 
 /// Plain old data that can be used to initialize a texture.
@@ -124,319 +244,33 @@ pub enum ReadPixelsFormat {
     Rgba8,
 }
 
-pub fn get_gl_target(target: TextureTarget) -> gl::GLuint {
-    match target {
-        TextureTarget::Default => gl::TEXTURE_2D,
-        TextureTarget::Array => gl::TEXTURE_2D_ARRAY,
-        TextureTarget::Rect => gl::TEXTURE_RECTANGLE,
-        TextureTarget::External => gl::TEXTURE_EXTERNAL_OES,
-    }
-}
-
-pub fn get_gl_format_bgra(gl: &gl::Gl) -> gl::GLuint {
-    match gl.get_type() {
-        gl::GlType::Gl => GL_FORMAT_BGRA_GL,
-        gl::GlType::Gles => GL_FORMAT_BGRA_GLES,
-    }
-}
-
-fn get_shader_version(gl: &gl::Gl) -> &'static str {
-    match gl.get_type() {
-        gl::GlType::Gl => SHADER_VERSION_GL,
-        gl::GlType::Gles => SHADER_VERSION_GLES,
-    }
-}
-
-// Get a shader string by name, from the built in resources or
-// an override path, if supplied.
-fn get_shader_source(shader_name: &str, base_path: &Option<PathBuf>) -> Option<String> {
-    if let Some(ref base) = *base_path {
-        let shader_path = base.join(&format!("{}.glsl", shader_name));
-        if shader_path.exists() {
-            let mut source = String::new();
-            File::open(&shader_path)
-                .unwrap()
-                .read_to_string(&mut source)
-                .unwrap();
-            return Some(source);
-        }
-    }
-
-    shader_source::SHADERS
-        .get(shader_name)
-        .map(|s| s.to_string())
-}
-
-// Parse a shader string for imports. Imports are recursively processed, and
-// prepended to the list of outputs.
-fn parse_shader_source(source: String, base_path: &Option<PathBuf>, output: &mut String) {
-    for line in source.lines() {
-        if line.starts_with(SHADER_IMPORT) {
-            let imports = line[SHADER_IMPORT.len() ..].split(',');
-
-            // For each import, get the source, and recurse.
-            for import in imports {
-                if let Some(include) = get_shader_source(import, base_path) {
-                    parse_shader_source(include, base_path, output);
-                }
-            }
-        } else {
-            output.push_str(line);
-            output.push_str("\n");
-        }
-    }
-}
-
-pub fn build_shader_strings(
-    gl_version_string: &str,
-    features: &str,
-    base_filename: &str,
-    override_path: &Option<PathBuf>,
-) -> (String, String) {
-    // Construct a list of strings to be passed to the shader compiler.
-    let mut vs_source = String::new();
-    let mut fs_source = String::new();
-
-    // GLSL requires that the version number comes first.
-    vs_source.push_str(gl_version_string);
-    fs_source.push_str(gl_version_string);
-
-    // Insert the shader name to make debugging easier.
-    let name_string = format!("// {}\n", base_filename);
-    vs_source.push_str(&name_string);
-    fs_source.push_str(&name_string);
-
-    // Define a constant depending on whether we are compiling VS or FS.
-    vs_source.push_str(SHADER_KIND_VERTEX);
-    fs_source.push_str(SHADER_KIND_FRAGMENT);
-
-    // Add any defines that were passed by the caller.
-    vs_source.push_str(features);
-    fs_source.push_str(features);
-
-    // Parse the main .glsl file, including any imports
-    // and append them to the list of sources.
-    let mut shared_result = String::new();
-    if let Some(shared_source) = get_shader_source(base_filename, override_path) {
-        parse_shader_source(shared_source, override_path, &mut shared_result);
-    }
-
-    vs_source.push_str(&shared_result);
-    fs_source.push_str(&shared_result);
-
-    (vs_source, fs_source)
-}
-
 pub trait FileWatcherHandler: Send {
     fn file_changed(&self, path: PathBuf);
 }
 
-impl VertexAttributeKind {
-    fn size_in_bytes(&self) -> u32 {
-        match *self {
-            VertexAttributeKind::F32 => 4,
-            #[cfg(feature = "debug_renderer")]
-            VertexAttributeKind::U8Norm => 1,
-            VertexAttributeKind::U16Norm => 2,
-            VertexAttributeKind::I32 => 4,
-            VertexAttributeKind::U16 => 2,
-        }
-    }
-}
-
-impl VertexAttribute {
-    fn size_in_bytes(&self) -> u32 {
-        self.count * self.kind.size_in_bytes()
-    }
-
-    fn bind_to_vao(
-        &self,
-        attr_index: gl::GLuint,
-        divisor: gl::GLuint,
-        stride: gl::GLint,
-        offset: gl::GLuint,
-        gl: &gl::Gl,
-    ) {
-        gl.enable_vertex_attrib_array(attr_index);
-        gl.vertex_attrib_divisor(attr_index, divisor);
-
-        match self.kind {
-            VertexAttributeKind::F32 => {
-                gl.vertex_attrib_pointer(
-                    attr_index,
-                    self.count as gl::GLint,
-                    gl::FLOAT,
-                    false,
-                    stride,
-                    offset,
-                );
-            }
-            #[cfg(feature = "debug_renderer")]
-            VertexAttributeKind::U8Norm => {
-                gl.vertex_attrib_pointer(
-                    attr_index,
-                    self.count as gl::GLint,
-                    gl::UNSIGNED_BYTE,
-                    true,
-                    stride,
-                    offset,
-                );
-            }
-            VertexAttributeKind::U16Norm => {
-                gl.vertex_attrib_pointer(
-                    attr_index,
-                    self.count as gl::GLint,
-                    gl::UNSIGNED_SHORT,
-                    true,
-                    stride,
-                    offset,
-                );
-            }
-            VertexAttributeKind::I32 => {
-                gl.vertex_attrib_i_pointer(
-                    attr_index,
-                    self.count as gl::GLint,
-                    gl::INT,
-                    stride,
-                    offset,
-                );
-            }
-            VertexAttributeKind::U16 => {
-                gl.vertex_attrib_i_pointer(
-                    attr_index,
-                    self.count as gl::GLint,
-                    gl::UNSIGNED_SHORT,
-                    stride,
-                    offset,
-                );
-            }
-        }
-    }
-}
-
-impl VertexDescriptor {
-    fn instance_stride(&self) -> u32 {
-        self.instance_attributes
-            .iter()
-            .map(|attr| attr.size_in_bytes())
-            .sum()
-    }
-
-    fn bind_attributes(
-        attributes: &[VertexAttribute],
-        start_index: usize,
-        divisor: u32,
-        gl: &gl::Gl,
-        vbo: VBOId,
-    ) {
-        vbo.bind(gl);
-
-        let stride: u32 = attributes
-            .iter()
-            .map(|attr| attr.size_in_bytes())
-            .sum();
-
-        let mut offset = 0;
-        for (i, attr) in attributes.iter().enumerate() {
-            let attr_index = (start_index + i) as gl::GLuint;
-            attr.bind_to_vao(attr_index, divisor, stride as _, offset, gl);
-            offset += attr.size_in_bytes();
-        }
-    }
-
-    fn bind(&self, gl: &gl::Gl, main: VBOId, instance: VBOId) {
-        Self::bind_attributes(self.vertex_attributes, 0, 0, gl, main);
-
-        if !self.instance_attributes.is_empty() {
-            Self::bind_attributes(
-                self.instance_attributes,
-                self.vertex_attributes.len(),
-                1, gl, instance,
-            );
-        }
-    }
-}
-
-impl VBOId {
-    fn bind(&self, gl: &gl::Gl) {
-        gl.bind_buffer(gl::ARRAY_BUFFER, self.0);
-    }
-}
-
-impl IBOId {
-    fn bind(&self, gl: &gl::Gl) {
-        gl.bind_buffer(gl::ELEMENT_ARRAY_BUFFER, self.0);
-    }
-}
-
-impl FBOId {
-    fn bind(&self, gl: &gl::Gl, target: FBOTarget) {
-        let target = match target {
-            FBOTarget::Read => gl::READ_FRAMEBUFFER,
-            FBOTarget::Draw => gl::DRAW_FRAMEBUFFER,
-        };
-        gl.bind_framebuffer(target, self.0);
-    }
-}
-
-pub struct Stream<'a> {
-    attributes: &'a [VertexAttribute],
-    vbo: VBOId,
-}
-
-pub struct VBO<V> {
-    id: gl::GLuint,
-    target: gl::GLenum,
-    allocated_count: usize,
-    marker: PhantomData<V>,
-}
-
-impl<V> VBO<V> {
-    pub fn allocated_count(&self) -> usize {
-        self.allocated_count
-    }
-
-    pub fn stream_with<'a>(&self, attributes: &'a [VertexAttribute]) -> Stream<'a> {
-        debug_assert_eq!(
-            mem::size_of::<V>(),
-            attributes.iter().map(|a| a.size_in_bytes() as usize).sum::<usize>()
-        );
-        Stream {
-            attributes,
-            vbo: VBOId(self.id),
-        }
-    }
-}
-
-impl<T> Drop for VBO<T> {
-    fn drop(&mut self) {
-        debug_assert!(thread::panicking() || self.id == 0);
-    }
-}
-
 #[cfg_attr(feature = "replay", derive(Clone))]
 pub struct ExternalTexture {
-    id: gl::GLuint,
-    target: gl::GLuint,
+    id: u32,
+    target: TextureTarget,
 }
 
 impl ExternalTexture {
     pub fn new(id: u32, target: TextureTarget) -> Self {
         ExternalTexture {
             id,
-            target: get_gl_target(target),
+            target,
         }
     }
 
     #[cfg(feature = "replay")]
-    pub fn internal_id(&self) -> gl::GLuint {
+    pub fn internal_id(&self) -> u32 {
         self.id
     }
 }
 
 pub struct Texture {
-    id: gl::GLuint,
-    target: gl::GLuint,
+    id: TextureId,
+    target: TextureTarget,
     layer_count: i32,
     format: ImageFormat,
     width: u32,
@@ -504,146 +338,11 @@ impl Drop for Texture {
     }
 }
 
-pub struct Program {
-    id: gl::GLuint,
-    u_transform: gl::GLint,
-    u_device_pixel_ratio: gl::GLint,
-    u_mode: gl::GLint,
-}
-
-impl Drop for Program {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
-
-pub struct CustomVAO {
-    id: gl::GLuint,
-}
-
-impl Drop for CustomVAO {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
-
-pub struct VAO {
-    id: gl::GLuint,
-    ibo_id: IBOId,
-    main_vbo_id: VBOId,
-    instance_vbo_id: VBOId,
-    instance_stride: usize,
-    owns_vertices_and_indices: bool,
-}
-
-impl Drop for VAO {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
-
-pub struct PBO {
-    id: gl::GLuint,
-}
-
-impl Drop for PBO {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct FBOId(u32);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct FBOId(gl::GLuint);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct RBOId(gl::GLuint);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct VBOId(gl::GLuint);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-struct IBOId(gl::GLuint);
-
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub struct ProgramSources {
-    renderer_name: String,
-    vs_source: String,
-    fs_source: String,
-}
-
-impl ProgramSources {
-    fn new(renderer_name: String, vs_source: String, fs_source: String) -> Self {
-        ProgramSources {
-            renderer_name,
-            vs_source,
-            fs_source,
-        }
-    }
-}
-
-pub struct ProgramBinary {
-    binary: Vec<u8>,
-    format: gl::GLenum,
-}
-
-impl ProgramBinary {
-    fn new(binary: Vec<u8>, format: gl::GLenum) -> Self {
-        ProgramBinary {
-            binary,
-            format
-        }
-    }
-}
-
-pub struct ProgramCache {
-    pub binaries: RefCell<FastHashMap<ProgramSources, ProgramBinary>>,
-}
-
-impl ProgramCache {
-    pub fn new() -> Rc<Self> {
-        Rc::new(
-            ProgramCache {
-                binaries: RefCell::new(FastHashMap::default()),
-            }
-        )
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum VertexUsageHint {
-    Static,
-    Dynamic,
-    Stream,
-}
-
-impl VertexUsageHint {
-    fn to_gl(&self) -> gl::GLuint {
-        match *self {
-            VertexUsageHint::Static => gl::STATIC_DRAW,
-            VertexUsageHint::Dynamic => gl::DYNAMIC_DRAW,
-            VertexUsageHint::Stream => gl::STREAM_DRAW,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct UniformLocation(gl::GLint);
-
-impl UniformLocation {
-    pub const INVALID: Self = UniformLocation(-1);
-}
+pub struct RBOId(u32);
 
 #[cfg(feature = "debug_renderer")]
 pub struct Capabilities {
@@ -656,17 +355,1497 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
-pub struct Device {
-    gl: Rc<gl::Gl>,
+bitflags!(
+    pub struct ApiCapabilities: u8 {
+        const BLITTING = 0x1;
+    }
+);
+
+#[derive(Debug, Copy, Clone)]
+pub enum VertexArrayKind {
+    Primitive,
+    Blur,
+    Clip,
+    VectorStencil,
+    VectorCover,
+}
+
+pub enum ShaderKind {
+    Primitive,
+    Cache(VertexArrayKind),
+    ClipCache,
+    Brush,
+    Text,
+    #[allow(dead_code)]
+    VectorStencil,
+    #[allow(dead_code)]
+    VectorCover,
+}
+
+const ALPHA: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::SrcAlpha,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+};
+
+const MAX: BlendState = BlendState::On {
+    color: BlendOp::Max,
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+const MIN: BlendState = BlendState::On {
+    color: BlendOp::Min,
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+const SUBPIXEL_PASS0: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcColor,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+};
+
+const SUBPIXEL_PASS1: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+const SUBPIXEL_WITH_BG_COLOR_PASS0: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::OneMinusSrcColor,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::One,
+    },
+};
+
+const SUBPIXEL_WITH_BG_COLOR_PASS1: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::OneMinusDstAlpha,
+        dst: Factor::One,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::Zero,
+        dst: Factor::One,
+    },
+};
+
+const SUBPIXEL_WITH_BG_COLOR_PASS2: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+};
+
+// This requires blend color to be set
+const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::ConstColor,
+        dst: Factor::OneMinusSrcColor,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::ConstAlpha,
+        dst: Factor::OneMinusSrcAlpha,
+    },
+};
+
+const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
+    color: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::OneMinusSrc1Color,
+    },
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::OneMinusSrc1Alpha,
+    },
+};
+
+const LESS_EQUAL_TEST: DepthTest = DepthTest::On {
+    fun: Comparison::LessEqual,
+    write: false,
+};
+
+const LESS_EQUAL_WRITE: DepthTest = DepthTest::On {
+    fun: Comparison::LessEqual,
+    write: true,
+};
+
+pub struct ImageBuffer<B: hal::Backend> {
+    pub buffer: CopyBuffer<B>,
+    pub offset: u64,
+}
+
+impl<B: hal::Backend> ImageBuffer<B> {
+    fn new(buffer: CopyBuffer<B>) -> ImageBuffer<B> {
+        ImageBuffer {
+            buffer,
+            offset: 0,
+        }
+    }
+
+    pub fn update(&mut self, device: &B::Device, data: &[u8], offset_alignment: usize) -> usize {
+        self.buffer
+            .update(device, self.offset, data.len() as u64, data, offset_alignment)
+    }
+
+    pub fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.buffer.deinit(device);
+    }
+}
+
+pub struct ImageCore<B: hal::Backend> {
+    pub image: B::Image,
+    pub memory: Option<B::Memory>,
+    pub view: B::ImageView,
+    pub subresource_range: hal::image::SubresourceRange,
+    pub state: Cell<hal::image::State>,
+}
+
+impl<B: hal::Backend> ImageCore<B> {
+    fn from_image(
+        device: &B::Device,
+        image: B::Image,
+        view_kind: hal::image::ViewKind,
+        format: hal::format::Format,
+        subresource_range: hal::image::SubresourceRange,
+    ) -> Self {
+        let view = device.create_image_view(
+            &image,
+            view_kind,
+            format,
+            hal::format::Swizzle::NO,
+            subresource_range.clone(),
+        ).unwrap();
+        ImageCore {
+            image,
+            memory: None,
+            view,
+            subresource_range,
+            state: Cell::new((hal::image::Access::empty(), hal::image::Layout::Undefined)),
+        }
+    }
+
+    fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        kind: hal::image::Kind,
+        view_kind: hal::image::ViewKind,
+        format: hal::format::Format,
+        usage: hal::image::Usage,
+        subresource_range: hal::image::SubresourceRange,
+    ) -> Self {
+        let image_unbound = device
+            .create_image(kind, 1, format, hal::image::Tiling::Optimal, usage, hal::image::StorageFlags::empty())
+            .unwrap();
+        let requirements = device.get_image_requirements(&image_unbound);
+
+        let mem_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mem_type)| {
+                requirements.type_mask & (1 << id) != 0 &&
+                    mem_type.properties.contains(hal::memory::Properties::DEVICE_LOCAL)
+            })
+            .unwrap()
+            .into();
+
+        let memory = device.allocate_memory(mem_type, requirements.size).unwrap();
+        let image = device.bind_image_memory(&memory, 0, image_unbound).unwrap();
+
+        ImageCore {
+            memory: Some(memory),
+            .. Self::from_image(device, image, view_kind, format, subresource_range)
+        }
+    }
+
+    fn reset(&self) {
+        self.state.set((hal::image::Access::empty(), hal::image::Layout::Undefined));
+    }
+
+    fn deinit(self, device: &B::Device) {
+        device.destroy_image(self.image);
+        device.destroy_image_view(self.view);
+        if let Some(memory) = self.memory {
+            device.free_memory(memory);
+        }
+    }
+
+    fn transit(
+        &self,
+        access: hal::image::Access,
+        layout: hal::image::Layout,
+    ) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == (access, layout) {
+            None
+        } else {
+            self.state.set((access, layout));
+            Some(hal::memory::Barrier::Image {
+                states: src_state .. (access, layout),
+                target: &self.image,
+                range: self.subresource_range.clone(),
+            })
+        }
+    }
+}
+
+pub struct Image<B: hal::Backend> {
+    pub core: ImageCore<B>,
+    pub upload_buffer: ImageBuffer<B>,
+    pub kind: hal::image::Kind,
+    pub format: ImageFormat,
+}
+
+impl<B: hal::Backend> Image<B> {
+    pub fn new(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        image_format: ImageFormat,
+        image_width: u32,
+        image_height: u32,
+        image_depth: i32,
+        pitch_alignment: usize,
+    ) -> Self {
+        let (bytes_per_pixel, format) = match image_format {
+            ImageFormat::R8 => (1, hal::format::Format::R8Unorm),
+            ImageFormat::RG8 => (2, hal::format::Format::Rg8Unorm),
+            ImageFormat::BGRA8 => (4, hal::format::Format::Bgra8Unorm),
+            _ => unimplemented!("TODO image format missing"),
+        };
+        let upload_buffer = CopyBuffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::TRANSFER_SRC,
+            1, // Data stride is 1, because we receive image data as [u8].
+            (image_width * bytes_per_pixel) as usize,
+            image_height as usize,
+            pitch_alignment,
+        );
+
+        let kind = hal::image::Kind::D2(
+            image_width as _,
+            image_height as _,
+            image_depth as _,
+            1,
+        );
+        let core = ImageCore::create(
+            device,
+            memory_types,
+            kind,
+            hal::image::ViewKind::D2Array,
+            format,
+            hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
+            hal::image::SubresourceRange {
+                aspects: hal::format::Aspects::COLOR,
+                levels: 0 .. 1,
+                layers: 0 .. image_depth as _,
+            },
+        );
+
+        Image {
+            core,
+            upload_buffer: ImageBuffer::new(upload_buffer),
+            kind,
+            format: image_format,
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        device: &mut B::Device,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        rect: DeviceUintRect,
+        layer_index: i32,
+        image_data: &[u8],
+        offset_alignment: usize,
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
+    {
+        //let (image_width, image_height, _, _) = self.kind.dimensions();
+        let pos = rect.origin;
+        let size = rect.size;
+        let offset = self.upload_buffer.update(device, image_data, offset_alignment);
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
+
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::TRANSFER_WRITE,
+            hal::image::Layout::TransferDstOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
+        }
+
+        let buffer_width = if self.kind.extent().width == size.width {
+            self.upload_buffer.buffer.row_pitch() as u32 / self.format.bytes_per_pixel()
+        } else {
+            size.width
+        };
+        cmd_buffer.copy_buffer_to_image(
+            &self.upload_buffer.buffer.buffer,
+            &self.core.image,
+            hal::image::Layout::TransferDstOptimal,
+            &[
+                hal::command::BufferImageCopy {
+                    buffer_offset: self.upload_buffer.offset,
+                    buffer_width,
+                    buffer_height: size.height,
+                    image_layers: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: layer_index as _ .. (layer_index + 1) as _,
+                    },
+                    image_offset: hal::image::Offset {
+                        x: pos.x as i32,
+                        y: pos.y as i32,
+                        z: 0,
+                    },
+                    image_extent: hal::image::Extent {
+                        width: size.width as u32,
+                        height: size.height as u32,
+                        depth: 1,
+                    },
+                },
+            ],
+        );
+
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::ColorAttachmentOptimal,
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
+        }
+
+        self.upload_buffer.offset += offset as u64;
+        cmd_buffer.finish()
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.core.deinit(device);
+        self.upload_buffer.deinit(device);
+    }
+}
+
+pub struct VertexDataImage<B: hal::Backend> {
+    pub core: ImageCore<B>,
+    pub image_upload_buffer: CopyBuffer<B>,
+    pub image_stride: usize,
+    pub vecs_per_data: usize,
+    pub image_width: u32,
+    pub image_height: u32,
+}
+
+impl<B: hal::Backend> VertexDataImage<B> {
+    pub fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        data_stride: usize,
+        image_width: u32,
+        image_height: u32,
+        pitch_alignment: usize,
+    ) -> Self {
+        let kind = hal::image::Kind::D2(
+            image_width as hal::image::Size,
+            image_height as hal::image::Size,
+            1,
+            1,
+        );
+        let core = ImageCore::create(
+            device,
+            memory_types,
+            kind,
+            hal::image::ViewKind::D2,
+            hal::format::Format::Rgba32Float,
+            hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
+            COLOR_RANGE,
+        );
+        let image_upload_buffer = CopyBuffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::TRANSFER_SRC,
+            data_stride,
+            image_width as usize,
+            image_height as usize,
+            pitch_alignment,
+        );
+        let image_stride = 4usize * mem::size_of::<f32>(); // Rgba32Float;
+
+        VertexDataImage {
+            core,
+            image_upload_buffer,
+            image_stride,
+            vecs_per_data: data_stride / image_stride,
+            image_width,
+            image_height,
+        }
+    }
+
+    pub fn update<T>(
+        &mut self,
+        device: &mut B::Device,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        image_offset: DeviceUintPoint,
+        image_data: &[T],
+        offset_alignment: usize,
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
+        where
+            T: Copy,
+    {
+        let image_data_length = image_data.len() as u32;
+        let image_row_length = self.image_width / self.vecs_per_data as u32;
+        let mut needed_height = image_data_length / image_row_length;
+        if image_data_length % image_row_length != 0 { needed_height += 1};
+        if needed_height > self.image_height {
+            unimplemented!("TODO: implement resize");
+        }
+        let image_data_width_in_bytes = (image_data_length as usize * self.image_upload_buffer.data_stride) as u64;
+        let buffer_offset = (image_offset.y as u64 * self.image_upload_buffer.row_pitch_in_bytes as u64);
+        assert_eq!(buffer_offset % (offset_alignment + 1) as u64, 0);
+        let _ = self.image_upload_buffer.update(device, buffer_offset, image_data_width_in_bytes, image_data, offset_alignment);
+
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
+
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::TRANSFER_WRITE,
+            hal::image::Layout::TransferDstOptimal
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
+        }
+
+        cmd_buffer.copy_buffer_to_image(
+            &self.image_upload_buffer.buffer,
+            &self.core.image,
+            hal::image::Layout::TransferDstOptimal,
+            &[
+                hal::command::BufferImageCopy {
+                    buffer_offset,
+                    buffer_width: self.image_width as u32,
+                    buffer_height: needed_height,
+                    image_layers: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: 0 .. 1,
+                    },
+                    image_offset: hal::image::Offset {
+                        x: image_offset.x as i32,
+                        y: image_offset.y as i32,
+                        z: 0,
+                    },
+                    image_extent: hal::image::Extent {
+                        width: self.image_width as u32,
+                        height: needed_height,
+                        depth: 1,
+                    },
+                },
+            ],
+        );
+
+        if let Some(barrier) = self.core.transit(
+            hal::image::Access::SHADER_READ,
+            hal::image::Layout::ShaderReadOnlyOptimal
+        ) {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                hal::memory::Dependencies::empty(),
+                &[barrier],
+            );
+        }
+
+        cmd_buffer.finish()
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.core.deinit(device);
+        self.image_upload_buffer.deinit(device);
+    }
+}
+
+pub struct Buffer<B: hal::Backend> {
+    pub memory: B::Memory,
+    pub buffer: B::Buffer,
+    pub data_stride: usize,
+    state: Cell<hal::buffer::State>,
+}
+
+impl<B: hal::Backend> Buffer<B> {
+    pub fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        data_len: usize,
+    ) -> Self {
+        let buffer_size = data_stride * data_len;
+        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
+        let requirements = device.get_buffer_requirements(&unbound_buffer);
+        let mem_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mt)| {
+                requirements.type_mask & (1 << id) != 0 &&
+                    mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
+                //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        let memory = device
+            .allocate_memory(mem_type, requirements.size)
+            .unwrap();
+        let buffer = device
+            .bind_buffer_memory(&memory, 0, unbound_buffer)
+            .unwrap();
+        Buffer {
+            memory,
+            buffer,
+            data_stride,
+            state: Cell::new(hal::buffer::Access::empty())
+        }
+    }
+
+    pub fn update<T>(
+        &mut self,
+        device: &B::Device,
+        buffer_offset: u64,
+        buffer_width: u64,
+        update_data: &[T],
+    ) where
+        T: Copy,
+    {
+        //TODO:
+        //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
+        let mut data = device
+            .acquire_mapping_writer::<T>(
+                &self.memory,
+                buffer_offset .. (buffer_offset + buffer_width),
+            )
+            .unwrap();
+        assert_eq!(data.len(), update_data.len());
+        for (i, d) in update_data.iter().enumerate() {
+            data[i] = *d;
+        }
+        device.release_mapping_writer(data);
+    }
+
+    fn transit(
+        &self,
+        access: hal::buffer::Access,
+    ) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == access {
+            None
+        } else {
+            self.state.set(access);
+            Some(hal::memory::Barrier::Buffer {
+                states: src_state .. access,
+                target: &self.buffer,
+            })
+        }
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        device.destroy_buffer(self.buffer);
+        device.free_memory(self.memory);
+    }
+}
+
+pub struct CopyBuffer<B: hal::Backend> {
+    pub memory: B::Memory,
+    pub buffer: B::Buffer,
+    pub data_stride: usize,
+    pub data_width: usize,
+    pub data_height: usize,
+    pub row_pitch_in_bytes: usize,
+    state: Cell<hal::buffer::State>,
+}
+
+impl<B: hal::Backend> CopyBuffer<B> {
+    pub fn create(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        data_width: usize, // without stride
+        data_height: usize,
+        pitch_alignment: usize,
+    ) -> Self {
+        let mut row_pitch_in_bytes = (data_width * data_stride + pitch_alignment) & !pitch_alignment;
+        if row_pitch_in_bytes % data_width > 0 {
+            row_pitch_in_bytes = ((data_width + pitch_alignment) & !pitch_alignment) * data_stride;
+        }
+        let buffer_size = row_pitch_in_bytes * data_height;
+        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
+        let requirements = device.get_buffer_requirements(&unbound_buffer);
+        let mem_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mt)| {
+                requirements.type_mask & (1 << id) != 0 &&
+                    mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
+                //&&!mt.properties.contains(memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        let memory = device
+            .allocate_memory(mem_type, requirements.size)
+            .unwrap();
+        let buffer = device
+            .bind_buffer_memory(&memory, 0, unbound_buffer)
+            .unwrap();
+        CopyBuffer {
+            memory,
+            buffer,
+            data_stride,
+            data_width,
+            data_height,
+            row_pitch_in_bytes,
+            state: Cell::new(hal::buffer::Access::empty())
+        }
+    }
+
+    pub fn update<T>(
+        &mut self,
+        device: &B::Device,
+        buffer_offset: u64,
+        image_data_width_in_bytes: u64,
+        image_data: &[T],
+        offset_alignment: usize,
+    ) -> usize
+        where
+            T: Copy,
+    {
+        //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
+        let buffer_data_width_in_bytes = self.data_width * self.data_stride;
+        let mut needed_height = image_data_width_in_bytes / buffer_data_width_in_bytes as u64;
+        let last_row_length = image_data_width_in_bytes % buffer_data_width_in_bytes as u64;
+        let range = if last_row_length != 0 {
+            needed_height += 1;
+            buffer_offset ..
+                buffer_offset + ((needed_height - 1) as usize * self.row_pitch_in_bytes) as u64 + last_row_length
+        } else {
+            buffer_offset .. (buffer_offset + (needed_height as usize * self.row_pitch_in_bytes) as u64)
+        };
+
+        let mut data = device
+            .acquire_mapping_writer::<T>(
+                &self.memory,
+                range,
+            )
+            .unwrap();
+
+        for y in 0 .. needed_height as usize {
+            let lower_bound = y * self.data_width;
+            let upper_bound = cmp::min(lower_bound + self.data_width, image_data.len());
+            let row = &(*image_data)[lower_bound .. upper_bound];
+            let dest_base = y * self.row_pitch();
+            data[dest_base .. dest_base + row.len()].copy_from_slice(row);
+        }
+        device.release_mapping_writer(data);
+        (needed_height as usize * self.row_pitch() + offset_alignment) & !offset_alignment
+    }
+
+    fn row_pitch(&self) -> usize {
+        assert_eq!(self.row_pitch_in_bytes % self.data_stride, 0);
+        self.row_pitch_in_bytes / self.data_stride
+    }
+
+    fn transit(
+        &self,
+        access: hal::buffer::Access,
+    ) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == access {
+            None
+        } else {
+            self.state.set(access);
+            Some(hal::memory::Barrier::Buffer {
+                states: src_state .. access,
+                target: &self.buffer,
+            })
+        }
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        device.destroy_buffer(self.buffer);
+        device.free_memory(self.memory);
+    }
+}
+
+pub struct InstanceBuffer<B: hal::Backend> {
+    pub buffer: Buffer<B>,
+    pub size: usize,
+    pub offset: usize,
+}
+
+impl<B: hal::Backend> InstanceBuffer<B> {
+    fn new(buffer: Buffer<B>) -> Self {
+        InstanceBuffer {
+            buffer,
+            size: 0,
+            offset: 0,
+        }
+    }
+
+    fn update<T>(
+        &mut self,
+        device: &B::Device,
+        instances: &[T],
+    )where
+        T: Copy,
+    {
+        let data_stride = self.buffer.data_stride;
+        self.buffer.update(
+            device,
+            (self.offset * data_stride) as u64,
+            (instances.len() * data_stride) as u64,
+            &instances.to_owned(),
+        );
+
+        self.size = instances.len();
+        self.offset += self.size;
+    }
+
+    pub fn reset(&mut self) {
+        self.size = 0;
+        self.offset = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.buffer.deinit(device);
+    }
+}
+
+pub struct UniformBuffer<B: hal::Backend> {
+    pub buffers: Vec<Buffer<B>>,
+    pub stride: usize,
+    pub memory_types: Vec<hal::MemoryType>,
+    pub size: usize,
+}
+
+impl<B: hal::Backend> UniformBuffer<B> {
+    fn new(stride: usize, memory_types: Vec<hal::MemoryType>) -> UniformBuffer<B> {
+        UniformBuffer {
+            buffers: vec![],
+            stride,
+            memory_types,
+            size: 0,
+        }
+    }
+
+    fn add<T>(
+        &mut self,
+        device: &B::Device,
+        instances: &[T],
+    ) where T: Copy,
+    {
+        if self.buffers.len() == self.size {
+            let buffer = Buffer::create(
+                device,
+                &self.memory_types,
+                hal::buffer::Usage::UNIFORM,
+                self.stride,
+                1,
+            );
+            self.buffers.push(buffer);
+        }
+        self.buffers[self.size].update(
+            device,
+            0 as u64,
+            (instances.len() * self.stride) as u64,
+            &instances.to_owned(),
+        );
+        self.size += 1;
+    }
+
+    pub fn reset(&mut self) {
+        self.size = 0;
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        for buffer in self.buffers {
+            buffer.deinit(device);
+        }
+    }
+}
+
+pub struct Program<B: hal::Backend> {
+    pub bindings_map: HashMap<String, u32>,
+    pub descriptor_set_layout: B::DescriptorSetLayout,
+    pub descriptor_pool: B::DescriptorPool,
+    pub descriptor_set: B::DescriptorSet,
+    pub pipeline_layout: B::PipelineLayout,
+    pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
+    pub vertex_buffer: Buffer<B>,
+    pub instance_buffer: InstanceBuffer<B>,
+    pub locals_buffer: UniformBuffer<B>,
+    shader_name: String,
+}
+
+impl<B: hal::Backend> Program<B> {
+    pub fn create(
+        pipeline_requirements: PipelineRequirements,
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        shader_name: &str,
+        shader_kind: &ShaderKind,
+        render_pass: &RenderPass<B>,
+    ) -> Program<B> {
+        let vs_module = device
+            .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
+            .unwrap();
+        let fs_module = device
+            .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
+            .unwrap();
+
+        let descriptor_set_layout = device.create_descriptor_set_layout(&pipeline_requirements.descriptor_set_layouts);
+        let mut descriptor_pool =
+            device.create_descriptor_pool(
+                1, //The number of descriptor sets
+                pipeline_requirements.descriptor_range_descriptors.as_slice(),
+            );
+        let descriptor_set =
+            descriptor_pool.allocate_set(&descriptor_set_layout)
+                .expect(&format!("Failed to allocate set with layout: {:?}", descriptor_set_layout));
+
+        let pipeline_layout = device.create_pipeline_layout(Some(&descriptor_set_layout), &[]);
+
+        let pipelines = {
+            let (vs_entry, fs_entry) = (
+                hal::pso::EntryPoint::<B> {
+                    entry: ENTRY_NAME,
+                    module: &vs_module,
+                    specialization: &[],
+                },
+                hal::pso::EntryPoint::<B> {
+                    entry: ENTRY_NAME,
+                    module: &fs_module,
+                    specialization: &[],
+                },
+            );
+
+            let shader_entries = hal::pso::GraphicsShaderSet {
+                vertex: vs_entry,
+                hull: None,
+                domain: None,
+                geometry: None,
+                fragment: Some(fs_entry),
+            };
+
+            let pipeline_states = match *shader_kind {
+                ShaderKind::Brush if shader_name.starts_with("brush_mask") => vec![(BlendState::Off, DepthTest::Off)],
+                ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
+                ShaderKind::Cache(VertexArrayKind::Primitive) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
+                ShaderKind::ClipCache => {
+                    if shader_name.starts_with("cs_clip_border") {
+                        vec![
+                            (BlendState::Off, DepthTest::Off),
+                            (MAX, DepthTest::Off)
+                        ]
+                    } else {
+                        vec![(BlendState::MULTIPLY, DepthTest::Off)]
+                    }
+                },
+                ShaderKind::Text => vec![
+                    (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                    (SUBPIXEL_DUAL_SOURCE, DepthTest::Off),
+                    (SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST),
+                    (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
+                    (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
+                    (SUBPIXEL_PASS0, DepthTest::Off),
+                    (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
+                    (SUBPIXEL_PASS1, DepthTest::Off),
+                    (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
+                    (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
+                ],
+                _ => vec![
+                    (BlendState::Off, DepthTest::Off),
+                    (BlendState::Off, LESS_EQUAL_TEST),
+                    (BlendState::Off, LESS_EQUAL_WRITE),
+                    (ALPHA, DepthTest::Off),
+                    (ALPHA, LESS_EQUAL_TEST),
+                    (ALPHA, LESS_EQUAL_WRITE),
+                    (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_WRITE),
+                    (PREMULTIPLIED_DEST_OUT, DepthTest::Off),
+                    (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_TEST),
+                    (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
+                ],
+            };
+            let format = match *shader_kind {
+                ShaderKind::ClipCache => ImageFormat::R8,
+                ShaderKind::Cache(VertexArrayKind::Blur) if shader_name.contains("_a8") => ImageFormat::R8,
+                _ => ImageFormat::BGRA8,
+            };
+
+            let pipelines_descriptors = pipeline_states.iter().map(|&(blend_state, depth_test)| {
+                let subpass = Subpass {
+                    index: 0,
+                    main_pass: render_pass.get_render_pass(format, depth_test != DepthTest::Off),
+                };
+                let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
+                    shader_entries.clone(),
+                    Primitive::TriangleList,
+                    hal::pso::Rasterizer::FILL,
+                    &pipeline_layout,
+                    subpass,
+                );
+                pipeline_descriptor
+                    .blender
+                    .targets
+                    .push(hal::pso::ColorBlendDesc(
+                        hal::pso::ColorMask::ALL,
+                        blend_state,
+                    ));
+
+                pipeline_descriptor.depth_stencil = Some(
+                    hal::pso::DepthStencilDesc {
+                        depth: depth_test,
+                        depth_bounds: false,
+                        stencil: hal::pso::StencilTest::Off,
+                    }
+                );
+
+                pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors.clone();
+                pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors.clone();
+                pipeline_descriptor
+            }).collect::<Vec<_>>();
+
+            //device.create_graphics_pipelines(&[pipeline_desc])
+            let pipelines = device
+                .create_graphics_pipelines(pipelines_descriptors.as_slice())
+                .into_iter();
+
+            pipeline_states.iter()
+                .cloned()
+                .zip(pipelines.map(|pipeline| pipeline.unwrap()))
+                .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
+        };
+
+        device.destroy_shader_module(vs_module);
+        device.destroy_shader_module(fs_module);
+
+        let vertex_buffer_stride = mem::size_of::<Vertex>();
+        let vertex_buffer_len = QUAD.len() * vertex_buffer_stride;
+
+        let mut vertex_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::VERTEX,
+            vertex_buffer_stride,
+            vertex_buffer_len,
+        );
+
+        vertex_buffer.update(device, 0, vertex_buffer_len as u64, &QUAD);
+
+        let instance_buffer_stride = match *shader_kind {
+            ShaderKind::Primitive |
+            ShaderKind::Brush |
+            ShaderKind::Text |
+            ShaderKind::Cache(VertexArrayKind::Primitive) => mem::size_of::<PrimitiveInstance>(),
+            ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => mem::size_of::<ClipMaskInstance>(),
+            ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<BlurInstance>(),
+            _ => unreachable!()
+        };
+        let instance_buffer_len = MAX_INSTANCE_COUNT * instance_buffer_stride;
+
+        let instance_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::VERTEX,
+            instance_buffer_stride,
+            instance_buffer_len,
+        );
+
+        let locals_buffer_stride = mem::size_of::<Locals>();
+        let locals_buffer = UniformBuffer::new(locals_buffer_stride, memory_types.to_vec());
+
+        let bindings_map = pipeline_requirements.bindings_map;
+
+        Program {
+            bindings_map,
+            descriptor_set_layout,
+            descriptor_pool,
+            descriptor_set,
+            pipeline_layout,
+            pipelines,
+            vertex_buffer,
+            instance_buffer: InstanceBuffer::new(instance_buffer),
+            locals_buffer,
+            shader_name: String::from(shader_name),
+        }
+    }
+
+
+    fn bind_instances<T>(
+        &mut self,
+        device: &B::Device,
+        instances: &[T],
+    ) where
+        T: Copy,
+    {
+        if !instances.is_empty() {
+            self.instance_buffer.update(
+                device,
+                instances,
+            );
+        }
+    }
+
+    fn bind_locals(
+        &mut self,
+        device: &B::Device,
+        projection: &Transform3D<f32>,
+        u_mode: i32,
+    ) {
+        let locals_data = vec![
+            Locals {
+                uTransform: projection.to_row_arrays(),
+                uDevicePixelRatio: 1.0,
+                uMode: u_mode,
+            },
+        ];
+        self.locals_buffer.add(
+            device,
+            &locals_data,
+        );
+        device.write_descriptor_sets(vec![
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["Locals"],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Buffer(&self.locals_buffer.buffers[self.locals_buffer.size - 1].buffer, Some(0)..Some(self.locals_buffer.stride as u64))
+                ),
+            },
+        ]);
+    }
+
+    fn bind_textures(
+        &mut self,
+        device: &Device<B>,
+    ) {
+        const samplers: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
+        for &(index, sampler) in samplers.iter() {
+            if device.bound_textures[index] != 0 {
+                self.bind_texture(device, &device.bound_textures[index], &device.bound_sampler[index], sampler);
+            }
+        }
+    }
+
+    fn bind_texture(&mut self, device: &Device<B>, id: &TextureId, sampler: &TextureFilter, binding: &'static str) {
+        let sampler = match *sampler {
+            TextureFilter::Linear | TextureFilter::Trilinear => &device.sampler_linear,
+            TextureFilter::Nearest => &device.sampler_nearest,
+        };
+        device.device.write_descriptor_sets(vec![
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map[&("t".to_owned() + binding)],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(&device.images[id].core.view, device.images[id].core.state.get().1)
+                ),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map[&("s".to_owned() + binding)],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Sampler(sampler)
+                )
+            },
+        ]);
+    }
+
+    pub fn bind<T>(
+        &mut self,
+        device: &Device<B>,
+        projection: &Transform3D<f32>,
+        instances: &[T],
+    ) where
+        T: Copy,
+    {
+        self.bind_instances(&device.device, instances);
+        self.bind_locals(&device.device, &projection, device.program_mode_id);
+        self.bind_textures(device);
+    }
+
+    pub fn init_vertex_data(
+        &mut self,
+        device: &B::Device,
+        resource_cache: &B::ImageView,
+        resource_cache_sampler: &B::Sampler,
+        node_data: &B::ImageView,
+        node_data_sampler: &B::Sampler,
+        render_tasks: &B::ImageView,
+        render_tasks_sampler: &B::Sampler,
+        local_clip_rects: &B::ImageView,
+        local_clip_rects_sampler: &B::Sampler,
+    ) {
+        device.write_descriptor_sets(vec![
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["tResourceCache"],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(resource_cache, hal::image::Layout::Undefined)
+                ),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["sResourceCache"],
+                array_offset: 0,
+                descriptors: Some(hal::pso::Descriptor::Sampler(resource_cache_sampler)),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["tClipScrollNodes"],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(node_data, hal::image::Layout::Undefined)
+                ),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["sClipScrollNodes"],
+                array_offset: 0,
+                descriptors: Some(hal::pso::Descriptor::Sampler(node_data_sampler)),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["tRenderTasks"],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(render_tasks, hal::image::Layout::Undefined)
+                ),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["sRenderTasks"],
+                array_offset: 0,
+                descriptors: Some(hal::pso::Descriptor::Sampler(render_tasks_sampler)),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["tLocalClipRects"],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(local_clip_rects, hal::image::Layout::Undefined)
+                ),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["sLocalClipRects"],
+                array_offset: 0,
+                descriptors: Some(hal::pso::Descriptor::Sampler(local_clip_rects_sampler)),
+            },
+        ]);
+    }
+
+    fn init_dither_data<'a>(
+        &mut self,
+        device: &B::Device,
+        dither: &B::ImageView,
+        dither_sampler: &B::Sampler,
+    ) {
+        device.write_descriptor_sets(vec![
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["tDither"],
+                array_offset: 0,
+                descriptors: Some(
+                    hal::pso::Descriptor::Image(dither, hal::image::Layout::ShaderReadOnlyOptimal)
+                ),
+            },
+            hal::pso::DescriptorSetWrite {
+                set: &self.descriptor_set,
+                binding: self.bindings_map["sDither"],
+                array_offset: 0,
+                descriptors: Some(hal::pso::Descriptor::Sampler(dither_sampler)),
+            },
+        ]);
+    }
+
+    pub fn submit(
+        &mut self,
+        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        viewport: hal::pso::Viewport,
+        render_pass: &B::RenderPass,
+        frame_buffer: &B::Framebuffer,
+        clear_values: &[hal::command::ClearValue],
+        blend_state: BlendState,
+        blend_color: ColorF,
+        depth_test: DepthTest,
+    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
+        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
+
+        cmd_buffer.set_viewports(0, &[viewport.clone()]);
+        cmd_buffer.set_scissors(0, &[viewport.rect]);
+        cmd_buffer.bind_graphics_pipeline(
+            &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
+        cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![
+            (&self.vertex_buffer.buffer, 0),
+            (&self.instance_buffer.buffer.buffer, 0),
+        ]));
+        cmd_buffer.bind_graphics_descriptor_sets(
+            &self.pipeline_layout,
+            0,
+            Some(&self.descriptor_set),
+        );
+
+        if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
+            cmd_buffer.set_blend_constants(blend_color.to_array());
+        }
+
+        {
+            let mut encoder = cmd_buffer.begin_render_pass_inline(
+                render_pass,
+                frame_buffer,
+                viewport.rect,
+                clear_values,
+            );
+            encoder.draw(0 .. 6, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32);
+        }
+
+        cmd_buffer.finish()
+    }
+
+    pub fn deinit(mut self, device: &B::Device) {
+        self.vertex_buffer.deinit(device);
+        self.instance_buffer.deinit(device);
+        self.locals_buffer.deinit(device);
+        device.destroy_descriptor_pool(self.descriptor_pool);
+        device.destroy_descriptor_set_layout(self.descriptor_set_layout);
+        device.destroy_pipeline_layout(self.pipeline_layout);
+        for pipeline in self.pipelines.drain() {
+            device.destroy_graphics_pipeline(pipeline.1);
+        }
+    }
+}
+
+pub struct Framebuffer<B: hal::Backend> {
+    pub texture: TextureId,
+    pub layer_index: u16,
+    pub format: ImageFormat,
+    pub image_view: B::ImageView,
+    pub fbo: B::Framebuffer,
+    pub rbo: RBOId,
+}
+
+impl<B: hal::Backend> Framebuffer<B> {
+    pub fn new(
+        device: &B::Device,
+        texture: &Texture,
+        image: &Image<B>,
+        layer_index: u16,
+        render_pass: &RenderPass<B>,
+        rbo: RBOId,
+        depth: Option<&B::ImageView>
+    ) -> Self {
+        let extent = hal::image::Extent {
+            width: texture.width as _,
+            height: texture.height as _,
+            depth: 1,
+        };
+        let format = match texture.format {
+            ImageFormat::R8 => hal::format::Format::R8Unorm,
+            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
+            _ => unimplemented!("TODO image format missing"),
+        };
+        let image_view = device
+            .create_image_view(
+                &image.core.image,
+                hal::image::ViewKind::D2Array,
+                format,
+                Swizzle::NO,
+                hal::image::SubresourceRange {
+                    aspects: hal::format::Aspects::COLOR,
+                    levels: 0 .. 1,
+                    layers: layer_index .. layer_index+1,
+                },
+            )
+            .unwrap();
+        let fbo = if rbo != RBOId(0) {
+            device
+                .create_framebuffer(render_pass.get_render_pass(texture.format, true), vec![&image_view, depth.unwrap()], extent)
+                .unwrap()
+        } else {
+            device
+                .create_framebuffer(render_pass.get_render_pass(texture.format, false), Some(&image_view), extent)
+                .unwrap()
+        };
+
+        Framebuffer {
+            texture: texture.id,
+            layer_index,
+            format: texture.format,
+            image_view,
+            fbo,
+            rbo,
+        }
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        device.destroy_framebuffer(self.fbo);
+        device.destroy_image_view(self.image_view);
+    }
+}
+
+pub struct DepthBuffer<B: hal::Backend> {
+    pub core: ImageCore<B>
+}
+
+impl<B: hal::Backend> DepthBuffer<B> {
+    pub fn new(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        pixel_width: u32,
+        pixel_height: u32,
+        depth_format: hal::format::Format
+    ) -> Self {
+        let core = ImageCore::create(
+            device,
+            memory_types,
+            hal::image::Kind::D2(pixel_width, pixel_height, 1, 1),
+            hal::image::ViewKind::D2,
+            depth_format,
+            hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
+            DEPTH_RANGE,
+        );
+        DepthBuffer {
+            core
+        }
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        self.core.deinit(device);
+    }
+}
+
+pub struct RenderPass<B: hal::Backend> {
+    pub r8: B::RenderPass,
+    pub r8_depth: B::RenderPass,
+    pub bgra8: B::RenderPass,
+    pub bgra8_depth: B::RenderPass,
+}
+
+impl<B: hal::Backend> RenderPass<B> {
+    pub fn get_render_pass(&self, format: ImageFormat, depth_enabled: bool) -> &B::RenderPass {
+        match format {
+            ImageFormat::R8 if depth_enabled => &self.r8_depth,
+            ImageFormat::R8 => &self.r8,
+            ImageFormat::BGRA8 if depth_enabled => &self.bgra8_depth,
+            ImageFormat::BGRA8 => &self.bgra8,
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        device.destroy_render_pass(self.r8);
+        device.destroy_render_pass(self.r8_depth);
+        device.destroy_render_pass(self.bgra8);
+        device.destroy_render_pass(self.bgra8_depth);
+    }
+}
+
+pub struct Device<B: hal::Backend> {
+    pub device: B::Device,
+    pub memory_types: Vec<hal::MemoryType>,
+    pub upload_memory_type: hal::MemoryTypeId,
+    pub download_memory_type: hal::MemoryTypeId,
+    pub limits: hal::Limits,
+    pub surface_format: hal::format::Format,
+    pub depth_format: hal::format::Format,
+    pub queue_group: hal::QueueGroup<B, hal::Graphics>,
+    pub command_pool: hal::CommandPool<B, hal::Graphics>,
+    pub swap_chain: Box<B::Swapchain>,
+    pub render_pass: RenderPass<B>,
+    pub framebuffers: Vec<B::Framebuffer>,
+    pub framebuffers_depth: Vec<B::Framebuffer>,
+    pub frame_images: Vec<ImageCore<B>>,
+    pub frame_depth: DepthBuffer<B>,
+    pub viewport: hal::pso::Viewport,
+    pub sampler_linear: B::Sampler,
+    pub sampler_nearest: B::Sampler,
+    pub resource_cache: VertexDataImage<B>,
+    pub render_tasks: VertexDataImage<B>,
+    pub local_clip_rects: VertexDataImage<B>,
+    pub node_data: VertexDataImage<B>,
+    dither_texture: Option<Texture>,
+    pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>>,
+    pub current_frame_id: usize,
+    current_blend_state: BlendState,
+    blend_color: ColorF,
+    current_depth_test: DepthTest,
     // device state
-    bound_textures: [gl::GLuint; 16],
-    bound_program: gl::GLuint,
-    bound_vao: gl::GLuint,
+    images: FastHashMap<TextureId, Image<B>>,
+    fbos: FastHashMap<FBOId, Framebuffer<B>>,
+    rbos: FastHashMap<RBOId, DepthBuffer<B>>,
+    // device state
+    bound_textures: [u32; 16],
+    bound_sampler: [TextureFilter; 16],
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
-    program_mode_id: UniformLocation,
-    default_read_fbo: gl::GLuint,
-    default_draw_fbo: gl::GLuint,
+    program_mode_id: i32,
+    //default_read_fbo: FBOId,
+    //default_draw_fbo: FBOId,
 
     device_pixel_ratio: f32,
     upload_method: UploadMethod,
@@ -683,35 +1862,316 @@ pub struct Device {
 
     max_texture_size: u32,
     renderer_name: String,
-    cached_programs: Option<Rc<ProgramCache>>,
 
     // Frame counter. This is used to map between CPU
     // frames and GPU frames.
     frame_id: FrameId,
 
-    // GL extensions
-    extensions: Vec<String>,
+    // Supported features
+    features: hal::Features,
+    api_capabilities: ApiCapabilities,
 }
 
-impl Device {
+impl<B: hal::Backend> Device<B> {
     pub fn new(
-        gl: Rc<gl::Gl>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
-        cached_programs: Option<Rc<ProgramCache>>,
-    ) -> Device {
-        let max_texture_size = gl.get_integer_v(gl::MAX_TEXTURE_SIZE) as u32;
-        let renderer_name = gl.get_string(gl::RENDERER);
+        adapter: &hal::Adapter<B>,
+        surface: &mut <B as hal::Backend>::Surface,
+        window_size: (u32, u32),
+        api_capabilities: ApiCapabilities,
+    ) -> Self {
+        let renderer_name = "TODO renderer name".to_owned();
+        let features = adapter.physical_device.features();
 
-        let mut extensions = Vec::new();
-        let extension_count = gl.get_integer_v(gl::NUM_EXTENSIONS) as gl::GLuint;
-        for i in 0 .. extension_count {
-            extensions.push(gl.get_string_i(gl::EXTENSIONS, i));
-        }
+        let pixel_width = window_size.0;
+        let pixel_height = window_size.1;
+
+        let (caps, formats) = surface.capabilities_and_formats(&adapter.physical_device);
+        let surface_format = formats
+            .map_or(
+                hal::format::Format::Bgra8Unorm,
+                |formats| {
+                    formats
+                        .into_iter()
+                        .find(|format| {
+                            format == &hal::format::Format::Bgra8Unorm
+                        })
+                        .unwrap()
+                },
+            );
+
+        let memory_types = adapter
+            .physical_device
+            .memory_properties()
+            .memory_types;
+        let limits = adapter
+            .physical_device
+            .limits();
+        let max_texture_size = 4096u32; // TODO use limits after it points to the correct texture size
+
+        let upload_memory_type: hal::MemoryTypeId = memory_types
+            .iter()
+            .position(|mt| {
+                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE)
+                //&&!mt.properties.contains(hal::memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        let download_memory_type = memory_types
+            .iter()
+            .position(|mt| {
+                mt.properties.contains(hal::memory::Properties::CPU_VISIBLE | hal::memory::Properties::CPU_CACHED)
+            })
+            .unwrap()
+            .into();
+        info!("upload memory: {:?}", upload_memory_type);
+        info!("download memory: {:?}", &download_memory_type);
+
+        let queue_family = adapter.queue_families
+            .iter()
+            .find(|family| surface.supports_queue_family(family))
+            .expect("No queue family is able to render to the surface!");
+        let mut gpu = adapter.physical_device
+            .open(&[(queue_family, &[1.0])])
+            .unwrap();
+        let device = gpu.device;
+        let queue_group = gpu.queues
+            .take(queue_family.id())
+            .unwrap();
+
+        let mut command_pool = device.create_command_pool_typed(
+            &queue_group,
+            hal::pool::CommandPoolCreateFlags::empty(),
+            32,
+        );
+        command_pool.reset();
+
+        println!("{:?}", surface_format);
+        assert_eq!(surface_format, hal::format::Format::Bgra8Unorm);
+        let min_image_count = caps.image_count.start;
+        let swap_config =
+            SwapchainConfig::new()
+                .with_color(surface_format)
+                .with_image_count(min_image_count)
+                .with_image_usage(
+                    hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
+                );
+        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
+        println!("backbuffer={:?}", backbuffer);
+        let depth_format = hal::format::Format::D32Float; //maybe d24s8?
+
+        let render_pass = {
+            let attachment_r8 = hal::pass::Attachment {
+                format: Some(hal::format::Format::R8Unorm),
+                ops: hal::pass::AttachmentOps::new(
+                    hal::pass::AttachmentLoadOp::DontCare,
+                    hal::pass::AttachmentStoreOp::Store,
+                ),
+                stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+                layouts: hal::image::Layout::ColorAttachmentOptimal .. hal::image::Layout::ColorAttachmentOptimal,
+            };
+
+            let attachment_bgra8 = hal::pass::Attachment {
+                format: Some(hal::format::Format::Bgra8Unorm),
+                ops: hal::pass::AttachmentOps::new(
+                    hal::pass::AttachmentLoadOp::DontCare,
+                    hal::pass::AttachmentStoreOp::Store,
+                ),
+                stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+                layouts: hal::image::Layout::ColorAttachmentOptimal .. hal::image::Layout::ColorAttachmentOptimal,
+            };
+
+            let attachment_depth = hal::pass::Attachment {
+                format: Some(depth_format),
+                ops: hal::pass::AttachmentOps::new(
+                    hal::pass::AttachmentLoadOp::DontCare,
+                    hal::pass::AttachmentStoreOp::Store,
+                ),
+                stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+                layouts: hal::image::Layout::Undefined .. hal::image::Layout::DepthStencilAttachmentOptimal,
+            };
+
+            let subpass_r8 = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
+                depth_stencil: None,
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let subpass_depth_r8 = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
+                depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let subpass_bgra8 = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
+                depth_stencil: None,
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let subpass_depth_bgra8 = hal::pass::SubpassDesc {
+                colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
+                depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
+                inputs: &[],
+                preserves: &[],
+            };
+
+            let dependency = hal::pass::SubpassDependency {
+                passes: hal::pass::SubpassRef::External .. hal::pass::SubpassRef::Pass(0),
+                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                    .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                accesses: hal::image::Access::empty()
+                    .. (hal::image::Access::COLOR_ATTACHMENT_READ
+                    | hal::image::Access::COLOR_ATTACHMENT_WRITE),
+            };
+
+            RenderPass {
+                r8: device.create_render_pass(&[attachment_r8.clone()], &[subpass_r8], &[dependency.clone()]),
+                r8_depth: device.create_render_pass(&[attachment_r8, attachment_depth.clone()], &[subpass_depth_r8], &[dependency.clone()]),
+                bgra8: device.create_render_pass(&[attachment_bgra8.clone()], &[subpass_bgra8], &[dependency.clone()]),
+                bgra8_depth: device.create_render_pass(&[attachment_bgra8, attachment_depth], &[subpass_depth_bgra8], &[dependency]),
+            }
+        };
+
+        let frame_depth = DepthBuffer::new(&device, &memory_types, pixel_width, pixel_height, depth_format);
+
+        // Framebuffer and render target creation
+        let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
+            Backbuffer::Images(images) => {
+                let extent = hal::image::Extent {
+                    width: pixel_width as _,
+                    height: pixel_height as _,
+                    depth: 1,
+                };
+                let cores = images
+                    .into_iter()
+                    .map(|image| {
+                        ImageCore::from_image(&device, image, hal::image::ViewKind::D2Array, surface_format, COLOR_RANGE.clone())
+                    })
+                    .collect::<Vec<_>>();
+                let fbos = cores
+                    .iter()
+                    .map(|core| {
+                        device
+                            .create_framebuffer(
+                                &render_pass.bgra8,
+                                Some(&core.view),
+                                extent,
+                            )
+                            .unwrap()
+                    })
+                    .collect();
+                let fbos_depth = cores
+                    .iter()
+                    .map(|core| {
+                        device
+                            .create_framebuffer(
+                                &render_pass.bgra8_depth,
+                                vec![&core.view, &frame_depth.core.view],
+                                extent,
+                            )
+                            .unwrap()
+                    })
+                    .collect();
+                (cores, fbos, fbos_depth)
+            }
+            // TODO fix depth fbos
+            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo], vec![]),
+        };
+
+        // Rendering setup
+        let viewport = hal::pso::Viewport {
+            rect: hal::pso::Rect {
+                x: 0,
+                y: 0,
+                w: pixel_width as u16,
+                h: pixel_height as u16,
+            },
+            depth: 0.0 .. 1.0,
+        };
+
+        // Samplers
+
+        let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::Filter::Linear,
+            hal::image::WrapMode::Clamp,
+        ));
+
+        let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
+            hal::image::Filter::Nearest,
+            hal::image::WrapMode::Clamp,
+        ));
+
+        let resource_cache = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 4]>(),
+            MAX_VERTEX_TEXTURE_WIDTH as u32,
+            MAX_VERTEX_TEXTURE_WIDTH as u32,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+        );
+
+        let render_tasks = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 8]>(),
+            RENDER_TASK_TEXTURE_WIDTH as u32,
+            TEXTURE_HEIGHT as u32,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+        );
+
+        let local_clip_rects = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 4]>(),
+            CLIP_RECTS_TEXTURE_WIDTH as u32,
+            TEXTURE_HEIGHT as u32,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+        );
+
+        let node_data = VertexDataImage::create(
+            &device,
+            &memory_types,
+            mem::size_of::<[f32; 36]>(),
+            NODE_TEXTURE_WIDTH as u32,
+            TEXTURE_HEIGHT as u32,
+            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+        );
 
         Device {
-            gl,
+            device,
+            limits,
+            memory_types,
+            upload_memory_type,
+            download_memory_type,
+            surface_format,
+            depth_format,
+            queue_group,
+            command_pool,
+            swap_chain: Box::new(swap_chain),
+            render_pass,
+            framebuffers,
+            framebuffers_depth,
+            frame_images,
+            frame_depth,
+            viewport,
+            sampler_linear,
+            sampler_nearest,
+            resource_cache,
+            render_tasks,
+            local_clip_rects,
+            node_data,
+            dither_texture: None,
+            upload_queue: Vec::new(),
+            current_frame_id: 0,
+            current_blend_state: BlendState::Off,
+            current_depth_test: DepthTest::Off,
+            blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
@@ -724,38 +2184,30 @@ impl Device {
                 supports_multisampling: false, //TODO
             },
 
+            images: FastHashMap::default(),
+            fbos: FastHashMap::default(),
+            rbos: FastHashMap::default(),
             bound_textures: [0; 16],
-            bound_program: 0,
-            bound_vao: 0,
-            bound_read_fbo: FBOId(0),
-            bound_draw_fbo: FBOId(0),
-            program_mode_id: UniformLocation::INVALID,
-            default_read_fbo: 0,
-            default_draw_fbo: 0,
+            bound_sampler: [TextureFilter::Linear; 16],
+            bound_read_fbo: DEFAULT_READ_FBO,
+            bound_draw_fbo: DEFAULT_DRAW_FBO,
+            program_mode_id: 0,
 
             max_texture_size,
             renderer_name,
-            cached_programs,
             frame_id: FrameId(0),
-            extensions,
+            features,
+            api_capabilities,
         }
-    }
-
-    pub fn gl(&self) -> &gl::Gl {
-        &*self.gl
-    }
-
-    pub fn rc_gl(&self) -> &Rc<gl::Gl> {
-        &self.gl
     }
 
     pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
         self.device_pixel_ratio = ratio;
     }
 
-    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
-        self.cached_programs = Some(cached_programs);
-    }
+    /*pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
+        unimplemented!();
+    }*/
 
     pub fn max_texture_size(&self) -> u32 {
         self.max_texture_size
@@ -768,102 +2220,252 @@ impl Device {
 
     pub fn reset_state(&mut self) {
         self.bound_textures = [0; 16];
-        self.bound_vao = 0;
-        self.bound_read_fbo = FBOId(0);
-        self.bound_draw_fbo = FBOId(0);
+        self.bound_sampler = [TextureFilter::Linear; 16];
+        self.bound_read_fbo = DEFAULT_READ_FBO;
+        self.bound_draw_fbo = DEFAULT_DRAW_FBO;
+        self.reset_image_buffer_offsets();
     }
 
-    #[cfg(debug_assertions)]
-    fn print_shader_errors(source: &str, log: &str) {
-        // hacky way to extract the offending lines
-        if !log.starts_with("0:") {
-            return;
-        }
-        let end_pos = match log[2..].chars().position(|c| !c.is_digit(10)) {
-            Some(pos) => 2 + pos,
-            None => return,
-        };
-        let base_line_number = match log[2 .. end_pos].parse::<usize>() {
-            Ok(number) if number >= 2 => number - 2,
-            _ => return,
-        };
-        for (line, prefix) in source.lines().skip(base_line_number).zip(&["|",">","|"]) {
-            error!("{}\t{}", prefix, line);
+    pub fn reset_image_buffer_offsets(&mut self) {
+        for img in self.images.values_mut() {
+            img.upload_buffer.reset();
         }
     }
 
-    pub fn compile_shader(
-        gl: &gl::Gl,
-        name: &str,
-        shader_type: gl::GLenum,
-        source: &String,
-    ) -> Result<gl::GLuint, ShaderError> {
-        debug!("compile {}", name);
-        let id = gl.create_shader(shader_type);
-        gl.shader_source(id, &[source.as_bytes()]);
-        gl.compile_shader(id);
-        let log = gl.get_shader_info_log(id);
-        if gl.get_shader_iv(id, gl::COMPILE_STATUS) == (0 as gl::GLint) {
-            error!("Failed to compile shader: {}\n{}", name, log);
-            #[cfg(debug_assertions)]
-            Self::print_shader_errors(source, &log);
-            Err(ShaderError::Compilation(name.to_string(), log))
-        } else {
-            if !log.is_empty() {
-                warn!("Warnings detected on shader: {}\n{}", name, log);
+    pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
+        debug_assert_eq!(gpu_data.len(), 1024);
+        self.upload_queue
+            .push(self.resource_cache.update(
+                &mut self.device,
+                &mut self.command_pool,
+                rect.origin,
+                gpu_data,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+            ));
+    }
+
+    pub fn update_render_tasks(&mut self, task_data: &[[f32; 8]]) {
+        self.upload_queue
+            .push(self.render_tasks.update(
+                &mut self.device,
+                &mut self.command_pool,
+                DeviceUintPoint::zero(),
+                task_data,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+            ));
+    }
+
+    pub fn update_local_rects(&mut self, local_data: &[[f32; 4]]) {
+        self.upload_queue
+            .push(self.local_clip_rects.update(
+                &mut self.device,
+                &mut self.command_pool,
+                DeviceUintPoint::zero(),
+                local_data,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+            ));
+    }
+
+    pub fn update_node_data(&mut self, node_data: &[[f32; 36]]) {
+        self.upload_queue
+            .push(self.node_data.update(
+                &mut self.device,
+                &mut self.command_pool,
+                DeviceUintPoint::zero(),
+                node_data,
+                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+            ));
+    }
+
+    pub fn create_program(
+        &mut self,
+        pipeline_requirements: PipelineRequirements,
+        shader_name: &str,
+        shader_kind: &ShaderKind,
+    ) -> Program<B> {
+        let mut program = Program::create(
+            pipeline_requirements,
+            &self.device,
+            &self.memory_types,
+            shader_name,
+            shader_kind,
+            &self.render_pass,
+        );
+        program.init_vertex_data(
+            &self.device,
+            &self.resource_cache.core.view,
+            &self.sampler_nearest,
+            &self.node_data.core.view,
+            &self.sampler_nearest,
+            &self.render_tasks.core.view,
+            &self.sampler_nearest,
+            &self.local_clip_rects.core.view,
+            &self.sampler_nearest,
+        );
+
+        if shader_name.contains("dithering") {
+            if self.dither_texture.is_none() {
+                self.dither_texture = Some(self.create_dither_texture());
             }
-            Ok(id)
+            let dither_text_id = self.dither_texture.as_ref().unwrap().id;
+            program.init_dither_data(
+                &self.device,
+                &self.images[&dither_text_id].core.view,
+                &self.sampler_nearest,
+            );
         }
+        program
+    }
+
+    fn create_dither_texture(&mut self) -> Texture {
+        let dither_matrix: [u8; 64] = [
+            42,
+            26,
+            38,
+            22,
+            41,
+            25,
+            37,
+            21,
+            10,
+            58,
+            06,
+            54,
+            09,
+            57,
+            05,
+            53,
+            34,
+            18,
+            46,
+            30,
+            33,
+            17,
+            45,
+            29,
+            02,
+            50,
+            14,
+            62,
+            01,
+            49,
+            13,
+            61,
+            40,
+            24,
+            36,
+            20,
+            43,
+            27,
+            39,
+            23,
+            08,
+            56,
+            04,
+            52,
+            11,
+            59,
+            07,
+            55,
+            32,
+            16,
+            44,
+            28,
+            35,
+            19,
+            47,
+            31,
+            00,
+            48,
+            12,
+            60,
+            03,
+            51,
+            15,
+            63
+        ];
+
+        let mut texture = self.create_texture(TextureTarget::Default,ImageFormat::R8);
+        self.init_texture::<u8>(
+            &mut texture,
+            8,
+            8,
+            TextureFilter::Nearest,
+            None,
+            1,
+            Some(&dither_matrix),
+        );
+        texture
+    }
+
+    pub fn bind_program(&mut self, program: &Program<B>) {
+        debug_assert!(self.inside_frame);
+
+        unimplemented!();
+        /*if self.bound_program != program.id {
+            self.bound_program = program.id;
+        }*/
+    }
+
+    pub fn set_uniforms(
+        &self,
+        program: &Program<B>,
+        transform: &Transform3D<f32>,
+    ) {
+        debug_assert!(self.inside_frame);
+        unimplemented!();
+    }
+
+    pub fn draw(
+        &mut self,
+        program: &mut Program<B>,
+    ) {
+        let submit = {
+            let (fb, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+                (&self.fbos[&self.bound_draw_fbo].fbo, self.fbos[&self.bound_draw_fbo].format)
+            } else {
+                if self.current_depth_test == DepthTest::Off {
+                    (&self.framebuffers[self.current_frame_id], ImageFormat::BGRA8)
+                } else {
+                    (&self.framebuffers_depth[self.current_frame_id], ImageFormat::BGRA8)
+                }
+            };
+            let rp = self.render_pass.get_render_pass(format, self.current_depth_test != DepthTest::Off);
+            program.submit(
+                &mut self.command_pool,
+                self.viewport.clone(),
+                rp,
+                &fb,
+                &vec![],
+                self.current_blend_state,
+                self.blend_color,
+                self.current_depth_test,
+            )
+        };
+
+        self.upload_queue.push(submit);
+        self.submit_to_gpu();
     }
 
     pub fn begin_frame(&mut self) -> FrameId {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
 
-        // Retrieve the currently set FBO.
-        let default_read_fbo = self.gl.get_integer_v(gl::READ_FRAMEBUFFER_BINDING);
-        self.default_read_fbo = default_read_fbo as gl::GLuint;
-        let default_draw_fbo = self.gl.get_integer_v(gl::DRAW_FRAMEBUFFER_BINDING);
-        self.default_draw_fbo = default_draw_fbo as gl::GLuint;
-
-        // Texture state
-        for i in 0 .. self.bound_textures.len() {
-            self.bound_textures[i] = 0;
-            self.gl.active_texture(gl::TEXTURE0 + i as gl::GLuint);
-            self.gl.bind_texture(gl::TEXTURE_2D, 0);
-        }
-
-        // Shader state
-        self.bound_program = 0;
-        self.program_mode_id = UniformLocation::INVALID;
-        self.gl.use_program(0);
-
-        // Vertex state
-        self.bound_vao = 0;
-        self.gl.bind_vertex_array(0);
-
-        // FBO state
-        self.bound_read_fbo = FBOId(self.default_read_fbo);
-        self.bound_draw_fbo = FBOId(self.default_draw_fbo);
-
-        // Pixel op state
-        self.gl.pixel_store_i(gl::UNPACK_ALIGNMENT, 1);
-        self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, 0);
-
-        // Default is sampler 0, always
-        self.gl.active_texture(gl::TEXTURE0);
+        self.bound_textures = [0; 16];
+        self.bound_sampler = [TextureFilter::Linear; 16];
+        self.bound_read_fbo = DEFAULT_READ_FBO;
+        self.bound_draw_fbo = DEFAULT_DRAW_FBO;
+        self.program_mode_id = 0;
 
         self.frame_id
     }
 
-    fn bind_texture_impl(&mut self, slot: TextureSlot, id: gl::GLuint, target: gl::GLenum) {
+    fn bind_texture_impl(&mut self, slot: TextureSlot, id: u32, sampler: TextureFilter) {
         debug_assert!(self.inside_frame);
 
         if self.bound_textures[slot.0] != id {
             self.bound_textures[slot.0] = id;
-            self.gl.active_texture(gl::TEXTURE0 + slot.0 as gl::GLuint);
-            self.gl.bind_texture(target, id);
-            self.gl.active_texture(gl::TEXTURE0);
+            self.bound_sampler[slot.0] = sampler;
         }
     }
 
@@ -871,14 +2473,14 @@ impl Device {
     where
         S: Into<TextureSlot>,
     {
-        self.bind_texture_impl(sampler.into(), texture.id, texture.target);
+        self.bind_texture_impl(sampler.into(), texture.id, texture.filter);
     }
 
     pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
     where
         S: Into<TextureSlot>,
     {
-        self.bind_texture_impl(sampler.into(), external_texture.id, external_texture.target);
+        self.bind_texture_impl(sampler.into(), external_texture.id, TextureFilter::Linear);
     }
 
     pub fn bind_read_target_impl(&mut self, fbo_id: FBOId) {
@@ -886,12 +2488,11 @@ impl Device {
 
         if self.bound_read_fbo != fbo_id {
             self.bound_read_fbo = fbo_id;
-            fbo_id.bind(self.gl(), FBOTarget::Read);
         }
     }
 
     pub fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
-        let fbo_id = texture_and_layer.map_or(FBOId(self.default_read_fbo), |texture_and_layer| {
+        let fbo_id = texture_and_layer.map_or(DEFAULT_READ_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
 
@@ -903,7 +2504,6 @@ impl Device {
 
         if self.bound_draw_fbo != fbo_id {
             self.bound_draw_fbo = fbo_id;
-            fbo_id.bind(self.gl(), FBOTarget::Draw);
         }
     }
 
@@ -912,38 +2512,58 @@ impl Device {
         texture_and_layer: Option<(&Texture, i32)>,
         dimensions: Option<DeviceUintSize>,
     ) {
-        let fbo_id = texture_and_layer.map_or(FBOId(self.default_draw_fbo), |texture_and_layer| {
+        let fbo_id = texture_and_layer.map_or(DEFAULT_DRAW_FBO, |texture_and_layer| {
             texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
         });
+
+        if let Some((texture, _layer)) = texture_and_layer {
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+            let rbos = &self.rbos;
+            //TODO: transit only specific layer
+            if let Some(barrier) = self.images[&texture.id].core.transit(
+                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                hal::image::Layout::ColorAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+
+            if let Some(barrier) = texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
+                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                hal::image::Layout::DepthStencilAttachmentOptimal,
+            )) {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+
+            self.upload_queue.push(cmd_buffer.finish())
+        }
 
         self.bind_draw_target_impl(fbo_id);
 
         if let Some(dimensions) = dimensions {
-            self.gl.viewport(
-                0,
-                0,
-                dimensions.width as _,
-                dimensions.height as _,
-            );
+            self.viewport.rect = hal::pso::Rect {
+                x: 0,
+                y: 0,
+                w: dimensions.width as _,
+                h: dimensions.height as _,
+            };
         }
     }
 
     pub fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> FBOId {
-        let fbo = FBOId(self.gl.gen_framebuffers(1)[0]);
-        fbo.bind(self.gl(), FBOTarget::Draw);
-        self.gl.framebuffer_texture_2d(
-            gl::DRAW_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            gl::TEXTURE_2D,
-            texture_id,
-            0,
-        );
-        self.bound_draw_fbo.bind(self.gl(), FBOTarget::Draw);
-        fbo
+        warn!("External texture creation is missing");
+        FBOId(0)
     }
 
     pub fn delete_fbo(&mut self, fbo: FBOId) {
-        self.gl.delete_framebuffers(&[fbo.0]);
+        warn!("delete fbo is missing");
     }
 
     pub fn bind_external_draw_target(&mut self, fbo_id: FBOId) {
@@ -951,18 +2571,38 @@ impl Device {
 
         if self.bound_draw_fbo != fbo_id {
             self.bound_draw_fbo = fbo_id;
-            fbo_id.bind(self.gl(), FBOTarget::Draw);
         }
     }
 
-    pub fn bind_program(&mut self, program: &Program) {
-        debug_assert!(self.inside_frame);
-
-        if self.bound_program != program.id {
-            self.gl.use_program(program.id);
-            self.bound_program = program.id;
-            self.program_mode_id = UniformLocation(program.u_mode);
+    fn generate_texture_id(&mut self) -> TextureId {
+        let mut rng = rand::thread_rng();
+        let mut texture_id = INVALID_TEXTURE_ID + 1;
+        while self.images.contains_key(&texture_id) {
+            texture_id = rng.gen_range::<u32>(INVALID_TEXTURE_ID + 1, u32::max_value());
         }
+        texture_id
+    }
+
+    fn generate_fbo_ids(&mut self, count: i32) -> Vec<FBOId> {
+        let mut rng = rand::thread_rng();
+        let mut fboids = vec!();
+        let mut fbo_id = FBOId(DEFAULT_DRAW_FBO.0 + 1);
+        for _ in 0..count {
+            while self.fbos.contains_key(&fbo_id) || fboids.contains(&fbo_id) {
+                fbo_id = FBOId(rng.gen_range::<u32>(DEFAULT_DRAW_FBO.0 + 1, u32::max_value()));
+            }
+            fboids.push(fbo_id);
+        }
+        fboids
+    }
+
+    fn generate_rbo_id(&mut self) -> RBOId {
+        let mut rng = rand::thread_rng();
+        let mut rbo_id = RBOId(1); // 0 is used for invalid
+        while self.rbos.contains_key(&rbo_id) {
+            rbo_id = RBOId(rng.gen_range::<u32>(1, u32::max_value()));
+        }
+        rbo_id
     }
 
     pub fn create_texture(
@@ -971,8 +2611,8 @@ impl Device {
         format: ImageFormat,
     ) -> Texture {
         Texture {
-            id: self.gl.gen_textures(1)[0],
-            target: get_gl_target(target),
+            id: 0,
+            target,
             width: 0,
             height: 0,
             layer_count: 0,
@@ -985,29 +2625,6 @@ impl Device {
         }
     }
 
-    fn set_texture_parameters(&mut self, target: gl::GLuint, filter: TextureFilter) {
-        let mag_filter = match filter {
-            TextureFilter::Nearest => gl::NEAREST,
-            TextureFilter::Linear | TextureFilter::Trilinear => gl::LINEAR,
-        };
-
-        let min_filter = match filter {
-            TextureFilter::Nearest => gl::NEAREST,
-            TextureFilter::Linear => gl::LINEAR,
-            TextureFilter::Trilinear => gl::LINEAR_MIPMAP_LINEAR,
-        };
-
-        self.gl
-            .tex_parameter_i(target, gl::TEXTURE_MAG_FILTER, mag_filter as gl::GLint);
-        self.gl
-            .tex_parameter_i(target, gl::TEXTURE_MIN_FILTER, min_filter as gl::GLint);
-
-        self.gl
-            .tex_parameter_i(target, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as gl::GLint);
-        self.gl
-            .tex_parameter_i(target, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as gl::GLint);
-    }
-
     /// Resizes a texture with enabled render target views,
     /// preserves the data by blitting the old texture contents over.
     pub fn resize_renderable_texture(
@@ -1015,31 +2632,7 @@ impl Device {
         texture: &mut Texture,
         new_size: DeviceUintSize,
     ) {
-        debug_assert!(self.inside_frame);
-
-        let old_size = texture.get_dimensions();
-        let old_fbos = mem::replace(&mut texture.fbo_ids, Vec::new());
-        let old_texture_id = mem::replace(&mut texture.id, self.gl.gen_textures(1)[0]);
-
-        texture.width = new_size.width;
-        texture.height = new_size.height;
-        let rt_info = texture.render_target
-            .clone()
-            .expect("Only renderable textures are expected for resize here");
-
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        self.set_texture_parameters(texture.target, texture.filter);
-        self.update_target_storage::<u8>(texture, &rt_info, true, None);
-
-        let rect = DeviceIntRect::new(DeviceIntPoint::zero(), old_size.to_i32());
-        for (read_fbo, &draw_fbo) in old_fbos.into_iter().zip(&texture.fbo_ids) {
-            self.bind_read_target_impl(read_fbo);
-            self.bind_draw_target_impl(draw_fbo);
-            self.blit_render_target(rect, rect);
-            self.delete_fbo(read_fbo);
-        }
-        self.gl.delete_textures(&[old_texture_id]);
-        self.bind_read_target(None);
+        unimplemented!();
     }
 
     pub fn init_texture<T: Texel>(
@@ -1050,7 +2643,7 @@ impl Device {
         filter: TextureFilter,
         render_target: Option<RenderTargetInfo>,
         layer_count: i32,
-        pixels: Option<&[T]>,
+        pixels: Option<&[u8]>,
     ) {
         debug_assert!(self.inside_frame);
 
@@ -1069,507 +2662,335 @@ impl Device {
         texture.render_target = render_target;
         texture.last_frame_used = self.frame_id;
 
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        self.set_texture_parameters(texture.target, filter);
+        let rt_info = render_target.unwrap_or(RenderTargetInfo { has_depth: false});
 
-        match render_target {
-            Some(info) => {
-                self.update_target_storage(texture, &info, is_resized, pixels);
-            }
-            None => {
-                self.update_texture_storage(texture, pixels);
-            }
+        if texture.id == 0 {
+            let id = self.generate_texture_id();
+            texture.id = id;
+        } else {
+            self.free_image(texture);
         }
-    }
+        assert_eq!(self.images.contains_key(&texture.id), false);
+        let img = Image::new(
+            &self.device,
+            &self.memory_types,
+            texture.format,
+            texture.width,
+            texture.height,
+            texture.layer_count,
+            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
+        );
 
-    /// Updates the render target storage for the texture, creating FBOs as required.
-    fn update_target_storage<T: Texel>(
-        &mut self,
-        texture: &mut Texture,
-        rt_info: &RenderTargetInfo,
-        is_resized: bool,
-        pixels: Option<&[T]>,
-    ) {
-        assert!(texture.layer_count > 0 || texture.width + texture.height == 0);
-
-        let needed_layer_count = texture.layer_count - texture.fbo_ids.len() as i32;
-        let allocate_color = needed_layer_count != 0 || is_resized || pixels.is_some();
-
-        if allocate_color {
-            let desc = gl_describe_format(self.gl(), texture.format);
-            match texture.target {
-                gl::TEXTURE_2D_ARRAY => {
-                    self.gl.tex_image_3d(
-                        texture.target,
-                        0,
-                        desc.internal,
-                        texture.width as _,
-                        texture.height as _,
-                        texture.layer_count,
-                        0,
-                        desc.external,
-                        desc.pixel_type,
-                        pixels.map(texels_to_u8_slice),
-                    )
-                }
-                _ => {
-                    assert_eq!(texture.layer_count, 1);
-                    self.gl.tex_image_2d(
-                        texture.target,
-                        0,
-                        desc.internal,
-                        texture.width as _,
-                        texture.height as _,
-                        0,
-                        desc.external,
-                        desc.pixel_type,
-                        pixels.map(texels_to_u8_slice),
-                    )
-                }
-            }
-        }
-
-        if needed_layer_count > 0 {
-            // Create more framebuffers to fill the gap
-            let new_fbos = self.gl.gen_framebuffers(needed_layer_count);
-            texture
-                .fbo_ids
-                .extend(new_fbos.into_iter().map(FBOId));
-        } else if needed_layer_count < 0 {
-            // Remove extra framebuffers
-            for old in texture.fbo_ids.drain(texture.layer_count as usize ..) {
-                self.gl.delete_framebuffers(&[old.0]);
-            }
-        }
+        assert_eq!(texture.fbo_ids.len(), 0);
 
         let (mut depth_rb, allocate_depth) = match texture.depth_rb {
-            Some(rbo) => (rbo.0, is_resized || !rt_info.has_depth),
+            Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
             None if rt_info.has_depth => {
-                let renderbuffer_ids = self.gl.gen_renderbuffers(1);
-                let depth_rb = renderbuffer_ids[0];
-                texture.depth_rb = Some(RBOId(depth_rb));
+                let depth_rb = self.generate_rbo_id();
+                texture.depth_rb = Some(depth_rb);
                 (depth_rb, true)
             },
-            None => (0, false),
+            None => (RBOId(0), false),
         };
 
         if allocate_depth {
+            if self.rbos.contains_key(&depth_rb) {
+                let old_rbo = self.rbos.remove(&depth_rb).unwrap();
+                old_rbo.deinit(&self.device);
+            }
             if rt_info.has_depth {
-                self.gl.bind_renderbuffer(gl::RENDERBUFFER, depth_rb);
-                self.gl.renderbuffer_storage(
-                    gl::RENDERBUFFER,
-                    gl::DEPTH_COMPONENT24,
-                    texture.width as _,
-                    texture.height as _,
+                let rbo = DepthBuffer::new(
+                    &self.device,
+                    &self.memory_types,
+                    texture.width,
+                    texture.height,
+                    self.depth_format
                 );
+                self.rbos.insert(depth_rb, rbo);
             } else {
-                self.gl.delete_renderbuffers(&[depth_rb]);
-                depth_rb = 0;
+                depth_rb = RBOId(0);
                 texture.depth_rb = None;
             }
         }
 
-        if allocate_color || allocate_depth {
-            let original_bound_fbo = self.bound_draw_fbo;
-            for (fbo_index, &fbo_id) in texture.fbo_ids.iter().enumerate() {
-                self.bind_external_draw_target(fbo_id);
-                match texture.target {
-                    gl::TEXTURE_2D_ARRAY => {
-                        self.gl.framebuffer_texture_layer(
-                            gl::DRAW_FRAMEBUFFER,
-                            gl::COLOR_ATTACHMENT0,
-                            texture.id,
-                            0,
-                            fbo_index as _,
-                        )
-                    }
-                    _ => {
-                        assert_eq!(fbo_index, 0);
-                        self.gl.framebuffer_texture_2d(
-                            gl::DRAW_FRAMEBUFFER,
-                            gl::COLOR_ATTACHMENT0,
-                            texture.target,
-                            texture.id,
-                            0,
-                        )
-                    }
-                }
+        let new_fbos = self.generate_fbo_ids(texture.layer_count);
 
-                self.gl.framebuffer_renderbuffer(
-                    gl::DRAW_FRAMEBUFFER,
-                    gl::DEPTH_ATTACHMENT,
-                    gl::RENDERBUFFER,
-                    depth_rb,
-                );
-            }
-            self.bind_external_draw_target(original_bound_fbo);
+        for i in 0..texture.layer_count as u16 {
+            let (rbo_id, depth) = match texture.depth_rb {
+                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
+                None => (RBOId(0), None)
+            };
+            let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(),depth);
+            self.fbos.insert(new_fbos[i as usize],fbo);
+            texture.fbo_ids.push(new_fbos[i as usize]);
         }
-    }
 
-    fn update_texture_storage<T: Texel>(&mut self, texture: &Texture, pixels: Option<&[T]>) {
-        let desc = gl_describe_format(self.gl(), texture.format);
-        match texture.target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.tex_image_3d(
-                    gl::TEXTURE_2D_ARRAY,
-                    0,
-                    desc.internal,
-                    texture.width as _,
-                    texture.height as _,
-                    texture.layer_count,
-                    0,
-                    desc.external,
-                    desc.pixel_type,
-                    pixels.map(texels_to_u8_slice),
+        self.images.insert(texture.id, img);
+
+
+        if let Some(data) = pixels {
+            self.upload_queue
+                .push(
+                    self.images
+                        .get_mut(&texture.id)
+                        .expect("Texture not found.")
+                        .update(
+                            &mut self.device,
+                            &mut self.command_pool,
+                            DeviceUintRect::new(
+                                DeviceUintPoint::new(0, 0),
+                                DeviceUintSize::new(texture.width, texture.height),
+                            ),
+                            0,
+                            data,
+                            (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+                        )
                 );
-            }
-            gl::TEXTURE_2D | gl::TEXTURE_RECTANGLE | gl::TEXTURE_EXTERNAL_OES => {
-                self.gl.tex_image_2d(
-                    texture.target,
-                    0,
-                    desc.internal,
-                    texture.width as _,
-                    texture.height as _,
-                    0,
-                    desc.external,
-                    desc.pixel_type,
-                    pixels.map(texels_to_u8_slice),
-                );
-            }
-            _ => panic!("BUG: Unexpected texture target!"),
         }
     }
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
         debug_assert!(self.inside_frame);
 
-        self.gl.blit_framebuffer(
-            src_rect.origin.x,
-            src_rect.origin.y,
-            src_rect.origin.x + src_rect.size.width,
-            src_rect.origin.y + src_rect.size.height,
-            dest_rect.origin.x,
-            dest_rect.origin.y,
-            dest_rect.origin.x + dest_rect.size.width,
-            dest_rect.origin.y + dest_rect.size.height,
-            gl::COLOR_BUFFER_BIT,
-            gl::LINEAR,
-        );
-    }
+        let (src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+            let fbo = &self.fbos[&self.bound_read_fbo];
+            let img = &self.images[&fbo.texture];
+            let layer = fbo.layer_index;
+            (&img.core, layer)
+        } else {
+            (&self.frame_images[self.current_frame_id], 0)
+        };
 
-    fn free_texture_storage_impl(&mut self, target: gl::GLenum, desc: FormatDesc) {
-        match target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.tex_image_3d(
-                    gl::TEXTURE_2D_ARRAY,
-                    0,
-                    desc.internal,
-                    0,
-                    0,
-                    0,
-                    0,
-                    desc.external,
-                    desc.pixel_type,
-                    None,
-                );
-            }
-            _ => {
-                self.gl.tex_image_2d(
-                    target,
-                    0,
-                    desc.internal,
-                    0,
-                    0,
-                    0,
-                    desc.external,
-                    desc.pixel_type,
-                    None,
+        let (dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            let fbo = &self.fbos[&self.bound_draw_fbo];
+            let img = &self.images[&fbo.texture];
+            let layer = fbo.layer_index;
+            (&img.core, layer)
+        } else {
+            (&self.frame_images[self.current_frame_id], 0)
+        };
+
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+
+        {
+            let mut barriers = Vec::new();
+            barriers.extend(src_img.transit(hal::image::Access::TRANSFER_READ, hal::image::Layout::TransferSrcOptimal));
+            barriers.extend(dest_img.transit(hal::image::Access::TRANSFER_WRITE, hal::image::Layout::TransferDstOptimal));
+            if !barriers.is_empty() {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
+                    hal::memory::Dependencies::empty(),
+                    &barriers,
                 );
             }
         }
+
+        if src_rect.size != dest_rect.size {
+            // TODO remove this if other platforms are supported
+            if !self.api_capabilities.contains(ApiCapabilities::BLITTING) {
+                warn!("Blitting is not supported!");
+                return;
+            }
+            cmd_buffer.blit_image(
+                &src_img.image,
+                hal::image::Layout::TransferSrcOptimal,
+                &dest_img.image,
+                hal::image::Layout::TransferDstOptimal,
+                hal::image::Filter::Linear,
+                &[
+                    hal::command::ImageBlit {
+                        src_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: src_layer .. src_layer + 1,
+                        },
+                        src_bounds: hal::image::Offset {
+                            x: src_rect.origin.x as i32,
+                            y: src_rect.origin.y as i32,
+                            z: 0,
+                        } .. hal::image::Offset {
+                            x: src_rect.origin.x as i32 + src_rect.size.width as i32,
+                            y: src_rect.origin.y as i32 + src_rect.size.height as i32,
+                            z: 1,
+                        },
+                        dst_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: dest_layer .. dest_layer + 1,
+                        },
+                        dst_bounds: hal::image::Offset {
+                            x: dest_rect.origin.x as i32,
+                            y: dest_rect.origin.y as i32,
+                            z: 0,
+                        } .. hal::image::Offset {
+                            x: dest_rect.origin.x as i32 + dest_rect.size.width as i32,
+                            y: dest_rect.origin.y as i32 + dest_rect.size.height as i32,
+                            z: 1,
+                        },
+                    }
+                ],
+            );
+        } else {
+            cmd_buffer.copy_image(
+                &src_img.image,
+                hal::image::Layout::TransferSrcOptimal,
+                &dest_img.image,
+                hal::image::Layout::TransferDstOptimal,
+                &[
+                    hal::command::ImageCopy {
+                        src_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: src_layer .. src_layer + 1,
+                        },
+                        src_offset: hal::image::Offset {
+                            x: src_rect.origin.x as i32,
+                            y: src_rect.origin.y as i32,
+                            z: 0,
+                        },
+                        dst_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: dest_layer as _ .. (dest_layer + 1) as _,
+                        },
+                        dst_offset: hal::image::Offset {
+                            x: dest_rect.origin.x as i32,
+                            y: dest_rect.origin.y as i32,
+                            z: 0,
+                        },
+                        extent: hal::image::Extent {
+                            width: src_rect.size.width as u32,
+                            height: src_rect.size.height as u32,
+                            depth: 1,
+                        },
+                    }
+                ],
+            );
+        }
+
+        // the blit caller code expects to be able to render to the target
+        {
+            let mut barriers = Vec::new();
+            barriers.extend(src_img.transit(hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::Layout::ColorAttachmentOptimal));
+            barriers.extend(dest_img.transit(hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE, hal::image::Layout::ColorAttachmentOptimal));
+            if !barriers.is_empty() {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &barriers,
+                );
+            }
+        }
+
+        self.upload_queue.push(cmd_buffer.finish());
     }
 
     pub fn free_texture_storage(&mut self, texture: &mut Texture) {
         debug_assert!(self.inside_frame);
-
         if texture.width + texture.height == 0 {
             return;
         }
 
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        let desc = gl_describe_format(self.gl(), texture.format);
-
-        self.free_texture_storage_impl(texture.target, desc);
-
-        if let Some(RBOId(depth_rb)) = texture.depth_rb.take() {
-            self.gl.delete_renderbuffers(&[depth_rb]);
-        }
-
-        if !texture.fbo_ids.is_empty() {
-            let fbo_ids: Vec<_> = texture
-                .fbo_ids
-                .drain(..)
-                .map(|FBOId(fbo_id)| fbo_id)
-                .collect();
-            self.gl.delete_framebuffers(&fbo_ids[..]);
-        }
+        self.free_image(texture);
 
         texture.width = 0;
         texture.height = 0;
         texture.layer_count = 0;
+        texture.id = 0;
+    }
+
+    pub fn free_image(&mut self, texture: &mut Texture) {
+        if let Some(depth_rb) = texture.depth_rb.take() {
+            let old_rbo = self.rbos.remove(&depth_rb).unwrap();
+            old_rbo.deinit(&self.device);
+        }
+
+        if !texture.fbo_ids.is_empty() {
+            for old in texture.fbo_ids.drain(..) {
+                let old_fbo = self.fbos.remove(&old).unwrap();
+                old_fbo.deinit(&self.device);
+            }
+        }
+
+        let image = self.images.remove(&texture.id).expect("Texture not found.");
+        image.deinit(&self.device);
     }
 
     pub fn delete_texture(&mut self, mut texture: Texture) {
         self.free_texture_storage(&mut texture);
-        self.gl.delete_textures(&[texture.id]);
-
-        for bound_texture in &mut self.bound_textures {
-            if *bound_texture == texture.id {
-                *bound_texture = 0
-            }
-        }
-
-        texture.id = 0;
     }
 
     #[cfg(feature = "replay")]
     pub fn delete_external_texture(&mut self, mut external: ExternalTexture) {
-        self.bind_external_texture(DEFAULT_TEXTURE, &external);
-        //Note: the format descriptor here doesn't really matter
-        self.free_texture_storage_impl(external.target, FormatDesc {
-            internal: gl::R8 as _,
-            external: gl::RED,
-            pixel_type: gl::UNSIGNED_BYTE,
-        });
-        self.gl.delete_textures(&[external.id]);
+        warn!("delete external texture is missing");
         external.id = 0;
     }
 
-    pub fn delete_program(&mut self, mut program: Program) {
-        self.gl.delete_program(program.id);
-        program.id = 0;
+    pub fn switch_mode(&mut self, mode: i32) {
+        debug_assert!(self.inside_frame);
+        self.program_mode_id = mode;
     }
 
-    pub fn create_program(
+    pub fn upload_texture(
         &mut self,
-        base_filename: &str,
-        features: &str,
-        descriptor: &VertexDescriptor,
-    ) -> Result<Program, ShaderError> {
-        debug_assert!(self.inside_frame);
-
-        let gl_version_string = get_shader_version(&*self.gl);
-
-        let (vs_source, fs_source) = build_shader_strings(
-            gl_version_string,
-            features,
-            base_filename,
-            &self.resource_override_path,
-        );
-
-        let sources = ProgramSources::new(self.renderer_name.clone(), vs_source, fs_source);
-
-        // Create program
-        let pid = self.gl.create_program();
-
-        let mut loaded = false;
-
-        if let Some(ref cached_programs) = self.cached_programs {
-            if let Some(binary) = cached_programs.binaries.borrow().get(&sources)
-            {
-                self.gl.program_binary(pid, binary.format, &binary.binary);
-
-                if self.gl.get_program_iv(pid, gl::LINK_STATUS) == (0 as gl::GLint) {
-                    let error_log = self.gl.get_program_info_log(pid);
-                    error!(
-                      "Failed to load a program object with a program binary: {} renderer {}\n{}",
-                      base_filename,
-                      self.renderer_name,
-                      error_log
-                    );
-                } else {
-                    loaded = true;
-                }
-            }
-        }
-
-        if loaded == false {
-            // Compile the vertex shader
-            let vs_id =
-                match Device::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
-                    Ok(vs_id) => vs_id,
-                    Err(err) => return Err(err),
-                };
-
-            // Compiler the fragment shader
-            let fs_id =
-                match Device::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
-                    Ok(fs_id) => fs_id,
-                    Err(err) => {
-                        self.gl.delete_shader(vs_id);
-                        return Err(err);
-                    }
-                };
-
-            // Attach shaders
-            self.gl.attach_shader(pid, vs_id);
-            self.gl.attach_shader(pid, fs_id);
-
-            // Bind vertex attributes
-            for (i, attr) in descriptor
-                .vertex_attributes
-                .iter()
-                .chain(descriptor.instance_attributes.iter())
-                .enumerate()
-            {
-                self.gl
-                    .bind_attrib_location(pid, i as gl::GLuint, attr.name);
-            }
-
-            if self.cached_programs.is_some() {
-                self.gl.program_parameter_i(pid, gl::PROGRAM_BINARY_RETRIEVABLE_HINT, gl::TRUE as gl::GLint);
-            }
-
-            // Link!
-            self.gl.link_program(pid);
-
-            // GL recommends detaching and deleting shaders once the link
-            // is complete (whether successful or not). This allows the driver
-            // to free any memory associated with the parsing and compilation.
-            self.gl.detach_shader(pid, vs_id);
-            self.gl.detach_shader(pid, fs_id);
-            self.gl.delete_shader(vs_id);
-            self.gl.delete_shader(fs_id);
-
-            if self.gl.get_program_iv(pid, gl::LINK_STATUS) == (0 as gl::GLint) {
-                let error_log = self.gl.get_program_info_log(pid);
-                error!(
-                    "Failed to link shader program: {}\n{}",
-                    base_filename,
-                    error_log
-                );
-                self.gl.delete_program(pid);
-                return Err(ShaderError::Link(base_filename.to_string(), error_log));
-            }
-        }
-
-        if let Some(ref cached_programs) = self.cached_programs {
-            if !cached_programs.binaries.borrow().contains_key(&sources) {
-                let (buffer, format) = self.gl.get_program_binary(pid);
-                if buffer.len() > 0 {
-                  cached_programs.binaries.borrow_mut().insert(sources, ProgramBinary::new(buffer, format));
-                }
-            }
-        }
-
-        let u_transform = self.gl.get_uniform_location(pid, "uTransform");
-        let u_device_pixel_ratio = self.gl.get_uniform_location(pid, "uDevicePixelRatio");
-        let u_mode = self.gl.get_uniform_location(pid, "uMode");
-
-        let program = Program {
-            id: pid,
-            u_transform,
-            u_device_pixel_ratio,
-            u_mode,
-        };
-
-        self.bind_program(&program);
-
-        Ok(program)
-    }
-
-    pub fn bind_shader_samplers<S>(&mut self, program: &Program, bindings: &[(&'static str, S)])
-    where
-        S: Into<TextureSlot> + Copy,
-    {
-        for binding in bindings {
-            let u_location = self.gl.get_uniform_location(program.id, binding.0);
-            if u_location != -1 {
-                self.bind_program(program);
-                self.gl
-                    .uniform_1i(u_location, binding.1.into().0 as gl::GLint);
-            }
-        }
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn get_uniform_location(&self, program: &Program, name: &str) -> UniformLocation {
-        UniformLocation(self.gl.get_uniform_location(program.id, name))
-    }
-
-    pub fn set_uniforms(
-        &self,
-        program: &Program,
-        transform: &Transform3D<f32>,
+        texture: &Texture,
+        rect: DeviceUintRect,
+        layer_index: i32,
+        stride: Option<u32>,
+        data: &[u8],
     ) {
-        debug_assert!(self.inside_frame);
-        self.gl
-            .uniform_matrix_4fv(program.u_transform, false, &transform.to_row_major_array());
-        self.gl
-            .uniform_1f(program.u_device_pixel_ratio, self.device_pixel_ratio);
-    }
-
-    pub fn switch_mode(&self, mode: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.uniform_1i(self.program_mode_id.0, mode);
-    }
-
-    pub fn create_pbo(&mut self) -> PBO {
-        let id = self.gl.gen_buffers(1)[0];
-        PBO { id }
-    }
-
-    pub fn delete_pbo(&mut self, mut pbo: PBO) {
-        self.gl.delete_buffers(&[pbo.id]);
-        pbo.id = 0;
-    }
-
-    pub fn upload_texture<'a, T>(
-        &'a mut self,
-        texture: &'a Texture,
-        pbo: &PBO,
-        upload_count: usize,
-    ) -> TextureUploader<'a, T> {
-        debug_assert!(self.inside_frame);
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-
-        let buffer = match self.upload_method {
-            UploadMethod::Immediate => None,
-            UploadMethod::PixelBuffer(hint) => {
-                let upload_size = upload_count * mem::size_of::<T>();
-                self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, pbo.id);
-                if upload_size != 0 {
-                    self.gl.buffer_data_untyped(
-                        gl::PIXEL_UNPACK_BUFFER,
-                        upload_size as _,
-                        ptr::null(),
-                        hint.to_gl(),
-                    );
-                }
-                Some(PixelBuffer::new(hint.to_gl(), upload_size))
-            },
+        let data_stride: usize = match texture.format {
+            ImageFormat::R8 => 1,
+            ImageFormat::RG8 => 2,
+            ImageFormat::BGRA8 => 4,
+            _ => unimplemented!("TODO image format missing"),
         };
+        let width = rect.size.width as usize;
+        let height = rect.size.height as usize;
+        let size = width * height * data_stride;
+        let mut new_data = vec![0u8; size];
+        let data= if stride.is_some() {
+            let row_length = (stride.unwrap()) as usize;
 
-        TextureUploader {
-            target: UploadTarget {
-                gl: &*self.gl,
-                texture,
-            },
-            buffer,
-            marker: PhantomData,
-        }
+            for j in 0..height {
+                for i in 0..width {
+                    let offset = i * data_stride + j * data_stride * width;
+                    let src = &data[j * row_length + i * data_stride ..];
+                    assert!(offset + 3 < new_data.len()); // optimization
+                    // convert from BGRA
+                    new_data[offset + 0] = src[0];
+                    new_data[offset + 1] = src[1];
+                    new_data[offset + 2] = src[2];
+                    new_data[offset + 3] = src[3];
+                }
+            }
+
+            new_data.as_slice()
+        } else {
+            data
+        };
+        assert_eq!(data.len(), width * height * data_stride);
+        self.upload_queue
+            .push(
+                self.images
+                    .get_mut(&texture.id)
+                    .expect("Texture not found.")
+                    .update(
+                        &mut self.device,
+                        &mut self.command_pool,
+                        rect,
+                        layer_index,
+                        data,
+                        (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+                    )
+            );
     }
 
     #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
-        let desc = gl_describe_format(self.gl(), img_desc.format);
-        self.gl.read_pixels(
-            0, 0,
-            img_desc.width as i32,
-            img_desc.height as i32,
-            desc.external,
-            desc.pixel_type,
-        )
+        let mut pixels = vec![0; (img_desc.width * img_desc.height * 4) as usize];
+        self.read_pixels_into(DeviceUintRect::new(DeviceUintPoint::zero(), DeviceUintSize::new(img_desc.width, img_desc.height)), ReadPixelsFormat::Rgba8, &mut pixels);
+        pixels
     }
 
     /// Read rectangle of pixels into the specified output slice.
@@ -1579,31 +3000,110 @@ impl Device {
         format: ReadPixelsFormat,
         output: &mut [u8],
     ) {
-        let (bytes_per_pixel, desc) = match format {
-            ReadPixelsFormat::Standard(imf) => {
-                (imf.bytes_per_pixel(), gl_describe_format(self.gl(), imf))
-            }
-            ReadPixelsFormat::Rgba8 => {
-                (4, FormatDesc {
-                    external: gl::RGBA,
-                    internal: gl::RGBA8 as _,
-                    pixel_type: gl::UNSIGNED_BYTE,
-                })
-            }
+        let bytes_per_pixel = match format {
+            ReadPixelsFormat::Standard(imf) => imf.bytes_per_pixel(),
+            ReadPixelsFormat::Rgba8 => 4,
         };
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
-
-        self.gl.flush();
-        self.gl.read_pixels_into_buffer(
-            rect.origin.x as _,
-            rect.origin.y as _,
-            rect.size.width as _,
-            rect.size.height as _,
-            desc.external,
-            desc.pixel_type,
-            output,
+        let image = &self.frame_images[self.current_frame_id];
+        let download_buffer: CopyBuffer<B> = CopyBuffer::create(
+            &self.device,
+            &self.memory_types,
+            hal::buffer::Usage::TRANSFER_DST,
+            1,
+            (rect.size.width * bytes_per_pixel) as usize,
+            rect.size.height as usize,
+            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
+
+        let copy_submit = {
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+            let mut barriers = Vec::new();
+
+            barriers.extend(download_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
+            barriers.extend(image.transit(hal::image::Access::TRANSFER_READ, hal::image::Layout::TransferSrcOptimal));
+            if !barriers.is_empty() {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
+                    hal::memory::Dependencies::empty(),
+                    &barriers
+                );
+            }
+
+            let buffer_width = rect.size.width * bytes_per_pixel as u32;
+            cmd_buffer.copy_image_to_buffer(
+                &image.image,
+                hal::image::Layout::TransferSrcOptimal,
+                &download_buffer.buffer,
+                &[hal::command::BufferImageCopy {
+                    buffer_offset: 0,
+                    buffer_width: rect.size.width,
+                    buffer_height: rect.size.height,
+                    image_layers: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: 0 .. 1,
+                    },
+                    image_offset: hal::image::Offset {
+                        x: rect.origin.x as i32,
+                        y: rect.origin.y as i32,
+                        z: 0,
+                    },
+                    image_extent: hal::image::Extent {
+                        width: rect.size.width as _,
+                        height: rect.size.height as _,
+                        depth: 1 as _,
+                    },
+                }]);
+            if let Some(barrier) = image.transit(
+                hal::image::Access::empty(),
+                hal::image::Layout::ColorAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+            cmd_buffer.finish()
+        };
+
+        let copy_fence = self.device.create_fence(false);
+        let submission = hal::queue::Submission::new()
+            .submit(Some(copy_submit));
+        self.queue_group.queues[0].submit(submission, Some(&copy_fence));
+        //queue.destroy_command_pool(command_pool);
+        self.device.wait_for_fence(&copy_fence, !0);
+        self.device.destroy_fence(copy_fence);
+
+        if let Ok(reader) = self.device
+            .acquire_mapping_reader::<[u8; 4]>(
+                &download_buffer.memory,
+                0 .. (rect.size.width * rect.size.height * bytes_per_pixel as u32) as u64,
+            )
+            {
+                assert_eq!(reader.len() * 4, output.len());
+                let mut offset = 0;
+                let (i0, i1, i2, i3) = match self.surface_format.base_format().0 {
+                    hal::format::SurfaceType::B8_G8_R8_A8 => (2, 1, 0, 3),
+                    //hal::format::SurfaceType::R8_G8_B8_A8 => (0, 1, 2, 3),
+                    _ => (0, 1, 2, 3)
+                };
+                for (i, d) in reader.iter().enumerate() {
+                    let data = *d;
+                    output[offset + 0] = data[i0];
+                    output[offset + 1] = data[i1];
+                    output[offset + 2] = data[i2];
+                    output[offset + 3] = data[i3];
+                    offset += 4;
+                }
+                self.device.release_mapping_reader(reader);
+            } else {
+            panic!("Fail to read the download buffer!");
+        }
+
+        download_buffer.deinit(&self.device);
     }
 
     /// Get texels of a texture into the specified output slice.
@@ -1614,319 +3114,27 @@ impl Device {
         format: ImageFormat,
         output: &mut [u8],
     ) {
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        let desc = gl_describe_format(self.gl(), format);
-        self.gl.get_tex_image_into_buffer(
-            texture.target,
-            0,
-            desc.external,
-            desc.pixel_type,
-            output,
-        );
+        unimplemented!();
     }
 
     /// Attaches the provided texture to the current Read FBO binding.
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     fn attach_read_texture_raw(
-        &mut self, texture_id: gl::GLuint, target: gl::GLuint, layer_id: i32
+        &mut self, texture_id: u32, target: TextureTarget, layer_id: i32
     ) {
-        match target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.framebuffer_texture_layer(
-                    gl::READ_FRAMEBUFFER,
-                    gl::COLOR_ATTACHMENT0,
-                    texture_id,
-                    0,
-                    layer_id,
-                )
-            }
-            _ => {
-                assert_eq!(layer_id, 0);
-                self.gl.framebuffer_texture_2d(
-                    gl::READ_FRAMEBUFFER,
-                    gl::COLOR_ATTACHMENT0,
-                    target,
-                    texture_id,
-                    0,
-                )
-            }
-        }
+        unimplemented!();
     }
 
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture_external(
-        &mut self, texture_id: gl::GLuint, target: TextureTarget, layer_id: i32
+        &mut self, texture_id: u32, target: TextureTarget, layer_id: i32
     ) {
-        self.attach_read_texture_raw(texture_id, get_gl_target(target), layer_id)
+        self.attach_read_texture_raw(texture_id, target, layer_id)
     }
 
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
         self.attach_read_texture_raw(texture.id, texture.target, layer_id)
-    }
-
-    fn bind_vao_impl(&mut self, id: gl::GLuint) {
-        debug_assert!(self.inside_frame);
-
-        if self.bound_vao != id {
-            self.bound_vao = id;
-            self.gl.bind_vertex_array(id);
-        }
-    }
-
-    pub fn bind_vao(&mut self, vao: &VAO) {
-        self.bind_vao_impl(vao.id)
-    }
-
-    pub fn bind_custom_vao(&mut self, vao: &CustomVAO) {
-        self.bind_vao_impl(vao.id)
-    }
-
-    fn create_vao_with_vbos(
-        &mut self,
-        descriptor: &VertexDescriptor,
-        main_vbo_id: VBOId,
-        instance_vbo_id: VBOId,
-        ibo_id: IBOId,
-        owns_vertices_and_indices: bool,
-    ) -> VAO {
-        debug_assert!(self.inside_frame);
-
-        let instance_stride = descriptor.instance_stride() as usize;
-        let vao_id = self.gl.gen_vertex_arrays(1)[0];
-
-        self.gl.bind_vertex_array(vao_id);
-
-        descriptor.bind(self.gl(), main_vbo_id, instance_vbo_id);
-        ibo_id.bind(self.gl()); // force it to be a part of VAO
-
-        self.gl.bind_vertex_array(0);
-
-        VAO {
-            id: vao_id,
-            ibo_id,
-            main_vbo_id,
-            instance_vbo_id,
-            instance_stride,
-            owns_vertices_and_indices,
-        }
-    }
-
-    pub fn create_custom_vao(
-        &mut self,
-        streams: &[Stream],
-    ) -> CustomVAO {
-        debug_assert!(self.inside_frame);
-
-        let vao_id = self.gl.gen_vertex_arrays(1)[0];
-        self.gl.bind_vertex_array(vao_id);
-
-        let mut attrib_index = 0;
-        for stream in streams {
-            VertexDescriptor::bind_attributes(
-                stream.attributes,
-                attrib_index,
-                0,
-                self.gl(),
-                stream.vbo,
-            );
-            attrib_index += stream.attributes.len();
-        }
-
-        self.gl.bind_vertex_array(0);
-
-        CustomVAO {
-            id: vao_id,
-        }
-    }
-
-    pub fn delete_custom_vao(&mut self, mut vao: CustomVAO) {
-        self.gl.delete_vertex_arrays(&[vao.id]);
-        vao.id = 0;
-    }
-
-    pub fn create_vbo<T>(&mut self) -> VBO<T> {
-        let ids = self.gl.gen_buffers(1);
-        VBO {
-            id: ids[0],
-            target: gl::ARRAY_BUFFER,
-            allocated_count: 0,
-            marker: PhantomData,
-        }
-    }
-
-    pub fn delete_vbo<T>(&mut self, mut vbo: VBO<T>) {
-        self.gl.delete_buffers(&[vbo.id]);
-        vbo.id = 0;
-    }
-
-    pub fn create_vao(&mut self, descriptor: &VertexDescriptor) -> VAO {
-        debug_assert!(self.inside_frame);
-
-        let buffer_ids = self.gl.gen_buffers(3);
-        let ibo_id = IBOId(buffer_ids[0]);
-        let main_vbo_id = VBOId(buffer_ids[1]);
-        let intance_vbo_id = VBOId(buffer_ids[2]);
-
-        self.create_vao_with_vbos(descriptor, main_vbo_id, intance_vbo_id, ibo_id, true)
-    }
-
-    pub fn delete_vao(&mut self, mut vao: VAO) {
-        self.gl.delete_vertex_arrays(&[vao.id]);
-        vao.id = 0;
-
-        if vao.owns_vertices_and_indices {
-            self.gl.delete_buffers(&[vao.ibo_id.0]);
-            self.gl.delete_buffers(&[vao.main_vbo_id.0]);
-        }
-
-        self.gl.delete_buffers(&[vao.instance_vbo_id.0])
-    }
-
-    pub fn allocate_vbo<V>(
-        &mut self,
-        vbo: &mut VBO<V>,
-        count: usize,
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert!(self.inside_frame);
-        vbo.allocated_count = count;
-
-        self.gl.bind_buffer(vbo.target, vbo.id);
-        self.gl.buffer_data_untyped(
-            vbo.target,
-            (count * mem::size_of::<V>()) as _,
-            ptr::null(),
-            usage_hint.to_gl(),
-        );
-    }
-
-    pub fn fill_vbo<V>(
-        &mut self,
-        vbo: &VBO<V>,
-        data: &[V],
-        offset: usize,
-    ) {
-        debug_assert!(self.inside_frame);
-        assert!(offset + data.len() <= vbo.allocated_count);
-        let stride = mem::size_of::<V>();
-
-        self.gl.bind_buffer(vbo.target, vbo.id);
-        self.gl.buffer_sub_data_untyped(
-            vbo.target,
-            (offset * stride) as _,
-            (data.len() * stride) as _,
-            data.as_ptr() as _,
-        );
-    }
-
-    fn update_vbo_data<V>(
-        &mut self,
-        vbo: VBOId,
-        vertices: &[V],
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert!(self.inside_frame);
-
-        vbo.bind(self.gl());
-        gl::buffer_data(self.gl(), gl::ARRAY_BUFFER, vertices, usage_hint.to_gl());
-    }
-
-    pub fn create_vao_with_new_instances(
-        &mut self,
-        descriptor: &VertexDescriptor,
-        base_vao: &VAO,
-    ) -> VAO {
-        debug_assert!(self.inside_frame);
-
-        let buffer_ids = self.gl.gen_buffers(1);
-        let intance_vbo_id = VBOId(buffer_ids[0]);
-
-        self.create_vao_with_vbos(
-            descriptor,
-            base_vao.main_vbo_id,
-            intance_vbo_id,
-            base_vao.ibo_id,
-            false,
-        )
-    }
-
-    pub fn update_vao_main_vertices<V>(
-        &mut self,
-        vao: &VAO,
-        vertices: &[V],
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert_eq!(self.bound_vao, vao.id);
-        self.update_vbo_data(vao.main_vbo_id, vertices, usage_hint)
-    }
-
-    pub fn update_vao_instances<V>(
-        &mut self,
-        vao: &VAO,
-        instances: &[V],
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert_eq!(self.bound_vao, vao.id);
-        debug_assert_eq!(vao.instance_stride as usize, mem::size_of::<V>());
-
-        self.update_vbo_data(vao.instance_vbo_id, instances, usage_hint)
-    }
-
-    pub fn update_vao_indices<I>(&mut self, vao: &VAO, indices: &[I], usage_hint: VertexUsageHint) {
-        debug_assert!(self.inside_frame);
-        debug_assert_eq!(self.bound_vao, vao.id);
-
-        vao.ibo_id.bind(self.gl());
-        gl::buffer_data(
-            self.gl(),
-            gl::ELEMENT_ARRAY_BUFFER,
-            indices,
-            usage_hint.to_gl(),
-        );
-    }
-
-    pub fn draw_triangles_u16(&mut self, first_vertex: i32, index_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_elements(
-            gl::TRIANGLES,
-            index_count,
-            gl::UNSIGNED_SHORT,
-            first_vertex as u32 * 2,
-        );
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn draw_triangles_u32(&mut self, first_vertex: i32, index_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_elements(
-            gl::TRIANGLES,
-            index_count,
-            gl::UNSIGNED_INT,
-            first_vertex as u32 * 4,
-        );
-    }
-
-    pub fn draw_nonindexed_points(&mut self, first_vertex: i32, vertex_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_arrays(gl::POINTS, first_vertex, vertex_count);
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_arrays(gl::LINES, first_vertex, vertex_count);
-    }
-
-    pub fn draw_indexed_triangles_instanced_u16(&mut self, index_count: i32, instance_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_elements_instanced(
-            gl::TRIANGLES,
-            index_count,
-            gl::UNSIGNED_SHORT,
-            0,
-            instance_count,
-        );
     }
 
     pub fn end_frame(&mut self) {
@@ -1936,406 +3144,290 @@ impl Device {
         debug_assert!(self.inside_frame);
         self.inside_frame = false;
 
-        self.gl.bind_texture(gl::TEXTURE_2D, 0);
-        self.gl.use_program(0);
-
-        for i in 0 .. self.bound_textures.len() {
-            self.gl.active_texture(gl::TEXTURE0 + i as gl::GLuint);
-            self.gl.bind_texture(gl::TEXTURE_2D, 0);
-        }
-
-        self.gl.active_texture(gl::TEXTURE0);
-
         self.frame_id.0 += 1;
     }
 
     pub fn clear_target(
-        &self,
+        &mut self,
         color: Option<[f32; 4]>,
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
     ) {
-        let mut clear_bits = 0;
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+
+        if let Some(rect) = rect {
+            //TODO handle scissors
+        }
+
+        let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            let fbo = &self.fbos[&self.bound_draw_fbo];
+            let img = &self.images[&fbo.texture];
+            let dimg = if depth.is_some() {
+                Some(&self.rbos[&fbo.rbo].core)
+            } else {
+                None
+            };
+            let layer = fbo.layer_index;
+            (&img.core, layer, dimg)
+        } else {
+            (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depth.core))
+        };
+
+        //Note: this function is assumed to be called within an active FBO
+        // thus, we bring back the targets into renderable state
 
         if let Some(color) = color {
-            self.gl.clear_color(color[0], color[1], color[2], color[3]);
-            clear_bits |= gl::COLOR_BUFFER_BIT;
-        }
-
-        if let Some(depth) = depth {
-            debug_assert_ne!(self.gl.get_boolean_v(gl::DEPTH_WRITEMASK), 0);
-            self.gl.clear_depth(depth as f64);
-            clear_bits |= gl::DEPTH_BUFFER_BIT;
-        }
-
-        if clear_bits != 0 {
-            match rect {
-                Some(rect) => {
-                    self.gl.enable(gl::SCISSOR_TEST);
-                    self.gl.scissor(
-                        rect.origin.x,
-                        rect.origin.y,
-                        rect.size.width,
-                        rect.size.height,
-                    );
-                    self.gl.clear(clear_bits);
-                    self.gl.disable(gl::SCISSOR_TEST);
-                }
-                None => {
-                    self.gl.clear(clear_bits);
-                }
+            if let Some(barrier) = img.transit(
+                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                hal::image::Layout::TransferDstOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+            cmd_buffer.clear_color_image(
+                &img.image,
+                hal::image::Layout::TransferDstOptimal,
+                hal::image::SubresourceRange {
+                    aspects: hal::format::Aspects::COLOR,
+                    levels: 0 .. 1,
+                    layers: layer .. layer+1,
+                },
+                hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]]),
+            );
+            if let Some(barrier) = img.transit(
+                hal::image::Access::empty(),
+                hal::image::Layout::ColorAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
             }
         }
+
+        if let (Some(depth), Some(dimg)) = (depth, dimg) {
+            assert_ne!(self.current_depth_test, DepthTest::Off);
+            if let Some(barrier) = dimg.transit(
+                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                hal::image::Layout::TransferDstOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+            cmd_buffer.clear_depth_stencil_image(
+                &dimg.image,
+                hal::image::Layout::TransferDstOptimal,
+                hal::image::SubresourceRange {
+                    aspects: hal::format::Aspects::DEPTH,
+                    levels: 0 .. 1,
+                    layers: 0 .. 1,
+                },
+                hal::command::ClearDepthStencil(depth, 0)
+            );
+            if let Some(barrier) = dimg.transit(
+                hal::image::Access::empty(),
+                hal::image::Layout::DepthStencilAttachmentOptimal,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+        }
+        self.upload_queue.push(cmd_buffer.finish());
     }
 
-    pub fn enable_depth(&self) {
-        self.gl.enable(gl::DEPTH_TEST);
+    pub fn enable_depth(&mut self) {
+        self.current_depth_test = LESS_EQUAL_TEST;
     }
 
-    pub fn disable_depth(&self) {
-        self.gl.disable(gl::DEPTH_TEST);
+    pub fn disable_depth(&mut self) {
+        self.current_depth_test = DepthTest::Off;
     }
 
-    pub fn set_depth_func(&self, depth_func: DepthFunction) {
-        self.gl.depth_func(depth_func as gl::GLuint);
+    pub fn set_depth_func(&mut self, depth_func: DepthFunction) {
+        // TODO add Less depth function
+        //self.current_depth_test = depth_func;
     }
 
-    pub fn enable_depth_write(&self) {
-        self.gl.depth_mask(true);
+    pub fn enable_depth_write(&mut self) {
+        self.current_depth_test = LESS_EQUAL_WRITE;
     }
 
-    pub fn disable_depth_write(&self) {
-        self.gl.depth_mask(false);
+    pub fn disable_depth_write(&mut self) {
+        if self.current_depth_test != DepthTest::Off {
+            self.current_depth_test = LESS_EQUAL_TEST;
+        }
     }
 
     pub fn disable_stencil(&self) {
-        self.gl.disable(gl::STENCIL_TEST);
+        unimplemented!();
     }
 
     pub fn set_scissor_rect(&self, rect: DeviceIntRect) {
-        self.gl.scissor(
-            rect.origin.x,
-            rect.origin.y,
-            rect.size.width,
-            rect.size.height,
-        );
+        unimplemented!();
     }
 
     pub fn enable_scissor(&self) {
-        self.gl.enable(gl::SCISSOR_TEST);
+        unimplemented!();
     }
 
     pub fn disable_scissor(&self) {
-        self.gl.disable(gl::SCISSOR_TEST);
+        unimplemented!();
     }
 
-    pub fn set_blend(&self, enable: bool) {
-        if enable {
-            self.gl.enable(gl::BLEND);
-        } else {
-            self.gl.disable(gl::BLEND);
+    pub fn set_blend(&mut self, enable: bool) {
+        if !enable {
+            self.current_blend_state = BlendState::Off
         }
     }
 
-    pub fn set_blend_mode_alpha(&self) {
-        self.gl.blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA,
-                                    gl::ONE, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_alpha(&mut self) {
+        self.current_blend_state = ALPHA;
     }
 
-    pub fn set_blend_mode_premultiplied_alpha(&self) {
-        self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_premultiplied_alpha(&mut self) {
+        self.current_blend_state = BlendState::PREMULTIPLIED_ALPHA;
     }
 
-    pub fn set_blend_mode_premultiplied_dest_out(&self) {
-        self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_premultiplied_dest_out(&mut self) {
+        self.current_blend_state = PREMULTIPLIED_DEST_OUT;
     }
 
-    pub fn set_blend_mode_multiply(&self) {
-        self.gl
-            .blend_func_separate(gl::ZERO, gl::SRC_COLOR, gl::ZERO, gl::SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_multiply(&mut self) {
+        self.current_blend_state = BlendState::MULTIPLY;
     }
-    pub fn set_blend_mode_max(&self) {
-        self.gl
-            .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
-        self.gl.blend_equation_separate(gl::MAX, gl::FUNC_ADD);
+    pub fn set_blend_mode_max(&mut self) {
+        self.current_blend_state = MAX;
     }
     #[cfg(feature = "debug_renderer")]
-    pub fn set_blend_mode_min(&self) {
-        self.gl
-            .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
-        self.gl.blend_equation_separate(gl::MIN, gl::FUNC_ADD);
+    pub fn set_blend_mode_min(&mut self) {
+        self.current_blend_state = MIN;
     }
-    pub fn set_blend_mode_subpixel_pass0(&self) {
-        self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_COLOR);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_subpixel_pass0(&mut self) {
+        self.current_blend_state = SUBPIXEL_PASS0;
     }
-    pub fn set_blend_mode_subpixel_pass1(&self) {
-        self.gl.blend_func(gl::ONE, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_subpixel_pass1(&mut self) {
+        self.current_blend_state = SUBPIXEL_PASS1;
     }
-    pub fn set_blend_mode_subpixel_with_bg_color_pass0(&self) {
-        self.gl.blend_func_separate(gl::ZERO, gl::ONE_MINUS_SRC_COLOR, gl::ZERO, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_subpixel_with_bg_color_pass0(&mut self) {
+        self.current_blend_state = SUBPIXEL_WITH_BG_COLOR_PASS0;
     }
-    pub fn set_blend_mode_subpixel_with_bg_color_pass1(&self) {
-        self.gl.blend_func_separate(gl::ONE_MINUS_DST_ALPHA, gl::ONE, gl::ZERO, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_subpixel_with_bg_color_pass1(&mut self) {
+        self.current_blend_state = SUBPIXEL_WITH_BG_COLOR_PASS1;
     }
-    pub fn set_blend_mode_subpixel_with_bg_color_pass2(&self) {
-        self.gl.blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_subpixel_with_bg_color_pass2(&mut self) {
+        self.current_blend_state = SUBPIXEL_WITH_BG_COLOR_PASS2;
     }
-    pub fn set_blend_mode_subpixel_constant_text_color(&self, color: ColorF) {
+    pub fn set_blend_mode_subpixel_constant_text_color(&mut self, color: ColorF) {
+        self.current_blend_state = SUBPIXEL_CONSTANT_TEXT_COLOR;
         // color is an unpremultiplied color.
-        self.gl.blend_color(color.r, color.g, color.b, 1.0);
-        self.gl
-            .blend_func(gl::CONSTANT_COLOR, gl::ONE_MINUS_SRC_COLOR);
-        self.gl.blend_equation(gl::FUNC_ADD);
+        self.blend_color = ColorF::new(color.r, color.g, color.b, 1.0);
     }
-    pub fn set_blend_mode_subpixel_dual_source(&self) {
-        self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC1_COLOR);
-        self.gl.blend_equation(gl::FUNC_ADD);
+    pub fn set_blend_mode_subpixel_dual_source(&mut self) {
+        self.current_blend_state = SUBPIXEL_DUAL_SOURCE;
     }
 
-    pub fn supports_extension(&self, extension: &str) -> bool {
-        self.extensions.iter().any(|s| s == extension)
+    pub fn supports_features(&self, features: hal::Features) -> bool {
+        self.features.contains(features)
     }
 
-    pub fn echo_driver_messages(&self) {
-        for msg in self.gl.get_debug_messages() {
-            let level = match msg.severity {
-                gl::DEBUG_SEVERITY_HIGH => Level::Error,
-                gl::DEBUG_SEVERITY_MEDIUM => Level::Warn,
-                gl::DEBUG_SEVERITY_LOW => Level::Info,
-                gl::DEBUG_SEVERITY_NOTIFICATION => Level::Debug,
-                _ => Level::Trace,
-            };
-            let ty = match msg.ty {
-                gl::DEBUG_TYPE_ERROR => "error",
-                gl::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "deprecated",
-                gl::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "undefined",
-                gl::DEBUG_TYPE_PORTABILITY => "portability",
-                gl::DEBUG_TYPE_PERFORMANCE => "perf",
-                gl::DEBUG_TYPE_MARKER => "marker",
-                gl::DEBUG_TYPE_PUSH_GROUP => "group push",
-                gl::DEBUG_TYPE_POP_GROUP => "group pop",
-                gl::DEBUG_TYPE_OTHER => "other",
-                _ => "?",
-            };
-            log!(level, "({}) {}", ty, msg.message);
+    pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {
+        let mut frame_semaphore = self.device.create_semaphore();
+        let frame = self.swap_chain
+            .acquire_frame(FrameSync::Semaphore(&mut frame_semaphore));
+        self.current_frame_id = frame.id();
+        frame_semaphore
+    }
+
+    pub fn submit_to_gpu(&mut self) {
+        let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        {
+            self.device.reset_fence(&frame_fence);
+            let submission = Submission::new()
+                .submit(&self.upload_queue);
+            self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
+
+            // TODO: replace with semaphore
+            self.device
+                .wait_for_fence(&frame_fence, !0);
         }
+        self.upload_queue.clear();
+        self.command_pool.reset();
+        self.device.destroy_fence(frame_fence);
     }
-}
 
-struct FormatDesc {
-    internal: gl::GLint,
-    external: gl::GLuint,
-    pixel_type: gl::GLuint,
-}
-
-fn gl_describe_format(gl: &gl::Gl, format: ImageFormat) -> FormatDesc {
-    match format {
-        ImageFormat::R8 => FormatDesc {
-            internal: gl::RED as _,
-            external: gl::RED,
-            pixel_type: gl::UNSIGNED_BYTE,
-        },
-        ImageFormat::BGRA8 => {
-            let external = get_gl_format_bgra(gl);
-            FormatDesc {
-                internal: match gl.get_type() {
-                    gl::GlType::Gl => gl::RGBA as _,
-                    gl::GlType::Gles => external as _,
-                },
-                external,
-                pixel_type: gl::UNSIGNED_BYTE,
-            }
-        },
-        ImageFormat::RGBAF32 => FormatDesc {
-            internal: gl::RGBA32F as _,
-            external: gl::RGBA,
-            pixel_type: gl::FLOAT,
-        },
-        ImageFormat::RG8 => FormatDesc {
-            internal: gl::RG8 as _,
-            external: gl::RG,
-            pixel_type: gl::UNSIGNED_BYTE,
-        },
-    }
-}
-
-struct UploadChunk {
-    rect: DeviceUintRect,
-    layer_index: i32,
-    stride: Option<u32>,
-    offset: usize,
-}
-
-struct PixelBuffer {
-    usage: gl::GLenum,
-    size_allocated: usize,
-    size_used: usize,
-    // small vector avoids heap allocation for a single chunk
-    chunks: SmallVec<[UploadChunk; 1]>,
-}
-
-impl PixelBuffer {
-    fn new(
-        usage: gl::GLenum,
-        size_allocated: usize,
-    ) -> Self {
-        PixelBuffer {
-            usage,
-            size_allocated,
-            size_used: 0,
-            chunks: SmallVec::new(),
-        }
-    }
-}
-
-struct UploadTarget<'a> {
-    gl: &'a gl::Gl,
-    texture: &'a Texture,
-}
-
-pub struct TextureUploader<'a, T> {
-    target: UploadTarget<'a>,
-    buffer: Option<PixelBuffer>,
-    marker: PhantomData<T>,
-}
-
-impl<'a, T> Drop for TextureUploader<'a, T> {
-    fn drop(&mut self) {
-        if let Some(buffer) = self.buffer.take() {
-            for chunk in buffer.chunks {
-                self.target.update_impl(chunk);
-            }
-            self.target.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, 0);
-        }
-    }
-}
-
-impl<'a, T> TextureUploader<'a, T> {
-    pub fn upload(
-        &mut self,
-        rect: DeviceUintRect,
-        layer_index: i32,
-        stride: Option<u32>,
-        data: &[T],
-    ) {
-        match self.buffer {
-            Some(ref mut buffer) => {
-                let upload_size = mem::size_of::<T>() * data.len();
-                if buffer.size_used + upload_size > buffer.size_allocated {
-                    // flush
-                    for chunk in buffer.chunks.drain() {
-                        self.target.update_impl(chunk);
-                    }
-                    buffer.size_used = 0;
-                }
-
-                if upload_size > buffer.size_allocated {
-                    gl::buffer_data(
-                        self.target.gl,
-                        gl::PIXEL_UNPACK_BUFFER,
-                        data,
-                        buffer.usage,
-                    );
-                    buffer.size_allocated = upload_size;
-                } else {
-                    gl::buffer_sub_data(
-                        self.target.gl,
-                        gl::PIXEL_UNPACK_BUFFER,
-                        buffer.size_used as _,
-                        data,
-                    );
-                }
-
-                buffer.chunks.push(UploadChunk {
-                    rect, layer_index, stride,
-                    offset: buffer.size_used,
-                });
-                buffer.size_used += upload_size;
-            }
-            None => {
-                self.target.update_impl(UploadChunk {
-                    rect, layer_index, stride,
-                    offset: data.as_ptr() as _,
-                });
-            }
-        }
-    }
-}
-
-impl<'a> UploadTarget<'a> {
-    fn update_impl(&mut self, chunk: UploadChunk) {
-        let (gl_format, bpp, data_type) = match self.texture.format {
-            ImageFormat::R8 => (gl::RED, 1, gl::UNSIGNED_BYTE),
-            ImageFormat::BGRA8 => (get_gl_format_bgra(self.gl), 4, gl::UNSIGNED_BYTE),
-            ImageFormat::RG8 => (gl::RG, 2, gl::UNSIGNED_BYTE),
-            ImageFormat::RGBAF32 => (gl::RGBA, 16, gl::FLOAT),
-        };
-
-        let row_length = match chunk.stride {
-            Some(value) => value / bpp,
-            None => self.texture.width,
-        };
-
-        if chunk.stride.is_some() {
-            self.gl.pixel_store_i(
-                gl::UNPACK_ROW_LENGTH,
-                row_length as _,
-            );
-        }
-
-        let pos = chunk.rect.origin;
-        let size = chunk.rect.size;
-
-        match self.texture.target {
-            gl::TEXTURE_2D_ARRAY => {
-                self.gl.tex_sub_image_3d_pbo(
-                    self.texture.target,
-                    0,
-                    pos.x as _,
-                    pos.y as _,
-                    chunk.layer_index,
-                    size.width as _,
-                    size.height as _,
-                    1,
-                    gl_format,
-                    data_type,
-                    chunk.offset,
+    pub fn swap_buffers(&mut self, frame_semaphore: B::Semaphore) {
+        {
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+            let image = &self.frame_images[self.current_frame_id];
+            if let Some(barrier) = image.transit(
+                hal::image::Access::empty(),
+                hal::image::Layout::Present,
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
                 );
             }
-            gl::TEXTURE_2D | gl::TEXTURE_RECTANGLE | gl::TEXTURE_EXTERNAL_OES => {
-                self.gl.tex_sub_image_2d_pbo(
-                    self.texture.target,
-                    0,
-                    pos.x as _,
-                    pos.y as _,
-                    size.width as _,
-                    size.height as _,
-                    gl_format,
-                    data_type,
-                    chunk.offset,
-                );
-            }
-            _ => panic!("BUG: Unexpected texture target!"),
+            self.upload_queue.push(cmd_buffer.finish());
         }
 
-        // If using tri-linear filtering, build the mip-map chain for this texture.
-        if self.texture.filter == TextureFilter::Trilinear {
-            self.gl.generate_mipmap(self.texture.target);
-        }
+        let mut frame_fence = self.device.create_fence(false); // TODO: remove
+        {
+            self.device.reset_fence(&frame_fence);
+            let submission = Submission::new()
+                .wait_on(&[(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
+                .submit(&self.upload_queue);
+            self.queue_group.queues[0].submit(submission, Some(&mut frame_fence));
 
-        // Reset row length to 0, otherwise the stride would apply to all texture uploads.
-        if chunk.stride.is_some() {
-            self.gl.pixel_store_i(gl::UNPACK_ROW_LENGTH, 0 as _);
+            // TODO: replace with semaphore
+            self.device
+                .wait_for_fence(&frame_fence, !0);
+
+            // present frame
+            self.swap_chain
+                .present(&mut self.queue_group.queues[0], &[]);
         }
+        self.upload_queue.clear();
+        self.command_pool.reset();
+        self.reset_state();
+        self.device.destroy_fence(frame_fence);
+        self.device.destroy_semaphore(frame_semaphore);
+    }
+
+    pub fn deinit(self) {
+        if let Some(mut texture) = self.dither_texture {
+            texture.id = 0;
+        }
+        self.device
+            .destroy_command_pool(self.command_pool.downgrade());
+        self.render_pass.deinit(&self.device);
+        for framebuffer in self.framebuffers {
+            self.device.destroy_framebuffer(framebuffer);
+        }
+        for image in self.frame_images {
+            image.deinit(&self.device);
+        }
+        for (_, image) in self.images {
+            image.deinit(&self.device);
+        }
+        for (_, rbo) in self.rbos {
+            rbo.deinit(&self.device);
+        }
+        self.resource_cache.deinit(&self.device);
+        self.render_tasks.deinit(&self.device);
+        self.local_clip_rects.deinit(&self.device);
+        self.node_data.deinit(&self.device);
     }
 }
 

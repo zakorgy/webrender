@@ -1037,7 +1037,7 @@ impl Profiler {
         backend_profile: &BackendProfileCounters,
         renderer_profile: &RendererProfileCounters,
         renderer_timers: &mut RendererProfileTimers,
-        gpu_samplers: &[GpuSampler<GpuProfileTag>],
+        //gpu_samplers: &[GpuSampler<GpuProfileTag>],
         screen_fraction: f32,
         debug_renderer: &mut DebugRenderer,
     ) {
@@ -1114,7 +1114,7 @@ impl Profiler {
             &mut self.draw_state
         );
 
-        if !gpu_samplers.is_empty() {
+        /*if !gpu_samplers.is_empty() {
             let mut samplers = Vec::<FloatProfileCounter>::new();
             // Gathering unique GPU samplers. This has O(N^2) complexity,
             // but we only have a few samplers per target.
@@ -1139,7 +1139,7 @@ impl Profiler {
                 false,
                 &mut self.draw_state,
             );
-        }
+        }*/
 
         let rect =
             self.backend_time
@@ -1170,7 +1170,7 @@ impl Profiler {
         backend_profile: &BackendProfileCounters,
         renderer_profile: &RendererProfileCounters,
         renderer_timers: &mut RendererProfileTimers,
-        gpu_samplers: &[GpuSampler<GpuProfileTag>],
+        //gpu_samplers: &[GpuSampler<GpuProfileTag>],
         screen_fraction: f32,
         debug_renderer: &mut DebugRenderer,
         compact: bool,
@@ -1207,7 +1207,7 @@ impl Profiler {
                 backend_profile,
                 renderer_profile,
                 renderer_timers,
-                gpu_samplers,
+                //gpu_samplers,
                 screen_fraction,
                 debug_renderer,
             );

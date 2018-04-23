@@ -50,9 +50,12 @@ extern crate log;
 extern crate thread_profiler;
 #[macro_use]
 extern crate cfg_if;
-#[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
+//#[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
 #[macro_use]
 extern crate serde;
+#[macro_use]
+pub extern crate gfx_hal as hal;
+extern crate rand;
 
 mod batch;
 mod border;
@@ -181,7 +184,7 @@ extern crate png;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::{build_shader_strings, ProgramCache, ReadPixelsFormat, UploadMethod, VertexUsageHint};
+pub use device::{ApiCapabilities, ReadPixelsFormat, UploadMethod};
 pub use renderer::{AsyncPropertySampler, CpuProfile, DebugFlags, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource, GpuProfile};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, PipelineInfo, Renderer, RendererOptions};

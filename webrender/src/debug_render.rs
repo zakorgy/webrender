@@ -4,9 +4,10 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, Program, Texture, TextureSlot, VertexDescriptor, VAO};
-use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
+use device::{Device, Program, Texture, TextureSlot, VertexDescriptor};
+use device::{TextureFilter, VertexAttribute, VertexAttributeKind};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
+use hal;
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use std::f32;
 
@@ -89,7 +90,7 @@ impl DebugColorVertex {
 }
 
 pub struct DebugRenderer {
-    font_vertices: Vec<DebugFontVertex>,
+    /*font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
     font_program: Program,
     font_vao: VAO,
@@ -100,12 +101,12 @@ pub struct DebugRenderer {
     tri_vao: VAO,
     line_vertices: Vec<DebugColorVertex>,
     line_vao: VAO,
-    color_program: Program,
+    color_program: Program,*/
 }
 
 impl DebugRenderer {
-    pub fn new(device: &mut Device) -> Self {
-        let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
+    pub fn new(/*device: &mut Device<B>*/) -> Self {
+        /*let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
         device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
 
         let color_program = device
@@ -139,16 +140,17 @@ impl DebugRenderer {
             font_vao,
             line_vao,
             font_texture,
-        }
+        }*/
+        DebugRenderer { }
     }
 
-    pub fn deinit(self, device: &mut Device) {
-        device.delete_texture(self.font_texture);
+    pub fn deinit(self/*, device: &mut Device<B>*/) {
+        /*device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
         device.delete_vao(self.tri_vao);
         device.delete_vao(self.line_vao);
-        device.delete_vao(self.font_vao);
+        device.delete_vao(self.font_vao);*/
     }
 
     pub fn line_height(&self) -> f32 {
@@ -183,7 +185,7 @@ impl DebugRenderer {
 
                 x_start += glyph.xa;
 
-                let vertex_count = self.font_vertices.len() as u32;
+                /*let vertex_count = self.font_vertices.len() as u32;
 
                 self.font_vertices
                     .push(DebugFontVertex::new(x0, y0, s0, t0, color));
@@ -199,7 +201,7 @@ impl DebugRenderer {
                 self.font_indices.push(vertex_count + 2);
                 self.font_indices.push(vertex_count + 2);
                 self.font_indices.push(vertex_count + 1);
-                self.font_indices.push(vertex_count + 3);
+                self.font_indices.push(vertex_count + 3);*/
 
                 min_x = min_x.min(x0);
                 max_x = max_x.max(x1);
@@ -223,7 +225,7 @@ impl DebugRenderer {
         color_top: ColorU,
         color_bottom: ColorU,
     ) {
-        let vertex_count = self.tri_vertices.len() as u32;
+        /*let vertex_count = self.tri_vertices.len() as u32;
 
         self.tri_vertices
             .push(DebugColorVertex::new(x0, y0, color_top));
@@ -239,15 +241,15 @@ impl DebugRenderer {
         self.tri_indices.push(vertex_count + 2);
         self.tri_indices.push(vertex_count + 2);
         self.tri_indices.push(vertex_count + 1);
-        self.tri_indices.push(vertex_count + 3);
+        self.tri_indices.push(vertex_count + 3);*/
     }
 
     #[allow(dead_code)]
     pub fn add_line(&mut self, x0: i32, y0: i32, color0: ColorU, x1: i32, y1: i32, color1: ColorU) {
-        self.line_vertices
+        /*self.line_vertices
             .push(DebugColorVertex::new(x0 as f32, y0 as f32, color0));
         self.line_vertices
-            .push(DebugColorVertex::new(x1 as f32, y1 as f32, color1));
+            .push(DebugColorVertex::new(x1 as f32, y1 as f32, color1));*/
     }
 
 
@@ -262,10 +264,10 @@ impl DebugRenderer {
 
     pub fn render(
         &mut self,
-        device: &mut Device,
+        //device: &mut Device<B>,
         viewport_size: Option<DeviceUintSize>,
     ) {
-        if let Some(viewport_size) = viewport_size {
+        /*if let Some(viewport_size) = viewport_size {
             device.disable_depth();
             device.set_blend(true);
             device.set_blend_mode_premultiplied_alpha();
@@ -326,6 +328,6 @@ impl DebugRenderer {
         self.font_vertices.clear();
         self.line_vertices.clear();
         self.tri_vertices.clear();
-        self.tri_indices.clear();
+        self.tri_indices.clear();*/
     }
 }

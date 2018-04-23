@@ -1,0 +1,14 @@
+environment:
+  PATH: '%PATH%;C:\msys64\mingw64\bin;C:\msys64\usr\bin;%USERPROFILE%\.cargo\bin'
+  RUST_BACKTRACE: 1
+
+install:
+  - curl -sSf -o rustup-init.exe https://win.rustup.rs
+  - rustup-init -yv --default-toolchain stable
+  - rustc -vV
+  - cargo -vV
+
+build: false
+
+test_script:
+  - cargo test --verbose
