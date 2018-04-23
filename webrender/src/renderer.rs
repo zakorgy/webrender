@@ -1317,7 +1317,7 @@ pub struct Renderer<B: hal::Backend> {
     pending_shader_updates: Vec<PathBuf>,
     active_documents: Vec<(DocumentId, RenderedDocument)>,
 
-    shaders: Shaders<B>,
+    shaders: Shaders,
 
     pub gpu_glyph_renderer: GpuGlyphRenderer,
 
@@ -2452,18 +2452,20 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
 
+        // TODO bind texture
+
         // TODO: this probably isn't the best place for this.
         /*if let Some(ref texture) = self.dither_matrix_texture {
             self.device.bind_texture(TextureSampler::Dither, texture);
         }*/
 
-        self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
+        self.draw_instanced_batch_with_previously_bound_textures(data, /*vertex_array_kind,*/ stats)
     }
 
     pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T>(
         &mut self,
         data: &[T],
-        vertex_array_kind: VertexArrayKind,
+        //vertex_array_kind: VertexArrayKind,
         stats: &mut RendererStats,
     ) {
         //let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
@@ -2475,8 +2477,10 @@ impl<B: hal::Backend> Renderer<B> {
         if batched {
             //self.device
             //    .update_vao_instances(vao, data);
+            // TODO bind instances
             //self.device
             //    .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
+            //TODO call draw
             self.profile_counters.draw_calls.inc();
             stats.total_draw_calls += 1;
         } else {

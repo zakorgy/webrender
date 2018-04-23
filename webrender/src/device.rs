@@ -51,6 +51,7 @@ const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 pub type TextureId = u32;
 
 pub const INVALID_TEXTURE_ID: TextureId = 0;
+pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 
@@ -337,6 +338,9 @@ impl Drop for Texture {
         debug_assert!(thread::panicking() || self.id == 0);
     }
 }
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct ProgramId(u32);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct FBOId(u32);
@@ -1433,7 +1437,7 @@ impl<B: hal::Backend> Program<B> {
     }
 
 
-    fn bind_instances<T>(
+    pub fn bind_instances<T>(
         &mut self,
         device: &B::Device,
         instances: &[T],
@@ -1477,7 +1481,7 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    fn bind_textures(
+    pub fn bind_textures(
         &mut self,
         device: &Device<B>,
     ) {
@@ -1514,7 +1518,7 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    pub fn bind<T>(
+    /*pub fn bind<T>(
         &mut self,
         device: &Device<B>,
         projection: &Transform3D<f32>,
@@ -1525,7 +1529,7 @@ impl<B: hal::Backend> Program<B> {
         self.bind_instances(&device.device, instances);
         self.bind_locals(&device.device, &projection, device.program_mode_id);
         self.bind_textures(device);
-    }
+    }*/
 
     pub fn init_vertex_data(
         &mut self,
@@ -1835,11 +1839,13 @@ pub struct Device<B: hal::Backend> {
     blend_color: ColorF,
     current_depth_test: DepthTest,
     // device state
+    programs: FastHashMap<ProgramId, Program<B>>,
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     // device state
     bound_textures: [u32; 16],
+    bound_program: ProgramId,
     bound_sampler: [TextureFilter; 16],
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
@@ -2184,10 +2190,12 @@ impl<B: hal::Backend> Device<B> {
                 supports_multisampling: false, //TODO
             },
 
+            programs: FastHashMap::default(),
             images: FastHashMap::default(),
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
             bound_textures: [0; 16],
+            bound_program: INVALID_PROGRAM_ID,
             bound_sampler: [TextureFilter::Linear; 16],
             bound_read_fbo: DEFAULT_READ_FBO,
             bound_draw_fbo: DEFAULT_DRAW_FBO,
@@ -2220,6 +2228,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn reset_state(&mut self) {
         self.bound_textures = [0; 16];
+        self.bound_program = INVALID_PROGRAM_ID;
         self.bound_sampler = [TextureFilter::Linear; 16];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
@@ -2277,12 +2286,21 @@ impl<B: hal::Backend> Device<B> {
             ));
     }
 
+    pub fn delete_program(&mut self, mut program: ProgramId) {
+        // TODO delete program
+        program = INVALID_PROGRAM_ID;
+    }
+
+    pub fn reset_program(&mut self, program: &ProgramId) {
+        self.programs.get_mut(program).expect("Program not found.").instance_buffer.reset();
+    }
+
     pub fn create_program(
         &mut self,
         pipeline_requirements: PipelineRequirements,
         shader_name: &str,
         shader_kind: &ShaderKind,
-    ) -> Program<B> {
+    ) -> ProgramId {
         let mut program = Program::create(
             pipeline_requirements,
             &self.device,
@@ -2314,7 +2332,9 @@ impl<B: hal::Backend> Device<B> {
                 &self.sampler_nearest,
             );
         }
-        program
+        let id = self.generate_program_id();
+        self.programs.insert(id, program);
+        id
     }
 
     fn create_dither_texture(&mut self) -> Texture {
@@ -2398,27 +2418,26 @@ impl<B: hal::Backend> Device<B> {
         texture
     }
 
-    pub fn bind_program(&mut self, program: &Program<B>) {
+    pub fn bind_program(&mut self, program_id: ProgramId) {
         debug_assert!(self.inside_frame);
 
-        unimplemented!();
-        /*if self.bound_program != program.id {
-            self.bound_program = program.id;
-        }*/
+        if self.bound_program != program_id {
+            self.bound_program = program_id;
+        }
     }
 
     pub fn set_uniforms(
-        &self,
-        program: &Program<B>,
+        &mut self,
+        program: ProgramId,
         transform: &Transform3D<f32>,
     ) {
         debug_assert!(self.inside_frame);
-        unimplemented!();
+        assert_ne!(program, INVALID_PROGRAM_ID);
+        self.programs.get_mut(&program).expect("Program not found.").bind_locals(&self.device, transform, self.program_mode_id);
     }
 
     pub fn draw(
         &mut self,
-        program: &mut Program<B>,
     ) {
         let submit = {
             let (fb, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
@@ -2431,7 +2450,7 @@ impl<B: hal::Backend> Device<B> {
                 }
             };
             let rp = self.render_pass.get_render_pass(format, self.current_depth_test != DepthTest::Off);
-            program.submit(
+            self.programs.get_mut(&self.bound_program).expect("Program not found").submit(
                 &mut self.command_pool,
                 self.viewport.clone(),
                 rp,
@@ -2581,6 +2600,15 @@ impl<B: hal::Backend> Device<B> {
             texture_id = rng.gen_range::<u32>(INVALID_TEXTURE_ID + 1, u32::max_value());
         }
         texture_id
+    }
+
+    fn generate_program_id(&mut self) -> ProgramId {
+        let mut rng = rand::thread_rng();
+        let mut program_id = ProgramId(INVALID_PROGRAM_ID.0 + 1);
+        while self.programs.contains_key(&program_id) {
+            program_id = ProgramId(rng.gen_range::<u32>(INVALID_PROGRAM_ID.0 + 1, u32::max_value()));
+        }
+        program_id
     }
 
     fn generate_fbo_ids(&mut self, count: i32) -> Vec<FBOId> {

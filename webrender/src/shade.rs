@@ -7,7 +7,7 @@ use api::{
     YuvColorSpace, YuvFormat,
 };
 use batch::{BatchKey, BatchKind, BrushBatchKind, TransformBatchKind};
-use device::{Device, Program, ShaderError, ShaderKind};
+use device::{Device, ProgramId, ShaderError, ShaderKind};
 use device::{PipelineRequirements, VertexArrayKind};
 use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
@@ -60,15 +60,15 @@ const ALPHA_FEATURE: &str = "ALPHA_PASS";
 const DITHERING_FEATURE: &str = "DITHERING";
 
 
-pub struct LazilyCompiledShader<B: hal::Backend> {
-    program: Option<Program<B>>,
+pub struct LazilyCompiledShader {
+    program: Option<ProgramId>,
     name: &'static str,
     kind: ShaderKind,
     pipeline_requirements: PipelineRequirements,
 }
 
-impl<B: hal::Backend> LazilyCompiledShader<B> {
-    pub(crate) fn new(
+impl LazilyCompiledShader {
+    pub(crate) fn new<B: hal::Backend>(
         kind: ShaderKind,
         name: &'static str,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
@@ -103,7 +103,7 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         Ok(shader)
     }
 
-    pub fn bind(
+    pub fn bind<B: hal::Backend>(
         &mut self,
         device: &mut Device<B>,
         projection: &Transform3D<f32>,
@@ -120,7 +120,7 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         device.set_uniforms(program, projection);
     }
 
-    fn get(&mut self, device: &mut Device<B>) -> Result<&Program<B>, ShaderError> {
+    fn get<B: hal::Backend>(&mut self, device: &mut Device<B>) -> Result<ProgramId, ShaderError> {
         if self.program.is_none() {
             let program = device.create_program(
                 self.pipeline_requirements.clone(),
@@ -130,18 +130,18 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             self.program = Some(program);
         }
 
-        Ok(self.program.as_ref().unwrap())
+        Ok(self.program.unwrap())
     }
 
-    fn reset(&mut self) {
-        if let Some(ref mut program) = self.program {
-            program.instance_buffer.reset()
+    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
+        if let Some(ref program) = self.program {
+            device.reset_program(program) ;
         }
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         if let Some(program) = self.program {
-            program.deinit(&device.device)
+            device.delete_program(program);
         }
     }
 }
@@ -157,13 +157,13 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
 //   pass. Assumes that AA should be applied
 //   along the primitive edge, and also that
 //   clip mask is present.
-struct BrushShader<B: hal::Backend> {
-    opaque: LazilyCompiledShader<B>,
-    alpha: LazilyCompiledShader<B>,
+struct BrushShader {
+    opaque: LazilyCompiledShader,
+    alpha: LazilyCompiledShader,
 }
 
-impl<B: hal::Backend> BrushShader<B> {
-    fn new(
+impl BrushShader {
+    fn new<B: hal::Backend>(
         name: &'static str,
         alpha_name: &'static str,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
@@ -189,7 +189,7 @@ impl<B: hal::Backend> BrushShader<B> {
         Ok(BrushShader { opaque, alpha })
     }
 
-    fn get(&mut self, blend_mode: BlendMode) -> &mut LazilyCompiledShader<B> {
+    fn get(&mut self, blend_mode: BlendMode) -> &mut LazilyCompiledShader {
         match blend_mode {
             BlendMode::None => &mut self.opaque,
             BlendMode::Alpha |
@@ -201,24 +201,24 @@ impl<B: hal::Backend> BrushShader<B> {
         }
     }
 
-    fn reset(&mut self) {
-        self.opaque.reset();
-        self.alpha.reset();
+    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
+        self.opaque.reset(device);
+        self.alpha.reset(device);
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.opaque.deinit(device);
         self.alpha.deinit(device);
     }
 }
 
-struct PrimitiveShader<B: hal::Backend> {
-    simple: LazilyCompiledShader<B>,
-    transform: LazilyCompiledShader<B>,
+struct PrimitiveShader {
+    simple: LazilyCompiledShader,
+    transform: LazilyCompiledShader,
 }
 
-impl<B: hal::Backend> PrimitiveShader<B> {
-    fn new(
+impl PrimitiveShader {
+    fn new<B: hal::Backend>(
         name: &'static str,
         transform_name: &'static str,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
@@ -244,32 +244,32 @@ impl<B: hal::Backend> PrimitiveShader<B> {
         Ok(PrimitiveShader { simple, transform })
     }
 
-    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut LazilyCompiledShader<B> {
+    fn get(&mut self, transform_kind: TransformedRectKind) -> &mut LazilyCompiledShader {
         match transform_kind {
             TransformedRectKind::AxisAligned => &mut self.simple,
             TransformedRectKind::Complex => &mut self.transform,
         }
     }
 
-    fn reset(&mut self) {
-        self.simple.reset();
-        self.transform.reset();
+    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
+        self.simple.reset(device);
+        self.transform.reset(device);
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.simple.deinit(device);
         self.transform.deinit(device);
     }
 }
 
-pub struct TextShader<B: hal::Backend> {
-    simple: LazilyCompiledShader<B>,
-    transform: LazilyCompiledShader<B>,
-    glyph_transform: LazilyCompiledShader<B>,
+pub struct TextShader {
+    simple: LazilyCompiledShader,
+    transform: LazilyCompiledShader,
+    glyph_transform: LazilyCompiledShader,
 }
 
-impl<B: hal::Backend> TextShader<B> {
-    fn new(
+impl TextShader {
+    fn new<B: hal::Backend>(
         name: &'static str,
         transform_name: &'static str,
         glyph_transform_name: &'static str,
@@ -308,7 +308,7 @@ impl<B: hal::Backend> TextShader<B> {
         &mut self,
         glyph_format: GlyphFormat,
         transform_kind: TransformedRectKind,
-    ) -> &mut LazilyCompiledShader<B> {
+    ) -> &mut LazilyCompiledShader {
         match glyph_format {
             GlyphFormat::Alpha |
             GlyphFormat::Subpixel |
@@ -322,45 +322,45 @@ impl<B: hal::Backend> TextShader<B> {
         }
     }
 
-    fn reset(&mut self) {
-        self.simple.reset();
-        self.transform.reset();
-        self.glyph_transform.reset()
+    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
+        self.simple.reset(device);
+        self.transform.reset(device);
+        self.glyph_transform.reset(device)
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.simple.deinit(device);
         self.transform.deinit(device);
         self.glyph_transform.deinit(device);
     }
 }
 
-pub struct Shaders<B: hal::Backend> {
+pub struct Shaders {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    pub cs_blur_a8: LazilyCompiledShader<B>,
-    pub cs_blur_rgba8: LazilyCompiledShader<B>,
+    pub cs_blur_a8: LazilyCompiledShader,
+    pub cs_blur_rgba8: LazilyCompiledShader,
 
     // Brush shaders
-    brush_solid: BrushShader<B>,
+    brush_solid: BrushShader,
     //brush_image: Vec<Option<BrushShader<B>>>,
-    brush_image: BrushShader<B>,
-    brush_blend: BrushShader<B>,
-    brush_mix_blend: BrushShader<B>,
+    brush_image: BrushShader,
+    brush_blend: BrushShader,
+    brush_mix_blend: BrushShader,
     //brush_yuv_image: Vec<Option<BrushShader<B>>>,
-    brush_yuv_image: Vec<BrushShader<B>>,
-    brush_radial_gradient: BrushShader<B>,
-    brush_linear_gradient: BrushShader<B>,
+    brush_yuv_image: Vec<BrushShader>,
+    brush_radial_gradient: BrushShader,
+    brush_linear_gradient: BrushShader,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    pub cs_clip_rectangle: LazilyCompiledShader<B>,
-    pub cs_clip_box_shadow: LazilyCompiledShader<B>,
-    pub cs_clip_image: LazilyCompiledShader<B>,
-    pub cs_clip_border: LazilyCompiledShader<B>,
-    pub cs_clip_line: LazilyCompiledShader<B>,
+    pub cs_clip_rectangle: LazilyCompiledShader,
+    pub cs_clip_box_shadow: LazilyCompiledShader,
+    pub cs_clip_image: LazilyCompiledShader,
+    pub cs_clip_border: LazilyCompiledShader,
+    pub cs_clip_line: LazilyCompiledShader,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -369,18 +369,18 @@ pub struct Shaders<B: hal::Backend> {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    pub ps_text_run: TextShader<B>,
-    pub ps_text_run_dual_source: TextShader<B>,
+    pub ps_text_run: TextShader,
+    pub ps_text_run_dual_source: TextShader,
     //ps_image: Vec<Option<PrimitiveShader<B>>>,
-    ps_image: PrimitiveShader<B>,
-    ps_border_corner: PrimitiveShader<B>,
-    ps_border_edge: PrimitiveShader<B>,
+    ps_image: PrimitiveShader,
+    ps_border_corner: PrimitiveShader,
+    ps_border_edge: PrimitiveShader,
 
-    ps_split_composite: LazilyCompiledShader<B>,
+    ps_split_composite: LazilyCompiledShader,
 }
 
-impl<B: hal::Backend> Shaders<B> {
-    pub fn new(
+impl Shaders {
+    pub fn new<B: hal::Backend>(
         device: &mut Device<B>,
         options: &RendererOptions,
     ) -> Result<Self, ShaderError> {
@@ -640,7 +640,7 @@ impl<B: hal::Backend> Shaders<B> {
             (color_space as usize)
     }
 
-    pub fn get(&mut self, key: &BatchKey) -> &mut LazilyCompiledShader<B> {
+    pub fn get(&mut self, key: &BatchKey) -> &mut LazilyCompiledShader {
         match key.kind {
             BatchKind::SplitComposite => {
                 &mut self.ps_split_composite
@@ -700,7 +700,7 @@ impl<B: hal::Backend> Shaders<B> {
         }
     }
 
-    pub fn deinit(self, device: &mut Device<B>) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.cs_blur_a8.deinit(device);
         self.cs_blur_rgba8.deinit(device);
         self.brush_solid.deinit(device);
