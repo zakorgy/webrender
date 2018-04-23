@@ -456,7 +456,7 @@ impl<B: hal::Backend> Shaders<B> {
 
         let cs_blur_a8 = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Blur),
-            "cs_blur_a8",
+            "cs_blur_alpha_target",
             &mut pipeline_requirements,
             device,
             options.precache_shaders,
@@ -464,7 +464,7 @@ impl<B: hal::Backend> Shaders<B> {
 
         let cs_blur_rgba8 = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Blur),
-            "cs_blur_rgba8",
+            "cs_blur_color_target",
             &mut pipeline_requirements,
             device,
             options.precache_shaders,
@@ -480,7 +480,7 @@ impl<B: hal::Backend> Shaders<B> {
 
         let cs_clip_box_shadow = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
-            "cs_clip_image_transform",
+            "cs_clip_box_shadow_transform",
             &mut pipeline_requirements,
             device,
             options.precache_shaders,
