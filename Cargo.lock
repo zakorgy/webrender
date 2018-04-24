@@ -492,20 +492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gfx-backend-empty"
-version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git#b8121153ce2bf81182105163a65166f686aaef6b"
-replace = "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b4241dcfe3a00f38b9304ce34765b21bcf918242)"
-
-[[package]]
-name = "gfx-backend-empty"
-version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=b4241dcfe3a00f38b9304ce34765b21bcf918242#b4241dcfe3a00f38b9304ce34765b21bcf918242"
-dependencies = [
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b4241dcfe3a00f38b9304ce34765b21bcf918242)",
-]
-
-[[package]]
 name = "gfx-backend-vulkan"
 version = "0.1.0"
 source = "git+https://github.com/gfx-rs/gfx.git#b8121153ce2bf81182105163a65166f686aaef6b"
@@ -1746,10 +1732,6 @@ dependencies = [
  "env_logger 0.5.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "euclid 0.17.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "font-loader 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
- "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
- "gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gleam 0.4.34 (registry+https://github.com/rust-lang/crates.io-index)",
  "glutin 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "image 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1764,7 +1746,6 @@ dependencies = [
  "time 0.1.39 (registry+https://github.com/rust-lang/crates.io-index)",
  "webrender 0.57.2",
  "webrender_api 0.57.2",
- "winit 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "yaml-rust 0.3.4 (git+https://github.com/vvuk/yaml-rust)",
 ]
 
@@ -1900,8 +1881,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum gdi32-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0912515a8ff24ba900422ecda800b52f4016a56251922d397c576bf92c690518"
 "checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b4241dcfe3a00f38b9304ce34765b21bcf918242)" = "<none>"
-"checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
-"checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b4241dcfe3a00f38b9304ce34765b21bcf918242)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=b4241dcfe3a00f38b9304ce34765b21bcf918242)" = "<none>"
 "checksum gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)" = "<none>"
