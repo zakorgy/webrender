@@ -788,7 +788,7 @@ fn main() {
     wrench.renderer.deinit();
 }
 
-#[cfg(not(feature = "gl"))]
+#[cfg(any(feature = "vulkan", feature = "dx12"))]
 fn main() {
     #[cfg(feature = "logging")]
         env_logger::init();
