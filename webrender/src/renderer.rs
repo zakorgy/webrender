@@ -23,7 +23,7 @@ use debug_colors;
 use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
-use device::{ApiCapabilities, VertexArrayKind};
+use device::{ApiCapabilities, BlurInstance, ClipMaskInstance, PrimitiveInstance, VertexArrayKind};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 use gleam::gl;
@@ -31,7 +31,7 @@ use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 #[cfg(feature = "pathfinder")]
 use gpu_glyph_renderer::GpuGlyphRenderer;
-use gpu_types::PrimitiveInstance;
+use gpu_types;
 use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, ResourceCacheError};
 use internal_types::{CacheTextureId, DebugOutput, FastHashMap, RenderedDocument, ResultMsg};
 use internal_types::{TextureUpdateList, TextureUpdateOp, TextureUpdateSource};
@@ -269,50 +269,59 @@ fn flag_changed(before: DebugFlags, after: DebugFlags, select: DebugFlags) -> Op
     }
 }
 
-/*impl<'a> From<&'a gpu_types::BlurInstance> for BlurInstance {
-    fn from(instance: &'a gpu_types::BlurInstance) -> BlurInstance {
+pub trait PrimitiveType {
+    type Primitive: Clone + Copy;
+    fn to_primitive_type(&self) -> Self::Primitive;
+}
+
+
+impl PrimitiveType for gpu_types::BlurInstance {
+    type Primitive = BlurInstance;
+    fn to_primitive_type(&self) -> BlurInstance {
         BlurInstance {
-            aBlurRenderTaskAddress: instance.task_address.0 as i32,
-            aBlurSourceTaskAddress: instance.src_task_address.0 as i32,
-            aBlurDirection: instance.blur_direction as i32,
+            aBlurRenderTaskAddress: self.task_address.0 as i32,
+            aBlurSourceTaskAddress: self.src_task_address.0 as i32,
+            aBlurDirection: self.blur_direction as i32,
         }
     }
 }
 
-impl<'a> From<&'a gpu_types::ClipMaskInstance> for ClipMaskInstance {
-    fn from(instance: &'a gpu_types::ClipMaskInstance) -> ClipMaskInstance {
+impl PrimitiveType for gpu_types::ClipMaskInstance {
+    type Primitive = ClipMaskInstance;
+    fn to_primitive_type(&self) -> ClipMaskInstance {
         ClipMaskInstance {
-            aClipRenderTaskAddress: instance.render_task_address.0 as i32,
-            aScrollNodeId: instance.scroll_node_data_index.0 as i32,
-            aClipSegment: instance.segment,
+            aClipRenderTaskAddress: self.render_task_address.0 as i32,
+            aScrollNodeId: self.scroll_node_data_index.0 as i32,
+            aClipSegment: self.segment,
             aClipDataResourceAddress: [
-                instance.clip_data_address.u as i32,
-                instance.clip_data_address.v as i32,
-                instance.resource_address.u as i32,
-                instance.resource_address.v as i32,
+                self.clip_data_address.u as i32,
+                self.clip_data_address.v as i32,
+                self.resource_address.u as i32,
+                self.resource_address.v as i32,
             ],
         }
     }
 }
 
-impl<'a> From<&'a gpu_types::PrimitiveInstance> for PrimitiveInstance {
-    fn from(instance: &'a gpu_types::PrimitiveInstance) -> PrimitiveInstance {
+impl PrimitiveType for gpu_types::PrimitiveInstance {
+    type Primitive = PrimitiveInstance;
+    fn to_primitive_type(&self) -> PrimitiveInstance {
         PrimitiveInstance {
             aData0: [
-                instance.data[0],
-                instance.data[1],
-                instance.data[2],
-                instance.data[3],
+                self.data[0],
+                self.data[1],
+                self.data[2],
+                self.data[3],
             ],
             aData1: [
-                instance.data[4],
-                instance.data[5],
-                instance.data[6],
-                instance.data[7],
+                self.data[4],
+                self.data[5],
+                self.data[6],
+                self.data[7],
             ],
         }
     }
-}*/
+}
 
 #[repr(C)]
 pub enum ShaderColorMode {
@@ -2130,6 +2139,7 @@ impl<B: hal::Backend> Renderer<B> {
             samplers
         };*/
 
+        let mut frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             //let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2266,6 +2276,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.end_frame();
         });
         self.last_time = current_time;
+
+        self.device.swap_buffers(frame_semaphore);
 
         if self.renderer_errors.is_empty() {
             Ok(stats)
@@ -2443,7 +2455,9 @@ impl<B: hal::Backend> Renderer<B> {
         vertex_array_kind: VertexArrayKind,
         textures: &BatchTextures,
         stats: &mut RendererStats,
-    ) {
+    )
+        where T: PrimitiveType
+    {
         for i in 0 .. textures.colors.len() {
             self.texture_resolver.bind(
                 &textures.colors[i],
@@ -2452,42 +2466,40 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
 
-        // TODO bind texture
+        self.device.bind_textures();
 
         // TODO: this probably isn't the best place for this.
         /*if let Some(ref texture) = self.dither_matrix_texture {
             self.device.bind_texture(TextureSampler::Dither, texture);
         }*/
 
-        self.draw_instanced_batch_with_previously_bound_textures(data, /*vertex_array_kind,*/ stats)
+        self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
     }
 
     pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T>(
         &mut self,
         data: &[T],
-        //vertex_array_kind: VertexArrayKind,
+        vertex_array_kind: VertexArrayKind,
         stats: &mut RendererStats,
-    ) {
+    )
+        where T: PrimitiveType
+    {
         //let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
 
         //self.device.bind_vao(vao);
 
         let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
 
+        let data = data.iter().map(|pi| pi.to_primitive_type()).collect::<Vec<T::Primitive>>();
         if batched {
-            //self.device
-            //    .update_vao_instances(vao, data);
-            // TODO bind instances
-            //self.device
-            //    .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
-            //TODO call draw
+            self.device.update_instances(&data);
+            self.device.draw();
             self.profile_counters.draw_calls.inc();
             stats.total_draw_calls += 1;
         } else {
             for i in 0 .. data.len() {
-                //self.device
-                //    .update_vao_instances(vao, &data[i .. i + 1]);
-                //self.device.draw_triangles_u16(0, 6);
+                self.device.update_instances(&data[ i .. i + 1]);
+                self.device.draw();
                 self.profile_counters.draw_calls.inc();
                 stats.total_draw_calls += 1;
             }
@@ -2563,7 +2575,7 @@ impl<B: hal::Backend> Renderer<B> {
     fn submit_batch(
         &mut self,
         key: &BatchKey,
-        instances: &[PrimitiveInstance],
+        instances: &[gpu_types::PrimitiveInstance],
         projection: &Transform3D<f32>,
         render_tasks: &RenderTaskTree,
         render_target: Option<(&Texture, i32)>,
@@ -2858,6 +2870,7 @@ impl<B: hal::Backend> Renderer<B> {
                             BlendMode::PremultipliedAlpha => {
                                 self.device.set_blend_mode_premultiplied_alpha();
                                 self.device.switch_mode(ShaderColorMode::from(glyph_format) as _);
+                                self.device.set_uniforms(projection);
 
                                 self.draw_instanced_batch(
                                     &batch.instances,
@@ -2869,6 +2882,7 @@ impl<B: hal::Backend> Renderer<B> {
                             BlendMode::SubpixelDualSource => {
                                 self.device.set_blend_mode_subpixel_dual_source();
                                 self.device.switch_mode(ShaderColorMode::SubpixelDualSource as _);
+                                self.device.set_uniforms(projection);
 
                                 self.draw_instanced_batch(
                                     &batch.instances,
@@ -2880,6 +2894,7 @@ impl<B: hal::Backend> Renderer<B> {
                             BlendMode::SubpixelConstantTextColor(color) => {
                                 self.device.set_blend_mode_subpixel_constant_text_color(color);
                                 self.device.switch_mode(ShaderColorMode::SubpixelConstantTextColor as _);
+                                self.device.set_uniforms(projection);
 
                                 self.draw_instanced_batch(
                                     &batch.instances,
@@ -2896,6 +2911,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 //
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass0();
                                 self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass0 as _);
+                                self.device.set_uniforms(projection);
 
                                 self.draw_instanced_batch(
                                     &batch.instances,
@@ -2906,20 +2922,19 @@ impl<B: hal::Backend> Renderer<B> {
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                                 self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
+                                self.device.set_uniforms(projection);
 
                                 // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                                 // are all set up from the previous draw_instanced_batch call,
                                 // so just issue a draw call here to avoid re-uploading the
                                 // instances and re-binding textures etc.
-                                unimplemented!();
-                                //self.device
-                                //    .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                                self.device.draw();
 
                                 self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                                 self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
+                                self.device.set_uniforms(projection);
 
-                                //self.device
-                                //    .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                                self.device.draw();
                             }
                             BlendMode::PremultipliedDestOut | BlendMode::None => {
                                 unreachable!("bug: bad blend mode for text");
@@ -3589,8 +3604,8 @@ impl<B: hal::Backend> Renderer<B> {
                         let projection = Transform3D::ortho(
                             0.0,
                             framebuffer_size.width as f32,
-                            framebuffer_size.height as f32,
                             0.0,
+                            framebuffer_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
                         );

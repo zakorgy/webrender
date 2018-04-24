@@ -1481,41 +1481,27 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    pub fn bind_textures(
-        &mut self,
-        device: &Device<B>,
-    ) {
-        const samplers: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
-        for &(index, sampler) in samplers.iter() {
-            if device.bound_textures[index] != 0 {
-                self.bind_texture(device, &device.bound_textures[index], &device.bound_sampler[index], sampler);
-            }
+    pub fn bind_texture(&mut self, device: &B::Device, image: &ImageCore<B>, sampler: &B::Sampler, binding: &'static str) {
+        if self.bindings_map.contains_key(&("t".to_owned() + binding)) {
+            device.write_descriptor_sets(vec![
+                hal::pso::DescriptorSetWrite {
+                    set: &self.descriptor_set,
+                    binding: self.bindings_map[&("t".to_owned() + binding)],
+                    array_offset: 0,
+                    descriptors: Some(
+                        hal::pso::Descriptor::Image(&image.view, image.state.get().1)
+                    ),
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &self.descriptor_set,
+                    binding: self.bindings_map[&("s".to_owned() + binding)],
+                    array_offset: 0,
+                    descriptors: Some(
+                        hal::pso::Descriptor::Sampler(sampler)
+                    )
+                },
+            ]);
         }
-    }
-
-    fn bind_texture(&mut self, device: &Device<B>, id: &TextureId, sampler: &TextureFilter, binding: &'static str) {
-        let sampler = match *sampler {
-            TextureFilter::Linear | TextureFilter::Trilinear => &device.sampler_linear,
-            TextureFilter::Nearest => &device.sampler_nearest,
-        };
-        device.device.write_descriptor_sets(vec![
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map[&("t".to_owned() + binding)],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Image(&device.images[id].core.view, device.images[id].core.state.get().1)
-                ),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map[&("s".to_owned() + binding)],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Sampler(sampler)
-                )
-            },
-        ]);
     }
 
     /*pub fn bind<T>(
@@ -1586,21 +1572,25 @@ impl<B: hal::Backend> Program<B> {
                 array_offset: 0,
                 descriptors: Some(hal::pso::Descriptor::Sampler(render_tasks_sampler)),
             },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["tLocalClipRects"],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Image(local_clip_rects, hal::image::Layout::Undefined)
-                ),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["sLocalClipRects"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Sampler(local_clip_rects_sampler)),
-            },
         ]);
+        if self.bindings_map.contains_key("tLocalClipRects") {
+            device.write_descriptor_sets(vec![
+                hal::pso::DescriptorSetWrite {
+                    set: &self.descriptor_set,
+                    binding: self.bindings_map["tLocalClipRects"],
+                    array_offset: 0,
+                    descriptors: Some(
+                        hal::pso::Descriptor::Image(local_clip_rects, hal::image::Layout::Undefined)
+                    ),
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &self.descriptor_set,
+                    binding: self.bindings_map["sLocalClipRects"],
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Sampler(local_clip_rects_sampler)),
+                },
+            ]);
+        }
     }
 
     fn init_dither_data<'a>(
@@ -2232,12 +2222,17 @@ impl<B: hal::Backend> Device<B> {
         self.bound_sampler = [TextureFilter::Linear; 16];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
-        self.reset_image_buffer_offsets();
     }
 
     pub fn reset_image_buffer_offsets(&mut self) {
         for img in self.images.values_mut() {
             img.upload_buffer.reset();
+        }
+    }
+
+    pub fn reset_program_buffer_offsets(&mut self) {
+        for img in self.programs.values_mut() {
+            img.instance_buffer.reset();
         }
     }
 
@@ -2301,6 +2296,7 @@ impl<B: hal::Backend> Device<B> {
         shader_name: &str,
         shader_kind: &ShaderKind,
     ) -> ProgramId {
+        println!("name={:?}", shader_name);
         let mut program = Program::create(
             pipeline_requirements,
             &self.device,
@@ -2426,14 +2422,39 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub fn bind_textures(&mut self) {
+        debug_assert!(self.inside_frame);
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        const samplers: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
+        let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
+        for &(index, sampler_name) in samplers.iter() {
+            if self.bound_textures[index] != 0 {
+                let sampler = match self.bound_sampler[index] {
+                    TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
+                    TextureFilter::Nearest => &self.sampler_nearest,
+                };
+                program.bind_texture(&self.device, &self.images[&self.bound_textures[index]].core, &sampler, sampler_name);
+            }
+        }
+    }
+
     pub fn set_uniforms(
         &mut self,
-        program: ProgramId,
         transform: &Transform3D<f32>,
     ) {
         debug_assert!(self.inside_frame);
-        assert_ne!(program, INVALID_PROGRAM_ID);
-        self.programs.get_mut(&program).expect("Program not found.").bind_locals(&self.device, transform, self.program_mode_id);
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_locals(&self.device, transform, self.program_mode_id);
+    }
+
+    pub fn update_instances<T>(
+        &mut self,
+        instances: &[T],
+    ) where
+        T: Copy
+    {
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_instances(&self.device, instances);
     }
 
     pub fn draw(
@@ -3297,7 +3318,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn disable_stencil(&self) {
-        unimplemented!();
+        //unimplemented!();
     }
 
     pub fn set_scissor_rect(&self, rect: DeviceIntRect) {
@@ -3309,7 +3330,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn disable_scissor(&self) {
-        unimplemented!();
+        //unimplemented!();
     }
 
     pub fn set_blend(&mut self, enable: bool) {
@@ -3429,6 +3450,9 @@ impl<B: hal::Backend> Device<B> {
         self.upload_queue.clear();
         self.command_pool.reset();
         self.reset_state();
+        self.reset_image_buffer_offsets();
+        self.reset_program_buffer_offsets();
+
         self.device.destroy_fence(frame_fence);
         self.device.destroy_semaphore(frame_semaphore);
     }

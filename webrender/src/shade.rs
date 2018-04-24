@@ -117,7 +117,7 @@ impl LazilyCompiledShader {
             }
         };
         device.bind_program(program);
-        device.set_uniforms(program, projection);
+        device.set_uniforms(projection);
     }
 
     fn get<B: hal::Backend>(&mut self, device: &mut Device<B>) -> Result<ProgramId, ShaderError> {
@@ -131,12 +131,6 @@ impl LazilyCompiledShader {
         }
 
         Ok(self.program.unwrap())
-    }
-
-    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
-        if let Some(ref program) = self.program {
-            device.reset_program(program) ;
-        }
     }
 
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
@@ -201,11 +195,6 @@ impl BrushShader {
         }
     }
 
-    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
-        self.opaque.reset(device);
-        self.alpha.reset(device);
-    }
-
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.opaque.deinit(device);
         self.alpha.deinit(device);
@@ -249,11 +238,6 @@ impl PrimitiveShader {
             TransformedRectKind::AxisAligned => &mut self.simple,
             TransformedRectKind::Complex => &mut self.transform,
         }
-    }
-
-    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
-        self.simple.reset(device);
-        self.transform.reset(device);
     }
 
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
@@ -320,12 +304,6 @@ impl TextShader {
             GlyphFormat::TransformedAlpha |
             GlyphFormat::TransformedSubpixel => &mut self.glyph_transform,
         }
-    }
-
-    fn reset<B: hal::Backend>(&self, device: &mut Device<B>) {
-        self.simple.reset(device);
-        self.transform.reset(device);
-        self.glyph_transform.reset(device)
     }
 
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
