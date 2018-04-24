@@ -14,4 +14,4 @@ branches:
     - master
 
 script:
-  - cargo test --verbose
+  - cargo build --verbose
