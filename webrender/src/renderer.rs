@@ -279,6 +279,8 @@ impl PrimitiveType for gpu_types::BlurInstance {
     type Primitive = BlurInstance;
     fn to_primitive_type(&self) -> BlurInstance {
         BlurInstance {
+            aData0: [0,0,0,0],
+            aData1: [0,0,0,0],
             aBlurRenderTaskAddress: self.task_address.0 as i32,
             aBlurSourceTaskAddress: self.src_task_address.0 as i32,
             aBlurDirection: self.blur_direction as i32,

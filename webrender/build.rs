@@ -548,21 +548,21 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     if file_name.starts_with("cs_blur") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 12 + 32, // size of Bluerinstance 3 * 4 + PrimitiveInstance 8 * 4
+                stride: 12 + 32, // size of BlurInstance 3 * 4 + PrimitiveInstance 8 * 4
                 rate: 1,
             }
         );
     } else if file_name.starts_with("cs_clip") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 28 + 32, // size of ClipMaskInstance 3 * 4 + 4 * 4 + PrimitiveInstance 8 * 4
+                stride: 28, // size of ClipMaskInstance 3 * 4 + 4 * 4
                 rate: 1,
             }
         );
     } else if file_name.starts_with("debug_color") {
         descriptors = vec![
             VertexBufferDesc{
-                stride: 12, // size of DebogColorVertex 4 * 4
+                stride: 12, // size of DebugColorVertex 4 * 4
                 rate: 0,
             },
         ];
