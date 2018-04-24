@@ -3422,6 +3422,7 @@ impl<B: hal::Backend> Renderer<B> {
             .iter()
             .position(|texture| {
                 //TODO: re-use a part of a larger target, if available
+                !texture.used_in_frame(frame_id) &&
                 selector == TargetSelector {
                     size: texture.get_dimensions(),
                     num_layers: texture.get_render_target_layer_count(),
