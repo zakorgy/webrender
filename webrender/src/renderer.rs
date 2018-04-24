@@ -3585,6 +3585,10 @@ impl<B: hal::Backend> Renderer<B> {
         self.texture_resolver.begin_frame();
 
         for (pass_index, pass) in frame.passes.iter_mut().enumerate() {
+            // Init SharedCacheA8 with dummy texture
+            if pass_index == 0 {
+                self.device.bind_texture(TextureSampler::SharedCacheA8, &self.texture_resolver.dummy_cache_texture);
+            }
             //self.gpu_profile.place_marker(&format!("pass {}", pass_index));
 
             self.texture_resolver.bind(
