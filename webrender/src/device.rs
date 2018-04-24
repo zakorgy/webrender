@@ -2298,7 +2298,6 @@ impl<B: hal::Backend> Device<B> {
         shader_name: &str,
         shader_kind: &ShaderKind,
     ) -> ProgramId {
-        println!("name={:?}", shader_name);
         let mut program = Program::create(
             pipeline_requirements,
             &self.device,
