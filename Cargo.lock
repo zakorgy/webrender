@@ -288,18 +288,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "direct-composition"
-version = "0.1.0"
-dependencies = [
- "euclid 0.17.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gleam 0.4.34 (registry+https://github.com/rust-lang/crates.io-index)",
- "mozangle 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "webrender 0.57.2",
- "winapi 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "winit 0.11.3 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "dlib"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
