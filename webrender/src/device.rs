@@ -3322,11 +3322,11 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn set_scissor_rect(&self, rect: DeviceIntRect) {
-        unimplemented!();
+        //unimplemented!();
     }
 
     pub fn enable_scissor(&self) {
-        unimplemented!();
+        //unimplemented!();
     }
 
     pub fn disable_scissor(&self) {
