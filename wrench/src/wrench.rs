@@ -29,7 +29,10 @@ use webrender::{ApiCapabilities, DebugFlags, RendererStats};
 #[cfg(not(feature = "gl"))]
 use winit::EventsLoopProxy;
 use yaml_frame_writer::YamlFrameWriterReceiver;
+#[cfg(feature = "gl")]
 use {WindowWrapper, NotifierEvent, BLACK_COLOR, WHITE_COLOR};
+#[cfg(not(feature = "gl"))]
+use NotifierEvent;
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -642,7 +645,7 @@ impl Wrench {
         self.api.send_transaction(self.document_id, txn);
     }
 
-
+    #[cfg(feature = "gl")]
     pub fn get_frame_profiles(
         &mut self,
     ) -> (Vec<webrender::CpuProfile>, Vec<webrender::GpuProfile>) {
