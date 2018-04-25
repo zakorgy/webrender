@@ -88,16 +88,19 @@ use reftest::{ReftestHarness, ReftestOptions};
 use std::ffi::CString;
 #[cfg(feature = "headless")]
 use std::mem;
+#[cfg(feature = "gl")]
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::process;
+#[cfg(feature = "gl")]
 use std::ptr;
+#[cfg(feature = "gl")]
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use webrender::DebugFlags;
 use webrender::api::*;
 #[cfg(not(feature = "gl"))]
-use winit::{ElementState, VirtualKeyCode, EventsLoop, EventsLoopProxy};
+use winit::VirtualKeyCode;
 use wrench::{Wrench, WrenchThing};
 use yaml_frame_reader::YamlFrameReader;
 
@@ -175,7 +178,7 @@ impl HeadlessContext {
         unsafe { mem::transmute(osmesa_sys::OSMesaGetProcAddress(c_str.as_ptr())) }
     }
 
-    #[cfg(not(all(feature = "headless", feature = "gl")))]
+    #[cfg(all(not(feature = "headless"), feature = "gl"))]
     fn get_proc_address(_: &str) -> *const c_void {
         ptr::null() as *const _
     }
@@ -413,10 +416,10 @@ fn make_window(
 #[cfg(not(feature = "gl"))]
 fn make_window(
     size: DeviceUintSize,
-    dp_ratio: Option<f32>,
-    vsync: bool,
+    _dp_ratio: Option<f32>,
+    _vsync: bool,
     events_loop: &Option<winit::EventsLoop>,
-    angle: bool,
+    _angle: bool,
 ) -> WindowWrapper {
     match *events_loop {
         Some(ref events_loop) => {
