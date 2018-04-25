@@ -304,7 +304,8 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
 }
 
 fn split_code(line: &str) -> Vec<&str> {
-    line.split(';').collect::<Vec<&str>>()[0]
+    line.split(';')
+        .collect::<Vec<&str>>()[0]
         .split(' ')
         .collect::<Vec<&str>>()
 }
@@ -498,7 +499,7 @@ fn add_attribute_descriptors(
                     location: *in_location,
                     binding: 0,
                     element: Element {
-                        format: format,
+                        format,
                         offset: *vertex_offset,
                     }
                 }
@@ -511,7 +512,7 @@ fn add_attribute_descriptors(
                     location: *in_location,
                     binding: 1,
                     element: Element {
-                        format: format,
+                        format,
                         offset: *instance_offset,
                     }
                 }
@@ -525,11 +526,11 @@ fn create_desciptor_range_descriptors(count: usize) -> Vec<DescriptorRangeDesc> 
     vec![
         DescriptorRangeDesc {
             ty: DescriptorType::SampledImage,
-            count: count,
+            count,
         },
         DescriptorRangeDesc {
             ty: DescriptorType::Sampler,
-            count: count,
+            count,
         },
         DescriptorRangeDesc {
             ty: DescriptorType::UniformBuffer,
@@ -561,15 +562,15 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
         );
     } else if file_name.starts_with("debug_color") {
         descriptors = vec![
-            VertexBufferDesc{
-                stride: 12, // size of DebugColorVertex 4 * 4
+            VertexBufferDesc {
+                stride: 16, // size of DebugColorVertex 4 * 4
                 rate: 0,
             },
         ];
     } else if file_name.starts_with("debug_font") {
         descriptors = vec![
-            VertexBufferDesc{
-                stride: 20, // size of DebugFontVertex 8 * 4
+            VertexBufferDesc {
+                stride: 32, // size of DebugFontVertex 8 * 4
                 rate: 0,
             },
         ];
