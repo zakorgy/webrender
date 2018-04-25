@@ -2556,11 +2556,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Need to invert the y coordinates and flip the image vertically when
         // reading back from the framebuffer.
-        if render_target.is_none() {
+        /*if render_target.is_none() {
             src.origin.y = framebuffer_size.height as i32 - src.size.height - src.origin.y;
             dest.origin.y += dest.size.height;
             dest.size.height = -dest.size.height;
-        }
+        }*/
 
         self.device.bind_read_target(render_target);
         self.device.blit_render_target(src, dest);
