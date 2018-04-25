@@ -652,6 +652,7 @@ impl<B: hal::Backend> Image<B> {
         image_width: u32,
         image_height: u32,
         image_depth: i32,
+        view_kind: hal::image::ViewKind,
         pitch_alignment: usize,
     ) -> Self {
         let (bytes_per_pixel, format) = match image_format {
@@ -680,7 +681,7 @@ impl<B: hal::Backend> Image<B> {
             device,
             memory_types,
             kind,
-            hal::image::ViewKind::D2Array,
+            view_kind,
             format,
             hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
             hal::image::SubresourceRange {
@@ -2721,6 +2722,10 @@ impl<B: hal::Backend> Device<B> {
             self.free_image(texture);
         }
         assert_eq!(self.images.contains_key(&texture.id), false);
+        let view_kind = match texture.filter {
+            TextureFilter::Nearest => hal::image::ViewKind::D2,
+            TextureFilter::Linear | TextureFilter::Trilinear  => hal::image::ViewKind::D2Array,
+        };
         let img = Image::new(
             &self.device,
             &self.memory_types,
@@ -2728,6 +2733,7 @@ impl<B: hal::Backend> Device<B> {
             texture.width,
             texture.height,
             texture.layer_count,
+            view_kind,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
