@@ -4101,7 +4101,7 @@ impl Default for RendererOptions {
             renderer_kind: RendererKind::Native,
             enable_subpixel_aa: false,
             clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
-            enable_clear_scissor: true,
+            enable_clear_scissor: false,
             max_texture_size: None,
             // Scattered GPU cache updates haven't met a test that would show their superiority yet.
             scatter_gpu_cache_updates: false,
