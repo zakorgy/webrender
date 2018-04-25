@@ -3965,6 +3965,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.delete_external_texture(ext);
         }
         self.device.end_frame();
+        self.device.deinit();
     }
 }
 

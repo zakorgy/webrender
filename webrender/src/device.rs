@@ -3477,6 +3477,9 @@ impl<B: hal::Backend> Device<B> {
         for image in self.frame_images {
             image.deinit(&self.device);
         }
+        for (_, program) in self.programs {
+            program.deinit(&self.device)
+        }
         for (_, image) in self.images {
             image.deinit(&self.device);
         }
