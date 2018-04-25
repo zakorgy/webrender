@@ -53,7 +53,6 @@ extern crate cfg_if;
 //#[cfg(any(feature = "debugger", feature = "capture", feature = "replay"))]
 #[macro_use]
 extern crate serde;
-#[macro_use]
 pub extern crate gfx_hal as hal;
 extern crate rand;
 
@@ -93,7 +92,7 @@ mod picture;
 mod prim_store;
 mod print_tree;
 mod profiler;
-mod query;
+//mod query;
 mod record;
 mod render_backend;
 mod render_task;

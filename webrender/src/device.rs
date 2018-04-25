@@ -2,29 +2,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use super::shader_source;
 use api::{ColorF, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
 use euclid::Transform3D;
 //use gleam::gl;
 use internal_types::{FastHashMap, RenderTargetInfo};
-use log::Level;
 use rand::{self, Rng};
-use smallvec::SmallVec;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
-use std::marker::PhantomData;
 use std::mem;
 use std::ops::Add;
 use std::path::PathBuf;
-use std::ptr;
-use std::rc::Rc;
 use std::slice;
 use std::thread;
 
@@ -35,7 +28,6 @@ use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, V
 use hal::pso::{BlendState, BlendOp, Comparison, DepthTest, Factor};
 use hal::{Device as BackendDevice, PhysicalDevice, QueueFamily, Surface, Swapchain};
 use hal::{Backbuffer, DescriptorPool, FrameSync, Primitive, SwapchainConfig};
-use hal::format::{ChannelType, Format, Swizzle};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
@@ -181,7 +173,7 @@ const SHADER_IMPORT: &str = "#include ";*/
 pub struct TextureSlot(pub usize);
 
 // In some places we need to temporarily bind a texture to any slot.
-const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
+//const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 
 #[repr(u32)]
 pub enum DepthFunction {
@@ -199,7 +191,7 @@ pub enum TextureFilter {
     Trilinear,
 }
 
-#[derive(Debug)]
+/*#[derive(Debug)]
 pub enum VertexAttributeKind {
     F32,
     #[cfg(feature = "debug_renderer")]
@@ -225,7 +217,7 @@ pub struct VertexDescriptor {
 enum FBOTarget {
     Read,
     Draw,
-}
+}*/
 
 /// Method of uploading texel data from CPU to GPU.
 #[derive(Debug, Clone)]
@@ -254,14 +246,14 @@ pub trait FileWatcherHandler: Send {
 #[cfg_attr(feature = "replay", derive(Clone))]
 pub struct ExternalTexture {
     id: u32,
-    target: TextureTarget,
+    _target: TextureTarget,
 }
 
 impl ExternalTexture {
-    pub fn new(id: u32, target: TextureTarget) -> Self {
+    pub fn new(id: u32, _target: TextureTarget) -> Self {
         ExternalTexture {
             id,
-            target,
+            _target,
         }
     }
 
@@ -273,7 +265,7 @@ impl ExternalTexture {
 
 pub struct Texture {
     id: TextureId,
-    target: TextureTarget,
+    _target: TextureTarget,
     layer_count: i32,
     format: ImageFormat,
     width: u32,
@@ -328,7 +320,7 @@ impl Texture {
     pub fn into_external(mut self) -> ExternalTexture {
         let ext = ExternalTexture {
             id: self.id,
-            target: self.target,
+            _target: self._target,
         };
         self.id = 0; // don't complain, moved out
         ext
@@ -412,14 +404,6 @@ const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
 
 const MAX: BlendState = BlendState::On {
     color: BlendOp::Max,
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-};
-
-const MIN: BlendState = BlendState::On {
-    color: BlendOp::Min,
     alpha: BlendOp::Add {
         src: Factor::One,
         dst: Factor::One,
@@ -606,7 +590,7 @@ impl<B: hal::Backend> ImageCore<B> {
         }
     }
 
-    fn reset(&self) {
+    fn _reset(&self) {
         self.state.set((hal::image::Access::empty(), hal::image::Layout::Undefined));
     }
 
@@ -720,7 +704,7 @@ impl<B: hal::Backend> Image<B> {
             hal::image::Layout::TransferDstOptimal,
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::TRANSFER,
+                PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                 hal::memory::Dependencies::empty(),
                 &[barrier],
             );
@@ -764,7 +748,7 @@ impl<B: hal::Backend> Image<B> {
             hal::image::Layout::ColorAttachmentOptimal,
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                 hal::memory::Dependencies::empty(),
                 &[barrier],
             );
@@ -853,7 +837,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             unimplemented!("TODO: implement resize");
         }
         let image_data_width_in_bytes = (image_data_length as usize * self.image_upload_buffer.data_stride) as u64;
-        let buffer_offset = (image_offset.y as u64 * self.image_upload_buffer.row_pitch_in_bytes as u64);
+        let buffer_offset = image_offset.y as u64 * self.image_upload_buffer.row_pitch_in_bytes as u64;
         assert_eq!(buffer_offset % (offset_alignment + 1) as u64, 0);
         let _ = self.image_upload_buffer.update(device, buffer_offset, image_data_width_in_bytes, image_data, offset_alignment);
 
@@ -864,7 +848,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             hal::image::Layout::TransferDstOptimal
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::VERTEX_SHADER .. hal::pso::PipelineStage::TRANSFER,
+                PipelineStage::VERTEX_SHADER .. PipelineStage::TRANSFER,
                 hal::memory::Dependencies::empty(),
                 &[barrier],
             );
@@ -903,7 +887,7 @@ impl<B: hal::Backend> VertexDataImage<B> {
             hal::image::Layout::ShaderReadOnlyOptimal
         ) {
             cmd_buffer.pipeline_barrier(
-                hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::VERTEX_SHADER,
+                PipelineStage::TRANSFER .. PipelineStage::VERTEX_SHADER,
                 hal::memory::Dependencies::empty(),
                 &[barrier],
             );
@@ -922,7 +906,7 @@ pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
     pub data_stride: usize,
-    state: Cell<hal::buffer::State>,
+    _state: Cell<hal::buffer::State>,
 }
 
 impl<B: hal::Backend> Buffer<B> {
@@ -956,7 +940,7 @@ impl<B: hal::Backend> Buffer<B> {
             memory,
             buffer,
             data_stride,
-            state: Cell::new(hal::buffer::Access::empty())
+            _state: Cell::new(hal::buffer::Access::empty())
         }
     }
 
@@ -984,15 +968,15 @@ impl<B: hal::Backend> Buffer<B> {
         device.release_mapping_writer(data);
     }
 
-    fn transit(
+    fn _transit(
         &self,
         access: hal::buffer::Access,
     ) -> Option<hal::memory::Barrier<B>> {
-        let src_state = self.state.get();
+        let src_state = self._state.get();
         if src_state == access {
             None
         } else {
-            self.state.set(access);
+            self._state.set(access);
             Some(hal::memory::Barrier::Buffer {
                 states: src_state .. access,
                 target: &self.buffer,
@@ -1214,7 +1198,7 @@ impl<B: hal::Backend> UniformBuffer<B> {
         self.size += 1;
     }
 
-    pub fn reset(&mut self) {
+    pub fn _reset(&mut self) {
         self.size = 0;
     }
 
@@ -1711,7 +1695,7 @@ impl<B: hal::Backend> Framebuffer<B> {
                 &image.core.image,
                 hal::image::ViewKind::D2Array,
                 format,
-                Swizzle::NO,
+                hal::format::Swizzle::NO,
                 hal::image::SubresourceRange {
                     aspects: hal::format::Aspects::COLOR,
                     levels: 0 .. 1,
@@ -1847,7 +1831,7 @@ pub struct Device<B: hal::Backend> {
     //default_draw_fbo: FBOId,
 
     device_pixel_ratio: f32,
-    upload_method: UploadMethod,
+    _upload_method: UploadMethod,
 
     // HW or API capabilities
     #[cfg(feature = "debug_renderer")]
@@ -1857,10 +1841,10 @@ pub struct Device<B: hal::Backend> {
     inside_frame: bool,
 
     // resources
-    resource_override_path: Option<PathBuf>,
+    _resource_override_path: Option<PathBuf>,
 
     max_texture_size: u32,
-    renderer_name: String,
+    _renderer_name: String,
 
     // Frame counter. This is used to map between CPU
     // frames and GPU frames.
@@ -2171,11 +2155,11 @@ impl<B: hal::Backend> Device<B> {
             current_blend_state: BlendState::Off,
             current_depth_test: DepthTest::Off,
             blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
-            resource_override_path,
+            _resource_override_path: resource_override_path,
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
             device_pixel_ratio: 1.0,
-            upload_method,
+            _upload_method: upload_method,
             inside_frame: false,
 
             #[cfg(feature = "debug_renderer")]
@@ -2195,7 +2179,7 @@ impl<B: hal::Backend> Device<B> {
             program_mode_id: 0,
 
             max_texture_size,
-            renderer_name,
+            _renderer_name: renderer_name,
             frame_id: FrameId(0),
             features,
             api_capabilities,
@@ -2284,9 +2268,9 @@ impl<B: hal::Backend> Device<B> {
             ));
     }
 
-    pub fn delete_program(&mut self, mut program: ProgramId) {
+    pub fn delete_program(&mut self, mut _program: ProgramId) {
         // TODO delete program
-        program = INVALID_PROGRAM_ID;
+        _program = INVALID_PROGRAM_ID;
     }
 
     pub fn reset_program(&mut self, program: &ProgramId) {
@@ -2427,9 +2411,9 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        const samplers: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
+        const SAMPLERS: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        for &(index, sampler_name) in samplers.iter() {
+        for &(index, sampler_name) in SAMPLERS.iter() {
             if self.bound_textures[index] != 0 {
                 let sampler = match self.bound_sampler[index] {
                     TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
@@ -2599,12 +2583,12 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> FBOId {
+    pub fn create_fbo_for_external_texture(&mut self, _texture_id: u32) -> FBOId {
         warn!("External texture creation is missing");
         FBOId(0)
     }
 
-    pub fn delete_fbo(&mut self, fbo: FBOId) {
+    pub fn delete_fbo(&mut self, _fbo: FBOId) {
         warn!("delete fbo is missing");
     }
 
@@ -2663,7 +2647,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> Texture {
         Texture {
             id: 0,
-            target,
+            _target: target,
             width: 0,
             height: 0,
             layer_count: 0,
@@ -2680,8 +2664,8 @@ impl<B: hal::Backend> Device<B> {
     /// preserves the data by blitting the old texture contents over.
     pub fn resize_renderable_texture(
         &mut self,
-        texture: &mut Texture,
-        new_size: DeviceUintSize,
+        _texture: &mut Texture,
+        _new_size: DeviceUintSize,
     ) {
         unimplemented!();
     }
@@ -2739,7 +2723,7 @@ impl<B: hal::Backend> Device<B> {
 
         assert_eq!(texture.fbo_ids.len(), 0);
 
-        let (mut depth_rb, allocate_depth) = match texture.depth_rb {
+        let (depth_rb, allocate_depth) = match texture.depth_rb {
             Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
             None if rt_info.has_depth => {
                 let depth_rb = self.generate_rbo_id();
@@ -2764,7 +2748,6 @@ impl<B: hal::Backend> Device<B> {
                 );
                 self.rbos.insert(depth_rb, rbo);
             } else {
-                depth_rb = RBOId(0);
                 texture.depth_rb = None;
             }
         }
@@ -3087,7 +3070,6 @@ impl<B: hal::Backend> Device<B> {
                 );
             }
 
-            let buffer_width = rect.size.width * bytes_per_pixel as u32;
             cmd_buffer.copy_image_to_buffer(
                 &image.image,
                 hal::image::Layout::TransferSrcOptimal,
@@ -3117,7 +3099,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::ColorAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::TRANSFER .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3146,7 +3128,7 @@ impl<B: hal::Backend> Device<B> {
                     //hal::format::SurfaceType::R8_G8_B8_A8 => (0, 1, 2, 3),
                     _ => (0, 1, 2, 3)
                 };
-                for (i, d) in reader.iter().enumerate() {
+                for d in reader.iter() {
                     let data = *d;
                     output[offset + 0] = data[i0];
                     output[offset + 1] = data[i1];
@@ -3211,7 +3193,7 @@ impl<B: hal::Backend> Device<B> {
     ) {
         let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
 
-        if let Some(rect) = rect {
+        if let Some(_rect) = rect {
             //TODO handle scissors
         }
 
@@ -3238,7 +3220,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::TransferDstOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3258,7 +3240,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::ColorAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3272,7 +3254,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::TransferDstOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3292,7 +3274,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::DepthStencilAttachmentOptimal,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS .. hal::pso::PipelineStage::EARLY_FRAGMENT_TESTS,
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3309,7 +3291,7 @@ impl<B: hal::Backend> Device<B> {
         self.current_depth_test = DepthTest::Off;
     }
 
-    pub fn set_depth_func(&mut self, depth_func: DepthFunction) {
+    pub fn set_depth_func(&mut self, _depth_func: DepthFunction) {
         // TODO add Less depth function
         //self.current_depth_test = depth_func;
     }
@@ -3325,19 +3307,19 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn disable_stencil(&self) {
-        //unimplemented!();
+        warn!("disable stencil is missing")
     }
 
-    pub fn set_scissor_rect(&self, rect: DeviceIntRect) {
-        //unimplemented!();
+    pub fn set_scissor_rect(&self, _rect: DeviceIntRect) {
+        warn!("set scissor rect is missing")
     }
 
     pub fn enable_scissor(&self) {
-        //unimplemented!();
+        warn!("enable scissor is missing")
     }
 
     pub fn disable_scissor(&self) {
-        //unimplemented!();
+        warn!("disable scissor is missing")
     }
 
     pub fn set_blend(&mut self, enable: bool) {
@@ -3430,7 +3412,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::Present,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT .. hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3493,7 +3475,7 @@ impl<B: hal::Backend> Device<B> {
     }
 }
 
-fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
+fn _texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
     unsafe {
         slice::from_raw_parts(texels.as_ptr() as *const u8, texels.len() * mem::size_of::<T>())
     }

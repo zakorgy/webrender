@@ -13,10 +13,10 @@ use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
 use hal;
 use renderer::{
-    desc,
-    MAX_VERTEX_TEXTURE_WIDTH,
+    //desc,
+    //MAX_VERTEX_TEXTURE_WIDTH,
     BlendMode, ImageBufferKind, RendererError, RendererOptions,
-    TextureSampler,
+    //TextureSampler,
 };
 use ron::de::from_reader;
 use std::collections::HashMap;
@@ -24,11 +24,11 @@ use std::fs::File;
 use util::TransformedRectKind;
 
 //use gleam::gl::GlType;
-use time::precise_time_ns;
+//use time::precise_time_ns;
 
 
 impl ImageBufferKind {
-    pub(crate) fn get_feature_string(&self) -> &'static str {
+    pub(crate) fn _get_feature_string(&self) -> &'static str {
         match *self {
             ImageBufferKind::Texture2D => "TEXTURE_2D",
             ImageBufferKind::Texture2DArray => "",
@@ -48,16 +48,16 @@ impl ImageBufferKind {
     }*/
 }
 
-pub const IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
+pub const _IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
     ImageBufferKind::Texture2D,
     ImageBufferKind::TextureRect,
     ImageBufferKind::TextureExternal,
     ImageBufferKind::Texture2DArray,
 ];
 
-const TRANSFORM_FEATURE: &str = "TRANSFORM";
-const ALPHA_FEATURE: &str = "ALPHA_PASS";
-const DITHERING_FEATURE: &str = "DITHERING";
+const _TRANSFORM_FEATURE: &str = "TRANSFORM";
+const _ALPHA_FEATURE: &str = "ALPHA_PASS";
+const _DITHERING_FEATURE: &str = "DITHERING";
 
 
 pub struct LazilyCompiledShader {
@@ -72,12 +72,12 @@ impl LazilyCompiledShader {
         kind: ShaderKind,
         name: &'static str,
         pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
-        device: &mut Device<B>,
+        _device: &mut Device<B>,
         precache: bool,
     ) -> Result<Self, ShaderError> {
         let pipeline_requirements =
             pipeline_requirements.remove(name).expect(&format!("Pipeline requirements not found for: {}", name));
-        let mut shader = LazilyCompiledShader {
+        let shader = LazilyCompiledShader {
             program: None,
             name,
             kind,
