@@ -33,10 +33,6 @@ use hal::pso::PipelineStage;
 use hal::queue::Submission;
 //use ron::de::from_reader;
 
-pub const NODE_TEXTURE_WIDTH: usize = 1017; // 113 * ( 36 / 4)
-pub const RENDER_TASK_TEXTURE_WIDTH: usize = 1024; // 512 * ( 8 / 4 )
-pub const CLIP_RECTS_TEXTURE_WIDTH: usize = 1024;
-pub const TEXTURE_HEIGHT: usize = 8;
 pub const MAX_INSTANCE_COUNT: usize = 1024;
 const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
@@ -639,18 +635,18 @@ impl<B: hal::Backend> Image<B> {
         view_kind: hal::image::ViewKind,
         pitch_alignment: usize,
     ) -> Self {
-        let (bytes_per_pixel, format) = match image_format {
-            ImageFormat::R8 => (1, hal::format::Format::R8Unorm),
-            ImageFormat::RG8 => (2, hal::format::Format::Rg8Unorm),
-            ImageFormat::BGRA8 => (4, hal::format::Format::Bgra8Unorm),
-            _ => unimplemented!("TODO image format missing"),
+        let format = match image_format {
+            ImageFormat::R8 => hal::format::Format::R8Unorm,
+            ImageFormat::RG8 => hal::format::Format::Rg8Unorm,
+            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
+            ImageFormat::RGBAF32 => hal::format::Format::Rgba32Float,
         };
         let upload_buffer = CopyBuffer::create(
             device,
             memory_types,
             hal::buffer::Usage::TRANSFER_SRC,
             1, // Data stride is 1, because we receive image data as [u8].
-            (image_width * bytes_per_pixel) as usize,
+            (image_width * image_format.bytes_per_pixel()) as usize,
             image_height as usize,
             pitch_alignment,
         );
@@ -1504,17 +1500,11 @@ impl<B: hal::Backend> Program<B> {
         self.bind_textures(device);
     }*/
 
-    pub fn init_vertex_data(
+    fn init_resource_cache(
         &mut self,
         device: &B::Device,
         resource_cache: &B::ImageView,
         resource_cache_sampler: &B::Sampler,
-        node_data: &B::ImageView,
-        node_data_sampler: &B::Sampler,
-        render_tasks: &B::ImageView,
-        render_tasks_sampler: &B::Sampler,
-        local_clip_rects: &B::ImageView,
-        local_clip_rects_sampler: &B::Sampler,
     ) {
         device.write_descriptor_sets(vec![
             hal::pso::DescriptorSetWrite {
@@ -1531,53 +1521,7 @@ impl<B: hal::Backend> Program<B> {
                 array_offset: 0,
                 descriptors: Some(hal::pso::Descriptor::Sampler(resource_cache_sampler)),
             },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["tClipScrollNodes"],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Image(node_data, hal::image::Layout::Undefined)
-                ),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["sClipScrollNodes"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Sampler(node_data_sampler)),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["tRenderTasks"],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Image(render_tasks, hal::image::Layout::Undefined)
-                ),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["sRenderTasks"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Sampler(render_tasks_sampler)),
-            },
         ]);
-        if self.bindings_map.contains_key("tLocalClipRects") {
-            device.write_descriptor_sets(vec![
-                hal::pso::DescriptorSetWrite {
-                    set: &self.descriptor_set,
-                    binding: self.bindings_map["tLocalClipRects"],
-                    array_offset: 0,
-                    descriptors: Some(
-                        hal::pso::Descriptor::Image(local_clip_rects, hal::image::Layout::Undefined)
-                    ),
-                },
-                hal::pso::DescriptorSetWrite {
-                    set: &self.descriptor_set,
-                    binding: self.bindings_map["sLocalClipRects"],
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Sampler(local_clip_rects_sampler)),
-                },
-            ]);
-        }
     }
 
     fn init_dither_data<'a>(
@@ -1806,9 +1750,6 @@ pub struct Device<B: hal::Backend> {
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
     pub resource_cache: VertexDataImage<B>,
-    pub render_tasks: VertexDataImage<B>,
-    pub local_clip_rects: VertexDataImage<B>,
-    pub node_data: VertexDataImage<B>,
     dither_texture: Option<Texture>,
     pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
@@ -2099,33 +2040,6 @@ impl<B: hal::Backend> Device<B> {
             (limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
-        let render_tasks = VertexDataImage::create(
-            &device,
-            &memory_types,
-            mem::size_of::<[f32; 8]>(),
-            RENDER_TASK_TEXTURE_WIDTH as u32,
-            TEXTURE_HEIGHT as u32,
-            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
-        );
-
-        let local_clip_rects = VertexDataImage::create(
-            &device,
-            &memory_types,
-            mem::size_of::<[f32; 4]>(),
-            CLIP_RECTS_TEXTURE_WIDTH as u32,
-            TEXTURE_HEIGHT as u32,
-            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
-        );
-
-        let node_data = VertexDataImage::create(
-            &device,
-            &memory_types,
-            mem::size_of::<[f32; 36]>(),
-            NODE_TEXTURE_WIDTH as u32,
-            TEXTURE_HEIGHT as u32,
-            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
-        );
-
         Device {
             device,
             limits,
@@ -2146,9 +2060,6 @@ impl<B: hal::Backend> Device<B> {
             sampler_linear,
             sampler_nearest,
             resource_cache,
-            render_tasks,
-            local_clip_rects,
-            node_data,
             dither_texture: None,
             upload_queue: Vec::new(),
             current_frame_id: 0,
@@ -2235,39 +2146,6 @@ impl<B: hal::Backend> Device<B> {
             ));
     }
 
-    pub fn update_render_tasks(&mut self, task_data: &[[f32; 8]]) {
-        self.upload_queue
-            .push(self.render_tasks.update(
-                &mut self.device,
-                &mut self.command_pool,
-                DeviceUintPoint::zero(),
-                task_data,
-                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
-            ));
-    }
-
-    pub fn update_local_rects(&mut self, local_data: &[[f32; 4]]) {
-        self.upload_queue
-            .push(self.local_clip_rects.update(
-                &mut self.device,
-                &mut self.command_pool,
-                DeviceUintPoint::zero(),
-                local_data,
-                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
-            ));
-    }
-
-    pub fn update_node_data(&mut self, node_data: &[[f32; 36]]) {
-        self.upload_queue
-            .push(self.node_data.update(
-                &mut self.device,
-                &mut self.command_pool,
-                DeviceUintPoint::zero(),
-                node_data,
-                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
-            ));
-    }
-
     pub fn delete_program(&mut self, mut _program: ProgramId) {
         // TODO delete program
         _program = INVALID_PROGRAM_ID;
@@ -2291,15 +2169,9 @@ impl<B: hal::Backend> Device<B> {
             shader_kind,
             &self.render_pass,
         );
-        program.init_vertex_data(
+        program.init_resource_cache(
             &self.device,
             &self.resource_cache.core.view,
-            &self.sampler_nearest,
-            &self.node_data.core.view,
-            &self.sampler_nearest,
-            &self.render_tasks.core.view,
-            &self.sampler_nearest,
-            &self.local_clip_rects.core.view,
             &self.sampler_nearest,
         );
 
@@ -2411,7 +2283,17 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        const SAMPLERS: [(usize, &'static str); 6] = [(0, "Color0"), (1, "Color1"), (2, "Color2"), (3, "CacheA8"), (4, "CacheRGBA8"), (9, "SharedCacheA8")];
+        const SAMPLERS: [(usize, &'static str); 9] = [
+            (0, "Color0"),
+            (1, "Color1"),
+            (2, "Color2"),
+            (3, "CacheA8"),
+            (4, "CacheRGBA8"),
+            (6, "ClipScrollNodes"),
+            (7, "RenderTasks"),
+            (9, "SharedCacheA8"),
+            (10, "LocalClipRects")
+        ];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
         for &(index, sampler_name) in SAMPLERS.iter() {
             if self.bound_textures[index] != 0 {
@@ -2678,7 +2560,7 @@ impl<B: hal::Backend> Device<B> {
         filter: TextureFilter,
         render_target: Option<RenderTargetInfo>,
         layer_count: i32,
-        pixels: Option<&[u8]>,
+        pixels: Option<&[T]>,
     ) {
         debug_assert!(self.inside_frame);
 
@@ -2696,8 +2578,6 @@ impl<B: hal::Backend> Device<B> {
         texture.layer_count = layer_count;
         texture.render_target = render_target;
         texture.last_frame_used = self.frame_id;
-
-        let rt_info = render_target.unwrap_or(RenderTargetInfo { has_depth: false});
 
         if texture.id == 0 {
             let id = self.generate_texture_id();
@@ -2723,45 +2603,47 @@ impl<B: hal::Backend> Device<B> {
 
         assert_eq!(texture.fbo_ids.len(), 0);
 
-        let (depth_rb, allocate_depth) = match texture.depth_rb {
-            Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
-            None if rt_info.has_depth => {
-                let depth_rb = self.generate_rbo_id();
-                texture.depth_rb = Some(depth_rb);
-                (depth_rb, true)
-            },
-            None => (RBOId(0), false),
-        };
-
-        if allocate_depth {
-            if self.rbos.contains_key(&depth_rb) {
-                let old_rbo = self.rbos.remove(&depth_rb).unwrap();
-                old_rbo.deinit(&self.device);
-            }
-            if rt_info.has_depth {
-                let rbo = DepthBuffer::new(
-                    &self.device,
-                    &self.memory_types,
-                    texture.width,
-                    texture.height,
-                    self.depth_format
-                );
-                self.rbos.insert(depth_rb, rbo);
-            } else {
-                texture.depth_rb = None;
-            }
-        }
-
-        let new_fbos = self.generate_fbo_ids(texture.layer_count);
-
-        for i in 0..texture.layer_count as u16 {
-            let (rbo_id, depth) = match texture.depth_rb {
-                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
-                None => (RBOId(0), None)
+        if let Some(rt_info) = render_target {
+            let (depth_rb, allocate_depth) = match texture.depth_rb {
+                Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
+                None if rt_info.has_depth => {
+                    let depth_rb = self.generate_rbo_id();
+                    texture.depth_rb = Some(depth_rb);
+                    (depth_rb, true)
+                },
+                None => (RBOId(0), false),
             };
-            let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(),depth);
-            self.fbos.insert(new_fbos[i as usize],fbo);
-            texture.fbo_ids.push(new_fbos[i as usize]);
+
+            if allocate_depth {
+                if self.rbos.contains_key(&depth_rb) {
+                    let old_rbo = self.rbos.remove(&depth_rb).unwrap();
+                    old_rbo.deinit(&self.device);
+                }
+                if rt_info.has_depth {
+                    let rbo = DepthBuffer::new(
+                        &self.device,
+                        &self.memory_types,
+                        texture.width,
+                        texture.height,
+                        self.depth_format
+                    );
+                    self.rbos.insert(depth_rb, rbo);
+                } else {
+                    texture.depth_rb = None;
+                }
+            }
+
+            let new_fbos = self.generate_fbo_ids(texture.layer_count);
+
+            for i in 0..texture.layer_count as u16 {
+                let (rbo_id, depth) = match texture.depth_rb {
+                    Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
+                    None => (RBOId(0), None)
+                };
+                let fbo = Framebuffer::new(&self.device, &texture, &img, i, &self.render_pass, rbo_id.clone(), depth);
+                self.fbos.insert(new_fbos[i as usize], fbo);
+                texture.fbo_ids.push(new_fbos[i as usize]);
+            }
         }
 
         self.images.insert(texture.id, img);
@@ -2781,7 +2663,7 @@ impl<B: hal::Backend> Device<B> {
                                 DeviceUintSize::new(texture.width, texture.height),
                             ),
                             0,
-                            data,
+                            texels_to_u8_slice(data),
                             (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
                         )
                 );
@@ -2970,20 +2852,18 @@ impl<B: hal::Backend> Device<B> {
         self.program_mode_id = mode;
     }
 
-    pub fn upload_texture(
+    pub fn upload_texture<T>(
         &mut self,
         texture: &Texture,
         rect: DeviceUintRect,
         layer_index: i32,
         stride: Option<u32>,
-        data: &[u8],
+        data: &[T],
     ) {
-        let data_stride: usize = match texture.format {
-            ImageFormat::R8 => 1,
-            ImageFormat::RG8 => 2,
-            ImageFormat::BGRA8 => 4,
-            _ => unimplemented!("TODO image format missing"),
+        let data = unsafe {
+            slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * mem::size_of::<T>())
         };
+        let data_stride: usize = texture.format.bytes_per_pixel() as usize;
         let width = rect.size.width as usize;
         let height = rect.size.height as usize;
         let size = width * height * data_stride;
@@ -3469,13 +3349,10 @@ impl<B: hal::Backend> Device<B> {
             rbo.deinit(&self.device);
         }
         self.resource_cache.deinit(&self.device);
-        self.render_tasks.deinit(&self.device);
-        self.local_clip_rects.deinit(&self.device);
-        self.node_data.deinit(&self.device);
     }
 }
 
-fn _texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
+fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
     unsafe {
         slice::from_raw_parts(texels.as_ptr() as *const u8, texels.len() * mem::size_of::<T>())
     }
