@@ -71,6 +71,7 @@ env_logger = "0.5"
 glutin = "0.13"             # for the example apps
 winit = "0.12"
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git" }
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 
 [target.'cfg(windows)'.dev-dependencies]
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git" }

@@ -2,15 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate gleam;
-extern crate glutin;
+//extern crate gleam;
+//extern crate glutin;
 extern crate webrender;
+extern crate winit;
 
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
-use gleam::gl;
+//use gleam::gl;
 use std::mem;
 use webrender::api::*;
 
@@ -188,14 +189,14 @@ impl Example for App {
 
     fn on_event(
         &mut self,
-        event: glutin::WindowEvent,
+        event: winit::WindowEvent,
         api: &RenderApi,
         _document_id: DocumentId,
     ) -> bool {
         match event {
-            glutin::WindowEvent::KeyboardInput {
-                input: glutin::KeyboardInput {
-                    state: glutin::ElementState::Pressed,
+            winit::WindowEvent::KeyboardInput {
+                input: winit::KeyboardInput {
+                    state: winit::ElementState::Pressed,
                     virtual_keycode: Some(key),
                     ..
                 },
@@ -204,7 +205,7 @@ impl Example for App {
                 let mut updates = ResourceUpdates::new();
 
                 match key {
-                    glutin::VirtualKeyCode::S => {
+                    winit::VirtualKeyCode::S => {
                         self.stress_keys.clear();
 
                         for _ in 0 .. 16 {
@@ -226,10 +227,10 @@ impl Example for App {
                             }
                         }
                     }
-                    glutin::VirtualKeyCode::D => if let Some(image_key) = self.image_key.take() {
+                    winit::VirtualKeyCode::D => if let Some(image_key) = self.image_key.take() {
                         updates.delete_image(image_key);
                     },
-                    glutin::VirtualKeyCode::U => if let Some(image_key) = self.image_key {
+                    winit::VirtualKeyCode::U => if let Some(image_key) = self.image_key {
                         let size = 128;
                         self.image_generator.generate_image(size);
 
@@ -240,7 +241,7 @@ impl Example for App {
                             None,
                         );
                     },
-                    glutin::VirtualKeyCode::E => {
+                    winit::VirtualKeyCode::E => {
                         if let Some(image_key) = self.image_key.take() {
                             updates.delete_image(image_key);
                         }
@@ -263,7 +264,7 @@ impl Example for App {
 
                         self.image_key = Some(image_key);
                     }
-                    glutin::VirtualKeyCode::R => {
+                    winit::VirtualKeyCode::R => {
                         if let Some(image_key) = self.image_key.take() {
                             updates.delete_image(image_key);
                         }
@@ -295,7 +296,7 @@ impl Example for App {
 
     fn get_image_handlers(
         &mut self,
-        _gl: &gl::Gl,
+        //_gl: &gl::Gl,
     ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
         (Some(Box::new(ImageGenerator::new())), None)

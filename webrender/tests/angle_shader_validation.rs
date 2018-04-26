@@ -107,7 +107,7 @@ const VERSION_STRING: &str = "#version 300 es\n";
 fn validate_shaders() {
     mozangle::shaders::initialize().unwrap();
 
-    let resources = BuiltInResources::default();
+    /*let resources = BuiltInResources::default();
     let vs_validator =
         ShaderValidator::new(VERTEX_SHADER, ShaderSpec::Gles3, Output::Essl, &resources).unwrap();
 
@@ -129,7 +129,7 @@ fn validate_shaders() {
             validate(&vs_validator, shader.name, vs);
             validate(&fs_validator, shader.name, fs);
         }
-    }
+    }*/
 }
 
 fn validate(validator: &ShaderValidator, name: &str, source: String) {

@@ -9,6 +9,8 @@ extern crate gfx_hal;
 extern crate gfx_backend_vulkan as back;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as back;
+#[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+extern crate gfx_backend_empty as back;
 
 use std::env;
 use std::path::PathBuf;
