@@ -3,16 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 extern crate euclid;
-extern crate gleam;
-extern crate glutin;
+//extern crate gleam;
+//extern crate glutin;
 extern crate webrender;
+extern crate winit;
 
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
+//use gleam::gl;
 use euclid::TypedScale;
-use gleam::gl;
 use webrender::api::*;
 
 // This example demonstrates using the frame output feature to copy
@@ -33,11 +34,13 @@ struct App {
 }
 
 struct OutputHandler {
-    texture_id: gl::GLuint
+    //texture_id: gl::GLuint
+    texture_id: u32
 }
 
 struct ExternalHandler {
-    texture_id: gl::GLuint
+    //texture_id: gl::GLuint
+    texture_id: u32
 }
 
 impl webrender::OutputImageHandler for OutputHandler {
@@ -173,10 +176,10 @@ impl Example for App {
 
     fn get_image_handlers(
         &mut self,
-        gl: &gl::Gl,
+        //gl: &gl::Gl,
     ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
-        let texture_id = gl.gen_textures(1)[0];
+        /*let texture_id = gl.gen_textures(1)[0];
 
         gl.bind_texture(gl::TEXTURE_2D, texture_id);
         gl.tex_parameter_i(
@@ -215,7 +218,8 @@ impl Example for App {
         (
             Some(Box::new(ExternalHandler { texture_id })),
             Some(Box::new(OutputHandler { texture_id }))
-        )
+        )*/
+        (None, None)
     }
 }
 

@@ -1583,6 +1583,7 @@ dependencies = [
  "freetype 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "fxhash 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+ "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
  "gleam 0.4.34 (registry+https://github.com/rust-lang/crates.io-index)",
