@@ -357,14 +357,14 @@ pub(crate) enum TextureSampler {
     CacheA8,
     CacheRGBA8,
     _ResourceCache,
-    _ClipScrollNodes,
-    _RenderTasks,
+    ClipScrollNodes,
+    RenderTasks,
     _Dither,
     // A special sampler that is bound to the A8 output of
     // the *first* pass. Items rendered in this target are
     // available as inputs to tasks in any subsequent pass.
     SharedCacheA8,
-    _LocalClipRects
+    LocalClipRects
 }
 
 impl TextureSampler {
@@ -389,11 +389,11 @@ impl Into<TextureSlot> for TextureSampler {
             TextureSampler::CacheA8 => TextureSlot(3),
             TextureSampler::CacheRGBA8 => TextureSlot(4),
             TextureSampler::_ResourceCache => TextureSlot(5),
-            TextureSampler::_ClipScrollNodes => TextureSlot(6),
-            TextureSampler::_RenderTasks => TextureSlot(7),
+            TextureSampler::ClipScrollNodes => TextureSlot(6),
+            TextureSampler::RenderTasks => TextureSlot(7),
             TextureSampler::_Dither => TextureSlot(8),
             TextureSampler::SharedCacheA8 => TextureSlot(9),
-            TextureSampler::_LocalClipRects => TextureSlot(10),
+            TextureSampler::LocalClipRects => TextureSlot(10),
         }
     }
 }
@@ -1195,17 +1195,22 @@ impl<B: hal::Backend> CacheTexture<B> {
     }
 }
 
-/*struct VertexDataTexture {
+struct VertexDataTexture<B> {
     texture: Texture,
-    pbo: PBO,
+    phantom: PhantomData<B>,
+    //pbo: PBO,
 }
 
-impl VertexDataTexture {
-    fn new(device: &mut Device<B>) -> VertexDataTexture {
+impl<B: hal::Backend> VertexDataTexture<B> {
+    fn new(device: &mut Device<B>) -> VertexDataTexture<B> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
-        let pbo = device.create_pbo();
+        //let pbo = device.create_pbo();
 
-        VertexDataTexture { texture, pbo }
+        VertexDataTexture {
+            texture,
+            phantom: PhantomData,
+            //pbo,
+        }
     }
 
     fn update<T>(&mut self, device: &mut Device<B>, data: &mut Vec<T>) {
@@ -1251,16 +1256,14 @@ impl VertexDataTexture {
             DeviceUintPoint::zero(),
             DeviceUintSize::new(width, needed_height),
         );
-        device
-            .upload_texture(&self.texture, &self.pbo, 0)
-            .upload(rect, 0, None, data);
+        device.upload_texture(&self.texture, rect, 0, None, data.as_slice());
     }
 
     fn deinit(self, device: &mut Device<B>) {
-        device.delete_pbo(self.pbo);
+        //device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
-}*/
+}
 
 struct FileWatcher {
     notifier: Box<RenderNotifier>,
@@ -1348,9 +1351,9 @@ pub struct Renderer<B: hal::Backend> {
     //pub gpu_profile: GpuProfiler<GpuProfileTag>,
     //vaos: RendererVAOs,
 
-    //node_data_texture: VertexDataTexture,
-    //local_clip_rects_texture: VertexDataTexture,
-    //render_task_texture: VertexDataTexture,
+    node_data_texture: VertexDataTexture<B>,
+    local_clip_rects_texture: VertexDataTexture<B>,
+    render_task_texture: VertexDataTexture<B>,
     gpu_cache_texture: CacheTexture<B>,
 
     gpu_cache_frame_id: FrameId,
@@ -1502,9 +1505,9 @@ impl<B: hal::Backend> Renderer<B> {
 
         let texture_resolver = SourceTextureResolver::new(&mut device);
 
-        //let node_data_texture = VertexDataTexture::new(&mut device);
-        //let local_clip_rects_texture = VertexDataTexture::new(&mut device);
-        //let render_task_texture = VertexDataTexture::new(&mut device);
+        let node_data_texture = VertexDataTexture::new(&mut device);
+        let local_clip_rects_texture = VertexDataTexture::new(&mut device);
+        let render_task_texture = VertexDataTexture::new(&mut device);
 
         let gpu_cache_texture = CacheTexture::new(
             &mut device,
@@ -1651,9 +1654,9 @@ impl<B: hal::Backend> Renderer<B> {
                 blur_vao,
                 clip_vao,
             },*/
-            //node_data_texture,
-            //local_clip_rects_texture,
-            //render_task_texture,
+            node_data_texture,
+            local_clip_rects_texture,
+            render_task_texture,
             pipeline_info: PipelineInfo::default(),
             //dither_matrix_texture,
             external_image_handler: None,
@@ -2512,7 +2515,7 @@ impl<B: hal::Backend> Renderer<B> {
     fn handle_readback_composite(
         &mut self,
         render_target: Option<(&Texture, i32)>,
-        framebuffer_size: DeviceUintSize,
+        _framebuffer_size: DeviceUintSize,
         scissor_rect: Option<DeviceIntRect>,
         source: &RenderTask,
         backdrop: &RenderTask,
@@ -2547,16 +2550,16 @@ impl<B: hal::Backend> Renderer<B> {
         let cache_draw_target = (cache_texture, readback_layer.0 as i32);
         self.device.bind_draw_target(Some(cache_draw_target), None);
 
-        let mut src = DeviceIntRect::new(
+        let src = DeviceIntRect::new(
             source_screen_origin + (backdrop_rect.origin - backdrop_screen_origin),
             readback_rect.size,
         );
-        let mut dest = readback_rect.to_i32();
+        let dest = readback_rect.to_i32();
 
         // Need to invert the y coordinates and flip the image vertically when
         // reading back from the framebuffer.
         /*if render_target.is_none() {
-            src.origin.y = framebuffer_size.height as i32 - src.size.height - src.origin.y;
+            src.origin.y = _framebuffer_size.height as i32 - src.size.height - src.origin.y;
             dest.origin.y += dest.size.height;
             dest.size.height = -dest.size.height;
         }*/
@@ -3472,90 +3475,32 @@ impl<B: hal::Backend> Renderer<B> {
         //let _timer = self.gpu_profile.start_timer(_GPU_TAG_SETUP_DATA);
         self.device.set_device_pixel_ratio(frame.device_pixel_ratio);
 
-        //self.node_data_texture.update(&mut self.device, &mut frame.node_data);
-        //self.device.bind_texture(TextureSampler::ClipScrollNodes, &self.node_data_texture.texture);
+        self.node_data_texture.update(
+            &mut self.device,
+            &mut frame.node_data,
+        );
+        self.device.bind_texture(
+            TextureSampler::ClipScrollNodes,
+            &self.node_data_texture.texture,
+        );
 
-        let node_data_blocks = frame.node_data.iter().map(
-            |block| {
-                let mut res_block: [f32; 36] = [0.0; 36];
-                let transform = block.transform.to_row_major_array();
-                res_block[0] = transform[0];
-                res_block[1] = transform[1];
-                res_block[2] = transform[2];
-                res_block[3] = transform[3];
-                res_block[4] = transform[4];
-                res_block[5] = transform[5];
-                res_block[6] = transform[6];
-                res_block[7] = transform[7];
-                res_block[8] = transform[8];
-                res_block[9] = transform[9];
-                res_block[10] = transform[10];
-                res_block[11] = transform[11];
-                res_block[12] = transform[12];
-                res_block[13] = transform[13];
-                res_block[14] = transform[14];
-                res_block[15] = transform[15];
+        self.local_clip_rects_texture.update(
+            &mut self.device,
+            &mut frame.clip_chain_local_clip_rects,
+        );
+        self.device.bind_texture(
+            TextureSampler::LocalClipRects,
+            &self.local_clip_rects_texture.texture,
+        );
 
-                let transform = block.inv_transform.to_row_major_array();
-                res_block[16] = transform[0];
-                res_block[17] = transform[1];
-                res_block[18] = transform[2];
-                res_block[19] = transform[3];
-                res_block[20] = transform[4];
-                res_block[21] = transform[5];
-                res_block[22] = transform[6];
-                res_block[23] = transform[7];
-                res_block[24] = transform[8];
-                res_block[25] = transform[9];
-                res_block[26] = transform[10];
-                res_block[27] = transform[11];
-                res_block[28] = transform[12];
-                res_block[29] = transform[13];
-                res_block[30] = transform[14];
-                res_block[31] = transform[15];
-
-                res_block[32] = block.transform_kind;
-
-                res_block[33] = block.padding[0];
-                res_block[34] = block.padding[1];
-                res_block[35] = block.padding[2];
-
-                res_block
-            }
-        ).collect::<Vec<[f32; 36]>>();
-        self.device.update_node_data(&node_data_blocks);
-
-        //self.local_clip_rects_texture.update(
-        //    &mut self.device,
-        //    &mut frame.clip_chain_local_clip_rects
-        //);
-        //self.device.bind_texture(
-        //    TextureSampler::LocalClipRects,
-        //    &self.local_clip_rects_texture.texture
-        //);
-
-        let local_rects_data_blocks = frame.clip_chain_local_clip_rects.iter().map(
-            |block| {
-                let mut res_block: [f32; 4] = [0.0; 4];
-                res_block[0] = block.origin.x;
-                res_block[1] = block.origin.y;
-                res_block[2] = block.size.width;
-                res_block[3] = block.size.height;
-
-                res_block
-            }
-        ).collect::<Vec<[f32; 4]>>();
-        self.device.update_local_rects(&local_rects_data_blocks);
-
-        //self.render_task_texture
-        //    .update(&mut self.device, &mut frame.render_tasks.task_data);
-        //self.device.bind_texture(
-        //    TextureSampler::RenderTasks,
-        //    &self.render_task_texture.texture,
-        //);
-
-        let task_data_blocks = frame.render_tasks.task_data.iter().map(|block| block.data).collect::<Vec<[f32; 8]>>();
-        self.device.update_render_tasks(&task_data_blocks);
+        self.render_task_texture.update(
+            &mut self.device,
+            &mut frame.render_tasks.task_data,
+        );
+        self.device.bind_texture(
+            TextureSampler::RenderTasks,
+            &self.render_task_texture.texture,
+        );
 
         debug_assert!(self.texture_resolver.cache_a8_texture.is_none());
         debug_assert!(self.texture_resolver.cache_rgba8_texture.is_none());
@@ -3939,9 +3884,9 @@ impl<B: hal::Backend> Renderer<B> {
         /*if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
         }*/
-        //self.node_data_texture.deinit(&mut self.device);
-        //self.local_clip_rects_texture.deinit(&mut self.device);
-        //self.render_task_texture.deinit(&mut self.device);
+        self.node_data_texture.deinit(&mut self.device);
+        self.local_clip_rects_texture.deinit(&mut self.device);
+        self.render_task_texture.deinit(&mut self.device);
         //self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
         //self.device.delete_vao(self.vaos.prim_vao);
