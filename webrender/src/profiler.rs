@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::ColorF;
-//use query::{GpuTimer, NamedTag};
+use query::{GpuTimer, NamedTag};
 use std::collections::vec_deque::VecDeque;
 use std::f32;
 use time::precise_time_ns;
@@ -13,7 +13,7 @@ cfg_if! {
         use api::ColorU;
         use debug_render::DebugRenderer;
         use euclid::{Point2D, Rect, Size2D, vec2};
-        //use query::GpuSampler;
+        use query::GpuSampler;
         use internal_types::FastHashMap;
         use renderer::MAX_VERTEX_TEXTURE_WIDTH;
         use std::mem;
@@ -38,11 +38,11 @@ pub struct GpuProfileTag {
     pub color: ColorF,
 }
  
-/*impl NamedTag for GpuProfileTag {
+impl NamedTag for GpuProfileTag {
     fn get_label(&self) -> &str {
         self.label
     }
-}*/
+}
 
 trait ProfileCounter {
     fn description(&self) -> &'static str;
@@ -462,7 +462,7 @@ pub struct RendererProfileCounters {
 pub struct RendererProfileTimers {
     pub cpu_time: TimeProfileCounter,
     pub gpu_time: TimeProfileCounter,
-    //pub gpu_samples: Vec<GpuTimer<GpuProfileTag>>,
+    pub gpu_samples: Vec<GpuTimer<GpuProfileTag>>,
 }
 
 impl RendererProfileCounters {
@@ -490,7 +490,7 @@ impl RendererProfileTimers {
     pub fn new() -> Self {
         RendererProfileTimers {
             cpu_time: TimeProfileCounter::new("Compositor CPU Time", false),
-            //gpu_samples: Vec::new(),
+            gpu_samples: Vec::new(),
             gpu_time: TimeProfileCounter::new("GPU Time", false),
         }
     }
@@ -654,7 +654,7 @@ impl ProfileCounter for ProfileGraph {
 #[cfg(feature = "debug_renderer")]
 struct GpuFrame {
     total_time: u64,
-    //samples: Vec<GpuTimer<GpuProfileTag>>,
+    samples: Vec<GpuTimer<GpuProfileTag>>,
 }
 
 #[cfg(feature = "debug_renderer")]
@@ -670,13 +670,13 @@ impl GpuFrameCollection {
         }
     }
 
-    fn push(&mut self, total_time: u64/*, samples: Vec<GpuTimer<GpuProfileTag>>*/) {
+    fn push(&mut self, total_time: u64, samples: Vec<GpuTimer<GpuProfileTag>>) {
         if self.frames.len() == 20 {
             self.frames.pop_back();
         }
         self.frames.push_front(GpuFrame {
             total_time,
-            //samples,
+            samples,
         });
     }
 }

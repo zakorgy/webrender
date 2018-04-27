@@ -2,14 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
+use api::{ColorU, ColorF, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, Program, Texture, TextureSlot, VertexDescriptor};
-use device::{TextureFilter, VertexAttribute, VertexAttributeKind};
+use device::{Device, ProgramId, Texture, TextureSlot, /*VertexDescriptor*/};
+use device::{PipelineRequirements, ShaderKind, TextureFilter, /*VertexAttribute, VertexAttributeKind*/};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use hal;
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
+use ron::de::from_reader;
+use std::collections::HashMap;
 use std::f32;
+use std::fs::File;
 
 #[derive(Debug, Copy, Clone)]
 enum DebugSampler {
@@ -24,7 +27,7 @@ impl Into<TextureSlot> for DebugSampler {
     }
 }
 
-const DESC_FONT: VertexDescriptor = VertexDescriptor {
+/*const DESC_FONT: VertexDescriptor = VertexDescriptor {
     vertex_attributes: &[
         VertexAttribute {
             name: "aPosition",
@@ -59,63 +62,94 @@ const DESC_COLOR: VertexDescriptor = VertexDescriptor {
         },
     ],
     instance_attributes: &[],
-};
+};*/
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct DebugFontVertex {
     pub x: f32,
     pub y: f32,
-    pub color: ColorU,
+    z: f32,
+    pub color: ColorF,
     pub u: f32,
     pub v: f32,
+    s: f32,
+    t: f32,
 }
 
 impl DebugFontVertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32, color: ColorU) -> DebugFontVertex {
-        DebugFontVertex { x, y, color, u, v }
+        DebugFontVertex { x, y, z: 0.0, color: color.into(), u, v, s: 0.0, t: 0.0 }
     }
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct DebugColorVertex {
     pub x: f32,
     pub y: f32,
-    pub color: ColorU,
+    z: f32,
+    pub color: ColorF,
 }
 
 impl DebugColorVertex {
     pub fn new(x: f32, y: f32, color: ColorU) -> DebugColorVertex {
-        DebugColorVertex { x, y, color }
+        DebugColorVertex { x, y, z: 0.0, color: color.into(), }
     }
 }
 
 pub struct DebugRenderer {
-    /*font_vertices: Vec<DebugFontVertex>,
+    font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
-    font_program: Program,
-    font_vao: VAO,
+    font_program: ProgramId,
+    //font_vao: VAO,
     font_texture: Texture,
 
     tri_vertices: Vec<DebugColorVertex>,
     tri_indices: Vec<u32>,
-    tri_vao: VAO,
+    //tri_vao: VAO,
     line_vertices: Vec<DebugColorVertex>,
-    line_vao: VAO,
-    color_program: Program,*/
+    //line_vao: VAO,
+    color_program: ProgramId,
 }
 
 impl DebugRenderer {
-    pub fn new(/*device: &mut Device<B>*/) -> Self {
-        /*let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
-        device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
+    pub fn new<B: hal::Backend>(device: &mut Device<B>) -> Self {
+        let file =
+            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
+        let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
+            from_reader(file).expect("Failed to load shader_bindings.ron");
+
+        let pipeline_requirement =
+            pipeline_requirements
+                .remove("debug_font")
+                .expect("Pipeline requirements not found for debug_font");
+
+        let font_program =
+            device.create_program(
+                pipeline_requirement,
+                "debug_font",
+                &ShaderKind::DebugFont,
+            );
+
+        // TODO: bind sampler
+        //device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
+
+        let pipeline_requirement2 =
+            pipeline_requirements
+                .remove("debug_color")
+                .expect("Pipeline requirements not found for debug_color");
 
         let color_program = device
-            .create_program("debug_color", "", &DESC_COLOR)
-            .unwrap();
+            .create_program(
+                pipeline_requirement2,
+                "debug_color",
+                &ShaderKind::DebugColor
+            );
 
-        let font_vao = device.create_vao(&DESC_FONT);
+        /*let font_vao = device.create_vao(&DESC_FONT);
         let line_vao = device.create_vao(&DESC_COLOR);
-        let tri_vao = device.create_vao(&DESC_COLOR);
+        let tri_vao = device.create_vao(&DESC_COLOR);*/
 
         let mut font_texture = device.create_texture(TextureTarget::Array, ImageFormat::R8);
         device.init_texture(
@@ -132,23 +166,22 @@ impl DebugRenderer {
             font_vertices: Vec::new(),
             font_indices: Vec::new(),
             line_vertices: Vec::new(),
-            tri_vao,
+            //tri_vao,
             tri_vertices: Vec::new(),
             tri_indices: Vec::new(),
             font_program,
             color_program,
-            font_vao,
-            line_vao,
+            //font_vao,
+            //line_vao,
             font_texture,
-        }*/
-        DebugRenderer { }
+        }
     }
 
-    pub fn deinit(self/*, device: &mut Device<B>*/) {
-        /*device.delete_texture(self.font_texture);
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
+        device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
-        device.delete_vao(self.tri_vao);
+        /*device.delete_vao(self.tri_vao);
         device.delete_vao(self.line_vao);
         device.delete_vao(self.font_vao);*/
     }
@@ -185,7 +218,7 @@ impl DebugRenderer {
 
                 x_start += glyph.xa;
 
-                /*let vertex_count = self.font_vertices.len() as u32;
+                let vertex_count = self.font_vertices.len() as u32;
 
                 self.font_vertices
                     .push(DebugFontVertex::new(x0, y0, s0, t0, color));
@@ -201,7 +234,7 @@ impl DebugRenderer {
                 self.font_indices.push(vertex_count + 2);
                 self.font_indices.push(vertex_count + 2);
                 self.font_indices.push(vertex_count + 1);
-                self.font_indices.push(vertex_count + 3);*/
+                self.font_indices.push(vertex_count + 3);
 
                 min_x = min_x.min(x0);
                 max_x = max_x.max(x1);
@@ -225,7 +258,7 @@ impl DebugRenderer {
         color_top: ColorU,
         color_bottom: ColorU,
     ) {
-        /*let vertex_count = self.tri_vertices.len() as u32;
+        let vertex_count = self.tri_vertices.len() as u32;
 
         self.tri_vertices
             .push(DebugColorVertex::new(x0, y0, color_top));
@@ -241,15 +274,15 @@ impl DebugRenderer {
         self.tri_indices.push(vertex_count + 2);
         self.tri_indices.push(vertex_count + 2);
         self.tri_indices.push(vertex_count + 1);
-        self.tri_indices.push(vertex_count + 3);*/
+        self.tri_indices.push(vertex_count + 3);
     }
 
     #[allow(dead_code)]
     pub fn add_line(&mut self, x0: i32, y0: i32, color0: ColorU, x1: i32, y1: i32, color1: ColorU) {
-        /*self.line_vertices
+        self.line_vertices
             .push(DebugColorVertex::new(x0 as f32, y0 as f32, color0));
         self.line_vertices
-            .push(DebugColorVertex::new(x1 as f32, y1 as f32, color1));*/
+            .push(DebugColorVertex::new(x1 as f32, y1 as f32, color1));
     }
 
 
@@ -262,12 +295,12 @@ impl DebugRenderer {
         self.add_line(p0.x, p1.y, color, p0.x, p0.y, color);
     }
 
-    pub fn render(
+    pub fn render<B: hal::Backend>(
         &mut self,
-        //device: &mut Device<B>,
+        device: &mut Device<B>,
         viewport_size: Option<DeviceUintSize>,
     ) {
-        /*if let Some(viewport_size) = viewport_size {
+        if let Some(viewport_size) = viewport_size {
             device.disable_depth();
             device.set_blend(true);
             device.set_blend_mode_premultiplied_alpha();
@@ -275,52 +308,61 @@ impl DebugRenderer {
             let projection = Transform3D::ortho(
                 0.0,
                 viewport_size.width as f32,
-                viewport_size.height as f32,
                 0.0,
+                viewport_size.height as f32,
                 ORTHO_NEAR_PLANE,
                 ORTHO_FAR_PLANE,
             );
 
             // Triangles
             if !self.tri_vertices.is_empty() {
-                device.bind_program(&self.color_program);
-                device.set_uniforms(&self.color_program, &projection);
-                device.bind_vao(&self.tri_vao);
-                device.update_vao_indices(&self.tri_vao, &self.tri_indices, VertexUsageHint::Dynamic);
-                device.update_vao_main_vertices(
-                    &self.tri_vao,
-                    &self.tri_vertices,
-                    VertexUsageHint::Dynamic,
-                );
-                device.draw_triangles_u32(0, self.tri_indices.len() as i32);
+                device.bind_program(self.color_program);
+                device.set_uniforms(/*&self.color_program,*/ &projection);
+                device.update_indices(self.tri_indices.as_slice());
+                device.update_vertices(&self.tri_vertices);
+                device.draw();
+                //device.bind_vao(&self.tri_vao);
+                //device.update_vao_indices(&self.tri_vao, &self.tri_indices, VertexUsageHint::Dynamic);
+                //device.update_vao_main_vertices(
+                //    &self.tri_vao,
+                //    &self.tri_vertices,
+                //    VertexUsageHint::Dynamic,
+                //);
+                //device.draw_triangles_u32(0, self.tri_indices.len() as i32);
             }
 
             // Lines
             if !self.line_vertices.is_empty() {
-                device.bind_program(&self.color_program);
-                device.set_uniforms(&self.color_program, &projection);
-                device.bind_vao(&self.line_vao);
-                device.update_vao_main_vertices(
-                    &self.line_vao,
-                    &self.line_vertices,
-                    VertexUsageHint::Dynamic,
-                );
-                device.draw_nonindexed_lines(0, self.line_vertices.len() as i32);
+                device.bind_program(self.color_program);
+                device.set_uniforms(/*&self.color_program,*/ &projection);
+                device.update_vertices(&self.line_vertices);
+                device.draw();
+                //device.bind_vao(&self.line_vao);
+                //device.update_vao_main_vertices(
+                //    &self.line_vao,
+                //    &self.line_vertices,
+                //    VertexUsageHint::Dynamic,
+                //);
+                //device.draw_nonindexed_lines(0, self.line_vertices.len() as i32);
             }
 
             // Glyph
             if !self.font_indices.is_empty() {
-                device.bind_program(&self.font_program);
-                device.set_uniforms(&self.font_program, &projection);
+                device.bind_program(self.font_program);
+                device.set_uniforms(/*&self.font_program,*/ &projection);
                 device.bind_texture(DebugSampler::Font, &self.font_texture);
-                device.bind_vao(&self.font_vao);
-                device.update_vao_indices(&self.font_vao, &self.font_indices, VertexUsageHint::Dynamic);
-                device.update_vao_main_vertices(
-                    &self.font_vao,
-                    &self.font_vertices,
-                    VertexUsageHint::Dynamic,
-                );
-                device.draw_triangles_u32(0, self.font_indices.len() as i32);
+                device.update_indices(self.font_indices.as_slice());
+                device.update_vertices(&self.font_vertices);
+                device.bind_textures();
+                device.draw();
+                //device.bind_vao(&self.font_vao);
+                //device.update_vao_indices(&self.font_vao, &self.font_indices, VertexUsageHint::Dynamic);
+                //device.update_vao_main_vertices(
+                //    &self.font_vao,
+                //    &self.font_vertices,
+                //    VertexUsageHint::Dynamic,
+                //);
+                //device.draw_triangles_u32(0, self.font_indices.len() as i32);
             }
         }
 
@@ -328,6 +370,6 @@ impl DebugRenderer {
         self.font_vertices.clear();
         self.line_vertices.clear();
         self.tri_vertices.clear();
-        self.tri_indices.clear();*/
+        self.tri_indices.clear();
     }
 }

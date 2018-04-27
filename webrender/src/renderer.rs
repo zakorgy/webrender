@@ -39,7 +39,7 @@ use internal_types::{RenderTargetInfo, SavedTargetIndex};
 use prim_store::DeferredResolve;
 use profiler::{BackendProfileCounters, FrameProfileCounters,
                GpuProfileTag, RendererProfileCounters, RendererProfileTimers};
-//use query::GpuProfiler;
+use query::GpuProfiler;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use record::ApiRecordingReceiver;
 use render_backend::RenderBackend;
@@ -85,7 +85,7 @@ cfg_if! {
         use api::ColorU;
         use debug_render::DebugRenderer;
         use profiler::Profiler;
-        //use query::GpuTimer;
+        use query::GpuTimer;
     }
 }
 
@@ -1300,13 +1300,13 @@ impl LazyInitializedDebugRenderer {
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self/*, device: &mut Device<B>*/) -> &'a mut DebugRenderer {
-        self.debug_renderer.get_or_insert_with(|| DebugRenderer::new(/*device*/))
+    pub fn get_mut<'a, B: hal::Backend>(&'a mut self, device: &mut Device<B>) -> &'a mut DebugRenderer {
+        self.debug_renderer.get_or_insert_with(|| DebugRenderer::new(device))
     }
 
-    pub fn deinit(self/*, device: &mut Device<B>*/) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         if let Some(debug_renderer) = self.debug_renderer {
-            debug_renderer.deinit(/*device*/);
+            debug_renderer.deinit(device);
         }
     }
 }
@@ -2252,7 +2252,7 @@ impl<B: hal::Backend> Renderer<B> {
                         &mut profile_timers,
                         //&profile_samplers,
                         screen_fraction,
-                        self.debug.get_mut(/*&mut self.device*/),
+                        self.debug.get_mut(&mut self.device),
                         self.debug_flags.contains(DebugFlags::COMPACT_PROFILER),
                     );
                 }
@@ -2272,8 +2272,8 @@ impl<B: hal::Backend> Renderer<B> {
             //self.gpu_profile.end_frame();
             #[cfg(feature = "debug_renderer")]
             {
-                self.debug.get_mut(/*&mut self.device*/)
-                          .render(/*&mut self.device,*/ framebuffer_size);
+                self.debug.get_mut(&mut self.device)
+                          .render(&mut self.device, framebuffer_size);
             }
             self.device.end_frame();
         });
@@ -3682,7 +3682,7 @@ impl<B: hal::Backend> Renderer<B> {
 
     #[cfg(feature = "debug_renderer")]
     pub fn debug_renderer<'b>(&'b mut self) -> &'b mut DebugRenderer {
-        self.debug.get_mut(/*&mut self.device*/)
+        self.debug.get_mut(&mut self.device)
     }
 
     pub fn get_debug_flags(&self) -> DebugFlags {
@@ -3819,7 +3819,7 @@ impl<B: hal::Backend> Renderer<B> {
             return;
         }
 
-        let debug_renderer = self.debug.get_mut(/*&mut self.device*/);
+        let debug_renderer = self.debug.get_mut(&mut self.device);
 
         let dy = debug_renderer.line_height();
         let x0: f32 = 30.0;
@@ -3893,7 +3893,7 @@ impl<B: hal::Backend> Renderer<B> {
 
         #[cfg(feature = "debug_renderer")]
         {
-            self.debug.deinit(/*&mut self.device*/);
+            self.debug.deinit(&mut self.device);
         }
 
         for (_, target) in self.output_targets {

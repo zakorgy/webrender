@@ -563,14 +563,14 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     } else if file_name.starts_with("debug_color") {
         descriptors = vec![
             VertexBufferDesc {
-                stride: 16, // size of DebugColorVertex 4 * 4
+                stride: 28, // size of DebugColorVertex 3 * 4 + 4 * 4
                 rate: 0,
             },
         ];
     } else if file_name.starts_with("debug_font") {
         descriptors = vec![
             VertexBufferDesc {
-                stride: 32, // size of DebugFontVertex 8 * 4
+                stride: 44, // size of DebugFontVertex 3 * 4 + 2 * 4 * 4
                 rate: 0,
             },
         ];

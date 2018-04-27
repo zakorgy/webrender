@@ -33,6 +33,10 @@ use hal::pso::PipelineStage;
 use hal::queue::Submission;
 
 pub const MAX_INSTANCE_COUNT: usize = 1024;
+const MAX_DEBUG_COLOR_INDEX_COUNT: usize = 14544;
+const MAX_DEBUG_FONT_INDEX_COUNT: usize = 4296;
+const MAX_DEBUG_COLOR_VERTEX_COUNT: usize = 9696;
+const MAX_DEBUG_FONT_VERTEX_COUNT: usize = 2864;
 
 pub type TextureId = u32;
 
@@ -58,6 +62,21 @@ const ENTRY_NAME: &str = "main";
 #[allow(non_snake_case)]
 pub struct Vertex {
     aPosition: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct DebugColorVertex {
+    aPosition: [f32; 3],
+    aColor: [f32; 4],
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct DebugFontVertex {
+    aPosition: [f32; 3],
+    aColor: [f32; 4],
+    aColorTexCoord: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,7 +123,7 @@ pub struct PipelineRequirements {
 }
 
 
-const QUAD: [Vertex; 6] = [
+const QUAD: [Vertex; 4] = [
     Vertex {
         aPosition: [0.0, 0.0, 0.0],
     },
@@ -114,16 +133,18 @@ const QUAD: [Vertex; 6] = [
     Vertex {
         aPosition: [0.0, 1.0, 0.0],
     },
-    Vertex {
+    /*Vertex {
         aPosition: [0.0, 1.0, 0.0],
     },
     Vertex {
         aPosition: [1.0, 0.0, 0.0],
-    },
+    },*/
     Vertex {
         aPosition: [1.0, 1.0, 0.0],
     },
 ];
+
+const INDICES: [u32; 6] = [0, 1, 2, 2, 1, 3];
 
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
@@ -259,7 +280,7 @@ impl ExternalTexture {
 
 pub struct Texture {
     id: TextureId,
-    _target: TextureTarget,
+    target: TextureTarget,
     layer_count: i32,
     format: ImageFormat,
     width: u32,
@@ -314,7 +335,7 @@ impl Texture {
     pub fn into_external(mut self) -> ExternalTexture {
         let ext = ExternalTexture {
             id: self.id,
-            _target: self._target,
+            _target: self.target,
         };
         self.id = 0; // don't complain, moved out
         ext
@@ -372,6 +393,8 @@ pub enum ShaderKind {
     VectorStencil,
     #[allow(dead_code)]
     VectorCover,
+    DebugColor,
+    DebugFont,
 }
 
 const ALPHA: BlendState = BlendState::On {
@@ -398,6 +421,15 @@ const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
 
 const MAX: BlendState = BlendState::On {
     color: BlendOp::Max,
+    alpha: BlendOp::Add {
+        src: Factor::One,
+        dst: Factor::One,
+    },
+};
+
+#[cfg(feature = "debug_renderer")]
+const MIN: BlendState = BlendState::On {
+    color: BlendOp::Min,
     alpha: BlendOp::Add {
         src: Factor::One,
         dst: Factor::One,
@@ -762,6 +794,7 @@ pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
     pub data_stride: usize,
+    pub data_len: usize,
     _state: Cell<hal::buffer::State>,
 }
 
@@ -796,6 +829,7 @@ impl<B: hal::Backend> Buffer<B> {
             memory,
             buffer,
             data_stride,
+            data_len,
             _state: Cell::new(hal::buffer::Access::empty())
         }
     }
@@ -1073,6 +1107,7 @@ pub struct Program<B: hal::Backend> {
     pub pipeline_layout: B::PipelineLayout,
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
+    pub index_buffer: Buffer<B>,
     pub instance_buffer: InstanceBuffer<B>,
     pub locals_buffer: UniformBuffer<B>,
     shader_name: String,
@@ -1160,6 +1195,9 @@ impl<B: hal::Backend> Program<B> {
                     (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
                     (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
                 ],
+                ShaderKind::DebugColor | ShaderKind::DebugFont => vec![
+                    (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                ],
                 _ => vec![
                     (BlendState::Off, DepthTest::Off),
                     (BlendState::Off, LESS_EQUAL_TEST),
@@ -1214,7 +1252,6 @@ impl<B: hal::Backend> Program<B> {
                 pipeline_descriptor
             }).collect::<Vec<_>>();
 
-            //device.create_graphics_pipelines(&[pipeline_desc])
             let pipelines = device
                 .create_graphics_pipelines(pipelines_descriptors.as_slice())
                 .into_iter();
@@ -1228,8 +1265,20 @@ impl<B: hal::Backend> Program<B> {
         device.destroy_shader_module(vs_module);
         device.destroy_shader_module(fs_module);
 
-        let vertex_buffer_stride = mem::size_of::<Vertex>();
-        let vertex_buffer_len = QUAD.len() * vertex_buffer_stride;
+        let (vertex_buffer_stride, vertex_buffer_len) = match *shader_kind {
+            ShaderKind::DebugColor => {
+                let stride = mem::size_of::<DebugColorVertex>();
+                (stride, MAX_DEBUG_COLOR_VERTEX_COUNT * stride)
+            },
+            ShaderKind::DebugFont => {
+                let stride = mem::size_of::<DebugFontVertex>();
+                (stride, MAX_DEBUG_FONT_VERTEX_COUNT * stride)
+            },
+            _ => {
+                let stride = mem::size_of::<Vertex>();
+                (stride, QUAD.len() * stride)
+            },
+        };
 
         let mut vertex_buffer = Buffer::create(
             device,
@@ -1239,7 +1288,30 @@ impl<B: hal::Backend> Program<B> {
             vertex_buffer_len,
         );
 
-        vertex_buffer.update(device, 0, vertex_buffer_len as u64, &QUAD);
+        match *shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => {},
+            _ => vertex_buffer.update(device, 0, (QUAD.len() * vertex_buffer_stride) as u64, &QUAD),
+        }
+
+        let index_buffer_stride = mem::size_of::<u32>();
+        let index_buffer_len = match *shader_kind {
+            ShaderKind::DebugColor => MAX_DEBUG_COLOR_INDEX_COUNT * index_buffer_stride,
+            ShaderKind::DebugFont => MAX_DEBUG_FONT_INDEX_COUNT * index_buffer_stride,
+            _ => INDICES.len() * index_buffer_stride,
+        };
+
+        let mut index_buffer = Buffer::create(
+            device,
+            memory_types,
+            hal::buffer::Usage::INDEX,
+            index_buffer_stride,
+            index_buffer_len,
+        );
+
+        match *shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => {},
+            _ => index_buffer.update(device, 0, (INDICES.len() * index_buffer_stride) as u64, &INDICES),
+        }
 
         let instance_buffer_stride = match *shader_kind {
             ShaderKind::Primitive |
@@ -1248,9 +1320,14 @@ impl<B: hal::Backend> Program<B> {
             ShaderKind::Cache(VertexArrayKind::Primitive) => mem::size_of::<PrimitiveInstance>(),
             ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => mem::size_of::<ClipMaskInstance>(),
             ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<BlurInstance>(),
+            ShaderKind::DebugColor | ShaderKind::DebugFont => 1,
             _ => unreachable!()
         };
-        let instance_buffer_len = MAX_INSTANCE_COUNT * instance_buffer_stride;
+
+        let instance_buffer_len = match *shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => 1,
+            _ => MAX_INSTANCE_COUNT * instance_buffer_stride,
+        };
 
         let instance_buffer = Buffer::create(
             device,
@@ -1273,6 +1350,7 @@ impl<B: hal::Backend> Program<B> {
             pipeline_layout,
             pipelines,
             vertex_buffer,
+            index_buffer,
             instance_buffer: InstanceBuffer::new(instance_buffer),
             locals_buffer,
             shader_name: String::from(shader_name),
@@ -1406,6 +1484,12 @@ impl<B: hal::Backend> Program<B> {
             (&self.vertex_buffer.buffer, 0),
             (&self.instance_buffer.buffer.buffer, 0),
         ]));
+        let index_buffer_view = hal::buffer::IndexBufferView {
+            buffer: &self.index_buffer.buffer,
+            offset: 0,
+            index_type: hal::IndexType::U32,
+        };
+        cmd_buffer.bind_index_buffer(index_buffer_view);
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
@@ -1423,7 +1507,8 @@ impl<B: hal::Backend> Program<B> {
                 viewport.rect,
                 clear_values,
             );
-            encoder.draw(0 .. 6, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32);
+            //encoder.draw(0 .. 6, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32);
+            encoder.draw_indexed(0 .. (self.index_buffer.data_len / mem::size_of::<u32>()) as u32, 0, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. cmp::max(self.instance_buffer.offset, 1)as u32);
         }
 
         cmd_buffer.finish()
@@ -1431,6 +1516,7 @@ impl<B: hal::Backend> Program<B> {
 
     pub fn deinit(mut self, device: &B::Device) {
         self.vertex_buffer.deinit(device);
+        self.index_buffer.deinit(device);
         self.instance_buffer.deinit(device);
         self.locals_buffer.deinit(device);
         device.destroy_descriptor_pool(self.descriptor_pool);
@@ -2123,6 +2209,28 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    #[cfg(feature = "debug_renderer")]
+    pub fn update_indices(&mut self, indices: &[u32]) {
+        debug_assert!(self.inside_frame);
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
+
+        let index_buffer_stride = mem::size_of::<u32>();
+        let index_buffer_len = indices.len() * index_buffer_stride;
+        program.index_buffer.update(&self.device, 0, index_buffer_len as u64, &indices);
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    pub fn update_vertices<T: Copy>(&mut self, vertices: &[T]) {
+        debug_assert!(self.inside_frame);
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
+
+        let vertex_buffer_stride = mem::size_of::<T>();
+        let vertex_buffer_len = vertices.len() * vertex_buffer_stride;
+        program.vertex_buffer.update(&self.device, 0, vertex_buffer_len as u64, &vertices);
+    }
+
     pub fn set_uniforms(
         &mut self,
         transform: &Transform3D<f32>,
@@ -2346,7 +2454,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> Texture {
         Texture {
             id: 0,
-            _target: target,
+            target: target,
             width: 0,
             height: 0,
             layer_count: 0,
