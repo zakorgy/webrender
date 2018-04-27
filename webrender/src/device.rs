@@ -31,10 +31,8 @@ use hal::{Backbuffer, DescriptorPool, FrameSync, Primitive, SwapchainConfig};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
-//use ron::de::from_reader;
 
 pub const MAX_INSTANCE_COUNT: usize = 1024;
-const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
 pub type TextureId = u32;
 
@@ -760,144 +758,6 @@ impl<B: hal::Backend> Image<B> {
     }
 }
 
-pub struct VertexDataImage<B: hal::Backend> {
-    pub core: ImageCore<B>,
-    pub image_upload_buffer: CopyBuffer<B>,
-    pub image_stride: usize,
-    pub vecs_per_data: usize,
-    pub image_width: u32,
-    pub image_height: u32,
-}
-
-impl<B: hal::Backend> VertexDataImage<B> {
-    pub fn create(
-        device: &B::Device,
-        memory_types: &[hal::MemoryType],
-        data_stride: usize,
-        image_width: u32,
-        image_height: u32,
-        pitch_alignment: usize,
-    ) -> Self {
-        let kind = hal::image::Kind::D2(
-            image_width as hal::image::Size,
-            image_height as hal::image::Size,
-            1,
-            1,
-        );
-        let core = ImageCore::create(
-            device,
-            memory_types,
-            kind,
-            hal::image::ViewKind::D2,
-            hal::format::Format::Rgba32Float,
-            hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED,
-            COLOR_RANGE,
-        );
-        let image_upload_buffer = CopyBuffer::create(
-            device,
-            memory_types,
-            hal::buffer::Usage::TRANSFER_SRC,
-            data_stride,
-            image_width as usize,
-            image_height as usize,
-            pitch_alignment,
-        );
-        let image_stride = 4usize * mem::size_of::<f32>(); // Rgba32Float;
-
-        VertexDataImage {
-            core,
-            image_upload_buffer,
-            image_stride,
-            vecs_per_data: data_stride / image_stride,
-            image_width,
-            image_height,
-        }
-    }
-
-    pub fn update<T>(
-        &mut self,
-        device: &mut B::Device,
-        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
-        image_offset: DeviceUintPoint,
-        image_data: &[T],
-        offset_alignment: usize,
-    ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>
-        where
-            T: Copy,
-    {
-        let image_data_length = image_data.len() as u32;
-        let image_row_length = self.image_width / self.vecs_per_data as u32;
-        let mut needed_height = image_data_length / image_row_length;
-        if image_data_length % image_row_length != 0 { needed_height += 1};
-        if needed_height > self.image_height {
-            unimplemented!("TODO: implement resize");
-        }
-        let image_data_width_in_bytes = (image_data_length as usize * self.image_upload_buffer.data_stride) as u64;
-        let buffer_offset = image_offset.y as u64 * self.image_upload_buffer.row_pitch_in_bytes as u64;
-        assert_eq!(buffer_offset % (offset_alignment + 1) as u64, 0);
-        let _ = self.image_upload_buffer.update(device, buffer_offset, image_data_width_in_bytes, image_data, offset_alignment);
-
-        let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
-
-        if let Some(barrier) = self.core.transit(
-            hal::image::Access::TRANSFER_WRITE,
-            hal::image::Layout::TransferDstOptimal
-        ) {
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::VERTEX_SHADER .. PipelineStage::TRANSFER,
-                hal::memory::Dependencies::empty(),
-                &[barrier],
-            );
-        }
-
-        cmd_buffer.copy_buffer_to_image(
-            &self.image_upload_buffer.buffer,
-            &self.core.image,
-            hal::image::Layout::TransferDstOptimal,
-            &[
-                hal::command::BufferImageCopy {
-                    buffer_offset,
-                    buffer_width: self.image_width as u32,
-                    buffer_height: needed_height,
-                    image_layers: hal::image::SubresourceLayers {
-                        aspects: hal::format::Aspects::COLOR,
-                        level: 0,
-                        layers: 0 .. 1,
-                    },
-                    image_offset: hal::image::Offset {
-                        x: image_offset.x as i32,
-                        y: image_offset.y as i32,
-                        z: 0,
-                    },
-                    image_extent: hal::image::Extent {
-                        width: self.image_width as u32,
-                        height: needed_height,
-                        depth: 1,
-                    },
-                },
-            ],
-        );
-
-        if let Some(barrier) = self.core.transit(
-            hal::image::Access::SHADER_READ,
-            hal::image::Layout::ShaderReadOnlyOptimal
-        ) {
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::TRANSFER .. PipelineStage::VERTEX_SHADER,
-                hal::memory::Dependencies::empty(),
-                &[barrier],
-            );
-        }
-
-        cmd_buffer.finish()
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        self.core.deinit(device);
-        self.image_upload_buffer.deinit(device);
-    }
-}
-
 pub struct Buffer<B: hal::Backend> {
     pub memory: B::Memory,
     pub buffer: B::Buffer,
@@ -1500,30 +1360,6 @@ impl<B: hal::Backend> Program<B> {
         self.bind_textures(device);
     }*/
 
-    fn init_resource_cache(
-        &mut self,
-        device: &B::Device,
-        resource_cache: &B::ImageView,
-        resource_cache_sampler: &B::Sampler,
-    ) {
-        device.write_descriptor_sets(vec![
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["tResourceCache"],
-                array_offset: 0,
-                descriptors: Some(
-                    hal::pso::Descriptor::Image(resource_cache, hal::image::Layout::Undefined)
-                ),
-            },
-            hal::pso::DescriptorSetWrite {
-                set: &self.descriptor_set,
-                binding: self.bindings_map["sResourceCache"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Sampler(resource_cache_sampler)),
-            },
-        ]);
-    }
-
     fn init_dither_data<'a>(
         &mut self,
         device: &B::Device,
@@ -1749,7 +1585,6 @@ pub struct Device<B: hal::Backend> {
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    pub resource_cache: VertexDataImage<B>,
     dither_texture: Option<Texture>,
     pub upload_queue: Vec<hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary>>,
     pub current_frame_id: usize,
@@ -2031,15 +1866,6 @@ impl<B: hal::Backend> Device<B> {
             hal::image::WrapMode::Clamp,
         ));
 
-        let resource_cache = VertexDataImage::create(
-            &device,
-            &memory_types,
-            mem::size_of::<[f32; 4]>(),
-            MAX_VERTEX_TEXTURE_WIDTH as u32,
-            MAX_VERTEX_TEXTURE_WIDTH as u32,
-            (limits.min_buffer_copy_pitch_alignment - 1) as usize,
-        );
-
         Device {
             device,
             limits,
@@ -2059,7 +1885,6 @@ impl<B: hal::Backend> Device<B> {
             viewport,
             sampler_linear,
             sampler_nearest,
-            resource_cache,
             dither_texture: None,
             upload_queue: Vec::new(),
             current_frame_id: 0,
@@ -2134,18 +1959,6 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn update_resource_cache(&mut self, rect: DeviceUintRect, gpu_data: &[[f32; 4]]) {
-        debug_assert_eq!(gpu_data.len(), 1024);
-        self.upload_queue
-            .push(self.resource_cache.update(
-                &mut self.device,
-                &mut self.command_pool,
-                rect.origin,
-                gpu_data,
-                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
-            ));
-    }
-
     pub fn delete_program(&mut self, mut _program: ProgramId) {
         // TODO delete program
         _program = INVALID_PROGRAM_ID;
@@ -2168,11 +1981,6 @@ impl<B: hal::Backend> Device<B> {
             shader_name,
             shader_kind,
             &self.render_pass,
-        );
-        program.init_resource_cache(
-            &self.device,
-            &self.resource_cache.core.view,
-            &self.sampler_nearest,
         );
 
         if shader_name.contains("dithering") {
@@ -2283,12 +2091,13 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        const SAMPLERS: [(usize, &'static str); 9] = [
+        const SAMPLERS: [(usize, &'static str); 10] = [
             (0, "Color0"),
             (1, "Color1"),
             (2, "Color2"),
             (3, "CacheA8"),
             (4, "CacheRGBA8"),
+            (5, "ResourceCache"),
             (6, "ClipScrollNodes"),
             (7, "RenderTasks"),
             (9, "SharedCacheA8"),
@@ -3348,7 +3157,6 @@ impl<B: hal::Backend> Device<B> {
         for (_, rbo) in self.rbos {
             rbo.deinit(&self.device);
         }
-        self.resource_cache.deinit(&self.device);
     }
 }
 
