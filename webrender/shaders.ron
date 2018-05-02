@@ -43,18 +43,18 @@
         name: "brush_yuv_image",
         source_name: "brush_yuv_image",
         features: [
-            "YUV_NV12,YUV_601",// [0]
-            "YUV_NV12,YUV_709",// [1]
-            "YUV_PLANAR,YUV_601",// [2]
-            "YUV_PLANAR,YUV_709",// [3]
-            "YUV_INTERLEAVED,YUV_601",// [4]
-            "YUV_INTERLEAVED,YUV_709",// [5]
-            "YUV_NV12,YUV_601,ALPHA_PASS",// [6]
-            "YUV_NV12,YUV_709,ALPHA_PASS",// [7]
-            "YUV_PLANAR,YUV_601,ALPHA_PASS",// [8]
-            "YUV_PLANAR,YUV_709,ALPHA_PASS",// [9]
-            "YUV_INTERLEAVED,YUV_601,ALPHA_PASS",// [10]
-            "YUV_INTERLEAVED,YUV_709,ALPHA_PASS",// [11]
+            "YUV_NV12,YUV_REC601",// [0]
+            "YUV_NV12,YUV_REC709",// [1]
+            "YUV_PLANAR,YUV_REC601",// [2]
+            "YUV_PLANAR,YUV_REC709",// [3]
+            "YUV_INTERLEAVED,YUV_REC601",// [4]
+            "YUV_INTERLEAVED,YUV_REC709",// [5]
+            "YUV_NV12,YUV_REC601,ALPHA_PASS",// [6]
+            "YUV_NV12,YUV_REC709,ALPHA_PASS",// [7]
+            "YUV_PLANAR,YUV_REC601,ALPHA_PASS",// [8]
+            "YUV_PLANAR,YUV_REC709,ALPHA_PASS",// [9]
+            "YUV_INTERLEAVED,YUV_REC601,ALPHA_PASS",// [10]
+            "YUV_INTERLEAVED,YUV_REC709,ALPHA_PASS",// [11]
         ],
     ),// [5]
     (
