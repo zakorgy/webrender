@@ -92,6 +92,7 @@ mod picture;
 mod prim_store;
 mod print_tree;
 mod profiler;
+#[cfg(feature = "debug_renderer")]
 mod query;
 mod record;
 mod render_backend;

@@ -280,7 +280,7 @@ impl ExternalTexture {
 
 pub struct Texture {
     id: TextureId,
-    target: TextureTarget,
+    _target: TextureTarget,
     layer_count: i32,
     format: ImageFormat,
     width: u32,
@@ -335,7 +335,7 @@ impl Texture {
     pub fn into_external(mut self) -> ExternalTexture {
         let ext = ExternalTexture {
             id: self.id,
-            _target: self.target,
+            _target: self._target,
         };
         self.id = 0; // don't complain, moved out
         ext
@@ -2454,7 +2454,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> Texture {
         Texture {
             id: 0,
-            target: target,
+            _target: target,
             width: 0,
             height: 0,
             layer_count: 0,
@@ -2977,7 +2977,7 @@ impl<B: hal::Backend> Device<B> {
 
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
-        self.attach_read_texture_raw(texture.id, texture.target, layer_id)
+        self.attach_read_texture_raw(texture.id, texture._target, layer_id)
     }
 
     pub fn end_frame(&mut self) {

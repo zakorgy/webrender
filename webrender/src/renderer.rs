@@ -39,6 +39,7 @@ use internal_types::{RenderTargetInfo, SavedTargetIndex};
 use prim_store::DeferredResolve;
 use profiler::{BackendProfileCounters, FrameProfileCounters,
                GpuProfileTag, RendererProfileCounters, RendererProfileTimers};
+#[cfg(feature = "debug_renderer")]
 use query::GpuProfiler;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use record::ApiRecordingReceiver;
