@@ -1889,6 +1889,7 @@ impl<B: hal::Backend> Device<B> {
         let render_pass = {
             let attachment_r8 = hal::pass::Attachment {
                 format: Some(hal::format::Format::R8Unorm),
+                samples: 1,
                 ops: hal::pass::AttachmentOps::new(
                     hal::pass::AttachmentLoadOp::DontCare,
                     hal::pass::AttachmentStoreOp::Store,
@@ -1899,6 +1900,7 @@ impl<B: hal::Backend> Device<B> {
 
             let attachment_bgra8 = hal::pass::Attachment {
                 format: Some(hal::format::Format::Bgra8Unorm),
+                samples: 1,
                 ops: hal::pass::AttachmentOps::new(
                     hal::pass::AttachmentLoadOp::DontCare,
                     hal::pass::AttachmentStoreOp::Store,
@@ -1909,6 +1911,7 @@ impl<B: hal::Backend> Device<B> {
 
             let attachment_depth = hal::pass::Attachment {
                 format: Some(depth_format),
+                samples: 1,
                 ops: hal::pass::AttachmentOps::new(
                     hal::pass::AttachmentLoadOp::DontCare,
                     hal::pass::AttachmentStoreOp::Store,
@@ -1921,6 +1924,7 @@ impl<B: hal::Backend> Device<B> {
                 colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
                 depth_stencil: None,
                 inputs: &[],
+                resolves: &[],
                 preserves: &[],
             };
 
@@ -1928,6 +1932,7 @@ impl<B: hal::Backend> Device<B> {
                 colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
                 depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
                 inputs: &[],
+                resolves: &[],
                 preserves: &[],
             };
 
@@ -1935,6 +1940,7 @@ impl<B: hal::Backend> Device<B> {
                 colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
                 depth_stencil: None,
                 inputs: &[],
+                resolves: &[],
                 preserves: &[],
             };
 
@@ -1942,6 +1948,7 @@ impl<B: hal::Backend> Device<B> {
                 colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
                 depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
                 inputs: &[],
+                resolves: &[],
                 preserves: &[],
             };
 
@@ -3331,7 +3338,7 @@ impl<B: hal::Backend> Device<B> {
             texture.id = 0;
         }
         self.device
-            .destroy_command_pool(self.command_pool.downgrade());
+            .destroy_command_pool(self.command_pool.into_raw());
         self.render_pass.deinit(&self.device);
         for framebuffer in self.framebuffers {
             self.device.destroy_framebuffer(framebuffer);
