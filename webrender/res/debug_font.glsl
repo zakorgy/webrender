@@ -9,7 +9,7 @@ varying vec4 vColor;
 
 #ifdef WR_VERTEX_SHADER
 in vec4 aColor;
-in vec4 aColorTexCoord;
+in vec2 aColorTexCoord;
 
 void main(void) {
     vColor = aColor;
