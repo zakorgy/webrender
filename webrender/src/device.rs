@@ -1299,12 +1299,13 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         device: &B::Device,
         projection: &Transform3D<f32>,
+        device_pixel_ratio: f32,
         u_mode: i32,
     ) {
         let locals_data = vec![
             Locals {
                 uTransform: projection.to_row_arrays(),
-                uDevicePixelRatio: 1.0,
+                uDevicePixelRatio: device_pixel_ratio,
                 uMode: u_mode,
             },
         ];
@@ -2128,7 +2129,7 @@ impl<B: hal::Backend> Device<B> {
     ) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_locals(&self.device, transform, self.program_mode_id);
+        self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_locals(&self.device, transform, self.device_pixel_ratio, self.program_mode_id);
     }
 
     pub fn update_instances<T>(
