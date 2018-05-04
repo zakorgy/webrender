@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorU, ColorF, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
+use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, ProgramId, Texture, TextureSlot, /*VertexDescriptor*/};
-use device::{PipelineRequirements, ShaderKind, TextureFilter, /*VertexAttribute, VertexAttributeKind*/};
+use device::{Device, ProgramId, Texture, TextureSlot};
+use device::{PipelineRequirements, ShaderKind, TextureFilter};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use hal;
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
@@ -27,57 +27,20 @@ impl Into<TextureSlot> for DebugSampler {
     }
 }
 
-/*const DESC_FONT: VertexDescriptor = VertexDescriptor {
-    vertex_attributes: &[
-        VertexAttribute {
-            name: "aPosition",
-            count: 2,
-            kind: VertexAttributeKind::F32,
-        },
-        VertexAttribute {
-            name: "aColor",
-            count: 4,
-            kind: VertexAttributeKind::U8Norm,
-        },
-        VertexAttribute {
-            name: "aColorTexCoord",
-            count: 2,
-            kind: VertexAttributeKind::F32,
-        },
-    ],
-    instance_attributes: &[],
-};
-
-const DESC_COLOR: VertexDescriptor = VertexDescriptor {
-    vertex_attributes: &[
-        VertexAttribute {
-            name: "aPosition",
-            count: 2,
-            kind: VertexAttributeKind::F32,
-        },
-        VertexAttribute {
-            name: "aColor",
-            count: 4,
-            kind: VertexAttributeKind::U8Norm,
-        },
-    ],
-    instance_attributes: &[],
-};*/
-
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct DebugFontVertex {
     pub x: f32,
     pub y: f32,
     z: f32,
-    pub color: ColorF,
+    pub color: ColorU,
     pub u: f32,
     pub v: f32,
 }
 
 impl DebugFontVertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32, color: ColorU) -> DebugFontVertex {
-        DebugFontVertex { x, y, z: 0.0, color: color.into(), u, v }
+        DebugFontVertex { x, y, z: 0.0, color, u, v }
     }
 }
 
@@ -87,12 +50,12 @@ pub struct DebugColorVertex {
     pub x: f32,
     pub y: f32,
     z: f32,
-    pub color: ColorF,
+    pub color: ColorU,
 }
 
 impl DebugColorVertex {
     pub fn new(x: f32, y: f32, color: ColorU) -> DebugColorVertex {
-        DebugColorVertex { x, y, z: 0.0, color: color.into(), }
+        DebugColorVertex { x, y, z: 0.0, color, }
     }
 }
 

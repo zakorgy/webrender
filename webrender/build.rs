@@ -488,15 +488,16 @@ fn add_attribute_descriptors(
     vertex_offset: &mut u32,
 ) {
     let def = split_code(line);
+    let var_name = def[2].trim_right_matches(';');
     let (format, offset) = match def[1] {
         "int" => (Format::R8Int, 4),
         "ivec4" => (Format::Rgba32Int, 16),
         "vec2" => (Format::Rg32Float, 8),
         "vec3" => (Format::Rgb32Float, 12),
+        "vec4" if var_name == "aColor" => (Format::Rgba8Unorm, 4),
         "vec4" => (Format::Rgba32Float, 16),
         _ => unimplemented!(),
     };
-    let var_name = def[2].trim_right_matches(';');
     match var_name {
         "aColor" | "aColorTexCoord" | "aPosition" => {
             attribute_descriptors.push(
