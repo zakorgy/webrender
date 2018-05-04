@@ -1220,11 +1220,11 @@ impl CacheTexture {
                     return 0
                 }
 
-                /*let mut uploader = device.upload_texture(
+                let mut uploader = device.upload_texture(
                     &self.texture,
-                    buffer,
+                    //buffer,
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
-                );*/
+                );
 
                 for (row_index, row) in rows.iter_mut().enumerate() {
                     if !row.is_dirty {
@@ -1239,9 +1239,7 @@ impl CacheTexture {
                         DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as u32, 1),
                     );
 
-                    //uploader.upload(rect, 0, None, cpu_blocks);
-                    let data_blocks = cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>();
-                    device.upload_texture(&self.texture, rect, 0, None, &data_blocks);
+                    uploader.upload(rect, 0, None, cpu_blocks);
 
                     row.is_dirty = false;
                 }
@@ -1320,10 +1318,9 @@ impl VertexDataTexture {
             DeviceUintPoint::zero(),
             DeviceUintSize::new(width, needed_height),
         );
-        //device
-        //    .upload_texture(&self.texture, &self.pbo, 0)
-        //    .upload(rect, 0, None, data);
-        device.upload_texture(&self.texture, rect, 0, None, data.as_slice());
+        device
+            .upload_texture(&self.texture, /*&self.pbo,*/ 0)
+            .upload(rect, 0, None, data);
     }
 
     fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
@@ -2476,20 +2473,16 @@ impl<B: hal::Backend> Renderer<B> {
                         offset,
                     } => {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
-                        /*let mut uploader = self.device.upload_texture(
+                        let mut uploader = self.device.upload_texture(
                             texture,
-                            &self.texture_cache_upload_pbo,
+                            //&self.texture_cache_upload_pbo,
                             0,
-                        );*/
+                        );
 
                         match source {
                             TextureUpdateSource::Bytes { data } => {
-                                //uploader.upload(
-                                //    rect, layer_index, stride,
-                                //    &data[offset as usize ..],
-                                //);
-                                self.device.upload_texture(
-                                    texture, rect, layer_index, stride,
+                                uploader.upload(
+                                    rect, layer_index, stride,
                                     &data[offset as usize ..],
                                 );
                             }
