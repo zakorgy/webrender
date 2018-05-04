@@ -20,6 +20,7 @@ use std::ops::Add;
 use std::path::PathBuf;
 use std::slice;
 use std::thread;
+use vertex_types::*;
 
 use hal;
 
@@ -60,57 +61,10 @@ const ENTRY_NAME: &str = "main";
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
-pub struct Vertex {
-    aPosition: [f32; 3],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct DebugColorVertex {
-    aPosition: [f32; 3],
-    aColor: [f32; 4],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct DebugFontVertex {
-    aPosition: [f32; 3],
-    aColor: [f32; 4],
-    aColorTexCoord: [f32; 4],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-struct Locals {
+pub struct Locals {
     uTransform: [[f32; 4]; 4],
     uDevicePixelRatio: f32,
     uMode: i32,
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct PrimitiveInstance {
-    pub aData0: [i32; 4],
-    pub aData1: [i32; 4],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct ClipMaskInstance {
-    pub aClipRenderTaskAddress: i32,
-    pub aScrollNodeId: i32,
-    pub aClipSegment: i32,
-    pub aClipDataResourceAddress: [i32; 4],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct BlurInstance {
-    pub aData0: [i32; 4],
-    pub aData1: [i32; 4],
-    pub aBlurRenderTaskAddress: i32,
-    pub aBlurSourceTaskAddress: i32,
-    pub aBlurDirection: i32,
 }
 
 #[derive(Clone, Deserialize)]

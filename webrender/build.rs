@@ -7,6 +7,9 @@ extern crate ron;
 extern crate serde;
 extern crate gfx_hal;
 
+#[path = "src/vertex_types.rs"]
+mod vertex_types;
+
 use gfx_hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding};
 use gfx_hal::pso::{DescriptorType, Element, ShaderStageFlags, VertexBufferDesc};
 use gfx_hal::format::Format;
@@ -14,12 +17,14 @@ use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 use std::cmp::max;
 use std::env;
+use std::collections::HashMap;
 use std::fs::{canonicalize, read_dir, File};
 use std::io::BufReader;
 use std::io::prelude::*;
-use std::collections::HashMap;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
+use vertex_types::*;
 
 const SHADER_IMPORT: &str = "#include ";
 const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
@@ -542,35 +547,35 @@ fn create_desciptor_range_descriptors(count: usize) -> Vec<DescriptorRangeDesc> 
 fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     let mut descriptors = vec![
         VertexBufferDesc {
-            stride: 12, // size of Vertex 3 * 4
+            stride: mem::size_of::<Vertex>() as _,
             rate: 0,
         }
     ];
     if file_name.starts_with("cs_blur") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 12 + 32, // size of BlurInstance 3 * 4 + PrimitiveInstance 8 * 4
+                stride: mem::size_of::<BlurInstance>() as _,
                 rate: 1,
             }
         );
     } else if file_name.starts_with("cs_clip") {
         descriptors.push(
             VertexBufferDesc {
-                stride: 28, // size of ClipMaskInstance 3 * 4 + 4 * 4
+                stride: mem::size_of::<ClipMaskInstance>() as _,
                 rate: 1,
             }
         );
     } else if file_name.starts_with("debug_color") {
         descriptors = vec![
             VertexBufferDesc {
-                stride: 28, // size of DebugColorVertex 3 * 4 + 4 * 4
+                stride: mem::size_of::<DebugColorVertex>() as _,
                 rate: 0,
             },
         ];
     } else if file_name.starts_with("debug_font") {
         descriptors = vec![
             VertexBufferDesc {
-                stride: 44, // size of DebugFontVertex 3 * 4 + 2 * 4 * 4
+                stride: mem::size_of::<DebugFontVertex>() as _,
                 rate: 0,
             },
         ];
@@ -578,7 +583,7 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     } else {
         descriptors.push(
             VertexBufferDesc {
-                stride: 32, // size of PrimitiveInstance 8 * 4
+                stride: mem::size_of::<PrimitiveInstance>() as _,
                 rate: 1,
             }
         );

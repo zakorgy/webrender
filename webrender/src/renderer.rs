@@ -23,7 +23,7 @@ use debug_colors;
 use device::{DepthFunction, Device, FrameId, UploadMethod, Texture};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
-use device::{ApiCapabilities, BlurInstance, ClipMaskInstance, PrimitiveInstance, VertexArrayKind};
+use device::{ApiCapabilities, VertexArrayKind};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 //use gleam::gl;
@@ -68,6 +68,7 @@ use tiling::{Frame, RenderTarget, RenderTargetKind, ScalingInfo, TextureCacheRen
 #[cfg(not(feature = "pathfinder"))]
 use tiling::GlyphJob;
 use time::precise_time_ns;
+use vertex_types::{BlurInstance, ClipMaskInstance, PrimitiveInstance};
 
 use hal;
 
