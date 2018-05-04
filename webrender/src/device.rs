@@ -1684,7 +1684,7 @@ pub struct Device<B: hal::Backend> {
     //default_draw_fbo: FBOId,
 
     device_pixel_ratio: f32,
-    _upload_method: UploadMethod,
+    upload_method: UploadMethod,
 
     // HW or API capabilities
     #[cfg(feature = "debug_renderer")]
@@ -1979,7 +1979,7 @@ impl<B: hal::Backend> Device<B> {
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
             device_pixel_ratio: 1.0,
-            _upload_method: upload_method,
+            upload_method,
             inside_frame: false,
 
             #[cfg(feature = "debug_renderer")]
@@ -2960,60 +2960,24 @@ impl<B: hal::Backend> Device<B> {
         self.program_mode_id = mode;
     }
 
-    pub fn upload_texture<T>(
-        &mut self,
-        texture: &Texture,
-        rect: DeviceUintRect,
-        layer_index: i32,
-        stride: Option<u32>,
-        data: &[T],
-    ) {
-        let data = unsafe {
-            slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * mem::size_of::<T>())
-        };
-        let data_stride: usize = texture.format.bytes_per_pixel() as usize;
-        let width = rect.size.width as usize;
-        let height = rect.size.height as usize;
-        let size = width * height * data_stride;
-        let mut new_data = vec![0u8; size];
-        let data= if stride.is_some() {
-            let row_length = (stride.unwrap()) as usize;
+    pub fn upload_texture<'a>(
+        &'a mut self,
+        texture: &'a Texture,
+        //pbo: &PBO,
+        _upload_count: usize,
+    ) -> TextureUploader<'a, B> {
+        debug_assert!(self.inside_frame);
 
-            for j in 0..height {
-                for i in 0..width {
-                    let offset = i * data_stride + j * data_stride * width;
-                    let src = &data[j * row_length + i * data_stride ..];
-                    assert!(offset + 3 < new_data.len()); // optimization
-                    // convert from BGRA
-                    new_data[offset + 0] = src[0];
-                    new_data[offset + 1] = src[1];
-                    new_data[offset + 2] = src[2];
-                    new_data[offset + 3] = src[3];
+        match self.upload_method {
+            UploadMethod::Immediate => unimplemented!(),
+            UploadMethod::PixelBuffer => {
+                TextureUploader {
+                        device: self,
+                        texture,
                 }
-            }
-
-            new_data.as_slice()
-        } else {
-            data
-        };
-        assert_eq!(data.len(), width * height * data_stride);
-        self.upload_queue
-            .push(
-                self.images
-                    .get_mut(&texture.id)
-                    .expect("Texture not found.")
-                    .update(
-                        &mut self.device,
-                        &mut self.command_pool,
-                        rect,
-                        layer_index,
-                        data,
-                        (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
-                    )
-            );
-        if texture.filter == TextureFilter::Trilinear {
-            self.generate_mipmaps(texture);
+            },
         }
+
     }
 
     #[cfg(any(feature = "debug_renderer", feature = "capture"))]
@@ -3477,6 +3441,69 @@ impl<B: hal::Backend> Device<B> {
         }
         self.render_pass.deinit(&self.device);
         self.device.destroy_swapchain(self.swap_chain);
+    }
+}
+
+pub struct TextureUploader<'a, B: hal::Backend> {
+    device: &'a mut Device<B>,
+    texture: &'a Texture,
+}
+
+impl<'a, B: hal::Backend> TextureUploader<'a, B> {
+    pub fn upload<T>(
+        &mut self,
+        rect: DeviceUintRect,
+        layer_index: i32,
+        stride: Option<u32>,
+        data: &[T],
+    ) {
+        let data = unsafe {
+            slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * mem::size_of::<T>())
+        };
+        let data_stride: usize = self.texture.format.bytes_per_pixel() as usize;
+        let width = rect.size.width as usize;
+        let height = rect.size.height as usize;
+        let size = width * height * data_stride;
+        let mut new_data = vec![0u8; size];
+        let data= if stride.is_some() {
+            let row_length = (stride.unwrap()) as usize;
+
+            for j in 0..height {
+                for i in 0..width {
+                    let offset = i * data_stride + j * data_stride * width;
+                    let src = &data[j * row_length + i * data_stride ..];
+                    assert!(offset + 3 < new_data.len()); // optimization
+                    // convert from BGRA
+                    new_data[offset + 0] = src[0];
+                    new_data[offset + 1] = src[1];
+                    new_data[offset + 2] = src[2];
+                    new_data[offset + 3] = src[3];
+                }
+            }
+
+            new_data.as_slice()
+        } else {
+            data
+        };
+        assert_eq!(data.len(), width * height * data_stride);
+        self.device.upload_queue
+            .push(
+                self.device.images
+                    .get_mut(&self.texture.id)
+                    .expect("Texture not found.")
+                    .update(
+                        &mut self.device.device,
+                        &mut self.device.command_pool,
+                        rect,
+                        layer_index,
+                        data,
+                        (self.device.limits.min_buffer_copy_offset_alignment - 1) as usize,
+                    )
+            );
+
+        if self.texture.filter == TextureFilter::Trilinear {
+            self.device.generate_mipmaps(self.texture);
+        }
     }
 }
 
