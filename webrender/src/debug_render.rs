@@ -55,7 +55,7 @@ pub struct DebugColorVertex {
 
 impl DebugColorVertex {
     pub fn new(x: f32, y: f32, color: ColorU) -> DebugColorVertex {
-        DebugColorVertex { x, y, z: 0.0, color, }
+        DebugColorVertex { x, y, z: 0.0, color }
     }
 }
 
@@ -96,14 +96,14 @@ impl DebugRenderer {
         // TODO: bind sampler
         //device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
 
-        let pipeline_requirement2 =
+        let pipeline_requirement_color =
             pipeline_requirements
                 .remove("debug_color")
                 .expect("Pipeline requirements not found for debug_color");
 
         let color_program = device
             .create_program(
-                pipeline_requirement2,
+                pipeline_requirement_color,
                 "debug_color",
                 &ShaderKind::DebugColor
             );

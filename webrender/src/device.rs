@@ -1461,8 +1461,11 @@ impl<B: hal::Backend> Program<B> {
                 viewport.rect,
                 clear_values,
             );
-            //encoder.draw(0 .. 6, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32);
-            encoder.draw_indexed(0 .. (self.index_buffer.data_len / mem::size_of::<u32>()) as u32, 0, (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. cmp::max(self.instance_buffer.offset, 1)as u32);
+            encoder.draw_indexed(
+                0 .. (self.index_buffer.data_len / self.index_buffer.data_stride) as u32,
+                0,
+                (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. cmp::max(self.instance_buffer.offset, 1) as u32,
+            );
         }
 
         cmd_buffer.finish()
@@ -2169,8 +2172,7 @@ impl<B: hal::Backend> Device<B> {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
 
-        let index_buffer_stride = mem::size_of::<u32>();
-        let index_buffer_len = indices.len() * index_buffer_stride;
+        let index_buffer_len = indices.len() * program.index_buffer.data_stride;
         program.index_buffer.update(&self.device, 0, index_buffer_len as u64, &indices);
     }
 
@@ -2180,8 +2182,7 @@ impl<B: hal::Backend> Device<B> {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
 
-        let vertex_buffer_stride = mem::size_of::<T>();
-        let vertex_buffer_len = vertices.len() * vertex_buffer_stride;
+        let vertex_buffer_len = vertices.len() * program.vertex_buffer.data_stride;
         program.vertex_buffer.update(&self.device, 0, vertex_buffer_len as u64, &vertices);
     }
 
