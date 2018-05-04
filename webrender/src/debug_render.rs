@@ -73,13 +73,11 @@ pub struct DebugFontVertex {
     pub color: ColorF,
     pub u: f32,
     pub v: f32,
-    s: f32,
-    t: f32,
 }
 
 impl DebugFontVertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32, color: ColorU) -> DebugFontVertex {
-        DebugFontVertex { x, y, z: 0.0, color: color.into(), u, v, s: 0.0, t: 0.0 }
+        DebugFontVertex { x, y, z: 0.0, color: color.into(), u, v }
     }
 }
 
