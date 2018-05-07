@@ -63,14 +63,11 @@ pub struct DebugRenderer {
     font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
     font_program: ProgramId,
-    //font_vao: VAO,
     font_texture: Texture,
 
     tri_vertices: Vec<DebugColorVertex>,
     tri_indices: Vec<u32>,
-    //tri_vao: VAO,
     line_vertices: Vec<DebugColorVertex>,
-    //line_vao: VAO,
     color_program: ProgramId,
 }
 
@@ -93,9 +90,6 @@ impl DebugRenderer {
                 &ShaderKind::DebugFont,
             );
 
-        // TODO: bind sampler
-        //device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
-
         let pipeline_requirement_color =
             pipeline_requirements
                 .remove("debug_color")
@@ -107,10 +101,6 @@ impl DebugRenderer {
                 "debug_color",
                 &ShaderKind::DebugColor
             );
-
-        /*let font_vao = device.create_vao(&DESC_FONT);
-        let line_vao = device.create_vao(&DESC_COLOR);
-        let tri_vao = device.create_vao(&DESC_COLOR);*/
 
         let mut font_texture = device.create_texture(TextureTarget::Array, ImageFormat::R8);
         device.init_texture(
@@ -127,13 +117,10 @@ impl DebugRenderer {
             font_vertices: Vec::new(),
             font_indices: Vec::new(),
             line_vertices: Vec::new(),
-            //tri_vao,
             tri_vertices: Vec::new(),
             tri_indices: Vec::new(),
             font_program,
             color_program,
-            //font_vao,
-            //line_vao,
             font_texture,
         }
     }
@@ -142,9 +129,6 @@ impl DebugRenderer {
         device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
-        /*device.delete_vao(self.tri_vao);
-        device.delete_vao(self.line_vao);
-        device.delete_vao(self.font_vao);*/
     }
 
     pub fn line_height(&self) -> f32 {
@@ -278,52 +262,29 @@ impl DebugRenderer {
             // Triangles
             if !self.tri_vertices.is_empty() {
                 device.bind_program(self.color_program);
-                device.set_uniforms(/*&self.color_program,*/ &projection);
+                device.set_uniforms(&projection);
                 device.update_indices(self.tri_indices.as_slice());
                 device.update_vertices(&self.tri_vertices);
                 device.draw();
-                //device.bind_vao(&self.tri_vao);
-                //device.update_vao_indices(&self.tri_vao, &self.tri_indices, VertexUsageHint::Dynamic);
-                //device.update_vao_main_vertices(
-                //    &self.tri_vao,
-                //    &self.tri_vertices,
-                //    VertexUsageHint::Dynamic,
-                //);
-                //device.draw_triangles_u32(0, self.tri_indices.len() as i32);
             }
 
             // Lines
             if !self.line_vertices.is_empty() {
                 device.bind_program(self.color_program);
-                device.set_uniforms(/*&self.color_program,*/ &projection);
+                device.set_uniforms(&projection);
                 device.update_vertices(&self.line_vertices);
                 device.draw();
-                //device.bind_vao(&self.line_vao);
-                //device.update_vao_main_vertices(
-                //    &self.line_vao,
-                //    &self.line_vertices,
-                //    VertexUsageHint::Dynamic,
-                //);
-                //device.draw_nonindexed_lines(0, self.line_vertices.len() as i32);
             }
 
             // Glyph
             if !self.font_indices.is_empty() {
                 device.bind_program(self.font_program);
-                device.set_uniforms(/*&self.font_program,*/ &projection);
+                device.set_uniforms(&projection);
                 device.bind_texture(DebugSampler::Font, &self.font_texture);
                 device.update_indices(self.font_indices.as_slice());
                 device.update_vertices(&self.font_vertices);
                 device.bind_textures();
                 device.draw();
-                //device.bind_vao(&self.font_vao);
-                //device.update_vao_indices(&self.font_vao, &self.font_indices, VertexUsageHint::Dynamic);
-                //device.update_vao_main_vertices(
-                //    &self.font_vao,
-                //    &self.font_vertices,
-                //    VertexUsageHint::Dynamic,
-                //);
-                //device.draw_triangles_u32(0, self.font_indices.len() as i32);
             }
         }
 
