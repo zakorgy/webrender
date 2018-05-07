@@ -77,7 +77,7 @@ pub struct PipelineRequirements {
 }
 
 
-const QUAD: [Vertex; 4] = [
+const QUAD: [Vertex; 6] = [
     Vertex {
         aPosition: [0.0, 0.0, 0.0],
     },
@@ -87,18 +87,16 @@ const QUAD: [Vertex; 4] = [
     Vertex {
         aPosition: [0.0, 1.0, 0.0],
     },
-    /*Vertex {
+    Vertex {
         aPosition: [0.0, 1.0, 0.0],
     },
     Vertex {
         aPosition: [1.0, 0.0, 0.0],
-    },*/
+    },
     Vertex {
         aPosition: [1.0, 1.0, 0.0],
     },
 ];
-
-const INDICES: [u32; 6] = [0, 1, 2, 2, 1, 3];
 
 fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     use std::io::Read;
@@ -349,6 +347,15 @@ pub enum ShaderKind {
     VectorCover,
     DebugColor,
     DebugFont,
+}
+
+impl ShaderKind {
+    fn is_debug(&self) -> bool {
+        match *self {
+            ShaderKind::DebugFont | ShaderKind::DebugColor => true,
+            _ => false,
+        }
+    }
 }
 
 const ALPHA: BlendState = BlendState::On {
@@ -1061,7 +1068,7 @@ pub struct Program<B: hal::Backend> {
     pub pipeline_layout: B::PipelineLayout,
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: Buffer<B>,
-    pub index_buffer: Buffer<B>,
+    pub index_buffer: Option<Buffer<B>>,
     pub instance_buffer: InstanceBuffer<B>,
     pub locals_buffer: UniformBuffer<B>,
     shader_name: String,
@@ -1242,29 +1249,25 @@ impl<B: hal::Backend> Program<B> {
             vertex_buffer_len,
         );
 
-        match *shader_kind {
-            ShaderKind::DebugColor | ShaderKind::DebugFont => {},
-            _ => vertex_buffer.update(device, 0, (QUAD.len() * vertex_buffer_stride) as u64, &QUAD),
-        }
+        let mut index_buffer = None;
 
-        let index_buffer_stride = mem::size_of::<u32>();
-        let index_buffer_len = match *shader_kind {
-            ShaderKind::DebugColor => MAX_DEBUG_COLOR_INDEX_COUNT * index_buffer_stride,
-            ShaderKind::DebugFont => MAX_DEBUG_FONT_INDEX_COUNT * index_buffer_stride,
-            _ => INDICES.len() * index_buffer_stride,
-        };
+        if shader_kind.is_debug() {
+            let index_buffer_stride = mem::size_of::<u32>();
+            let index_buffer_len = match *shader_kind {
+                ShaderKind::DebugColor => MAX_DEBUG_COLOR_INDEX_COUNT * index_buffer_stride,
+                ShaderKind::DebugFont => MAX_DEBUG_FONT_INDEX_COUNT * index_buffer_stride,
+                _ => unreachable!(),
+            };
 
-        let mut index_buffer = Buffer::create(
-            device,
-            memory_types,
-            hal::buffer::Usage::INDEX,
-            index_buffer_stride,
-            index_buffer_len,
-        );
-
-        match *shader_kind {
-            ShaderKind::DebugColor | ShaderKind::DebugFont => {},
-            _ => index_buffer.update(device, 0, (INDICES.len() * index_buffer_stride) as u64, &INDICES),
+            index_buffer = Some(Buffer::create(
+                device,
+                memory_types,
+                hal::buffer::Usage::INDEX,
+                index_buffer_stride,
+                index_buffer_len,
+            ));
+        } else {
+            vertex_buffer.update(device, 0, (QUAD.len() * vertex_buffer_stride) as u64, &QUAD);
         }
 
         let instance_buffer_stride = match *shader_kind {
@@ -1438,12 +1441,17 @@ impl<B: hal::Backend> Program<B> {
             (&self.vertex_buffer.buffer, 0),
             (&self.instance_buffer.buffer.buffer, 0),
         ]));
-        let index_buffer_view = hal::buffer::IndexBufferView {
-            buffer: &self.index_buffer.buffer,
-            offset: 0,
-            index_type: hal::IndexType::U32,
-        };
-        cmd_buffer.bind_index_buffer(index_buffer_view);
+
+        if let Some(ref index_buffer) = self.index_buffer {
+            cmd_buffer.bind_index_buffer(
+                hal::buffer::IndexBufferView {
+                    buffer: &index_buffer.buffer,
+                    offset: 0,
+                    index_type: hal::IndexType::U32,
+                }
+            );
+        }
+
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
@@ -1461,11 +1469,19 @@ impl<B: hal::Backend> Program<B> {
                 viewport.rect,
                 clear_values,
             );
-            encoder.draw_indexed(
-                0 .. (self.index_buffer.data_len / self.index_buffer.data_stride) as u32,
-                0,
-                (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. cmp::max(self.instance_buffer.offset, 1) as u32,
-            );
+
+            if let Some(ref index_buffer) = self.index_buffer {
+                encoder.draw_indexed(
+                    0 .. (index_buffer.data_len / index_buffer.data_stride) as u32,
+                    0,
+                    0 .. 1,
+                );
+            } else {
+                encoder.draw(
+                    0 .. QUAD.len() as _,
+                    (self.instance_buffer.offset - self.instance_buffer.size) as u32 .. self.instance_buffer.offset as u32,
+                );
+            }
         }
 
         cmd_buffer.finish()
@@ -1473,7 +1489,9 @@ impl<B: hal::Backend> Program<B> {
 
     pub fn deinit(mut self, device: &B::Device) {
         self.vertex_buffer.deinit(device);
-        self.index_buffer.deinit(device);
+        if let Some(index_buffer) = self.index_buffer {
+            index_buffer.deinit(device);
+        }
         self.instance_buffer.deinit(device);
         self.locals_buffer.deinit(device);
         device.destroy_descriptor_pool(self.descriptor_pool);
@@ -2172,8 +2190,12 @@ impl<B: hal::Backend> Device<B> {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
 
-        let index_buffer_len = indices.len() * program.index_buffer.data_stride;
-        program.index_buffer.update(&self.device, 0, index_buffer_len as u64, &indices);
+        if let Some(ref mut index_buffer) = program.index_buffer {
+            let index_buffer_len = indices.len() * index_buffer.data_stride;
+            index_buffer.update(&self.device, 0, index_buffer_len as u64, &indices);
+        } else {
+            warn!("This function is for debug shaders only!");
+        }
     }
 
     #[cfg(feature = "debug_renderer")]
@@ -2182,8 +2204,12 @@ impl<B: hal::Backend> Device<B> {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
 
-        let vertex_buffer_len = vertices.len() * program.vertex_buffer.data_stride;
-        program.vertex_buffer.update(&self.device, 0, vertex_buffer_len as u64, &vertices);
+        if program.shader_name.contains("debug") {
+            let vertex_buffer_len = vertices.len() * program.vertex_buffer.data_stride;
+            program.vertex_buffer.update(&self.device, 0, vertex_buffer_len as u64, &vertices);
+        } else {
+            warn!("This function is for debug shaders only!");
+        }
     }
 
     pub fn set_uniforms(
