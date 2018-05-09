@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::ColorF;
+#[cfg(feature = "debug_renderer")]
 use query::{GpuTimer, NamedTag};
 use std::collections::vec_deque::VecDeque;
 use std::f32;
@@ -37,7 +38,8 @@ pub struct GpuProfileTag {
     pub label: &'static str,
     pub color: ColorF,
 }
- 
+
+#[cfg(feature = "debug_renderer")]
 impl NamedTag for GpuProfileTag {
     fn get_label(&self) -> &str {
         self.label
@@ -462,6 +464,7 @@ pub struct RendererProfileCounters {
 pub struct RendererProfileTimers {
     pub cpu_time: TimeProfileCounter,
     pub gpu_time: TimeProfileCounter,
+    #[cfg(feature = "debug_renderer")]
     pub gpu_samples: Vec<GpuTimer<GpuProfileTag>>,
 }
 
@@ -490,6 +493,7 @@ impl RendererProfileTimers {
     pub fn new() -> Self {
         RendererProfileTimers {
             cpu_time: TimeProfileCounter::new("Compositor CPU Time", false),
+            #[cfg(feature = "debug_renderer")]
             gpu_samples: Vec::new(),
             gpu_time: TimeProfileCounter::new("GPU Time", false),
         }
@@ -1037,7 +1041,7 @@ impl Profiler {
         backend_profile: &BackendProfileCounters,
         renderer_profile: &RendererProfileCounters,
         renderer_timers: &mut RendererProfileTimers,
-        gpu_samplers: &[GpuSampler<GpuProfileTag>],
+        //gpu_samplers: &[GpuSampler<GpuProfileTag>],
         screen_fraction: f32,
         debug_renderer: &mut DebugRenderer,
     ) {
@@ -1114,7 +1118,7 @@ impl Profiler {
             &mut self.draw_state
         );
 
-        if !gpu_samplers.is_empty() {
+        /*if !gpu_samplers.is_empty() {
             let mut samplers = Vec::<FloatProfileCounter>::new();
             // Gathering unique GPU samplers. This has O(N^2) complexity,
             // but we only have a few samplers per target.
@@ -1139,7 +1143,7 @@ impl Profiler {
                 false,
                 &mut self.draw_state,
             );
-        }
+        }*/
 
         let rect =
             self.backend_time
@@ -1170,7 +1174,7 @@ impl Profiler {
         backend_profile: &BackendProfileCounters,
         renderer_profile: &RendererProfileCounters,
         renderer_timers: &mut RendererProfileTimers,
-        gpu_samplers: &[GpuSampler<GpuProfileTag>],
+        //gpu_samplers: &[GpuSampler<GpuProfileTag>],
         screen_fraction: f32,
         debug_renderer: &mut DebugRenderer,
         compact: bool,
@@ -1207,7 +1211,7 @@ impl Profiler {
                 backend_profile,
                 renderer_profile,
                 renderer_timers,
-                gpu_samplers,
+                //gpu_samplers,
                 screen_fraction,
                 debug_renderer,
             );

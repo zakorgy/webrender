@@ -8,7 +8,10 @@ use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
 use parse_function::parse_function;
+#[cfg(feature = "gl")]
 use png::save_flipped;
+#[cfg(not(feature = "gl"))]
+use png::{save, SaveSettings};
 use std::cmp;
 use std::fmt::{Display, Error, Formatter};
 use std::fs::File;
@@ -442,11 +445,11 @@ impl<'a> ReftestHarness<'a> {
                     "number of differing pixels",
                     count_different
                 );
-                println!("REFTEST   IMAGE 1 (TEST): {}", test.create_data_uri());
+                /*println!("REFTEST   IMAGE 1 (TEST): {}", test.create_data_uri());
                 println!(
                     "REFTEST   IMAGE 2 (REFERENCE): {}",
                     reference.create_data_uri()
-                );
+                );*/
                 println!("REFTEST TEST-END | {}", t);
 
                 false
@@ -463,6 +466,7 @@ impl<'a> ReftestHarness<'a> {
         }
     }
 
+    #[cfg(feature = "gl")]
     fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
         let file = BufReader::new(File::open(filename).unwrap());
         let img_raw = load_piston_image(file, format).unwrap();
@@ -474,6 +478,19 @@ impl<'a> ReftestHarness<'a> {
         }
     }
 
+    #[cfg(not(feature = "gl"))]
+    fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
+        let file = BufReader::new(File::open(filename).unwrap());
+        let img_raw = load_piston_image(file, format).unwrap();
+        let img = img_raw.to_rgba();
+        let size = img.dimensions();
+        ReftestImage {
+            data: img.into_raw(),
+            size: DeviceUintSize::new(size.0, size.1),
+        }
+    }
+
+    #[cfg(feature = "gl")]
     fn render_yaml(
         &mut self,
         filename: &Path,
@@ -506,6 +523,45 @@ impl<'a> ReftestHarness<'a> {
         if write_debug_images {
             let debug_path = filename.with_extension("yaml.png");
             save_flipped(debug_path, pixels.clone(), size);
+        }
+
+        reader.deinit(self.wrench);
+
+        (ReftestImage { data: pixels, size }, stats)
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn render_yaml(
+        &mut self,
+        filename: &Path,
+        size: DeviceUintSize,
+        font_render_mode: Option<FontRenderMode>,
+        allow_mipmaps: bool,
+    ) -> (ReftestImage, RendererStats) {
+        let mut reader = YamlFrameReader::new(filename);
+        reader.set_font_render_mode(font_render_mode);
+        reader.allow_mipmaps(allow_mipmaps);
+        reader.do_frame(self.wrench);
+
+        // wait for the frame
+        self.rx.recv().unwrap();
+        let stats = self.wrench.render();
+
+        let window_size = self.window.get_inner_size();
+        assert!(size.width <= window_size.width && size.height <= window_size.height);
+
+        // taking the bottom left sub-rectangle
+        let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
+        let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
+
+        let write_debug_images = false;
+        if write_debug_images {
+            let debug_path = filename.with_extension("yaml.png");
+            save(debug_path, pixels.clone(), size,
+                 SaveSettings {
+                     flip_vertical: false,
+                     try_crop: true,
+                 });
         }
 
         reader.deinit(self.wrench);

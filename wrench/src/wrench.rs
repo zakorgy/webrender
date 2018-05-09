@@ -4,13 +4,18 @@
 
 
 use app_units::Au;
+#[cfg(not(feature = "gl"))]
+use back;
 use blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
 use dwrote;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use font_loader::system_fonts;
+#[cfg(feature = "gl")]
 use glutin::EventsLoopProxy;
+#[cfg(not(feature = "gl"))]
+use hal;
 use json_frame_writer::JsonFrameWriter;
 use ron_frame_writer::RonFrameWriter;
 use std::collections::HashMap;
@@ -20,9 +25,14 @@ use std::sync::mpsc::Receiver;
 use time;
 use webrender;
 use webrender::api::*;
-use webrender::{DebugFlags, RendererStats};
+use webrender::{ApiCapabilities, DebugFlags, RendererStats};
+#[cfg(not(feature = "gl"))]
+use winit::EventsLoopProxy;
 use yaml_frame_writer::YamlFrameWriterReceiver;
+#[cfg(feature = "gl")]
 use {WindowWrapper, NotifierEvent, BLACK_COLOR, WHITE_COLOR};
+#[cfg(not(feature = "gl"))]
+use NotifierEvent;
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -147,7 +157,7 @@ pub struct Wrench {
     device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer,
+    pub renderer: webrender::Renderer<back::Backend>,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
@@ -165,6 +175,7 @@ pub struct Wrench {
 }
 
 impl Wrench {
+    #[cfg(feature = "gl")]
     pub fn new(
         window: &mut WindowWrapper,
         proxy: Option<EventsLoopProxy>,
@@ -228,6 +239,115 @@ impl Wrench {
         });
 
         let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts).unwrap();
+        let api = sender.create_api();
+        let document_id = api.add_document(size, 0);
+
+        let graphics_api = renderer.get_graphics_api_info();
+        let zoom_factor = ZoomFactor::new(zoom_factor);
+
+        let mut wrench = Wrench {
+            window_size: size,
+
+            renderer,
+            api,
+            document_id,
+            window_title_to_set: None,
+
+            rebuild_display_lists: do_rebuild,
+            verbose,
+            device_pixel_ratio: dp_ratio,
+            page_zoom_factor: zoom_factor,
+
+            root_pipeline_id: PipelineId(0, 0),
+
+            graphics_api,
+            frame_start_sender: timing_sender,
+
+            callbacks,
+        };
+
+        wrench.set_page_zoom(zoom_factor);
+        wrench.set_title("start");
+        let mut txn = Transaction::new();
+        txn.set_root_pipeline(wrench.root_pipeline_id);
+        wrench.api.send_transaction(wrench.document_id, txn);
+
+        wrench
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn new(
+        window_size: (u32, u32),
+        proxy: Option<EventsLoopProxy>,
+        adapter: hal::Adapter<back::Backend>,
+        surface: &mut <back::Backend as hal::Backend>::Surface,
+        shader_override_path: Option<PathBuf>,
+        dp_ratio: f32,
+        save_type: Option<SaveType>,
+        size: DeviceUintSize,
+        do_rebuild: bool,
+        no_subpixel_aa: bool,
+        verbose: bool,
+        no_scissor: bool,
+        no_batch: bool,
+        precache_shaders: bool,
+        disable_dual_source_blending: bool,
+        zoom_factor: f32,
+        notifier: Option<Box<RenderNotifier>>,
+    ) -> Self {
+        println!("Shader override path: {:?}", shader_override_path);
+
+        let recorder = save_type.map(|save_type| match save_type {
+            SaveType::Yaml => Box::new(
+                YamlFrameWriterReceiver::new(&PathBuf::from("yaml_frames")),
+            ) as Box<webrender::ApiRecordingReceiver>,
+            SaveType::Json => Box::new(JsonFrameWriter::new(&PathBuf::from("json_frames"))) as
+                Box<webrender::ApiRecordingReceiver>,
+            SaveType::Ron => Box::new(RonFrameWriter::new(&PathBuf::from("ron_frames"))) as
+                Box<webrender::ApiRecordingReceiver>,
+            SaveType::Binary => Box::new(webrender::BinaryRecorder::new(
+                &PathBuf::from("wr-record.bin"),
+            )) as Box<webrender::ApiRecordingReceiver>,
+        });
+
+        let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES;
+        debug_flags.set(DebugFlags::DISABLE_BATCHING, no_batch);
+        let callbacks = Arc::new(Mutex::new(blob::BlobCallbacks::new()));
+
+        let mut api_capabilities = ApiCapabilities::empty();
+        if cfg!(feature = "vulkan") {
+            api_capabilities.insert(ApiCapabilities::BLITTING);
+        }
+
+        let opts = webrender::RendererOptions {
+            device_pixel_ratio: dp_ratio,
+            resource_override_path: shader_override_path,
+            recorder,
+            enable_subpixel_aa: !no_subpixel_aa,
+            debug_flags,
+            enable_clear_scissor: !no_scissor,
+            max_recorded_profiles: 16,
+            precache_shaders,
+            blob_image_renderer: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
+            disable_dual_source_blending,
+            api_capabilities,
+            ..Default::default()
+        };
+
+        // put an Awakened event into the queue to kick off the first frame
+        if let Some(ref elp) = proxy {
+            #[cfg(not(target_os = "android"))]
+            let _ = elp.wakeup();
+        }
+
+        let (timing_sender, timing_receiver) = chase_lev::deque();
+        let notifier = notifier.unwrap_or_else(|| {
+            let data = Arc::new(Mutex::new(NotifierData::new(proxy, timing_receiver, verbose)));
+            Box::new(Notifier(data))
+        });
+
+        //let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts).unwrap();
+        let (renderer, sender) =  webrender::Renderer::new(notifier, &adapter, surface, window_size, opts).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 
@@ -528,6 +648,7 @@ impl Wrench {
         self.api.send_transaction(self.document_id, txn);
     }
 
+    #[cfg(feature = "gl")]
     pub fn get_frame_profiles(
         &mut self,
     ) -> (Vec<webrender::CpuProfile>, Vec<webrender::GpuProfile>) {
@@ -549,6 +670,7 @@ impl Wrench {
         self.api.send_transaction(self.document_id, txn);
     }
 
+    #[cfg(feature = "gl")]
     pub fn show_onscreen_help(&mut self) {
         let help_lines = [
             "Esc - Quit",
@@ -578,6 +700,9 @@ impl Wrench {
             }
         }
     }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn show_onscreen_help(&mut self) { }
 
     pub fn shut_down(self, rx: Receiver<NotifierEvent>) {
         self.api.shut_down();

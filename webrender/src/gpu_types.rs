@@ -98,7 +98,7 @@ pub struct ClipMaskBorderCornerDotDash {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PrimitiveInstance {
-    data: [i32; 8],
+    pub data: [i32; 8],
 }
 
 pub struct SimplePrimitiveInstance {

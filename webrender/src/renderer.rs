@@ -20,18 +20,18 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind, TransformBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture, PBO};
+use device::{DepthFunction, Device, FrameId, UploadMethod, Texture};
 use device::{ExternalTexture, FBOId, TextureSlot};
-use device::{FileWatcherHandler, ShaderError, TextureFilter,
-             VertexUsageHint, VAO, VBO, CustomVAO};
-use device::{ProgramCache, ReadPixelsFormat};
+use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
+use device::{ApiCapabilities, VertexArrayKind};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
-use gleam::gl;
+//use gleam::gl;
 use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 #[cfg(feature = "pathfinder")]
 use gpu_glyph_renderer::GpuGlyphRenderer;
+use gpu_types;
 use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, ResourceCacheError};
 use internal_types::{CacheTextureId, DebugOutput, FastHashMap, RenderedDocument, ResultMsg};
 use internal_types::{TextureUpdateList, TextureUpdateOp, TextureUpdateSource};
@@ -39,6 +39,7 @@ use internal_types::{RenderTargetInfo, SavedTargetIndex};
 use prim_store::DeferredResolve;
 use profiler::{BackendProfileCounters, FrameProfileCounters,
                GpuProfileTag, RendererProfileCounters, RendererProfileTimers};
+#[cfg(feature = "debug_renderer")]
 use query::GpuProfiler;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use record::ApiRecordingReceiver;
@@ -55,7 +56,7 @@ use std::collections::hash_map::Entry;
 use std::f32;
 use std::mem;
 use std::path::PathBuf;
-use std::rc::Rc;
+//use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -67,6 +68,8 @@ use tiling::{Frame, RenderTarget, RenderTargetKind, ScalingInfo, TextureCacheRen
 #[cfg(not(feature = "pathfinder"))]
 use tiling::GlyphJob;
 use time::precise_time_ns;
+use vertex_types::{BlurInstance, ClipMaskBorderCornerDotDash, ClipMaskInstance, PrimitiveInstance};
+use hal;
 
 cfg_if! {
     if #[cfg(feature = "debugger")] {
@@ -96,84 +99,84 @@ const GPU_CACHE_RESIZE_TEST: bool = false;
 /// Number of GPU blocks per UV rectangle provided for an image.
 pub const BLOCKS_PER_UV_RECT: usize = 2;
 
-const GPU_TAG_BRUSH_LINEAR_GRADIENT: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_LINEAR_GRADIENT: GpuProfileTag = GpuProfileTag {
     label: "B_LinearGradient",
     color: debug_colors::POWDERBLUE,
 };
-const GPU_TAG_BRUSH_RADIAL_GRADIENT: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_RADIAL_GRADIENT: GpuProfileTag = GpuProfileTag {
     label: "B_RadialGradient",
     color: debug_colors::LIGHTPINK,
 };
-const GPU_TAG_BRUSH_YUV_IMAGE: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_YUV_IMAGE: GpuProfileTag = GpuProfileTag {
     label: "B_YuvImage",
     color: debug_colors::DARKGREEN,
 };
-const GPU_TAG_BRUSH_MIXBLEND: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_MIXBLEND: GpuProfileTag = GpuProfileTag {
     label: "B_MixBlend",
     color: debug_colors::MAGENTA,
 };
-const GPU_TAG_BRUSH_BLEND: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_BLEND: GpuProfileTag = GpuProfileTag {
     label: "B_Blend",
     color: debug_colors::LIGHTBLUE,
 };
-const GPU_TAG_BRUSH_IMAGE: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_IMAGE: GpuProfileTag = GpuProfileTag {
     label: "B_Image",
     color: debug_colors::SPRINGGREEN,
 };
-const GPU_TAG_BRUSH_SOLID: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BRUSH_SOLID: GpuProfileTag = GpuProfileTag {
     label: "B_Solid",
     color: debug_colors::RED,
 };
-const GPU_TAG_CACHE_CLIP: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_CACHE_CLIP: GpuProfileTag = GpuProfileTag {
     label: "C_Clip",
     color: debug_colors::PURPLE,
 };
-const GPU_TAG_SETUP_TARGET: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_SETUP_TARGET: GpuProfileTag = GpuProfileTag {
     label: "target init",
     color: debug_colors::SLATEGREY,
 };
-const GPU_TAG_SETUP_DATA: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_SETUP_DATA: GpuProfileTag = GpuProfileTag {
     label: "data init",
     color: debug_colors::LIGHTGREY,
 };
-const GPU_TAG_PRIM_IMAGE: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_PRIM_IMAGE: GpuProfileTag = GpuProfileTag {
     label: "Image",
     color: debug_colors::GREEN,
 };
-const GPU_TAG_PRIM_SPLIT_COMPOSITE: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_PRIM_SPLIT_COMPOSITE: GpuProfileTag = GpuProfileTag {
     label: "SplitComposite",
     color: debug_colors::DARKBLUE,
 };
-const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag {
     label: "TextRun",
     color: debug_colors::BLUE,
 };
-const GPU_TAG_PRIM_BORDER_CORNER: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_PRIM_BORDER_CORNER: GpuProfileTag = GpuProfileTag {
     label: "BorderCorner",
     color: debug_colors::DARKSLATEGREY,
 };
-const GPU_TAG_PRIM_BORDER_EDGE: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_PRIM_BORDER_EDGE: GpuProfileTag = GpuProfileTag {
     label: "BorderEdge",
     color: debug_colors::LAVENDER,
 };
-const GPU_TAG_BLUR: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BLUR: GpuProfileTag = GpuProfileTag {
     label: "Blur",
     color: debug_colors::VIOLET,
 };
-const GPU_TAG_BLIT: GpuProfileTag = GpuProfileTag {
+const _GPU_TAG_BLIT: GpuProfileTag = GpuProfileTag {
     label: "Blit",
     color: debug_colors::LIME,
 };
 
-const GPU_SAMPLER_TAG_ALPHA: GpuProfileTag = GpuProfileTag {
+const _GPU_SAMPLER_TAG_ALPHA: GpuProfileTag = GpuProfileTag {
     label: "Alpha Targets",
     color: debug_colors::BLACK,
 };
-const GPU_SAMPLER_TAG_OPAQUE: GpuProfileTag = GpuProfileTag {
+const _GPU_SAMPLER_TAG_OPAQUE: GpuProfileTag = GpuProfileTag {
     label: "Opaque Pass",
     color: debug_colors::BLACK,
 };
-const GPU_SAMPLER_TAG_TRANSPARENT: GpuProfileTag = GpuProfileTag {
+const _GPU_SAMPLER_TAG_TRANSPARENT: GpuProfileTag = GpuProfileTag {
     label: "Transparent Pass",
     color: debug_colors::BLACK,
 };
@@ -194,12 +197,12 @@ impl TransformBatchKind {
         }
     }
 
-    fn sampler_tag(&self) -> GpuProfileTag {
+    fn _sampler_tag(&self) -> GpuProfileTag {
         match *self {
-            TransformBatchKind::TextRun(..) => GPU_TAG_PRIM_TEXT_RUN,
-            TransformBatchKind::Image(..) => GPU_TAG_PRIM_IMAGE,
-            TransformBatchKind::BorderCorner => GPU_TAG_PRIM_BORDER_CORNER,
-            TransformBatchKind::BorderEdge => GPU_TAG_PRIM_BORDER_EDGE,
+            TransformBatchKind::TextRun(..) => _GPU_TAG_PRIM_TEXT_RUN,
+            TransformBatchKind::Image(..) => _GPU_TAG_PRIM_IMAGE,
+            TransformBatchKind::BorderCorner => _GPU_TAG_PRIM_BORDER_CORNER,
+            TransformBatchKind::BorderEdge => _GPU_TAG_PRIM_BORDER_EDGE,
         }
     }
 }
@@ -224,21 +227,21 @@ impl BatchKind {
         }
     }
 
-    fn sampler_tag(&self) -> GpuProfileTag {
+    fn _sampler_tag(&self) -> GpuProfileTag {
         match *self {
-            BatchKind::SplitComposite => GPU_TAG_PRIM_SPLIT_COMPOSITE,
+            BatchKind::SplitComposite => _GPU_TAG_PRIM_SPLIT_COMPOSITE,
             BatchKind::Brush(kind) => {
                 match kind {
-                    BrushBatchKind::Solid => GPU_TAG_BRUSH_SOLID,
-                    BrushBatchKind::Image(..) => GPU_TAG_BRUSH_IMAGE,
-                    BrushBatchKind::Blend => GPU_TAG_BRUSH_BLEND,
-                    BrushBatchKind::MixBlend { .. } => GPU_TAG_BRUSH_MIXBLEND,
-                    BrushBatchKind::YuvImage(..) => GPU_TAG_BRUSH_YUV_IMAGE,
-                    BrushBatchKind::RadialGradient => GPU_TAG_BRUSH_RADIAL_GRADIENT,
-                    BrushBatchKind::LinearGradient => GPU_TAG_BRUSH_LINEAR_GRADIENT,
+                    BrushBatchKind::Solid => _GPU_TAG_BRUSH_SOLID,
+                    BrushBatchKind::Image(..) => _GPU_TAG_BRUSH_IMAGE,
+                    BrushBatchKind::Blend => _GPU_TAG_BRUSH_BLEND,
+                    BrushBatchKind::MixBlend { .. } => _GPU_TAG_BRUSH_MIXBLEND,
+                    BrushBatchKind::YuvImage(..) => _GPU_TAG_BRUSH_YUV_IMAGE,
+                    BrushBatchKind::RadialGradient => _GPU_TAG_BRUSH_RADIAL_GRADIENT,
+                    BrushBatchKind::LinearGradient => _GPU_TAG_BRUSH_LINEAR_GRADIENT,
                 }
             }
-            BatchKind::Transformable(_, batch_kind) => batch_kind.sampler_tag(),
+            BatchKind::Transformable(_, batch_kind) => batch_kind._sampler_tag(),
         }
     }
 }
@@ -263,6 +266,91 @@ fn flag_changed(before: DebugFlags, after: DebugFlags, select: DebugFlags) -> Op
         Some(after.contains(select))
     } else {
         None
+    }
+}
+
+pub trait PrimitiveType {
+    type Primitive: Clone + Copy;
+    fn to_primitive_type(&self) -> Self::Primitive;
+}
+
+
+impl PrimitiveType for gpu_types::BlurInstance {
+    type Primitive = BlurInstance;
+    fn to_primitive_type(&self) -> BlurInstance {
+        BlurInstance {
+            aData0: [0,0,0,0],
+            aData1: [0,0,0,0],
+            aBlurRenderTaskAddress: self.task_address.0 as i32,
+            aBlurSourceTaskAddress: self.src_task_address.0 as i32,
+            aBlurDirection: self.blur_direction as i32,
+        }
+    }
+}
+
+impl PrimitiveType for gpu_types::ClipMaskInstance {
+    type Primitive = ClipMaskInstance;
+    fn to_primitive_type(&self) -> ClipMaskInstance {
+        ClipMaskInstance {
+            aClipRenderTaskAddress: self.render_task_address.0 as i32,
+            aScrollNodeId: self.scroll_node_data_index.0 as i32,
+            aClipSegment: self.segment,
+            aClipDataResourceAddress: [
+                self.clip_data_address.u as i32,
+                self.clip_data_address.v as i32,
+                self.resource_address.u as i32,
+                self.resource_address.v as i32,
+            ],
+        }
+    }
+}
+
+impl PrimitiveType for gpu_types::ClipMaskBorderCornerDotDash {
+    type Primitive = ClipMaskBorderCornerDotDash;
+    fn to_primitive_type(&self) -> ClipMaskBorderCornerDotDash {
+        ClipMaskBorderCornerDotDash {
+            aClipRenderTaskAddress: self.clip_mask_instance.render_task_address.0 as i32,
+            aScrollNodeId: self.clip_mask_instance.scroll_node_data_index.0 as i32,
+            aClipSegment: self.clip_mask_instance.segment,
+            aClipDataResourceAddress: [
+                self.clip_mask_instance.clip_data_address.u as i32,
+                self.clip_mask_instance.clip_data_address.v as i32,
+                self.clip_mask_instance.resource_address.u as i32,
+                self.clip_mask_instance.resource_address.v as i32,
+            ],
+            aDashOrDot0: [
+                self.dot_dash_data[0],
+                self.dot_dash_data[1],
+                self.dot_dash_data[2],
+                self.dot_dash_data[3],
+            ],
+            aDashOrDot1: [
+                self.dot_dash_data[4],
+                self.dot_dash_data[5],
+                self.dot_dash_data[6],
+                self.dot_dash_data[7],
+            ]
+        }
+    }
+}
+
+impl PrimitiveType for gpu_types::PrimitiveInstance {
+    type Primitive = PrimitiveInstance;
+    fn to_primitive_type(&self) -> PrimitiveInstance {
+        PrimitiveInstance {
+            aData0: [
+                self.data[0],
+                self.data[1],
+                self.data[2],
+                self.data[3],
+            ],
+            aData1: [
+                self.data[4],
+                self.data[5],
+                self.data[6],
+                self.data[7],
+            ],
+        }
     }
 }
 
@@ -304,7 +392,7 @@ pub(crate) enum TextureSampler {
     ResourceCache,
     ClipScrollNodes,
     RenderTasks,
-    Dither,
+    _Dither,
     // A special sampler that is bound to the A8 output of
     // the *first* pass. Items rendered in this target are
     // available as inputs to tasks in any subsequent pass.
@@ -336,7 +424,7 @@ impl Into<TextureSlot> for TextureSampler {
             TextureSampler::ResourceCache => TextureSlot(5),
             TextureSampler::ClipScrollNodes => TextureSlot(6),
             TextureSampler::RenderTasks => TextureSlot(7),
-            TextureSampler::Dither => TextureSlot(8),
+            TextureSampler::_Dither => TextureSlot(8),
             TextureSampler::SharedCacheA8 => TextureSlot(9),
             TextureSampler::LocalClipRects => TextureSlot(10),
         }
@@ -349,7 +437,7 @@ pub struct PackedVertex {
     pub pos: [f32; 2],
 }
 
-pub(crate) mod desc {
+/*pub(crate) mod desc {
     use device::{VertexAttribute, VertexAttributeKind, VertexDescriptor};
 
     pub const PRIM_INSTANCES: VertexDescriptor = VertexDescriptor {
@@ -574,17 +662,7 @@ pub(crate) mod desc {
             },
         ],
     };
-}
-
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
-    Primitive,
-    Blur,
-    Clip,
-    DashAndDot,
-    VectorStencil,
-    VectorCover,
-}
+}*/
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GraphicsApi {
@@ -675,7 +753,7 @@ pub struct GpuGlyphRenderer;
 
 #[cfg(not(feature = "pathfinder"))]
 impl GpuGlyphRenderer {
-    fn new(_: &mut Device, _: &VAO, _: bool) -> Result<GpuGlyphRenderer, RendererError> {
+    fn new(/*_: &mut Device, _: &VAO, _: bool*/) -> Result<GpuGlyphRenderer, RendererError> {
         Ok(GpuGlyphRenderer)
     }
 }
@@ -724,7 +802,7 @@ struct SourceTextureResolver {
 }
 
 impl SourceTextureResolver {
-    fn new(device: &mut Device) -> SourceTextureResolver {
+    fn new<B: hal::Backend>(device: &mut Device<B>) -> Self {
         let mut dummy_cache_texture = device
             .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
         device.init_texture::<u8>(
@@ -749,7 +827,7 @@ impl SourceTextureResolver {
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -814,7 +892,7 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device) {
+    fn bind<B: hal::Backend>(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
@@ -909,14 +987,14 @@ enum CacheBus {
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
-        /// PBO used for transfers.
-        buffer: PBO,
+        //// PBO used for transfers.
+        //buffer: PBO,
         /// Meta-data about the cached rows.
         rows: Vec<CacheRow>,
         /// Mirrored block data on CPU.
         cpu_blocks: Vec<GpuBlockData>,
     },
-    /// Shader-based scattering updates. Currently rendered by a set
+    /*/// Shader-based scattering updates. Currently rendered by a set
     /// of points into the GPU texture, each carrying a `GpuBlockData`.
     Scatter {
         /// Special program to run the scattered update.
@@ -929,7 +1007,7 @@ enum CacheBus {
         buf_value: VBO<GpuBlockData>,
         /// Currently stored block count.
         count: usize,
-    },
+    },*/
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
@@ -939,10 +1017,10 @@ struct CacheTexture {
 }
 
 impl CacheTexture {
-    fn new(device: &mut Device, use_scatter: bool) -> Result<Self, RendererError> {
+    fn new<B: hal::Backend>(device: &mut Device<B>, _use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
-        let bus = if use_scatter {
+        let bus = /*if use_scatter {
             let program = device
                 .create_program("gpu_cache_update", "", &desc::GPU_CACHE_UPDATE)?;
             let buf_position = device.create_vbo();
@@ -960,10 +1038,10 @@ impl CacheTexture {
                 buf_value,
                 count: 0,
             }
-        } else {
-            let buffer = device.create_pbo();
+        } else*/ {
+            //let buffer = device.create_pbo();
             CacheBus::PixelBuffer {
-                buffer,
+                //buffer,
                 rows: Vec::new(),
                 cpu_blocks: Vec::new(),
             }
@@ -975,18 +1053,18 @@ impl CacheTexture {
         })
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         device.delete_texture(self.texture);
         match self.bus {
-            CacheBus::PixelBuffer { buffer, ..} => {
-                device.delete_pbo(buffer);
+            CacheBus::PixelBuffer { /*buffer,*/ ..} => {
+                //device.delete_pbo(buffer);
             }
-            CacheBus::Scatter { program, vao, buf_position, buf_value, ..} => {
+            /*CacheBus::Scatter { program, vao, buf_position, buf_value, ..} => {
                 device.delete_program(program);
                 device.delete_custom_vao(vao);
                 device.delete_vbo(buf_position);
                 device.delete_vbo(buf_value);
-            }
+            }*/
         }
     }
 
@@ -994,10 +1072,10 @@ impl CacheTexture {
         self.texture.get_dimensions().height
     }
 
-    fn prepare_for_updates(
+    fn prepare_for_updates<B: hal::Backend>(
         &mut self,
-        device: &mut Device,
-        total_block_count: usize,
+        device: &mut Device<B>,
+        _total_block_count: usize,
         max_height: u32,
     ) {
         // See if we need to create or resize the texture.
@@ -1027,7 +1105,7 @@ impl CacheTexture {
                     }
                 }
             }
-            CacheBus::Scatter {
+            /*CacheBus::Scatter {
                 ref mut buf_position,
                 ref mut buf_value,
                 ref mut count,
@@ -1056,11 +1134,11 @@ impl CacheTexture {
                         );
                     }
                 }
-            }
+            }*/
         }
     }
 
-    fn update(&mut self, device: &mut Device, updates: &GpuCacheUpdateList) {
+    fn update<B: hal::Backend>(&mut self, _device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1095,7 +1173,7 @@ impl CacheTexture {
                     }
                 }
             }
-            CacheBus::Scatter {
+            /*CacheBus::Scatter {
                 ref buf_position,
                 ref buf_value,
                 ref mut count,
@@ -1127,13 +1205,13 @@ impl CacheTexture {
                 device.fill_vbo(buf_value, &updates.blocks, *count);
                 device.fill_vbo(buf_position, &position_data, *count);
                 *count += position_data.len();
-            }
+            }*/
         }
     }
 
-    fn flush(&mut self, device: &mut Device) -> usize {
+    fn flush<B: hal::Backend>(&mut self, device: &mut Device<B>) -> usize {
         match self.bus {
-            CacheBus::PixelBuffer { ref buffer, ref mut rows, ref cpu_blocks } => {
+            CacheBus::PixelBuffer { /*ref buffer,*/ ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
                     .iter()
                     .filter(|row| row.is_dirty)
@@ -1142,11 +1220,11 @@ impl CacheTexture {
                     return 0
                 }
 
-                let mut uploader = device.upload_texture(
+                /*let mut uploader = device.upload_texture(
                     &self.texture,
                     buffer,
                     rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
-                );
+                );*/
 
                 for (row_index, row) in rows.iter_mut().enumerate() {
                     if !row.is_dirty {
@@ -1161,14 +1239,16 @@ impl CacheTexture {
                         DeviceUintSize::new(MAX_VERTEX_TEXTURE_WIDTH as u32, 1),
                     );
 
-                    uploader.upload(rect, 0, None, cpu_blocks);
+                    //uploader.upload(rect, 0, None, cpu_blocks);
+                    let data_blocks = cpu_blocks.iter().map(|block| block.data).collect::<Vec<[f32; 4]>>();
+                    device.upload_texture(&self.texture, rect, 0, None, &data_blocks);
 
                     row.is_dirty = false;
                 }
 
                 rows_dirty
             }
-            CacheBus::Scatter { ref program, ref vao, count, .. } => {
+            /*CacheBus::Scatter { ref program, ref vao, count, .. } => {
                 device.disable_depth();
                 device.set_blend(false);
                 device.bind_program(program);
@@ -1179,25 +1259,25 @@ impl CacheTexture {
                 );
                 device.draw_nonindexed_points(0, count as _);
                 0
-            }
+            }*/
         }
     }
 }
 
 struct VertexDataTexture {
     texture: Texture,
-    pbo: PBO,
+    //pbo: PBO,
 }
 
 impl VertexDataTexture {
-    fn new(device: &mut Device) -> VertexDataTexture {
+    fn new<B: hal::Backend>(device: &mut Device<B>) -> VertexDataTexture {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
-        let pbo = device.create_pbo();
+        //let pbo = device.create_pbo();
 
-        VertexDataTexture { texture, pbo }
+        VertexDataTexture { texture/*, pbo*/ }
     }
 
-    fn update<T>(&mut self, device: &mut Device, data: &mut Vec<T>) {
+    fn update<B: hal::Backend, T>(&mut self, device: &mut Device<B>, data: &mut Vec<T>) {
         if data.is_empty() {
             return;
         }
@@ -1240,13 +1320,14 @@ impl VertexDataTexture {
             DeviceUintPoint::zero(),
             DeviceUintSize::new(width, needed_height),
         );
-        device
-            .upload_texture(&self.texture, &self.pbo, 0)
-            .upload(rect, 0, None, data);
+        //device
+        //    .upload_texture(&self.texture, &self.pbo, 0)
+        //    .upload(rect, 0, None, data);
+        device.upload_texture(&self.texture, rect, 0, None, data.as_slice());
     }
 
-    fn deinit(self, device: &mut Device) {
-        device.delete_pbo(self.pbo);
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
+        //device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
 }
@@ -1288,30 +1369,30 @@ impl LazyInitializedDebugRenderer {
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self, device: &mut Device) -> &'a mut DebugRenderer {
+    pub fn get_mut<'a, B: hal::Backend>(&'a mut self, device: &mut Device<B>) -> &'a mut DebugRenderer {
         self.debug_renderer.get_or_insert_with(|| DebugRenderer::new(device))
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         if let Some(debug_renderer) = self.debug_renderer {
             debug_renderer.deinit(device);
         }
     }
 }
 
-pub struct RendererVAOs {
+/*pub struct RendererVAOs {
     prim_vao: VAO,
     blur_vao: VAO,
     clip_vao: VAO,
     dash_and_dot_vao: VAO,
-}
+}*/
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
-pub struct Renderer {
+pub struct Renderer<B: hal::Backend> {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
-    pub device: Device,
+    pub device: Device<B>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
@@ -1335,8 +1416,8 @@ pub struct Renderer {
     profiler: Profiler,
     last_time: u64,
 
-    pub gpu_profile: GpuProfiler<GpuProfileTag>,
-    vaos: RendererVAOs,
+    //pub gpu_profile: GpuProfiler<GpuProfileTag>,
+    //vaos: RendererVAOs,
 
     node_data_texture: VertexDataTexture,
     local_clip_rects_texture: VertexDataTexture,
@@ -1352,9 +1433,9 @@ pub struct Renderer {
     texture_resolver: SourceTextureResolver,
 
     // A PBO used to do asynchronous texture cache uploads.
-    texture_cache_upload_pbo: PBO,
+    //texture_cache_upload_pbo: PBO,
 
-    dither_matrix_texture: Option<Texture>,
+    //dither_matrix_texture: Option<Texture>,
 
     /// Optional trait object that allows the client
     /// application to provide external buffers for image data.
@@ -1407,7 +1488,7 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
-impl Renderer {
+impl<B: hal::Backend> Renderer<B> {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
     /// # Examples
@@ -1426,14 +1507,16 @@ impl Renderer {
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        gl: Rc<gl::Gl>,
         notifier: Box<RenderNotifier>,
+        adapter: &hal::Adapter<B>,
+        surface: &mut B::Surface,
+        window_size: (u32, u32),
         mut options: RendererOptions,
     ) -> Result<(Self, RenderApiSender), RendererError> {
         let (api_tx, api_rx) = channel::msg_channel()?;
         let (payload_tx, payload_rx) = channel::payload_channel()?;
         let (result_tx, result_rx) = channel();
-        let gl_type = gl.get_type();
+        //let gl_type = gl.get_type();
 
         let debug_server = DebugServer::new(api_tx.clone());
 
@@ -1443,15 +1526,18 @@ impl Renderer {
         };
 
         let mut device = Device::new(
-            gl,
             options.resource_override_path.clone(),
             options.upload_method.clone(),
             Box::new(file_watch_handler),
-            options.cached_programs.take(),
+            adapter,
+            surface,
+            window_size,
+            //options.cached_programs.take(),
+            options.api_capabilities,
         );
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
-            device.supports_extension("GL_ARB_blend_func_extended");
+            device.supports_features(hal::Features::DUAL_SRC_BLENDING);
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
@@ -1477,122 +1563,19 @@ impl Renderer {
 
         device.begin_frame();
 
-        let shaders = Shaders::new(&mut device, gl_type, &options)?;
+        let shaders = Shaders::new(&mut device, /*gl_type,*/ &options)?;
 
         let backend_profile_counters = BackendProfileCounters::new();
 
-        let dither_matrix_texture = if options.enable_dithering {
-            let dither_matrix: [u8; 64] = [
-                00,
-                48,
-                12,
-                60,
-                03,
-                51,
-                15,
-                63,
-                32,
-                16,
-                44,
-                28,
-                35,
-                19,
-                47,
-                31,
-                08,
-                56,
-                04,
-                52,
-                11,
-                59,
-                07,
-                55,
-                40,
-                24,
-                36,
-                20,
-                43,
-                27,
-                39,
-                23,
-                02,
-                50,
-                14,
-                62,
-                01,
-                49,
-                13,
-                61,
-                34,
-                18,
-                46,
-                30,
-                33,
-                17,
-                45,
-                29,
-                10,
-                58,
-                06,
-                54,
-                09,
-                57,
-                05,
-                53,
-                42,
-                26,
-                38,
-                22,
-                41,
-                25,
-                37,
-                21,
-            ];
-
-            let mut texture = device
-                .create_texture(TextureTarget::Default, ImageFormat::R8);
-            device.init_texture(
-                &mut texture,
-                8,
-                8,
-                TextureFilter::Nearest,
-                None,
-                1,
-                Some(&dither_matrix),
-            );
-
-            Some(texture)
-        } else {
-            None
-        };
-
-        let x0 = 0.0;
-        let y0 = 0.0;
-        let x1 = 1.0;
-        let y1 = 1.0;
-
-        let quad_indices: [u16; 6] = [0, 1, 2, 2, 1, 3];
-        let quad_vertices = [
-            PackedVertex { pos: [x0, y0] },
-            PackedVertex { pos: [x1, y0] },
-            PackedVertex { pos: [x0, y1] },
-            PackedVertex { pos: [x1, y1] },
-        ];
-
-        let prim_vao = device.create_vao(&desc::PRIM_INSTANCES);
-        device.bind_vao(&prim_vao);
-        device.update_vao_indices(&prim_vao, &quad_indices, VertexUsageHint::Static);
-        device.update_vao_main_vertices(&prim_vao, &quad_vertices, VertexUsageHint::Static);
-
-        let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(&mut device,
+        let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(/*&mut device,
                                                             &prim_vao,
-                                                            options.precache_shaders));
+                                                            options.precache_shaders*/));
 
-        let blur_vao = device.create_vao_with_new_instances(&desc::BLUR, &prim_vao);
-        let clip_vao = device.create_vao_with_new_instances(&desc::CLIP, &prim_vao);
-        let dash_and_dot_vao =
-            device.create_vao_with_new_instances(&desc::BORDER_CORNER_DASH_AND_DOT, &prim_vao);
-        let texture_cache_upload_pbo = device.create_pbo();
+        //let blur_vao = device.create_vao_with_new_instances(&desc::BLUR, &prim_vao);
+        //let clip_vao = device.create_vao_with_new_instances(&desc::CLIP, &prim_vao);
+        //let dash_and_dot_vao =
+        //    device.create_vao_with_new_instances(&desc::BORDER_CORNER_DASH_AND_DOT, &prim_vao);
+        //let texture_cache_upload_pbo = device.create_pbo();
 
         let texture_resolver = SourceTextureResolver::new(&mut device);
 
@@ -1713,7 +1696,7 @@ impl Renderer {
             }
         })?;
 
-        let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()));
+        //let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()));
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo_for_external_texture(0);
 
@@ -1738,19 +1721,19 @@ impl Renderer {
             clear_color: options.clear_color,
             enable_clear_scissor: options.enable_clear_scissor,
             last_time: 0,
-            gpu_profile,
+            //gpu_profile,
             gpu_glyph_renderer,
-            vaos: RendererVAOs {
+            /*vaos: RendererVAOs {
                 prim_vao,
                 blur_vao,
                 clip_vao,
                 dash_and_dot_vao,
-            },
+            },*/
             node_data_texture,
             local_clip_rects_texture,
             render_task_texture,
             pipeline_info: PipelineInfo::default(),
-            dither_matrix_texture,
+            //dither_matrix_texture,
             external_image_handler: None,
             output_image_handler: None,
             output_targets: FastHashMap::default(),
@@ -1759,7 +1742,7 @@ impl Renderer {
             gpu_cache_texture,
             gpu_cache_frame_id: FrameId::new(0),
             gpu_cache_overflow: false,
-            texture_cache_upload_pbo,
+            //texture_cache_upload_pbo,
             texture_resolver,
             renderer_errors: Vec::new(),
             #[cfg(feature = "capture")]
@@ -1781,8 +1764,8 @@ impl Renderer {
     pub fn get_graphics_api_info(&self) -> GraphicsApiInfo {
         GraphicsApiInfo {
             kind: GraphicsApi::OpenGL,
-            version: self.device.gl().get_string(gl::VERSION),
-            renderer: self.device.gl().get_string(gl::RENDERER),
+            version: String::from("0.0.1"), //self.device.gl().get_string(gl::VERSION),
+            renderer: String::from("gfx-hal"), //self.device.gl().get_string(gl::RENDERER),
         }
     }
 
@@ -1797,9 +1780,9 @@ impl Renderer {
 
     // update the program cache with new binaries, e.g. when some of the lazy loaded
     // shader programs got activated in the mean time
-    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
+    /*pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
         self.device.update_program_cache(cached_programs);
-    }
+    }*/
 
     /// Processes the result queue.
     ///
@@ -2137,9 +2120,9 @@ impl Renderer {
                             row.is_dirty = true;
                         }
                     }
-                    CacheBus::Scatter { .. } => {
+                    /*CacheBus::Scatter { .. } => {
                         warn!("Unable to invalidate scattered GPU cache");
-                    }
+                    }*/
                 }
             }
         }
@@ -2217,7 +2200,7 @@ impl Renderer {
         let mut frame_profiles = Vec::new();
         let mut profile_timers = RendererProfileTimers::new();
 
-        #[cfg(feature = "debug_renderer")]
+        /*#[cfg(feature = "debug_renderer")]
         let profile_samplers = {
             let _gm = self.gpu_profile.start_marker("build samples");
             // Block CPU waiting for last frame's GPU profiles to arrive.
@@ -2233,13 +2216,14 @@ impl Renderer {
             }
             profile_timers.gpu_samples = timers;
             samplers
-        };
+        };*/
 
+        let frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
-            let _gm = self.gpu_profile.start_marker("begin frame");
+            //let _gm = self.gpu_profile.start_marker("begin frame");
             let frame_id = self.device.begin_frame();
-            self.gpu_profile.begin_frame(frame_id);
+            //self.gpu_profile.begin_frame(frame_id);
 
             self.device.disable_scissor();
             self.device.disable_depth();
@@ -2353,7 +2337,7 @@ impl Renderer {
         }
 
         if self.debug_flags.contains(DebugFlags::ECHO_DRIVER_MESSAGES) {
-            self.device.echo_driver_messages();
+            //self.device.echo_driver_messages();
         }
 
         self.backend_profile_counters.reset();
@@ -2361,8 +2345,8 @@ impl Renderer {
         self.profile_counters.frame_counter.inc();
 
         profile_timers.cpu_time.profile(|| {
-            let _gm = self.gpu_profile.start_marker("end frame");
-            self.gpu_profile.end_frame();
+            //let _gm = self.gpu_profile.start_marker("end frame");
+            //self.gpu_profile.end_frame();
             #[cfg(feature = "debug_renderer")]
             {
                 self.debug.get_mut(&mut self.device)
@@ -2372,6 +2356,8 @@ impl Renderer {
         });
         self.last_time = current_time;
 
+        self.device.swap_buffers(frame_semaphore);
+
         if self.renderer_errors.is_empty() {
             Ok(stats)
         } else {
@@ -2380,7 +2366,7 @@ impl Renderer {
     }
 
     fn update_gpu_cache(&mut self) {
-        let _gm = self.gpu_profile.start_marker("gpu cache update");
+        //let _gm = self.gpu_profile.start_marker("gpu cache update");
 
         // For an artificial stress test of GPU cache resizing,
         // always pass an extra update list with at least one block in it.
@@ -2446,7 +2432,7 @@ impl Renderer {
     }
 
     fn update_texture_cache(&mut self) {
-        let _gm = self.gpu_profile.start_marker("texture cache update");
+        //let _gm = self.gpu_profile.start_marker("texture cache update");
         let mut pending_texture_updates = mem::replace(&mut self.pending_texture_updates, vec![]);
 
         for update_list in pending_texture_updates.drain(..) {
@@ -2490,21 +2476,26 @@ impl Renderer {
                         offset,
                     } => {
                         let texture = &self.texture_resolver.cache_texture_map[update.id.0];
-                        let mut uploader = self.device.upload_texture(
+                        /*let mut uploader = self.device.upload_texture(
                             texture,
                             &self.texture_cache_upload_pbo,
                             0,
-                        );
+                        );*/
 
                         match source {
                             TextureUpdateSource::Bytes { data } => {
-                                uploader.upload(
-                                    rect, layer_index, stride,
+                                //uploader.upload(
+                                //    rect, layer_index, stride,
+                                //    &data[offset as usize ..],
+                                //);
+                                self.device.upload_texture(
+                                    texture, rect, layer_index, stride,
                                     &data[offset as usize ..],
                                 );
                             }
-                            TextureUpdateSource::External { id, channel_index } => {
-                                let handler = self.external_image_handler
+                            TextureUpdateSource::External { /*id, channel_index*/ .. } => {
+                                unimplemented!();
+                                /*let handler = self.external_image_handler
                                     .as_mut()
                                     .expect("Found external image, but no handler set!");
                                 match handler.lock(id, channel_index).source {
@@ -2528,7 +2519,7 @@ impl Renderer {
                                         panic!("Unexpected external texture {:?} for the texture cache update of {:?}", eid, id);
                                     }
                                 };
-                                handler.unlock(id, channel_index);
+                                handler.unlock(id, channel_index);*/
                             }
                         }
                     }
@@ -2547,7 +2538,9 @@ impl Renderer {
         vertex_array_kind: VertexArrayKind,
         textures: &BatchTextures,
         stats: &mut RendererStats,
-    ) {
+    )
+        where T: PrimitiveType
+    {
         for i in 0 .. textures.colors.len() {
             self.texture_resolver.bind(
                 &textures.colors[i],
@@ -2556,10 +2549,12 @@ impl Renderer {
             );
         }
 
+        self.device.bind_textures();
+
         // TODO: this probably isn't the best place for this.
-        if let Some(ref texture) = self.dither_matrix_texture {
+        /*if let Some(ref texture) = self.dither_matrix_texture {
             self.device.bind_texture(TextureSampler::Dither, texture);
-        }
+        }*/
 
         self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
     }
@@ -2567,27 +2562,27 @@ impl Renderer {
     pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T>(
         &mut self,
         data: &[T],
-        vertex_array_kind: VertexArrayKind,
+        _vertex_array_kind: VertexArrayKind,
         stats: &mut RendererStats,
-    ) {
-        let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
+    )
+        where T: PrimitiveType
+    {
+        //let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
 
-        self.device.bind_vao(vao);
+        //self.device.bind_vao(vao);
 
         let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
 
+        let data = data.iter().map(|pi| pi.to_primitive_type()).collect::<Vec<T::Primitive>>();
         if batched {
-            self.device
-                .update_vao_instances(vao, data, VertexUsageHint::Stream);
-            self.device
-                .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
+            self.device.update_instances(&data);
+            self.device.draw();
             self.profile_counters.draw_calls.inc();
             stats.total_draw_calls += 1;
         } else {
             for i in 0 .. data.len() {
-                self.device
-                    .update_vao_instances(vao, &data[i .. i + 1], VertexUsageHint::Stream);
-                self.device.draw_triangles_u16(0, 6);
+                self.device.update_instances(&data[ i .. i + 1]);
+                self.device.draw();
                 self.profile_counters.draw_calls.inc();
                 stats.total_draw_calls += 1;
             }
@@ -2599,7 +2594,7 @@ impl Renderer {
     fn handle_readback_composite(
         &mut self,
         render_target: Option<(&Texture, i32)>,
-        framebuffer_size: DeviceUintSize,
+        _framebuffer_size: DeviceUintSize,
         scissor_rect: Option<DeviceIntRect>,
         source: &RenderTask,
         backdrop: &RenderTask,
@@ -2634,19 +2629,19 @@ impl Renderer {
         let cache_draw_target = (cache_texture, readback_layer.0 as i32);
         self.device.bind_draw_target(Some(cache_draw_target), None);
 
-        let mut src = DeviceIntRect::new(
+        let src = DeviceIntRect::new(
             source_screen_origin + (backdrop_rect.origin - backdrop_screen_origin),
             readback_rect.size,
         );
-        let mut dest = readback_rect.to_i32();
+        let dest = readback_rect.to_i32();
 
         // Need to invert the y coordinates and flip the image vertically when
         // reading back from the framebuffer.
-        if render_target.is_none() {
+        /*if render_target.is_none() {
             src.origin.y = framebuffer_size.height as i32 - src.size.height - src.origin.y;
             dest.origin.y += dest.size.height;
             dest.size.height = -dest.size.height;
-        }
+        }*/
 
         self.device.bind_read_target(render_target);
         self.device.blit_render_target(src, dest);
@@ -2669,7 +2664,7 @@ impl Renderer {
             return;
         }
 
-        let _timer = self.gpu_profile.start_timer(GPU_TAG_BLIT);
+        //let _timer = self.gpu_profile.start_timer(_GPU_TAG_BLIT);
 
         // TODO(gw): For now, we don't bother batching these by source texture.
         //           If if ever shows up as an issue, we can easily batch them.
@@ -2742,7 +2737,7 @@ impl Renderer {
         stats: &mut RendererStats,
     ) {
         self.profile_counters.color_targets.inc();
-        let _gm = self.gpu_profile.start_marker("color target");
+        //let _gm = self.gpu_profile.start_marker("color target");
 
         // sanity check for the depth buffer
         if let Some((texture, _)) = render_target {
@@ -2750,7 +2745,7 @@ impl Renderer {
         }
 
         {
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
+            //let _timer = self.gpu_profile.start_timer(_GPU_TAG_SETUP_TARGET);
             self.device
                 .bind_draw_target(render_target, Some(target_size));
             self.device.disable_depth();
@@ -2803,7 +2798,7 @@ impl Renderer {
         //           fast path blur shaders for common
         //           blur radii with fixed weights.
         if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_BLUR);
+            //let _timer = self.gpu_profile.start_timer(_GPU_TAG_BLUR);
 
             self.device.set_blend(false);
             self.shaders.cs_blur_rgba8
@@ -2833,8 +2828,8 @@ impl Renderer {
         //TODO: record the pixel count for cached primitives
 
         if target.needs_depth() {
-            let _gl = self.gpu_profile.start_marker("opaque batches");
-            let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
+            //let _gl = self.gpu_profile.start_marker("opaque batches");
+            //let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
             self.device.set_blend(false);
             //Note: depth equality is needed for split planes
             self.device.set_depth_func(DepthFunction::LessEqual);
@@ -2861,7 +2856,7 @@ impl Renderer {
                             &mut self.renderer_errors,
                         );
 
-                    let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
+                    //let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
                     self.draw_instanced_batch(
                         &batch.instances,
                         VertexArrayKind::Primitive,
@@ -2876,11 +2871,11 @@ impl Renderer {
             }
 
             self.device.disable_depth_write();
-            self.gpu_profile.finish_sampler(opaque_sampler);
+            //self.gpu_profile.finish_sampler(opaque_sampler);
         }
 
-        let _gl = self.gpu_profile.start_marker("alpha batches");
-        let transparent_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
+        //let _gl = self.gpu_profile.start_marker("alpha batches");
+        //let transparent_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
         self.device.set_blend(true);
         let mut prev_blend_mode = BlendMode::None;
 
@@ -2946,7 +2941,7 @@ impl Renderer {
                     );
                 }
 
-                let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
+                //let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
                 self.draw_instanced_batch(
                     &batch.instances,
                     VertexArrayKind::Primitive,
@@ -2957,19 +2952,19 @@ impl Renderer {
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
+                    self.device.set_uniforms(projection);
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                     // are all set up from the previous draw_instanced_batch call,
                     // so just issue a draw call here to avoid re-uploading the
                     // instances and re-binding textures etc.
-                    self.device
-                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                    self.device.draw();
 
                     self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
+                    self.device.set_uniforms(projection);
 
-                    self.device
-                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                    self.device.draw();
 
                     prev_blend_mode = BlendMode::None;
                 }
@@ -2982,7 +2977,7 @@ impl Renderer {
 
         self.device.disable_depth();
         self.device.set_blend(false);
-        self.gpu_profile.finish_sampler(transparent_sampler);
+        //self.gpu_profile.finish_sampler(transparent_sampler);
 
         // For any registered image outputs on this render target,
         // get the texture from caller and blit it.
@@ -3031,11 +3026,11 @@ impl Renderer {
         stats: &mut RendererStats,
     ) {
         self.profile_counters.alpha_targets.inc();
-        let _gm = self.gpu_profile.start_marker("alpha target");
-        let alpha_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_ALPHA);
+        //let _gm = self.gpu_profile.start_marker("alpha target");
+        //let alpha_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_ALPHA);
 
         {
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
+            //let _timer = self.gpu_profile.start_timer(_GPU_TAG_SETUP_TARGET);
             self.device
                 .bind_draw_target(Some(render_target), Some(target_size));
             self.device.disable_depth();
@@ -3071,7 +3066,7 @@ impl Renderer {
         //           fast path blur shaders for common
         //           blur radii with fixed weights.
         if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_BLUR);
+            //let _timer = self.gpu_profile.start_timer(_GPU_TAG_BLUR);
 
             self.device.set_blend(false);
             self.shaders.cs_blur_a8
@@ -3100,13 +3095,13 @@ impl Renderer {
 
         // Draw the clip items into the tiled alpha mask.
         {
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_CLIP);
+            //let _timer = self.gpu_profile.start_timer(_GPU_TAG_CACHE_CLIP);
 
             // If we have border corner clips, the first step is to clear out the
             // area in the clip mask. This allows drawing multiple invididual clip
             // in regions below.
             if !target.clip_batcher.border_clears.is_empty() {
-                let _gm2 = self.gpu_profile.start_marker("clip borders [clear]");
+                //let _gm2 = self.gpu_profile.start_marker("clip borders [clear]");
                 self.device.set_blend(false);
                 self.shaders.cs_clip_border
                     .bind(&mut self.device, projection, &mut self.renderer_errors);
@@ -3120,7 +3115,7 @@ impl Renderer {
 
             // Draw any dots or dashes for border corners.
             if !target.clip_batcher.borders.is_empty() {
-                let _gm2 = self.gpu_profile.start_marker("clip borders");
+                //let _gm2 = self.gpu_profile.start_marker("clip borders");
                 // We are masking in parts of the corner (dots or dashes) here.
                 // Blend mode is set to max to allow drawing multiple dots.
                 // The individual dots and dashes in a border never overlap, so using
@@ -3143,7 +3138,7 @@ impl Renderer {
 
             // draw rounded cornered rectangles
             if !target.clip_batcher.rectangles.is_empty() {
-                let _gm2 = self.gpu_profile.start_marker("clip rectangles");
+                //let _gm2 = self.gpu_profile.start_marker("clip rectangles");
                 self.shaders.cs_clip_rectangle.bind(
                     &mut self.device,
                     projection,
@@ -3158,7 +3153,7 @@ impl Renderer {
             }
             // draw box-shadow clips
             for (mask_texture_id, items) in target.clip_batcher.box_shadows.iter() {
-                let _gm2 = self.gpu_profile.start_marker("box-shadows");
+                //let _gm2 = self.gpu_profile.start_marker("box-shadows");
                 let textures = BatchTextures {
                     colors: [
                         mask_texture_id.clone(),
@@ -3178,7 +3173,7 @@ impl Renderer {
 
             // draw line decoration clips
             if !target.clip_batcher.line_decorations.is_empty() {
-                let _gm2 = self.gpu_profile.start_marker("clip lines");
+                //let _gm2 = self.gpu_profile.start_marker("clip lines");
                 self.shaders.cs_clip_line.bind(
                     &mut self.device,
                     projection,
@@ -3194,7 +3189,7 @@ impl Renderer {
 
             // draw image masks
             for (mask_texture_id, items) in target.clip_batcher.images.iter() {
-                let _gm2 = self.gpu_profile.start_marker("clip images");
+                //let _gm2 = self.gpu_profile.start_marker("clip images");
                 let textures = BatchTextures {
                     colors: [
                         mask_texture_id.clone(),
@@ -3213,7 +3208,7 @@ impl Renderer {
             }
         }
 
-        self.gpu_profile.finish_sampler(alpha_sampler);
+        //self.gpu_profile.finish_sampler(alpha_sampler);
     }
 
     fn draw_texture_cache_target(
@@ -3265,7 +3260,7 @@ impl Renderer {
 
         // Draw any blurs for this target.
         if !target.horizontal_blurs.is_empty() {
-            let _timer = self.gpu_profile.start_timer(GPU_TAG_BLUR);
+            //let _timer = self.gpu_profile.start_timer(_GPU_TAG_BLUR);
 
             match target.target_kind {
                 RenderTargetKind::Alpha => &mut self.shaders.cs_blur_a8,
@@ -3323,7 +3318,7 @@ impl Renderer {
         };
 
         for deferred_resolve in deferred_resolves {
-            self.gpu_profile.place_marker("deferred resolve");
+            //self.gpu_profile.place_marker("deferred resolve");
             let props = &deferred_resolve.image_properties;
             let ext_image = props
                 .external_image
@@ -3409,6 +3404,8 @@ impl Renderer {
         let mut index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
+                //TODO add this upstream
+                !texture.used_in_frame(frame_id) &&
                 //TODO: re-use a part of a larger target, if available
                 selector == TargetSelector {
                     size: texture.get_dimensions(),
@@ -3457,7 +3454,7 @@ impl Renderer {
     }
 
     fn bind_frame_data(&mut self, frame: &mut Frame) {
-        let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_DATA);
+        //let _timer = self.gpu_profile.start_timer(_GPU_TAG_SETUP_DATA);
         self.device.set_device_pixel_ratio(frame.device_pixel_ratio);
 
         self.node_data_texture.update(&mut self.device, &mut frame.node_data);
@@ -3491,7 +3488,7 @@ impl Renderer {
         frame_id: FrameId,
         stats: &mut RendererStats,
     ) {
-        let _gm = self.gpu_profile.start_marker("tile frame draw");
+        //let _gm = self.gpu_profile.start_marker("tile frame draw");
 
         if frame.passes.is_empty() {
             frame.has_been_rendered = true;
@@ -3506,7 +3503,12 @@ impl Renderer {
         self.texture_resolver.begin_frame();
 
         for (pass_index, pass) in frame.passes.iter_mut().enumerate() {
-            self.gpu_profile.place_marker(&format!("pass {}", pass_index));
+            //self.gpu_profile.place_marker(&format!("pass {}", pass_index));
+            //TODO add this upstream
+            // Init SharedCacheA8 with dummy texture
+            if pass_index == 0 {
+                self.device.bind_texture(TextureSampler::SharedCacheA8, &self.texture_resolver.dummy_cache_texture);
+            }
 
             self.texture_resolver.bind(
                 &SourceTexture::CacheA8,
@@ -3528,8 +3530,8 @@ impl Renderer {
                         let projection = Transform3D::ortho(
                             0.0,
                             framebuffer_size.width as f32,
-                            framebuffer_size.height as f32,
                             0.0,
+                            framebuffer_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
                         );
@@ -3667,16 +3669,16 @@ impl Renderer {
     pub fn set_debug_flags(&mut self, flags: DebugFlags) {
         if let Some(enabled) = flag_changed(self.debug_flags, flags, DebugFlags::GPU_TIME_QUERIES) {
             if enabled {
-                self.gpu_profile.enable_timers();
+                //self.gpu_profile.enable_timers();
             } else {
-                self.gpu_profile.disable_timers();
+                //self.gpu_profile.disable_timers();
             }
         }
         if let Some(enabled) = flag_changed(self.debug_flags, flags, DebugFlags::GPU_SAMPLE_QUERIES) {
             if enabled {
-                self.gpu_profile.enable_samplers();
+                //self.gpu_profile.enable_samplers();
             } else {
-                self.gpu_profile.disable_samplers();
+                //self.gpu_profile.disable_samplers();
             }
         }
 
@@ -3834,7 +3836,8 @@ impl Renderer {
     }
 
     pub fn read_gpu_cache(&mut self) -> (DeviceUintSize, Vec<u8>) {
-        let size = self.gpu_cache_texture.texture.get_dimensions();
+        unimplemented!()
+        /*let size = self.gpu_cache_texture.texture.get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
         self.device.begin_frame();
         self.device.bind_read_target(Some((&self.gpu_cache_texture.texture, 0)));
@@ -3845,7 +3848,7 @@ impl Renderer {
         );
         self.device.bind_read_target(None);
         self.device.end_frame();
-        (size, texels)
+        (size, texels)*/
     }
 
     // De-initialize the Renderer safely, assuming the GL is still alive and active.
@@ -3853,18 +3856,18 @@ impl Renderer {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
         self.gpu_cache_texture.deinit(&mut self.device);
-        if let Some(dither_matrix_texture) = self.dither_matrix_texture {
+        /*if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
-        }
+        }*/
         self.node_data_texture.deinit(&mut self.device);
         self.local_clip_rects_texture.deinit(&mut self.device);
         self.render_task_texture.deinit(&mut self.device);
-        self.device.delete_pbo(self.texture_cache_upload_pbo);
+        //self.device.delete_pbo(self.texture_cache_upload_pbo);
         self.texture_resolver.deinit(&mut self.device);
-        self.device.delete_vao(self.vaos.prim_vao);
-        self.device.delete_vao(self.vaos.clip_vao);
-        self.device.delete_vao(self.vaos.blur_vao);
-        self.device.delete_vao(self.vaos.dash_and_dot_vao);
+        //self.device.delete_vao(self.vaos.prim_vao);
+        //self.device.delete_vao(self.vaos.clip_vao);
+        //self.device.delete_vao(self.vaos.blur_vao);
+        //self.device.delete_vao(self.vaos.dash_and_dot_vao);
 
         #[cfg(feature = "debug_renderer")]
         {
@@ -3882,6 +3885,7 @@ impl Renderer {
             self.device.delete_external_texture(ext);
         }
         self.device.end_frame();
+        self.device.deinit();
     }
 }
 
@@ -3994,12 +3998,13 @@ pub struct RendererOptions {
     pub recorder: Option<Box<ApiRecordingReceiver>>,
     pub thread_listener: Option<Box<ThreadListener + Send + Sync>>,
     pub enable_render_on_scroll: bool,
-    pub cached_programs: Option<Rc<ProgramCache>>,
+    //pub cached_programs: Option<Rc<ProgramCache>>,
     pub debug_flags: DebugFlags,
     pub renderer_id: Option<u64>,
     pub disable_dual_source_blending: bool,
     pub scene_builder_hooks: Option<Box<SceneBuilderHooks + Send>>,
     pub sampler: Option<Box<AsyncPropertySampler + Send>>,
+    pub api_capabilities: ApiCapabilities,
 }
 
 impl Default for RendererOptions {
@@ -4016,23 +4021,24 @@ impl Default for RendererOptions {
             renderer_kind: RendererKind::Native,
             enable_subpixel_aa: false,
             clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
-            enable_clear_scissor: true,
+            enable_clear_scissor: false,
             max_texture_size: None,
             // Scattered GPU cache updates haven't met a test that would show their superiority yet.
             scatter_gpu_cache_updates: false,
             // This is best as `Immediate` on Angle, or `Pixelbuffer(Dynamic)` on GL,
             // but we are unable to make this decision here, so picking the reasonable medium.
-            upload_method: UploadMethod::PixelBuffer(VertexUsageHint::Stream),
+            upload_method: UploadMethod::PixelBuffer,
             workers: None,
             blob_image_renderer: None,
             recorder: None,
             thread_listener: None,
             enable_render_on_scroll: true,
             renderer_id: None,
-            cached_programs: None,
+            //cached_programs: None,
             disable_dual_source_blending: false,
             scene_builder_hooks: None,
             sampler: None,
+            api_capabilities: ApiCapabilities::empty(),
         }
     }
 }
@@ -4135,10 +4141,10 @@ pub struct PipelineInfo {
     pub removed_pipelines: Vec<PipelineId>,
 }
 
-impl Renderer {
+impl<B: hal::Backend> Renderer<B> {
     #[cfg(feature = "capture")]
     fn save_texture(
-        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device
+        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device<B>
     ) -> PlainTexture {
         use std::fs;
         use std::io::Write;
@@ -4194,7 +4200,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "replay")]
-    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device) -> Vec<u8> {
+    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device<B>) -> Vec<u8> {
         use std::fs::File;
         use std::io::Read;
 
@@ -4225,7 +4231,7 @@ impl Renderer {
         use api::{CaptureBits, ExternalImageData};
 
         self.device.begin_frame();
-        let _gm = self.gpu_profile.start_marker("read GPU data");
+        //let _gm = self.gpu_profile.start_marker("read GPU data");
         self.device.bind_read_target_impl(self.read_fbo);
 
         if !deferred_images.is_empty() {
@@ -4296,7 +4302,8 @@ impl Renderer {
         }
 
         if config.bits.contains(CaptureBits::FRAME) {
-            let path_textures = config.root.join("textures");
+            unimplemented!()
+            /*let path_textures = config.root.join("textures");
             if !path_textures.is_dir() {
                 fs::create_dir(&path_textures).unwrap();
             }
@@ -4321,7 +4328,7 @@ impl Renderer {
                 plain_self.textures.push(plain);
             }
 
-            config.serialize(&plain_self, "renderer");
+            config.serialize(&plain_self, "renderer");*/
         }
 
         self.device.bind_read_target(None);
@@ -4400,7 +4407,7 @@ impl Renderer {
                     rows.extend((0 .. dim.height).map(|_| CacheRow::new()));
                     cpu_blocks.extend_from_slice(blocks);
                 }
-                CacheBus::Scatter { .. } => {}
+                //CacheBus::Scatter { .. } => {}
             }
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 
@@ -4448,7 +4455,7 @@ impl Renderer {
     }
 }
 
-#[cfg(feature = "pathfinder")]
+/*#[cfg(feature = "pathfinder")]
 fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
                vaos: &'a RendererVAOs,
                gpu_glyph_renderer: &'a GpuGlyphRenderer)
@@ -4475,4 +4482,4 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
         VertexArrayKind::DashAndDot => &vaos.dash_and_dot_vao,
         VertexArrayKind::VectorStencil | VertexArrayKind::VectorCover => unreachable!(),
     }
-}
+}*/
