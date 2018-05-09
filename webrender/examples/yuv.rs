@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate gleam;
-extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
@@ -11,10 +9,9 @@ extern crate winit;
 mod boilerplate;
 
 use boilerplate::Example;
-use gleam::gl;
 use webrender::api::*;
 
-fn init_gl_texture(
+/*fn init_gl_texture(
     id: gl::GLuint,
     internal: gl::GLenum,
     external: gl::GLenum,
@@ -38,23 +35,23 @@ fn init_gl_texture(
         Some(bytes),
     );
     gl.bind_texture(gl::TEXTURE_2D, 0);
-}
+}*/
 
 struct YuvImageProvider {
-    texture_ids: Vec<gl::GLuint>,
+    texture_ids: Vec<u32>,
 }
 
 impl YuvImageProvider {
-    fn new(gl: &gl::Gl) -> Self {
-        let texture_ids = gl.gen_textures(4);
+    fn new() -> Self {
+        /*let texture_ids = gl.gen_textures(4);
 
         init_gl_texture(texture_ids[0], gl::RED, gl::RED, &[127; 100 * 100], gl);
         init_gl_texture(texture_ids[1], gl::RG8, gl::RG, &[0; 100 * 100 * 2], gl);
         init_gl_texture(texture_ids[2], gl::RED, gl::RED, &[127; 100 * 100], gl);
-        init_gl_texture(texture_ids[3], gl::RED, gl::RED, &[127; 100 * 100], gl);
+        init_gl_texture(texture_ids[3], gl::RED, gl::RED, &[127; 100 * 100], gl);*/
 
         YuvImageProvider {
-            texture_ids
+            texture_ids: vec![0; 4],
         }
     }
 }
@@ -186,10 +183,9 @@ impl Example for App {
 
     fn get_image_handlers(
         &mut self,
-        gl: &gl::Gl,
     ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
-        (Some(Box::new(YuvImageProvider::new(gl))), None)
+        (Some(Box::new(YuvImageProvider::new())), None)
     }
 }
 

@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate gleam;
-extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
@@ -11,7 +9,6 @@ extern crate winit;
 mod boilerplate;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
-use gleam::gl;
 use std::mem;
 use webrender::api::*;
 
@@ -295,7 +292,6 @@ impl Example for App {
 
     fn get_image_handlers(
         &mut self,
-        _gl: &gl::Gl,
     ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
         (Some(Box::new(ImageGenerator::new())), None)

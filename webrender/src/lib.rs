@@ -48,11 +48,13 @@ extern crate cfg_if;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[cfg(any(feature = "serde"))]
+#[cfg(any(feature = "gfx", feature = "serde"))]
 #[macro_use]
 extern crate serde;
 #[macro_use]
 extern crate thread_profiler;
+pub extern crate gfx_hal as hal;
+extern crate rand;
 
 mod batch;
 mod border;
@@ -103,6 +105,7 @@ mod texture_allocator;
 mod texture_cache;
 mod tiling;
 mod util;
+mod vertex_types;
 
 mod shader_source {
     include!(concat!(env!("OUT_DIR"), "/shaders.rs"));
@@ -180,8 +183,9 @@ extern crate png;
 pub extern crate webrender_api;
 
 #[doc(hidden)]
-pub use device::{build_shader_strings, ReadPixelsFormat, UploadMethod, VertexUsageHint};
+pub use device::{/*build_shader_strings,*/ VertexUsageHint};
 pub use device::{ProgramBinary, ProgramCache, ProgramCacheObserver, ProgramSources};
+pub use device::{ApiCapabilities, ReadPixelsFormat, UploadMethod};
 pub use renderer::{AsyncPropertySampler, CpuProfile, DebugFlags, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource, GpuProfile};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, PipelineInfo, Renderer, RendererOptions};

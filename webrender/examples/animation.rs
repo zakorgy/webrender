@@ -11,8 +11,6 @@
 //! scene building for render optimization.
 
 extern crate euclid;
-extern crate gleam;
-extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
