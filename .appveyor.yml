@@ -3,7 +3,7 @@ before_test:
   - ps: Set-ScreenResolution 1920 1080
 
 environment:
-  PATH: 'C:\msys64\mingw64\bin;C:\msys64\usr\bin;%PATH%;C:\Rust\bin'
+  PATH: '%PATH%;C:\msys64\mingw64\bin;C:\msys64\usr\bin;%USERPROFILE%\.cargo\bin'
   RUST_BACKTRACE: 1
   TARGET: x86_64-pc-windows-msvc
 
