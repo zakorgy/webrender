@@ -7,23 +7,28 @@ use api::{
     YuvColorSpace, YuvFormat,
 };
 use batch::{BatchKey, BatchKind, BrushBatchKind, TransformBatchKind};
-use device::{Device, Program, ShaderError};
+use device::{Device, ProgramId, ShaderError, ShaderKind};
+use device::{PipelineRequirements, VertexArrayKind};
 use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
+use hal;
 use renderer::{
-    desc,
-    MAX_VERTEX_TEXTURE_WIDTH,
+    //desc,
+    //MAX_VERTEX_TEXTURE_WIDTH,
     BlendMode, ImageBufferKind, RendererError, RendererOptions,
-    TextureSampler, VertexArrayKind,
+    //TextureSampler,
 };
+use ron::de::from_reader;
+use std::collections::HashMap;
+use std::fs::File;
 use util::TransformedRectKind;
 
-use gleam::gl::GlType;
-use time::precise_time_ns;
+//use gleam::gl::GlType;
+//use time::precise_time_ns;
 
 
 impl ImageBufferKind {
-    pub(crate) fn get_feature_string(&self) -> &'static str {
+    pub(crate) fn _get_feature_string(&self) -> &'static str {
         match *self {
             ImageBufferKind::Texture2D => "TEXTURE_2D",
             ImageBufferKind::Texture2DArray => "",
@@ -32,7 +37,7 @@ impl ImageBufferKind {
         }
     }
 
-    fn has_platform_support(&self, gl_type: &GlType) -> bool {
+    /*fn has_platform_support(&self, gl_type: &GlType) -> bool {
         match (*self, gl_type) {
             (ImageBufferKind::Texture2D, _) => true,
             (ImageBufferKind::Texture2DArray, _) => true,
@@ -40,56 +45,47 @@ impl ImageBufferKind {
             (ImageBufferKind::TextureExternal, &GlType::Gles) => true,
             (ImageBufferKind::TextureExternal, &GlType::Gl) => false,
         }
-    }
+    }*/
 }
 
-pub const IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
+pub const _IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
     ImageBufferKind::Texture2D,
     ImageBufferKind::TextureRect,
     ImageBufferKind::TextureExternal,
     ImageBufferKind::Texture2DArray,
 ];
 
-const ALPHA_FEATURE: &str = "ALPHA_PASS";
-const DITHERING_FEATURE: &str = "DITHERING";
-const DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
-
-pub(crate) enum ShaderKind {
-    Primitive,
-    Cache(VertexArrayKind),
-    ClipCache,
-    Brush,
-    Text,
-    #[allow(dead_code)]
-    VectorStencil,
-    #[allow(dead_code)]
-    VectorCover,
-}
+const _ALPHA_FEATURE: &str = "ALPHA_PASS";
+const _DITHERING_FEATURE: &str = "DITHERING";
+const _DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
 
 pub struct LazilyCompiledShader {
-    program: Option<Program>,
+    program: Option<ProgramId>,
     name: &'static str,
     kind: ShaderKind,
-    features: Vec<&'static str>,
+    pipeline_requirements: PipelineRequirements,
 }
 
 impl LazilyCompiledShader {
-    pub(crate) fn new(
+    pub(crate) fn new<B: hal::Backend>(
         kind: ShaderKind,
         name: &'static str,
-        features: &[&'static str],
-        device: &mut Device,
+        pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
+        _device: &mut Device<B>,
         precache: bool,
     ) -> Result<Self, ShaderError> {
-        let mut shader = LazilyCompiledShader {
+        let pipeline_requirements =
+            pipeline_requirements.remove(name).expect(&format!("Pipeline requirements not found for: {}", name));
+        let shader = LazilyCompiledShader {
             program: None,
             name,
             kind,
-            features: features.to_vec(),
+            pipeline_requirements,
         };
 
         if precache {
-            let t0 = precise_time_ns();
+            // TODO
+            /*let t0 = precise_time_ns();
             let program = shader.get(device)?;
             let t1 = precise_time_ns();
             device.bind_program(program);
@@ -100,15 +96,15 @@ impl LazilyCompiledShader {
                 (t2 - t1) as f64 / 1000000.0,
                 name,
                 features
-            );
+            );*/
         }
 
         Ok(shader)
     }
 
-    pub fn bind(
+    pub fn bind<B: hal::Backend>(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         projection: &Transform3D<f32>,
         renderer_errors: &mut Vec<RendererError>,
     ) {
@@ -120,47 +116,23 @@ impl LazilyCompiledShader {
             }
         };
         device.bind_program(program);
-        device.set_uniforms(program, projection);
+        device.set_uniforms(projection);
     }
 
-    fn get(&mut self, device: &mut Device) -> Result<&Program, ShaderError> {
+    fn get<B: hal::Backend>(&mut self, device: &mut Device<B>) -> Result<ProgramId, ShaderError> {
         if self.program.is_none() {
-            let program = match self.kind {
-                ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       VertexArrayKind::Primitive)
-                }
-                ShaderKind::Cache(format) => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       format)
-                }
-                ShaderKind::VectorStencil => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       VertexArrayKind::VectorStencil)
-                }
-                ShaderKind::VectorCover => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       VertexArrayKind::VectorCover)
-                }
-                ShaderKind::ClipCache => {
-                    create_clip_shader(self.name, device)
-                }
-            };
-            self.program = Some(program?);
+            let program = device.create_program(
+                self.pipeline_requirements.clone(),
+                self.name,
+                &self.kind,
+            );
+            self.program = Some(program);
         }
 
-        Ok(self.program.as_ref().unwrap())
+        Ok(self.program.unwrap())
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         if let Some(program) = self.program {
             device.delete_program(program);
         }
@@ -185,40 +157,36 @@ struct BrushShader {
 }
 
 impl BrushShader {
-    fn new(
+    fn new<B: hal::Backend>(
         name: &'static str,
-        device: &mut Device,
-        features: &[&'static str],
+        alpha_name: &'static str,
+        dual_source_name: &'static str,
+        pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
+        device: &mut Device<B>,
         precache: bool,
         dual_source: bool,
     ) -> Result<Self, ShaderError> {
         let opaque = LazilyCompiledShader::new(
             ShaderKind::Brush,
             name,
-            features,
+            pipeline_requirements,
             device,
             precache,
         )?;
 
-        let mut alpha_features = features.to_vec();
-        alpha_features.push(ALPHA_FEATURE);
-
         let alpha = LazilyCompiledShader::new(
             ShaderKind::Brush,
-            name,
-            &alpha_features,
+            alpha_name,
+            pipeline_requirements,
             device,
             precache,
         )?;
 
         let dual_source = if dual_source {
-            let mut dual_source_features = alpha_features.to_vec();
-            dual_source_features.push(DUAL_SOURCE_FEATURE);
-
             let shader = LazilyCompiledShader::new(
                 ShaderKind::Brush,
-                name,
-                &dual_source_features,
+                dual_source_name,
+                pipeline_requirements,
                 device,
                 precache,
             )?;
@@ -251,7 +219,7 @@ impl BrushShader {
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.opaque.deinit(device);
         self.alpha.deinit(device);
         if let Some(dual_source) = self.dual_source {
@@ -267,38 +235,34 @@ pub struct TextShader {
 }
 
 impl TextShader {
-    fn new(
+    fn new<B: hal::Backend>(
         name: &'static str,
-        device: &mut Device,
-        features: &[&'static str],
+        transform_name: &'static str,
+        glyph_transform_name: &'static str,
+        pipeline_requirements: &mut HashMap<String, PipelineRequirements>,
+        device: &mut Device<B>,
         precache: bool,
     ) -> Result<Self, ShaderError> {
         let simple = LazilyCompiledShader::new(
             ShaderKind::Text,
             name,
-            features,
+            pipeline_requirements,
             device,
             precache,
         )?;
-
-        let mut transform_features = features.to_vec();
-        transform_features.push("TRANSFORM");
 
         let transform = LazilyCompiledShader::new(
             ShaderKind::Text,
-            name,
-            &transform_features,
+            transform_name,
+            pipeline_requirements,
             device,
             precache,
         )?;
 
-        let mut glyph_transform_features = features.to_vec();
-        glyph_transform_features.push("GLYPH_TRANSFORM");
-
         let glyph_transform = LazilyCompiledShader::new(
             ShaderKind::Text,
-            name,
-            &glyph_transform_features,
+            glyph_transform_name,
+            pipeline_requirements,
             device,
             precache,
         )?;
@@ -324,91 +288,12 @@ impl TextShader {
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.simple.deinit(device);
         self.transform.deinit(device);
         self.glyph_transform.deinit(device);
     }
 }
-
-fn create_prim_shader(
-    name: &'static str,
-    device: &mut Device,
-    features: &[&'static str],
-    vertex_format: VertexArrayKind,
-) -> Result<Program, ShaderError> {
-    let mut prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    for feature in features {
-        prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
-    }
-
-    debug!("PrimShader {}", name);
-
-    let vertex_descriptor = match vertex_format {
-        VertexArrayKind::Primitive => desc::PRIM_INSTANCES,
-        VertexArrayKind::Blur => desc::BLUR,
-        VertexArrayKind::Clip => desc::CLIP,
-        VertexArrayKind::VectorStencil => desc::VECTOR_STENCIL,
-        VertexArrayKind::VectorCover => desc::VECTOR_COVER,
-        VertexArrayKind::Border => desc::BORDER,
-    };
-
-    let program = device.create_program(name, &prefix, &vertex_descriptor);
-
-    if let Ok(ref program) = program {
-        device.bind_shader_samplers(
-            program,
-            &[
-                ("sColor0", TextureSampler::Color0),
-                ("sColor1", TextureSampler::Color1),
-                ("sColor2", TextureSampler::Color2),
-                ("sDither", TextureSampler::Dither),
-                ("sCacheA8", TextureSampler::CacheA8),
-                ("sCacheRGBA8", TextureSampler::CacheRGBA8),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
-                ("sRenderTasks", TextureSampler::RenderTasks),
-                ("sResourceCache", TextureSampler::ResourceCache),
-                ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sLocalClipRects", TextureSampler::LocalClipRects),
-            ],
-        );
-    }
-
-    program
-}
-
-fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program, ShaderError> {
-    let prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
-        #define WR_FEATURE_TRANSFORM\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    debug!("ClipShader {}", name);
-
-    let program = device.create_program(name, &prefix, &desc::CLIP);
-
-    if let Ok(ref program) = program {
-        device.bind_shader_samplers(
-            program,
-            &[
-                ("sColor0", TextureSampler::Color0),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
-                ("sRenderTasks", TextureSampler::RenderTasks),
-                ("sResourceCache", TextureSampler::ResourceCache),
-                ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sLocalClipRects", TextureSampler::LocalClipRects),
-            ],
-        );
-    }
-
-    program
-}
-
 
 pub struct Shaders {
     // These are "cache shaders". These shaders are used to
@@ -420,10 +305,12 @@ pub struct Shaders {
 
     // Brush shaders
     brush_solid: BrushShader,
-    brush_image: Vec<Option<BrushShader>>,
+    //brush_image: Vec<Option<BrushShader<B>>>,
+    brush_image: BrushShader,
     brush_blend: BrushShader,
     brush_mix_blend: BrushShader,
-    brush_yuv_image: Vec<Option<BrushShader>>,
+    //brush_yuv_image: Vec<Option<BrushShader<B>>>,
+    brush_yuv_image: Vec<BrushShader>,
     brush_radial_gradient: BrushShader,
     brush_linear_gradient: BrushShader,
 
@@ -449,200 +336,228 @@ pub struct Shaders {
 }
 
 impl Shaders {
-    pub fn new(
-        device: &mut Device,
-        gl_type: GlType,
+    pub fn new<B: hal::Backend>(
+        device: &mut Device<B>,
         options: &RendererOptions,
     ) -> Result<Self, ShaderError> {
-        // needed for the precache fake draws
-        let dummy_vao = if options.precache_shaders {
-            let vao = device.create_custom_vao(&[]);
-            device.bind_custom_vao(&vao);
-            Some(vao)
-        } else {
-            None
-        };
+        let file =
+            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
+        let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
+            from_reader(file).expect("Failed to load shader_bindings.ron");
 
         let brush_solid = BrushShader::new(
             "brush_solid",
+            "brush_solid_alpha_pass",
+            "brush_solid_alpha_pass_dual_source_blending",
+            &mut pipeline_requirements,
             device,
-            &[],
             options.precache_shaders,
             false,
         )?;
 
+        // We only support one type of image shaders for now.
+        let brush_image = BrushShader::new(
+            "brush_image",
+            "brush_image_alpha_pass",
+            "brush_image_alpha_pass_dual_source_blending",
+            &mut pipeline_requirements,
+            device,
+            options.precache_shaders,
+            true,
+        )?;
+
         let brush_blend = BrushShader::new(
             "brush_blend",
+            "brush_blend_alpha_pass",
+            "brush_blend_alpha_pass_dual_source_blending",
+            &mut pipeline_requirements,
             device,
-            &[],
             options.precache_shaders,
             false,
         )?;
 
         let brush_mix_blend = BrushShader::new(
             "brush_mix_blend",
+            "brush_mix_blend_alpha_pass",
+            "brush_mix_blend_alpha_pass_dual_source_blending",
+            &mut pipeline_requirements,
             device,
-            &[],
             options.precache_shaders,
             false,
         )?;
 
         let brush_radial_gradient = BrushShader::new(
-            "brush_radial_gradient",
-            device,
             if options.enable_dithering {
-               &[DITHERING_FEATURE]
+                "brush_radial_gradient_dithering"
             } else {
-               &[]
+                "brush_radial_gradient"
             },
+            if options.enable_dithering {
+                "brush_radial_gradient_dithering_alpha_pass"
+            } else {
+                "brush_radial_gradient_alpha_pass"
+            },
+            if options.enable_dithering {
+                "brush_radial_gradient_dual_source_dithering"
+            } else {
+                "brush_radial_gradient_alpha_pass_dual_source_blending"
+            },
+            &mut pipeline_requirements,
+            device,
             options.precache_shaders,
             false,
         )?;
 
         let brush_linear_gradient = BrushShader::new(
-            "brush_linear_gradient",
-            device,
             if options.enable_dithering {
-               &[DITHERING_FEATURE]
+                "brush_linear_gradient_dithering"
             } else {
-               &[]
+                "brush_linear_gradient"
             },
+            if options.enable_dithering {
+                "brush_linear_gradient_dithering_alpha_pass"
+            } else {
+                "brush_linear_gradient_alpha_pass"
+            },
+            if options.enable_dithering {
+                "brush_linear_gradient_dual_source_dithering"
+            } else {
+                "brush_linear_gradient_alpha_pass_dual_source_blending"
+            },
+            &mut pipeline_requirements,
+            device,
             options.precache_shaders,
             false,
         )?;
 
         let cs_blur_a8 = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Blur),
-            "cs_blur",
-            &["ALPHA_TARGET"],
+            "cs_blur_alpha_target",
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
 
         let cs_blur_rgba8 = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Blur),
-            "cs_blur",
-            &["COLOR_TARGET"],
+            "cs_blur_color_target",
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
 
         let cs_clip_rectangle = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
-            "cs_clip_rectangle",
-            &[],
+            "cs_clip_rectangle_transform",
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
 
         let cs_clip_box_shadow = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
-            "cs_clip_box_shadow",
-            &[],
+            "cs_clip_box_shadow_transform",
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
 
         let cs_clip_line = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
-            "cs_clip_line",
-            &[],
+            "cs_clip_line_transform",
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
 
         let cs_clip_image = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
-            "cs_clip_image",
-            &[],
+            "cs_clip_image_transform",
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
 
-        let ps_text_run = TextShader::new("ps_text_run",
+        let ps_text_run = TextShader::new(
+            "ps_text_run",
+            "ps_text_run_transform",
+            "ps_text_run_glyph_transform",
+            &mut pipeline_requirements,
             device,
-            &[],
             options.precache_shaders,
         )?;
 
-        let ps_text_run_dual_source = TextShader::new("ps_text_run",
+        let ps_text_run_dual_source = TextShader::new(
+            "ps_text_run_dual_source_blending",
+            "ps_text_run_dual_source_blending_transform",
+            "ps_text_run_dual_source_blending_glyph_transform",
+            &mut pipeline_requirements,
             device,
-            &["DUAL_SOURCE_BLENDING"],
             options.precache_shaders,
         )?;
-
-        // All image configuration.
-        let mut image_features = Vec::new();
-        let mut brush_image = Vec::new();
-        // PrimitiveShader is not clonable. Use push() to initialize the vec.
-        for _ in 0 .. IMAGE_BUFFER_KINDS.len() {
-            brush_image.push(None);
-        }
-        for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
-                let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
-                if feature_string != "" {
-                    image_features.push(feature_string);
-                }
-                brush_image[buffer_kind] = Some(BrushShader::new(
-                    "brush_image",
-                    device,
-                    &image_features,
-                    options.precache_shaders,
-                    true,
-                )?);
-            }
-            image_features.clear();
-        }
 
         // All yuv_image configuration.
-        let mut yuv_features = Vec::new();
-        let yuv_shader_num = IMAGE_BUFFER_KINDS.len() * YUV_FORMATS.len() * YUV_COLOR_SPACES.len();
-        let mut brush_yuv_image = Vec::new();
-        // PrimitiveShader is not clonable. Use push() to initialize the vec.
-        for _ in 0 .. yuv_shader_num {
-            brush_yuv_image.push(None);
-        }
-        for image_buffer_kind in &IMAGE_BUFFER_KINDS {
-            if image_buffer_kind.has_platform_support(&gl_type) {
-                for format_kind in &YUV_FORMATS {
-                    for color_space_kind in &YUV_COLOR_SPACES {
-                        let feature_string = image_buffer_kind.get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string = format_kind.get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string = color_space_kind.get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-
-                        let shader = BrushShader::new(
-                            "brush_yuv_image",
-                            device,
-                            &yuv_features,
-                            options.precache_shaders,
-                            false,
-                        )?;
-                        let index = Self::get_yuv_shader_index(
-                            *image_buffer_kind,
-                            *format_kind,
-                            *color_space_kind,
-                        );
-                        brush_yuv_image[index] = Some(shader);
-                        yuv_features.clear();
-                    }
-                }
-            }
-        }
+        let brush_yuv_image = vec![
+            BrushShader::new(
+                "brush_yuv_image_yuv_nv12_yuv_rec601",
+                "brush_yuv_image_yuv_nv12_yuv_rec601_alpha_pass",
+                "brush_yuv_image_yuv_nv12_yuv_rec601_alpha_pass_dual_source_blending",
+                &mut pipeline_requirements,
+                device,
+                options.precache_shaders,
+                false,
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_yuv_nv12_yuv_rec709",
+                "brush_yuv_image_yuv_nv12_yuv_rec709_alpha_pass",
+                "brush_yuv_image_yuv_nv12_yuv_rec709_alpha_pass_dual_source_blending",
+                &mut pipeline_requirements,
+                device,
+                options.precache_shaders,
+                false,
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_yuv_planar_yuv_rec601",
+                "brush_yuv_image_yuv_planar_yuv_rec601_alpha_pass",
+                "brush_yuv_image_yuv_planar_yuv_rec601_alpha_pass_dual_source_blending",
+                &mut pipeline_requirements,
+                device,
+                options.precache_shaders,
+                false,
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_yuv_planar_yuv_rec709",
+                "brush_yuv_image_yuv_planar_yuv_rec709_alpha_pass",
+                "brush_yuv_image_yuv_planar_yuv_rec709_alpha_pass_dual_source_blending",
+                &mut pipeline_requirements,
+                device,
+                options.precache_shaders,
+                false,
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_yuv_interleaved_yuv_rec601",
+                "brush_yuv_image_yuv_interleaved_yuv_rec601_alpha_pass",
+                "brush_yuv_image_yuv_interleaved_yuv_rec601_alpha_pass_dual_source_blending",
+                &mut pipeline_requirements,
+                device,
+                options.precache_shaders,
+                false,
+            )?,
+            BrushShader::new(
+                "brush_yuv_image_yuv_interleaved_yuv_rec709",
+                "brush_yuv_image_yuv_interleaved_yuv_rec709_alpha_pass",
+                "brush_yuv_image_yuv_interleaved_yuv_rec709_alpha_pass_dual_source_blending",
+                &mut pipeline_requirements,
+                device,
+                options.precache_shaders,
+                false,
+            )?,
+        ];
 
         let cs_border_segment = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Border),
             "cs_border_segment",
-             &[],
+            &mut pipeline_requirements,
              device,
              options.precache_shaders,
         )?;
@@ -650,14 +565,10 @@ impl Shaders {
         let ps_split_composite = LazilyCompiledShader::new(
             ShaderKind::Primitive,
             "ps_split_composite",
-            &[],
+            &mut pipeline_requirements,
             device,
             options.precache_shaders,
         )?;
-
-        if let Some(vao) = dummy_vao {
-            device.delete_custom_vao(vao);
-        }
 
         Ok(Shaders {
             cs_blur_a8,
@@ -699,10 +610,10 @@ impl Shaders {
                     BrushBatchKind::Solid => {
                         &mut self.brush_solid
                     }
-                    BrushBatchKind::Image(image_buffer_kind) => {
-                        self.brush_image[image_buffer_kind as usize]
+                    BrushBatchKind::Image(_image_buffer_kind) => {
+                        &mut self.brush_image/*[image_buffer_kind as usize]
                             .as_mut()
-                            .expect("Unsupported image shader kind")
+                            .expect("Unsupported image shader kind")*/
                     }
                     BrushBatchKind::Blend => {
                         &mut self.brush_blend
@@ -718,10 +629,11 @@ impl Shaders {
                     }
                     BrushBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
                         let shader_index =
-                            Self::get_yuv_shader_index(image_buffer_kind, format, color_space);
-                        self.brush_yuv_image[shader_index]
-                            .as_mut()
-                            .expect("Unsupported YUV shader kind")
+                            Self::get_yuv_shader_index(image_buffer_kind, format, color_space)
+                                % self.brush_yuv_image.len();
+                        &mut self.brush_yuv_image[shader_index]
+                            /*.as_mut()
+                            .expect("Unsupported YUV shader kind")*/
                     }
                 };
                 brush_shader.get(key.blend_mode)
@@ -744,7 +656,7 @@ impl Shaders {
         }
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         self.cs_blur_a8.deinit(device);
         self.cs_blur_rgba8.deinit(device);
         self.brush_solid.deinit(device);
@@ -758,15 +670,16 @@ impl Shaders {
         self.cs_clip_line.deinit(device);
         self.ps_text_run.deinit(device);
         self.ps_text_run_dual_source.deinit(device);
-        for shader in self.brush_image {
+        /*for shader in self.brush_image {
             if let Some(shader) = shader {
                 shader.deinit(device);
             }
-        }
+        }*/
+        self.brush_image.deinit(device);
         for shader in self.brush_yuv_image {
-            if let Some(shader) = shader {
+            //if let Some(shader) = shader {
                 shader.deinit(device);
-            }
+            //}
         }
         self.cs_border_segment.deinit(device);
         self.ps_split_composite.deinit(device);

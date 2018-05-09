@@ -4,17 +4,22 @@
 
 extern crate app_units;
 extern crate euclid;
-extern crate gleam;
-extern crate glutin;
+extern crate gfx_hal;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+extern crate gfx_backend_empty as back;
 extern crate webrender;
 extern crate winit;
 
 use app_units::Au;
-use gleam::gl;
-use glutin::GlContext;
 use std::fs::File;
 use std::io::Read;
 use webrender::api::*;
+
+use self::gfx_hal::Instance;
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -45,8 +50,8 @@ impl RenderNotifier for Notifier {
 
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
-    window: glutin::GlWindow,
-    renderer: webrender::Renderer,
+    window: winit::Window,
+    renderer: webrender::Renderer<back::Backend>,
     name: &'static str,
     pipeline_id: PipelineId,
     document_id: DocumentId,
@@ -58,7 +63,7 @@ struct Window {
 impl Window {
     fn new(name: &'static str, clear_color: ColorF) -> Self {
         let events_loop = winit::EventsLoop::new();
-        let context_builder = glutin::ContextBuilder::new()
+        /*let context_builder = glutin::ContextBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
                 opengl_version: (3, 2),
                 opengles_version: (3, 0),
@@ -67,7 +72,7 @@ impl Window {
             .with_title(name)
             .with_multitouch()
             .with_dimensions(800, 600);
-        let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+        let window = winit::GlWindow::new(window_builder, context_builder, &events_loop)
             .unwrap();
 
         unsafe {
@@ -75,14 +80,21 @@ impl Window {
         }
 
         let gl = match window.get_api() {
-            glutin::Api::OpenGl => unsafe {
+            winit::Api::OpenGl => unsafe {
                 gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
             },
-            glutin::Api::OpenGlEs => unsafe {
+            winit::Api::OpenGlEs => unsafe {
                 gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
             },
-            glutin::Api::WebGl => unimplemented!(),
-        };
+            winit::Api::WebGl => unimplemented!(),
+        };*/
+
+        let window = winit::WindowBuilder::new()
+            .with_title(name)
+            .with_multitouch()
+            .with_dimensions(800, 600)
+            .build(&events_loop)
+            .unwrap();
 
         let device_pixel_ratio = window.hidpi_factor();
 
@@ -97,7 +109,22 @@ impl Window {
             DeviceUintSize::new(width, height)
         };
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-        let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts).unwrap();
+
+        #[cfg(any(feature = "dx12", feature = "vulkan"))]
+        let instance = back::Instance::create("gfx-rs instance", 1);
+        #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+        let instance = back::Instance;
+
+        let mut adapters = instance.enumerate_adapters();
+        let adapter = adapters.remove(0);
+
+        #[cfg(any(feature = "dx12", feature = "vulkan"))]
+        let mut surface = instance.create_surface(&window);
+        #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+        let mut surface = back::Surface;
+
+        let window_size = window.get_inner_size().unwrap();
+        let (renderer, sender) = webrender::Renderer::new(notifier, &adapter, &mut surface, window_size, opts).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(framebuffer_size, 0);
 
@@ -128,9 +155,9 @@ impl Window {
     }
 
     fn tick(&mut self) -> bool {
-        unsafe {
+        /*unsafe {
             self.window.make_current().ok();
-        }
+        }*/
         let mut do_exit = false;
         let my_name = &self.name;
         let renderer = &mut self.renderer;
@@ -271,7 +298,7 @@ impl Window {
 
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
-        self.window.swap_buffers().ok();
+        //self.window.swap_buffers().ok();
 
         false
     }
