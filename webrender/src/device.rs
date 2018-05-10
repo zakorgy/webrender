@@ -1188,7 +1188,7 @@ impl<B: hal::Backend> Program<B> {
                 ],
             };
             let format = match *shader_kind {
-                ShaderKind::ClipCache => ImageFormat::R8,
+                ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::DashAndDot) => ImageFormat::R8,
                 ShaderKind::Cache(VertexArrayKind::Blur) if shader_name.contains("_alpha_target") => ImageFormat::R8,
                 _ => ImageFormat::BGRA8,
             };
