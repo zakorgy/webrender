@@ -1444,11 +1444,18 @@ impl<B: hal::Backend> Program<B> {
         blend_state: BlendState,
         blend_color: ColorF,
         depth_test: DepthTest,
+        scissor_rect: Option<DeviceIntRect>,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::MultiShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
 
         cmd_buffer.set_viewports(0, &[viewport.clone()]);
-        cmd_buffer.set_scissors(0, &[viewport.rect]);
+        match scissor_rect {
+            Some(r) => cmd_buffer.set_scissors(
+                0,
+                &[hal::pso::Rect {x: r.origin.x as _, y: r.origin.y as _, w: r.size.width as _, h: r.size.height as _}],
+            ),
+            None => cmd_buffer.set_scissors(0, &[viewport.rect]),
+        }
         cmd_buffer.bind_graphics_pipeline(
             &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
         cmd_buffer.bind_vertex_buffers(hal::pso::VertexBufferSet(vec![
@@ -1680,6 +1687,7 @@ pub struct Device<B: hal::Backend> {
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
     program_mode_id: i32,
+    scissor_rect: Option<DeviceIntRect>,
     //default_read_fbo: FBOId,
     //default_draw_fbo: FBOId,
 
@@ -1997,6 +2005,7 @@ impl<B: hal::Backend> Device<B> {
             bound_read_fbo: DEFAULT_READ_FBO,
             bound_draw_fbo: DEFAULT_DRAW_FBO,
             program_mode_id: 0,
+            scissor_rect: None,
 
             max_texture_size,
             _renderer_name: renderer_name,
@@ -2269,6 +2278,7 @@ impl<B: hal::Backend> Device<B> {
                 self.current_blend_state,
                 self.blend_color,
                 self.current_depth_test,
+                self.scissor_rect,
             )
         };
 
@@ -3273,16 +3283,14 @@ impl<B: hal::Backend> Device<B> {
         warn!("disable stencil is missing")
     }
 
-    pub fn set_scissor_rect(&self, _rect: DeviceIntRect) {
-        warn!("set scissor rect is missing")
+    pub fn set_scissor_rect(&mut self, rect: DeviceIntRect) {
+        self.scissor_rect = Some(rect);
     }
 
-    pub fn enable_scissor(&self) {
-        warn!("enable scissor is missing")
-    }
+    pub fn enable_scissor(&self) {}
 
-    pub fn disable_scissor(&self) {
-        warn!("disable scissor is missing")
+    pub fn disable_scissor(&mut self) {
+        self.scissor_rect = None;
     }
 
     pub fn set_blend(&mut self, enable: bool) {
