@@ -4,11 +4,23 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, Program, Texture, TextureSlot, VertexDescriptor, VAO};
+use device::{Device, Texture, TextureSlot, VertexDescriptor, VAO};
 use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use std::f32;
+use hal;
+
+cfg_if! {
+    if #[cfg(feature = "gleam")] {
+        use device::Program;
+    } else {
+        use device::{PipelineRequirements, ProgramId as Program, ShaderKind};
+        use ron::de::from_reader;
+        use std::collections::HashMap;
+        use std::fs::File;
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 enum DebugSampler {
@@ -27,7 +39,7 @@ const DESC_FONT: VertexDescriptor = VertexDescriptor {
     vertex_attributes: &[
         VertexAttribute {
             name: "aPosition",
-            count: 2,
+            count: 3,
             kind: VertexAttributeKind::F32,
         },
         VertexAttribute {
@@ -48,7 +60,7 @@ const DESC_COLOR: VertexDescriptor = VertexDescriptor {
     vertex_attributes: &[
         VertexAttribute {
             name: "aPosition",
-            count: 2,
+            count: 3,
             kind: VertexAttributeKind::F32,
         },
         VertexAttribute {
@@ -61,9 +73,11 @@ const DESC_COLOR: VertexDescriptor = VertexDescriptor {
 };
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct DebugFontVertex {
     pub x: f32,
     pub y: f32,
+    z: f32,
     pub color: ColorU,
     pub u: f32,
     pub v: f32,
@@ -71,21 +85,67 @@ pub struct DebugFontVertex {
 
 impl DebugFontVertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32, color: ColorU) -> DebugFontVertex {
-        DebugFontVertex { x, y, color, u, v }
+        DebugFontVertex { x, y, z: 0.0, color, u, v }
     }
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct DebugColorVertex {
     pub x: f32,
     pub y: f32,
+    z: f32,
     pub color: ColorU,
 }
 
 impl DebugColorVertex {
     pub fn new(x: f32, y: f32, color: ColorU) -> DebugColorVertex {
-        DebugColorVertex { x, y, color }
+        DebugColorVertex { x, y, z: 0.0, color }
     }
+}
+
+#[cfg(not(feature = "gleam"))]
+fn create_debug_programs<B: hal::Backend>(device: &mut Device<B>)-> (Program, Program) {
+    let file =
+        File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
+    let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
+        from_reader(file).expect("Failed to load shader_bindings.ron");
+
+    let pipeline_requirement =
+        pipeline_requirements
+            .remove("debug_font")
+            .expect("Pipeline requirements not found for debug_font");
+
+    let font_program =
+        device.create_program(
+            pipeline_requirement,
+            "debug_font",
+            &ShaderKind::DebugFont,
+        );
+
+    let pipeline_requirement_color =
+        pipeline_requirements
+            .remove("debug_color")
+            .expect("Pipeline requirements not found for debug_color");
+
+    let color_program = device
+        .create_program(
+            pipeline_requirement_color,
+            "debug_color",
+            &ShaderKind::DebugColor
+        );
+    (font_program, color_program)
+}
+
+#[cfg(feature = "gleam")]
+fn create_debug_programs<B: hal::Backend>(device: &mut Device<B>)-> (Program, Program) {
+    let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
+    device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
+
+    let color_program = device
+        .create_program("debug_color", "", &DESC_COLOR)
+        .unwrap();
+    (font_program, color_program)
 }
 
 pub struct DebugRenderer {
@@ -104,14 +164,8 @@ pub struct DebugRenderer {
 }
 
 impl DebugRenderer {
-    pub fn new(device: &mut Device) -> Self {
-        let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
-        device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
-
-        let color_program = device
-            .create_program("debug_color", "", &DESC_COLOR)
-            .unwrap();
-
+    pub fn new<B: hal::Backend>(device: &mut Device<B>) -> Self {
+        let (font_program, color_program) = create_debug_programs(device);
         let font_vao = device.create_vao(&DESC_FONT);
         let line_vao = device.create_vao(&DESC_COLOR);
         let tri_vao = device.create_vao(&DESC_COLOR);
@@ -142,7 +196,7 @@ impl DebugRenderer {
         }
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
@@ -260,9 +314,9 @@ impl DebugRenderer {
         self.add_line(p0.x, p1.y, color, p0.x, p0.y, color);
     }
 
-    pub fn render(
+    pub fn render<B: hal::Backend>(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         viewport_size: Option<DeviceUintSize>,
     ) {
         if let Some(viewport_size) = viewport_size {
@@ -270,6 +324,17 @@ impl DebugRenderer {
             device.set_blend(true);
             device.set_blend_mode_premultiplied_alpha();
 
+            #[cfg(feature = "gfx")]
+            let projection = Transform3D::ortho(
+                0.0,
+                viewport_size.width as f32,
+                0.0,
+                viewport_size.height as f32,
+                ORTHO_NEAR_PLANE,
+                ORTHO_FAR_PLANE,
+            );
+
+            #[cfg(not(feature = "gfx"))]
             let projection = Transform3D::ortho(
                 0.0,
                 viewport_size.width as f32,
