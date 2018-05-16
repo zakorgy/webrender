@@ -28,6 +28,7 @@ path = "document.rs"
 [[bin]]
 name = "frame_output"
 path = "frame_output.rs"
+required-features = ["gl"]
 
 [[bin]]
 name = "iframe"
@@ -52,16 +53,36 @@ path = "texture_cache_stress.rs"
 [[bin]]
 name = "yuv"
 path = "yuv.rs"
+required-features = ["gl"]
 
 [features]
+default = []
 debug = ["webrender/capture", "webrender/debugger", "webrender/profiler", "webrender/debug_renderer"]
+gfx-hal = []
+gl = ["gleam", "glutin", "webrender/gleam"]
+dx12 = ["gfx-backend-dx12", "gfx-hal"]
+metal = ["gfx-backend-metal", "gfx-hal"]
+vulkan = ["gfx-backend-vulkan", "gfx-hal"]
 
 [dependencies]
 app_units = "0.7"
 env_logger = "0.5"
 euclid = "0.19"
-gleam = "0.6.2"
-glutin = "0.17"
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
+gleam = { version = "0.6", optional = true}
+glutin = { version = "0.18", optional = true }
 rayon = "1"
 webrender = { path = "../webrender" }
-winit = "0.16"
+winit = "0.17"
+
+[target.'cfg(windows)'.dependencies.gfx-backend-dx12]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true
+
+[target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true
+
+[target.'cfg(not(target_os = "macos"))'.dependencies.gfx-backend-vulkan]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true
