@@ -20,11 +20,12 @@ test_script:
   - cargo test --verbose
   - cd ../webrender
   - cargo test --verbose
+  - cargo test --verbose --features gleam
   - cargo check --verbose --no-default-features --features pathfinder
   - cd ../wrench
-  - cargo test --verbose
-  - cargo run --release -- --angle reftest
+  - cargo test --verbose --features gl
+  - cargo run --features gl --release -- --angle reftest
   - cd ../examples
-  - cargo check --verbose
+  - cargo check --verbose --features gl
   - cd ../direct-composition
   - cargo check --verbose
