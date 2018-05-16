@@ -65,7 +65,7 @@ def set_osmesa_env(bin_path):
         os.environ["GALLIUM_DRIVER"] = "softpipe"
 
 
-subprocess.check_call(['cargo', 'build', '--release', '--verbose', '--features', 'headless'])
+subprocess.check_call(['cargo', 'build', '--release', '--verbose', '--features', 'gl,headless'])
 set_osmesa_env('../target/release/')
 # TODO(gw): We have an occasional accuracy issue or bug (could be WR or OSMesa)
 #           where the output of a previous test that uses intermediate targets can
