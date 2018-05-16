@@ -5,6 +5,7 @@
 extern crate serde_bytes;
 
 use font::{FontInstanceKey, FontInstanceData, FontKey, FontTemplate};
+use std::convert::From;
 use std::sync::Arc;
 use {DevicePoint, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use {IdNamespace, TileOffset, TileSize};
@@ -35,6 +36,18 @@ pub enum TextureTarget {
     Array = 1,
     Rect = 2,
     External = 3,
+}
+
+impl From<u32> for TextureTarget {
+    fn from(target: u32) -> Self {
+        match target {
+            0 => TextureTarget::Default,
+            1 => TextureTarget::Array,
+            2 => TextureTarget::Rect,
+            3 => TextureTarget::External,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[repr(u32)]
