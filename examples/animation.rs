@@ -10,8 +10,12 @@
 //! rounded cornered rectangle, which is done automatically during the
 //! scene building for render optimization.
 
+#[macro_use]
+extern crate cfg_if;
 extern crate euclid;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate gleam;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
