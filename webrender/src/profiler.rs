@@ -37,7 +37,7 @@ pub struct GpuProfileTag {
     pub label: &'static str,
     pub color: ColorF,
 }
-
+ 
 impl NamedTag for GpuProfileTag {
     fn get_label(&self) -> &str {
         self.label

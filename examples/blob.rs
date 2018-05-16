@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[macro_use]
+extern crate cfg_if;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate gleam;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate glutin;
 extern crate rayon;
 extern crate webrender;
 extern crate winit;

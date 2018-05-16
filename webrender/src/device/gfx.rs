@@ -3,28 +3,32 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntSize, DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
 use euclid::Transform3D;
-//use gleam::gl;
 use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
 use ron::de::from_reader;
 use smallvec::SmallVec;
 use std::cell::Cell;
+#[cfg(feature = "debug_renderer")]
+use std::convert::Into;
 use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
 use std::mem;
-use std::ops::Add;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::slice;
 use std::sync::Arc;
-use std::thread;
+#[cfg(feature = "debug_renderer")]
+use super::Capabilities;
+use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
+use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, FileWatcherHandler};
+use super::{Texture, FBOId, RBOId, VertexUsageHint};
 use vertex_types::*;
 
 use hal;
@@ -65,6 +69,12 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 };
 
 const ENTRY_NAME: &str = "main";
+
+pub struct RendererInit<'a, B: hal::Backend> {
+    pub adapter: &'a hal::Adapter<B>,
+    pub surface: &'a mut B::Surface,
+    pub window_size: (u32, u32),
+}
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
@@ -114,78 +124,11 @@ fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     shader
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct FrameId(usize);
-
-impl FrameId {
-    pub fn new(value: usize) -> Self {
-        FrameId(value)
-    }
-}
-
-impl Add<usize> for FrameId {
-    type Output = FrameId;
-
-    fn add(self, other: usize) -> FrameId {
-        FrameId(self.0 + other)
-    }
-}
-
-/*const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
-
-const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
-
-const SHADER_VERSION_GL: &str = "#version 150\n";
-const SHADER_VERSION_GLES: &str = "#version 300 es\n";
-
-const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
-const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
-const SHADER_IMPORT: &str = "#include ";*/
-
-pub struct TextureSlot(pub usize);
-
-// In some places we need to temporarily bind a texture to any slot.
-//const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
-
 #[repr(u32)]
 pub enum DepthFunction {
     #[cfg(feature = "debug_renderer")]
     Less,
     LessEqual,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub enum TextureFilter {
-    Nearest,
-    Linear,
-    Trilinear,
-}
-
-#[derive(Debug)]
-pub enum VertexAttributeKind {
-    F32,
-    #[cfg(feature = "debug_renderer")]
-    U8Norm,
-    U16Norm,
-    I32,
-    U16,
-}
-
-#[derive(Debug)]
-pub struct VertexAttribute {
-    pub name: &'static str,
-    pub count: u32,
-    pub kind: VertexAttributeKind,
-}
-
-#[derive(Debug)]
-pub struct VertexDescriptor {
-    pub vertex_attributes: &'static [VertexAttribute],
-    pub instance_attributes: &'static [VertexAttribute],
 }
 
 pub trait PrimitiveType {
@@ -251,35 +194,6 @@ impl PrimitiveType for gpu_types::ClipMaskInstance {
     }
 }
 
-impl PrimitiveType for gpu_types::ClipMaskBorderCornerDotDash {
-    type Primitive = ClipMaskBorderCornerDotDash;
-    fn to_primitive_type(&self) -> ClipMaskBorderCornerDotDash {
-        ClipMaskBorderCornerDotDash {
-            aClipRenderTaskAddress: self.clip_mask_instance.render_task_address.0 as i32,
-            aScrollNodeId: self.clip_mask_instance.scroll_node_data_index.0 as i32,
-            aClipSegment: self.clip_mask_instance.segment,
-            aClipDataResourceAddress: [
-                self.clip_mask_instance.clip_data_address.u as i32,
-                self.clip_mask_instance.clip_data_address.v as i32,
-                self.clip_mask_instance.resource_address.u as i32,
-                self.clip_mask_instance.resource_address.v as i32,
-            ],
-            aDashOrDot0: [
-                self.dot_dash_data[0],
-                self.dot_dash_data[1],
-                self.dot_dash_data[2],
-                self.dot_dash_data[3],
-            ],
-            aDashOrDot1: [
-                self.dot_dash_data[4],
-                self.dot_dash_data[5],
-                self.dot_dash_data[6],
-                self.dot_dash_data[7],
-            ]
-        }
-    }
-}
-
 impl PrimitiveType for gpu_types::PrimitiveInstance {
     type Primitive = PrimitiveInstance;
     fn to_primitive_type(&self) -> PrimitiveInstance {
@@ -300,152 +214,11 @@ impl PrimitiveType for gpu_types::PrimitiveInstance {
     }
 }
 
-enum FBOTarget {
-    Read,
-    Draw,
-}
-
-/// Method of uploading texel data from CPU to GPU.
-#[derive(Debug, Clone)]
-pub enum UploadMethod {
-    /// Just call `glTexSubImage` directly with the CPU data pointer
-    Immediate,
-    /// Accumulate the changes in PBO first before transferring to a texture.
-    PixelBuffer,
-}
-
-/// Plain old data that can be used to initialize a texture.
-pub unsafe trait Texel: Copy {}
-unsafe impl Texel for u8 {}
-unsafe impl Texel for f32 {}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReadPixelsFormat {
-    Standard(ImageFormat),
-    Rgba8,
-}
-
-pub trait FileWatcherHandler: Send {
-    fn file_changed(&self, path: PathBuf);
-}
-
-#[cfg_attr(feature = "replay", derive(Clone))]
-pub struct ExternalTexture {
-    id: u32,
-    _target: TextureTarget,
-}
-
-impl ExternalTexture {
-    pub fn new(id: u32, _target: TextureTarget) -> Self {
-        ExternalTexture {
-            id,
-            _target,
-        }
-    }
-
-    #[cfg(feature = "replay")]
-    pub fn internal_id(&self) -> u32 {
-        self.id
-    }
-}
-
-pub struct Texture {
-    id: TextureId,
-    _target: TextureTarget,
-    layer_count: i32,
-    format: ImageFormat,
-    width: u32,
-    height: u32,
-    filter: TextureFilter,
-    render_target: Option<RenderTargetInfo>,
-    fbo_ids: Vec<FBOId>,
-    depth_rb: Option<RBOId>,
-    last_frame_used: FrameId,
-    bound_in_frame: Cell<FrameId>,
-}
-
-impl Texture {
-    pub fn get_dimensions(&self) -> DeviceUintSize {
-        DeviceUintSize::new(self.width, self.height)
-    }
-
-    pub fn get_render_target_layer_count(&self) -> usize {
-        self.fbo_ids.len()
-    }
-
-    pub fn get_layer_count(&self) -> i32 {
-        self.layer_count
-    }
-
-    pub fn get_format(&self) -> ImageFormat {
-        self.format
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn get_filter(&self) -> TextureFilter {
-        self.filter
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn get_render_target(&self) -> Option<RenderTargetInfo> {
-        self.render_target.clone()
-    }
-
-    pub fn has_depth(&self) -> bool {
-        self.depth_rb.is_some()
-    }
-
-    pub fn get_rt_info(&self) -> Option<&RenderTargetInfo> {
-        self.render_target.as_ref()
-    }
-
-    pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
-        self.last_frame_used == frame_id
-    }
-
-    fn still_in_flight(&self, frame_id: FrameId) -> bool {
-        for i in 0..MAX_FRAME_COUNT {
-            if self.bound_in_frame.get() == FrameId(frame_id.0 - i) {
-                return true
-            }
-        }
-        false
-    }
-
-    #[cfg(feature = "replay")]
-    pub fn into_external(mut self) -> ExternalTexture {
-        let ext = ExternalTexture {
-            id: self.id,
-            _target: self._target,
-        };
-        self.id = 0; // don't complain, moved out
-        ext
-    }
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        debug_assert!(thread::panicking() || self.id == 0);
-    }
-}
-
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct ProgramId(u32);
 
 pub struct PBO;
 pub struct VAO;
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct FBOId(u32);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct RBOId(u32);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct VBOId(u32);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-struct IBOId(u32);
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 #[cfg_attr(feature = "serialize_program", derive(Deserialize, Serialize))]
@@ -460,58 +233,6 @@ pub trait ProgramCacheObserver {
 }
 
 pub struct ProgramCache;
-
-#[derive(Debug, Copy, Clone)]
-pub enum VertexUsageHint {
-    Static,
-    Dynamic,
-    Stream,
-}
-
-#[cfg(feature = "debug_renderer")]
-pub struct Capabilities {
-    pub supports_multisampling: bool,
-}
-
-#[derive(Clone, Debug)]
-pub enum ShaderError {
-    Compilation(String, String), // name, error message
-    Link(String, String),        // name, error message
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum VertexArrayKind {
-    Primitive,
-    Blur,
-    Clip,
-    VectorStencil,
-    VectorCover,
-    Border,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum ShaderKind {
-    Primitive,
-    Cache(VertexArrayKind),
-    ClipCache,
-    Brush,
-    Text,
-    #[allow(dead_code)]
-    VectorStencil,
-    #[allow(dead_code)]
-    VectorCover,
-    DebugColor,
-    DebugFont,
-}
-
-impl ShaderKind {
-    fn is_debug(&self) -> bool {
-        match *self {
-            ShaderKind::DebugFont | ShaderKind::DebugColor => true,
-            _ => false,
-        }
-    }
-}
 
 const ALPHA: BlendState = BlendState::On {
     color: BlendOp::Add {
@@ -961,15 +682,13 @@ impl<B: hal::Backend> Buffer<B> {
         }
     }
 
-    pub fn update<T>(
+    pub fn update<T: Copy>(
         &mut self,
         device: &B::Device,
         buffer_offset: u64,
         buffer_width: u64,
         update_data: &[T],
-    ) where
-        T: Copy,
-    {
+    ) {
         //TODO:
         //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
         let mut data = device
@@ -1061,17 +780,14 @@ impl<B: hal::Backend> CopyBuffer<B> {
         }
     }
 
-    pub fn update<T>(
+    pub fn update<T: Copy>(
         &mut self,
         device: &B::Device,
         buffer_offset: u64,
         image_data_width_in_bytes: u64,
         image_data: &[T],
         offset_alignment: usize,
-    ) -> usize
-        where
-            T: Copy,
-    {
+    ) -> usize {
         //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
         let buffer_data_width_in_bytes = self.data_width * self.data_stride;
         let mut needed_height = image_data_width_in_bytes / buffer_data_width_in_bytes as u64;
@@ -1144,13 +860,11 @@ impl<B: hal::Backend> InstanceBuffer<B> {
         }
     }
 
-    fn update<T>(
+    fn update<T: Copy>(
         &mut self,
         device: &B::Device,
         instances: &[T],
-    )where
-        T: Copy,
-    {
+    ) {
         let data_stride = self.buffer.data_stride;
         self.buffer.update(
             device,
@@ -1190,12 +904,11 @@ impl<B: hal::Backend> UniformBuffer<B> {
         }
     }
 
-    fn add<T>(
+    fn add<T: Copy>(
         &mut self,
         device: &B::Device,
         instances: &[T],
-    ) where T: Copy,
-    {
+    ) {
         if self.buffers.len() == self.size {
             let buffer = Buffer::create(
                 device,
@@ -1467,14 +1180,12 @@ impl<B: hal::Backend> Program<B> {
     }
 
 
-    pub fn bind_instances<T>(
+    pub fn bind_instances<T: Copy>(
         &mut self,
         device: &B::Device,
         instances: &[T],
         buffer_id: usize,
-    ) where
-        T: Copy,
-    {
+    ) {
         if !instances.is_empty() {
             self.instance_buffer[buffer_id].update(
                 device,
@@ -1537,19 +1248,6 @@ impl<B: hal::Backend> Program<B> {
             ]);
         }
     }
-
-    /*pub fn bind<T>(
-        &mut self,
-        device: &Device<B>,
-        projection: &Transform3D<f32>,
-        instances: &[T],
-    ) where
-        T: Copy,
-    {
-        self.bind_instances(&device.device, instances);
-        self.bind_locals(&device.device, &projection, device.program_mode_id);
-        self.bind_textures(device);
-    }*/
 
     pub fn submit(
         &mut self,
@@ -2016,14 +1714,13 @@ pub struct Device<B: hal::Backend> {
 
 impl<B: hal::Backend> Device<B> {
     pub fn new(
+        init: RendererInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
-        adapter: &hal::Adapter<B>,
-        surface: &mut <B as hal::Backend>::Surface,
-        window_size: (u32, u32),
     ) -> Self {
+        let (adapter, mut surface, window_size) = (init.adapter, init.surface, init.window_size);
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
 
@@ -2094,7 +1791,7 @@ impl<B: hal::Backend> Device<B> {
                 .with_image_usage(
                     hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
                 );
-        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
+        let (swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
 
@@ -2343,6 +2040,7 @@ impl<B: hal::Backend> Device<B> {
             _renderer_name: renderer_name,
             frame_id: FrameId(0),
             features,
+
             next_id: 0,
             frame_fence,
             image_available_semaphore,
@@ -2354,7 +2052,7 @@ impl<B: hal::Backend> Device<B> {
         self.device_pixel_ratio = ratio;
     }
 
-    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
+    pub fn update_program_cache(&mut self, _cached_programs: Rc<ProgramCache>) {
         unimplemented!();
     }
 
@@ -2420,11 +2118,11 @@ impl<B: hal::Backend> Device<B> {
         id
     }
 
-    pub fn bind_program(&mut self, program_id: ProgramId) {
+    pub fn bind_program(&mut self, program_id: &ProgramId) {
         debug_assert!(self.inside_frame);
 
-        if self.bound_program != program_id {
-            self.bound_program = program_id;
+        if self.bound_program != *program_id {
+            self.bound_program = *program_id;
         }
     }
 
@@ -2458,7 +2156,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     #[cfg(feature = "debug_renderer")]
-    pub fn update_indices(&mut self, indices: &[u32]) {
+    pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
@@ -2496,12 +2194,10 @@ impl<B: hal::Backend> Device<B> {
         program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id, self.next_id);
     }
 
-    pub fn update_instances<T>(
+    pub fn update_instances<T: Copy>(
         &mut self,
         instances: &[T],
-    ) where
-        T: Copy
-    {
+    ) {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_instances(&self.device, instances, self.next_id);
     }
@@ -2718,7 +2414,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> Texture {
         Texture {
             id: 0,
-            _target: target,
+            target: target as _,
             width: 0,
             height: 0,
             layer_count: 0,
@@ -2775,7 +2471,6 @@ impl<B: hal::Backend> Device<B> {
         texture.layer_count = layer_count;
         texture.render_target = render_target;
         texture.last_frame_used = self.frame_id;
-        texture.bound_in_frame.set(self.frame_id);
 
         assert_eq!(self.images.contains_key(&texture.id), false);
         let (view_kind, mip_levels) = match texture.filter {
@@ -3249,10 +2944,10 @@ impl<B: hal::Backend> Device<B> {
 
         match self.upload_method {
             UploadMethod::Immediate => unimplemented!(),
-            UploadMethod::PixelBuffer => {
+            UploadMethod::PixelBuffer(..) => {
                 TextureUploader {
-                        device: self,
-                        texture,
+                    device: self,
+                    texture,
                 }
             },
         }
@@ -3262,7 +2957,11 @@ impl<B: hal::Backend> Device<B> {
     #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
         let mut pixels = vec![0; (img_desc.size.width * img_desc.size.height * 4) as usize];
-        self.read_pixels_into(DeviceUintRect::new(DeviceUintPoint::zero(), DeviceUintSize::new(img_desc.size.width, img_desc.size.height)), ReadPixelsFormat::Rgba8, &mut pixels);
+        self.read_pixels_into(
+            DeviceUintRect::new(DeviceUintPoint::zero(), DeviceUintSize::new(img_desc.size.width, img_desc.size.height)),
+            ReadPixelsFormat::Rgba8,
+            &mut pixels,
+        );
         pixels
     }
 
@@ -3435,22 +3134,10 @@ impl<B: hal::Backend> Device<B> {
 
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
-        self.attach_read_texture_raw(texture.id, texture._target, layer_id)
+        self.attach_read_texture_raw(texture.id, texture.target.into(), layer_id)
     }
 
     pub fn bind_vao(&mut self, _vao: &VAO) { }
-
-
-    fn create_vao_with_vbos(
-        &mut self,
-        _descriptor: &VertexDescriptor,
-        _main_vbo_id: VBOId,
-        _instance_vbo_id: VBOId,
-        _ibo_id: IBOId,
-        _owns_vertices_and_indices: bool,
-    ) -> VAO {
-        VAO { }
-    }
 
     pub fn create_vao(&mut self, _descriptor: &VertexDescriptor) -> VAO {
         VAO { }
@@ -3466,28 +3153,54 @@ impl<B: hal::Backend> Device<B> {
         VAO { }
     }
 
-    pub fn update_vao_main_vertices<V>(
+    pub fn update_vao_main_vertices<V: Copy>(
         &mut self,
         _vao: &VAO,
         _vertices: &[V],
         _usage_hint: VertexUsageHint,
-    ) { }
+    ) {
+        if self.bound_program != INVALID_PROGRAM_ID {
+            #[cfg(feature = "debug_renderer")]
+                self.update_vertices(_vertices);
+        }
+    }
 
-    pub fn update_vao_instances<V>(
+    pub fn update_vao_instances<V: PrimitiveType>(
         &mut self,
         _vao: &VAO,
         instances: &[V],
         _usage_hint: VertexUsageHint,
-    )
-        where V: PrimitiveType
-    {
+    ) {
         let data = instances.iter().map(|pi| pi.to_primitive_type()).collect::<Vec<V::Primitive>>();
         self.update_instances(&data);
     }
 
-    pub fn update_vao_indices<I>(&mut self, _vao: &VAO, _indices: &[I], _usage_hint: VertexUsageHint) { }
+    pub fn update_vao_indices<I: Copy>(
+        &mut self,
+        _vao: &VAO,
+        indices: &[I],
+        _usage_hint: VertexUsageHint
+    ) {
+        if self.bound_program != INVALID_PROGRAM_ID {
+            #[cfg(feature = "debug_renderer")]
+            self.update_indices(indices);
+        }
+    }
 
     pub fn draw_triangles_u16(&mut self, _first_vertex: i32, _index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.draw();
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    pub fn draw_triangles_u32(&mut self, _first_vertex: i32, _index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.bind_textures();
+        self.draw();
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    pub fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
         debug_assert!(self.inside_frame);
         self.draw();
     }
@@ -3793,6 +3506,10 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn supports_features(&self, features: hal::Features) -> bool {
         self.features.contains(features)
+    }
+
+    pub fn echo_driver_messages(&self) {
+        warn!("echo_driver_messages is unimplemeneted");
     }
 
     pub fn set_next_frame_id(&mut self) {

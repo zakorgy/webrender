@@ -1,0 +1,83 @@
+[package]
+name = "webrender-examples"
+version = "0.1.0"
+authors = ["Zakor Gyula <gyula.zakor@h-lab.eu>"]
+license = "MPL-2.0"
+repository = "https://github.com/servo/webrender"
+
+[[bin]]
+name = "alpha_perf"
+path = "alpha_perf.rs"
+
+[[bin]]
+name = "animation"
+path = "animation.rs"
+
+[[bin]]
+name = "basic"
+path = "basic.rs"
+
+[[bin]]
+name = "blob"
+path = "blob.rs"
+
+[[bin]]
+name = "document"
+path = "document.rs"
+
+[[bin]]
+name = "frame_output"
+path = "frame_output.rs"
+
+[[bin]]
+name = "iframe"
+path = "iframe.rs"
+
+[[bin]]
+name = "image_resize"
+path = "image_resize.rs"
+
+[[bin]]
+name = "multiwindow"
+path = "multiwindow.rs"
+
+[[bin]]
+name = "scrolling"
+path = "scrolling.rs"
+
+[[bin]]
+name = "texture_cache_stress"
+path = "texture_cache_stress.rs"
+
+[[bin]]
+name = "yuv"
+path = "yuv.rs"
+
+[features]
+default = ["gl"]
+debug = ["webrender/capture", "webrender/replay", "webrender/debugger", "webrender/png", "webrender/profiler"]
+gl = ["gleam", "glutin"]
+dx12 = [ "gfx-backend-dx12", "webrender/gfx" ]
+metal = [ "gfx-backend-metal", "webrender/gfx" ]
+vulkan = [ "gfx-backend-vulkan", "webrender/gfx" ]
+
+[dependencies]
+app_units = "0.6"
+cfg-if = "0.1.2"
+env_logger = "0.5"
+euclid = "0.17.3"
+gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
+gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
+gleam = { version = "0.5", optional = true}
+glutin = { version = "0.15", optional = true }
+rayon = "1"
+webrender = {path = "../webrender" }
+winit = "0.13"
+
+[target.'cfg(windows)'.dependencies.gfx-backend-dx12]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true
+
+[target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true

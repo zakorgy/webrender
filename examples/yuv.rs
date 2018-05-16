@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[macro_use]
+extern crate cfg_if;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate gleam;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
@@ -9,9 +15,12 @@ extern crate winit;
 mod boilerplate;
 
 use boilerplate::Example;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+use gleam::gl;
 use webrender::api::*;
 
-/*fn init_gl_texture(
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+fn init_gl_texture(
     id: gl::GLuint,
     internal: gl::GLenum,
     external: gl::GLenum,
@@ -35,27 +44,30 @@ use webrender::api::*;
         Some(bytes),
     );
     gl.bind_texture(gl::TEXTURE_2D, 0);
-}*/
-
-struct YuvImageProvider {
-    texture_ids: Vec<u32>,
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+struct YuvImageProvider {
+    texture_ids: Vec<gl::GLuint>,
+}
+
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl YuvImageProvider {
-    fn new() -> Self {
-        /*let texture_ids = gl.gen_textures(4);
+    fn new(gl: &gl::Gl) -> Self {
+        let texture_ids = gl.gen_textures(4);
 
         init_gl_texture(texture_ids[0], gl::RED, gl::RED, &[127; 100 * 100], gl);
         init_gl_texture(texture_ids[1], gl::RG8, gl::RG, &[0; 100 * 100 * 2], gl);
         init_gl_texture(texture_ids[2], gl::RED, gl::RED, &[127; 100 * 100], gl);
-        init_gl_texture(texture_ids[3], gl::RED, gl::RED, &[127; 100 * 100], gl);*/
+        init_gl_texture(texture_ids[3], gl::RED, gl::RED, &[127; 100 * 100], gl);
 
         YuvImageProvider {
-            texture_ids: vec![0; 4],
+            texture_ids
         }
     }
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl webrender::ExternalImageHandler for YuvImageProvider {
     fn lock(&mut self, key: ExternalImageId, _channel_index: u8) -> webrender::ExternalImage {
         let id = self.texture_ids[key.0 as usize];
@@ -71,6 +83,7 @@ impl webrender::ExternalImageHandler for YuvImageProvider {
 struct App {
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl Example for App {
     fn render(
         &mut self,
@@ -181,14 +194,21 @@ impl Example for App {
 
     fn get_image_handlers(
         &mut self,
+        gl: &gl::Gl,
     ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
-        (Some(Box::new(YuvImageProvider::new())), None)
+        (Some(Box::new(YuvImageProvider::new(gl))), None)
     }
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 fn main() {
     let mut app = App {
     };
     boilerplate::main_wrapper(&mut app, None);
+}
+
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+fn main() {
+    println!("This example only runs with OpenGL.");
 }

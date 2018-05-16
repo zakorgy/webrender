@@ -2,24 +2,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[macro_use]
+extern crate cfg_if;
 extern crate app_units;
 extern crate euclid;
-extern crate gfx_hal;
-#[cfg(feature = "vulkan")]
-extern crate gfx_backend_vulkan as back;
-#[cfg(feature = "dx12")]
-extern crate gfx_backend_dx12 as back;
-#[cfg(not(any(feature = "dx12", feature = "vulkan")))]
-extern crate gfx_backend_empty as back;
 extern crate webrender;
 extern crate winit;
+
+cfg_if! {
+    if #[cfg(feature = "dx12")] {
+        extern crate gfx_backend_dx12 as back;
+    } else if #[cfg(feature = "metal")] {
+        extern crate gfx_backend_metal as back;
+    } else if #[cfg(feature = "vulkan")] {
+        extern crate gfx_backend_vulkan as back;
+    } else {
+        extern crate gfx_backend_empty as back;
+    }
+}
+
+cfg_if! {
+    if #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))] {
+        use std::boxed::Box;
+        use webrender::hal::{self, Instance};
+    } else {
+        extern crate gleam;
+        extern crate glutin;
+        use gleam::gl;
+        use glutin::GlContext;
+        use std::marker::PhantomData;
+    }
+}
 
 use app_units::Au;
 use std::fs::File;
 use std::io::Read;
 use webrender::api::*;
-
-use self::gfx_hal::Instance;
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -50,6 +68,9 @@ impl RenderNotifier for Notifier {
 
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
+    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+    window: glutin::GlWindow,
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
     window: winit::Window,
     renderer: webrender::Renderer<back::Backend>,
     name: &'static str,
@@ -58,73 +79,78 @@ struct Window {
     epoch: Epoch,
     api: RenderApi,
     font_instance_key: FontInstanceKey,
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    surface: Box<hal::Surface<back::Backend>>,
 }
 
 impl Window {
     fn new(name: &'static str, clear_color: ColorF) -> Self {
         let events_loop = winit::EventsLoop::new();
-        /*let context_builder = glutin::ContextBuilder::new()
-            .with_gl(glutin::GlRequest::GlThenGles {
-                opengl_version: (3, 2),
-                opengles_version: (3, 0),
-            });
         let window_builder = winit::WindowBuilder::new()
             .with_title(name)
             .with_multitouch()
             .with_dimensions(800, 600);
-        let window = winit::GlWindow::new(window_builder, context_builder, &events_loop)
-            .unwrap();
 
-        unsafe {
-            window.make_current().ok();
-        }
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        let (init, window) = {
+            let context_builder = glutin::ContextBuilder::new()
+                .with_gl(glutin::GlRequest::GlThenGles {
+                    opengl_version: (3, 2),
+                    opengles_version: (3, 0),
+                });
+            let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+                .unwrap();
 
-        let gl = match window.get_api() {
-            winit::Api::OpenGl => unsafe {
-                gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-            },
-            winit::Api::OpenGlEs => unsafe {
-                gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-            },
-            winit::Api::WebGl => unimplemented!(),
-        };*/
+            unsafe {
+                window.make_current().ok();
+            }
 
-        let window = winit::WindowBuilder::new()
-            .with_title(name)
-            .with_multitouch()
-            .with_dimensions(800, 600)
-            .build(&events_loop)
-            .unwrap();
+            let gl = match window.get_api() {
+                glutin::Api::OpenGl => unsafe {
+                    gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+                },
+                glutin::Api::OpenGlEs => unsafe {
+                    gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+                },
+                glutin::Api::WebGl => unimplemented!(),
+            };
 
-        let device_pixel_ratio = window.hidpi_factor();
-
-        let opts = webrender::RendererOptions {
-            device_pixel_ratio,
-            clear_color: Some(clear_color),
-            ..webrender::RendererOptions::default()
+            let init = webrender::RendererInit {
+                gl,
+                phantom_data: PhantomData,
+            };
+            (init, window)
         };
 
-        let framebuffer_size = {
-            let (width, height) = window.get_inner_size().unwrap();
-            DeviceUintSize::new(width, height)
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let (window, adapter, mut surface) = {
+            let window = window_builder.build(&events_loop).unwrap();
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface(&window);
+            (window, adapter, surface)
         };
+
+        let (width, height) = window.get_inner_size().unwrap();
+
+        let framebuffer_size = DeviceUintSize::new(width, height);
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-
-        #[cfg(any(feature = "dx12", feature = "vulkan"))]
-        let instance = back::Instance::create("gfx-rs instance", 1);
-        #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
-        let instance = back::Instance;
-
-        let mut adapters = instance.enumerate_adapters();
-        let adapter = adapters.remove(0);
-
-        #[cfg(any(feature = "dx12", feature = "vulkan"))]
-        let mut surface = instance.create_surface(&window);
-        #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
-        let mut surface = back::Surface;
-
-        let window_size = window.get_inner_size().unwrap();
-        let (renderer, sender) = webrender::Renderer::new(notifier, &adapter, &mut surface, window_size, opts).unwrap();
+        let (renderer, sender) = {
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            let init = webrender::RendererInit {
+                adapter: &adapter,
+                surface: &mut surface,
+                window_size: (width, height),
+            };
+            let device_pixel_ratio = window.hidpi_factor();
+            let opts = webrender::RendererOptions {
+                device_pixel_ratio,
+                clear_color: Some(clear_color),
+                ..webrender::RendererOptions::default()
+            };
+            webrender::Renderer::new(init, notifier, opts).unwrap()
+        };
         let api = sender.create_api();
         let document_id = api.add_document(framebuffer_size, 0);
 
@@ -151,13 +177,16 @@ impl Window {
             document_id,
             api,
             font_instance_key,
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            surface: Box::new(surface),
         }
     }
 
     fn tick(&mut self) -> bool {
-        /*unsafe {
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        unsafe {
             self.window.make_current().ok();
-        }*/
+        }
         let mut do_exit = false;
         let my_name = &self.name;
         let renderer = &mut self.renderer;
@@ -298,7 +327,8 @@ impl Window {
 
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
-        //self.window.swap_buffers().ok();
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        self.window.swap_buffers().ok();
 
         false
     }

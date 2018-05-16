@@ -28,17 +28,6 @@ pub struct BlurInstance {
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
-pub struct ClipMaskBorderCornerDotDash {
-    pub aClipRenderTaskAddress: i32,
-    pub aScrollNodeId: i32,
-    pub aClipSegment: i32,
-    pub aClipDataResourceAddress: [i32; 4],
-    pub aDashOrDot0: [f32; 4],
-    pub aDashOrDot1: [f32; 4],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
 pub struct ClipMaskInstance {
     pub aClipRenderTaskAddress: i32,
     pub aScrollNodeId: i32,
@@ -72,4 +61,28 @@ pub struct PrimitiveInstance {
 #[allow(non_snake_case)]
 pub struct Vertex {
     pub aPosition: [f32; 3],
+}
+
+#[cfg(feature = "pathfinder")]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct VectorStencilInstance {
+    pub aFromPosition: [f32; 2],
+    pub aCtrlPosition: [f32; 2],
+    pub aToPosition: [f32; 2],
+    pub aFromNormal: [f32; 2],
+    pub aCtrlNormal: [f32; 2],
+    pub aToNormal: [f32; 2],
+    pub aPathID: i32,
+    pub aPad: i32,
+}
+
+#[cfg(feature = "pathfinder")]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct VectorCoverInstance {
+    pub aTargetRect: [i32; 4],
+    pub aStencilOrigin: [i32; 2],
+    pub aSubpixel: i32,
+    pub aPad: i32,
 }

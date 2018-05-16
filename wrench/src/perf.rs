@@ -11,10 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
-use wrench::{Wrench};
-#[cfg(feature = "gl")]
-use wrench::{WrenchThing};
-#[cfg(feature = "gl")]
+use wrench::{Wrench, WrenchThing};
 use yaml_frame_reader::YamlFrameReader;
 
 const COLOR_DEFAULT: &str = "\x1b[0m";
@@ -22,9 +19,7 @@ const COLOR_RED: &str = "\x1b[31m";
 const COLOR_GREEN: &str = "\x1b[32m";
 const COLOR_MAGENTA: &str = "\x1b[95m";
 
-#[cfg(feature = "gl")]
 const MIN_SAMPLE_COUNT: usize = 50;
-#[cfg(feature = "gl")]
 const SAMPLE_EXCLUDE_COUNT: usize = 10;
 
 pub struct Benchmark {
@@ -127,14 +122,14 @@ impl Profile {
 }
 
 pub struct PerfHarness<'a> {
-    _wrench: &'a mut Wrench,
-    _window: &'a mut WindowWrapper,
-    _rx: Receiver<NotifierEvent>,
+    wrench: &'a mut Wrench,
+    window: &'a mut WindowWrapper,
+    rx: Receiver<NotifierEvent>,
 }
 
 impl<'a> PerfHarness<'a> {
     pub fn new(wrench: &'a mut Wrench, window: &'a mut WindowWrapper, rx: Receiver<NotifierEvent>) -> Self {
-        PerfHarness { _wrench: wrench, _window: window, _rx: rx }
+        PerfHarness { wrench, window, rx }
     }
 
     pub fn run(mut self, base_manifest: &Path, filename: &str) {
@@ -150,7 +145,6 @@ impl<'a> PerfHarness<'a> {
         profile.save(filename);
     }
 
-    #[cfg(feature = "gl")]
     fn render_yaml(&mut self, filename: &Path) -> TestProfile {
         let mut reader = YamlFrameReader::new(filename);
 
@@ -162,11 +156,11 @@ impl<'a> PerfHarness<'a> {
         while cpu_frame_profiles.len() < MIN_SAMPLE_COUNT ||
             gpu_frame_profiles.len() < MIN_SAMPLE_COUNT
         {
-            reader.do_frame(self._wrench);
-            self._rx.recv().unwrap();
-            self._wrench.render();
-            self._window.swap_buffers();
-            let (cpu_profiles, gpu_profiles) = self._wrench.get_frame_profiles();
+            reader.do_frame(self.wrench);
+            self.rx.recv().unwrap();
+            self.wrench.render();
+            self.window.swap_buffers();
+            let (cpu_profiles, gpu_profiles) = self.wrench.get_frame_profiles();
             cpu_frame_profiles.extend(cpu_profiles);
             gpu_frame_profiles.extend(gpu_profiles);
         }
@@ -191,15 +185,8 @@ impl<'a> PerfHarness<'a> {
             draw_calls,
         }
     }
-
-
-    #[cfg(not(feature = "gl"))]
-    fn render_yaml(&mut self, _filename: &Path) -> TestProfile {
-        unimplemented!()
-    }
 }
 
-#[cfg(feature = "gl")]
 fn extract_sample<F, T>(profiles: &mut [T], f: F) -> u64
 where
     F: Fn(&T) -> u64,

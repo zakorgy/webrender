@@ -8,10 +8,10 @@ use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
 use parse_function::parse_function;
-#[cfg(feature = "gl")]
-use png::save_flipped;
-#[cfg(not(feature = "gl"))]
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 use png::{save, SaveSettings};
+#[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
+use png::save_flipped;
 use std::cmp;
 use std::fmt::{Display, Error, Formatter};
 use std::fs::File;
@@ -466,10 +466,12 @@ impl<'a> ReftestHarness<'a> {
         }
     }
 
-    #[cfg(feature = "gl")]
     fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
         let file = BufReader::new(File::open(filename).unwrap());
         let img_raw = load_piston_image(file, format).unwrap();
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let img = img_raw.to_rgba();
+        #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
         let img = img_raw.flipv().to_rgba();
         let size = img.dimensions();
         ReftestImage {
@@ -478,19 +480,6 @@ impl<'a> ReftestHarness<'a> {
         }
     }
 
-    #[cfg(not(feature = "gl"))]
-    fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
-        let file = BufReader::new(File::open(filename).unwrap());
-        let img_raw = load_piston_image(file, format).unwrap();
-        let img = img_raw.to_rgba();
-        let size = img.dimensions();
-        ReftestImage {
-            data: img.into_raw(),
-            size: DeviceUintSize::new(size.0, size.1),
-        }
-    }
-
-    #[cfg(feature = "gl")]
     fn render_yaml(
         &mut self,
         filename: &Path,
@@ -514,7 +503,11 @@ impl<'a> ReftestHarness<'a> {
             format!("size={:?} ws={:?}", size, window_size)
         );
 
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
+
         // taking the bottom left sub-rectangle
+        #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
         let rect = DeviceUintRect::new(DeviceUintPoint::new(0, window_size.height - size.height), size);
         let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
         self.window.swap_buffers();
@@ -522,46 +515,14 @@ impl<'a> ReftestHarness<'a> {
         let write_debug_images = false;
         if write_debug_images {
             let debug_path = filename.with_extension("yaml.png");
-            save_flipped(debug_path, pixels.clone(), size);
-        }
-
-        reader.deinit(self.wrench);
-
-        (ReftestImage { data: pixels, size }, stats)
-    }
-
-    #[cfg(not(feature = "gl"))]
-    fn render_yaml(
-        &mut self,
-        filename: &Path,
-        size: DeviceUintSize,
-        font_render_mode: Option<FontRenderMode>,
-        allow_mipmaps: bool,
-    ) -> (ReftestImage, RendererStats) {
-        let mut reader = YamlFrameReader::new(filename);
-        reader.set_font_render_mode(font_render_mode);
-        reader.allow_mipmaps(allow_mipmaps);
-        reader.do_frame(self.wrench);
-
-        // wait for the frame
-        self.rx.recv().unwrap();
-        let stats = self.wrench.render();
-
-        let window_size = self.window.get_inner_size();
-        assert!(size.width <= window_size.width && size.height <= window_size.height);
-
-        // taking the bottom left sub-rectangle
-        let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
-        let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
-
-        let write_debug_images = false;
-        if write_debug_images {
-            let debug_path = filename.with_extension("yaml.png");
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
             save(debug_path, pixels.clone(), size,
                  SaveSettings {
                      flip_vertical: false,
                      try_crop: true,
                  });
+            #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
+            save_flipped(debug_path, pixels.clone(), size);
         }
 
         reader.deinit(self.wrench);
