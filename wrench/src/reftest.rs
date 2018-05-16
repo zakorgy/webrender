@@ -8,6 +8,9 @@ use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
 use parse_function::parse_function;
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+use png::{save, SaveSettings};
+#[cfg(feature = "gl")]
 use png::save_flipped;
 use std::cmp;
 use std::fmt::{Display, Error, Formatter};
@@ -442,11 +445,11 @@ impl<'a> ReftestHarness<'a> {
                     "number of differing pixels",
                     count_different
                 );
-                println!("REFTEST   IMAGE 1 (TEST): {}", test.create_data_uri());
+                /*println!("REFTEST   IMAGE 1 (TEST): {}", test.create_data_uri());
                 println!(
                     "REFTEST   IMAGE 2 (REFERENCE): {}",
                     reference.create_data_uri()
-                );
+                );*/
                 println!("REFTEST TEST-END | {}", t);
 
                 false
@@ -466,6 +469,9 @@ impl<'a> ReftestHarness<'a> {
     fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
         let file = BufReader::new(File::open(filename).unwrap());
         let img_raw = load_piston_image(file, format).unwrap();
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let img = img_raw.to_rgba();
+        #[cfg(feature = "gl")]
         let img = img_raw.flipv().to_rgba();
         let size = img.dimensions();
         ReftestImage {
@@ -497,7 +503,11 @@ impl<'a> ReftestHarness<'a> {
             format!("size={:?} ws={:?}", size, window_size)
         );
 
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
+
         // taking the bottom left sub-rectangle
+        #[cfg(feature = "gl")]
         let rect = DeviceUintRect::new(DeviceUintPoint::new(0, window_size.height - size.height), size);
         let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
         self.window.swap_buffers();
@@ -505,6 +515,13 @@ impl<'a> ReftestHarness<'a> {
         let write_debug_images = false;
         if write_debug_images {
             let debug_path = filename.with_extension("yaml.png");
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            save(debug_path, pixels.clone(), size,
+                 SaveSettings {
+                     flip_vertical: false,
+                     try_crop: true,
+                 });
+            #[cfg(feature = "gl")]
             save_flipped(debug_path, pixels.clone(), size);
         }
 
