@@ -21,3 +21,6 @@ wrench/ron_frames
 
 # VSCode
 .vscode
+
+# mac
+.DS_Store
