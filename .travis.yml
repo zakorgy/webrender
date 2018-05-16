@@ -9,16 +9,16 @@ matrix:
   - rust: nightly
 os:
   - linux
-#  - osx
+  - osx
 
 # Travis is slow and often backlogged so we only run it on the "auto" branch
 # which is what bors uses to test the merge commit when merging a PR. Individual
 # PRs can catch errors by checking the taskcluster result instead.
 branches:
   only:
-    - auto
-notifications:
-  webhooks: http://build.servo.org:54856/travis
+    - master
+# notifications:
+#   webhooks: http://build.servo.org:54856/travis
 
 addons:
   apt:
@@ -39,18 +39,19 @@ before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew update; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install zlib; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PKG_CONFIG_PATH="/usr/local/opt/zlib/lib/pkgconfig:$PKG_CONFIG_PATH"; fi
+  - pip install virtualenv
   - virtualenv ../venv
   - source ../venv/bin/activate
   - python --version
   - pip install mako voluptuous PyYAML servo-tidy
 script:
-  - servo-tidy
+#  - servo-tidy
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender_api && cargo test --verbose --features "ipc"); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features capture); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --features profiler,capture); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --features replay); fi
-  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features pathfinder); fi
+#  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features pathfinder); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features serialize_program); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd wrench && cargo check --verbose --features env_logger); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd examples && cargo check --verbose); fi

@@ -2,16 +2,35 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#![cfg_attr(
+    not(any(feature = "gfx-hal", feature = "gl")),
+    allow(dead_code, unused_imports)
+)]
+
 extern crate env_logger;
 extern crate euclid;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(feature = "metal")]
+extern crate gfx_backend_metal as back;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "gl")]
+extern crate gfx_backend_empty as back;
 
+#[cfg(feature = "gl")]
 use gleam::gl;
+#[cfg(feature = "gl")]
 use glutin::{self, GlContext};
 use std::env;
+#[cfg(feature = "gl")]
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use webrender;
-use winit;
 use webrender::api::*;
+#[cfg(feature = "gfx-hal")]
+use webrender::hal::Instance;
+use winit;
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -89,6 +108,8 @@ pub trait Example {
     ) -> bool {
         false
     }
+
+    #[cfg(feature = "gl")]
     fn get_image_handlers(
         &mut self,
         _gl: &gl::Gl,
@@ -96,10 +117,12 @@ pub trait Example {
           Option<Box<webrender::OutputImageHandler>>) {
         (None, None)
     }
+    #[cfg(feature = "gl")]
     fn draw_custom(&mut self, _gl: &gl::Gl) {
     }
 }
 
+#[cfg(any(feature = "gfx-hal", feature = "gl"))]
 pub fn main_wrapper<E: Example>(
     example: &mut E,
     options: Option<webrender::RendererOptions>,
@@ -114,33 +137,63 @@ pub fn main_wrapper<E: Example>(
     };
 
     let mut events_loop = winit::EventsLoop::new();
-    let context_builder = glutin::ContextBuilder::new()
-        .with_gl(glutin::GlRequest::GlThenGles {
-            opengl_version: (3, 2),
-            opengles_version: (3, 0),
-        });
     let window_builder = winit::WindowBuilder::new()
         .with_title(E::TITLE)
         .with_multitouch()
         .with_dimensions(winit::dpi::LogicalSize::new(E::WIDTH as f64, E::HEIGHT as f64));
-    let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
-        .unwrap();
 
-    unsafe {
-        window.make_current().ok();
-    }
+    #[cfg(feature = "gl")]
+    let (gl, mut init, window) = {
+        let context_builder = glutin::ContextBuilder::new()
+            .with_gl(glutin::GlRequest::GlThenGles {
+                opengl_version: (3, 2),
+                opengles_version: (3, 0),
+            });
+        let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+            .unwrap();
 
-    let gl = match window.get_api() {
-        glutin::Api::OpenGl => unsafe {
-            gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-        },
-        glutin::Api::OpenGlEs => unsafe {
-            gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-        },
-        glutin::Api::WebGl => unimplemented!(),
+        unsafe {
+            window.make_current().ok();
+        }
+
+        let gl = match window.get_api() {
+            glutin::Api::OpenGl => unsafe {
+                gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+            },
+            glutin::Api::OpenGlEs => unsafe {
+                gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+            },
+            glutin::Api::WebGl => unimplemented!(),
+        };
+
+        println!("OpenGL version {}", gl.get_string(gl::VERSION));
+        let init: webrender::DeviceInit<back::Backend> = webrender::DeviceInit {
+            gl: gl.clone(),
+            phantom_data: PhantomData,
+        };
+        (gl, init, window)
     };
 
-    println!("OpenGL version {}", gl.get_string(gl::VERSION));
+    #[cfg(feature = "gfx-hal")]
+    let (window, adapter, surface, instance) = {
+        let window = window_builder.build(&events_loop).unwrap();
+        let instance = back::Instance::create("gfx-rs instance", 1);
+        let mut adapters = instance.enumerate_adapters();
+        let adapter = adapters.remove(0);
+        let mut surface = instance.create_surface(&window);
+        (window, adapter, surface, instance)
+    };
+
+    #[cfg(feature = "gfx-hal")]
+    let winit::dpi::LogicalSize { width, height } = window.get_inner_size().unwrap();
+
+    #[cfg(feature = "gfx-hal")]
+    let init = webrender::DeviceInit {
+        adapter,
+        surface,
+        window_size: (width as u32, height as u32),
+    };
+
     println!("Shader resource path: {:?}", res_path);
     let device_pixel_ratio = window.get_hidpi_factor() as f32;
     println!("Device pixel ratio: {}", device_pixel_ratio);
@@ -156,7 +209,7 @@ pub fn main_wrapper<E: Example>(
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
-    let framebuffer_size = {
+    let mut framebuffer_size = {
         let size = window
             .get_inner_size()
             .unwrap()
@@ -164,11 +217,15 @@ pub fn main_wrapper<E: Example>(
         DeviceUintSize::new(size.width as u32, size.height as u32)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 
+    #[cfg(feature = "gl")]
     let (external, output) = example.get_image_handlers(&*gl);
+
+    #[cfg(feature = "gfx-hal")]
+    let (external, output) = (None, None);
 
     if let Some(output_image_handler) = output {
         renderer.set_output_image_handler(output_image_handler);
@@ -180,7 +237,7 @@ pub fn main_wrapper<E: Example>(
 
     let epoch = Epoch(0);
     let pipeline_id = PipelineId(0, 0);
-    let layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
+    let mut layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
     let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
     let mut txn = Transaction::new();
 
@@ -271,6 +328,25 @@ pub fn main_wrapper<E: Example>(
                     )
                 },
             },
+            #[cfg(feature = "gfx-hal")]
+            winit::Event::WindowEvent {
+                event: winit::WindowEvent::Resized(dims),
+                ..
+            } => {
+                let new_size = DeviceUintSize::new((dims.width as f32 * device_pixel_ratio) as u32, (dims.height as f32 * device_pixel_ratio) as u32);
+                if framebuffer_size != new_size {
+                    let real_size = renderer.resize(Some((new_size.width as u32, new_size.height as u32)));
+                    framebuffer_size = real_size;
+                    layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
+                    api.set_window_parameters(
+                        document_id,
+                        framebuffer_size,
+                        DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
+                        device_pixel_ratio,
+                    );
+                    return winit::ControlFlow::Continue;
+                }
+            },
             winit::Event::WindowEvent { event, .. } => custom_event = example.on_event(
                 event,
                 &api,
@@ -304,7 +380,9 @@ pub fn main_wrapper<E: Example>(
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
         let _ = renderer.flush_pipeline_info();
+        #[cfg(feature = "gl")]
         example.draw_custom(&*gl);
+        #[cfg(feature = "gl")]
         window.swap_buffers().ok();
 
         winit::ControlFlow::Continue
@@ -312,3 +390,11 @@ pub fn main_wrapper<E: Example>(
 
     renderer.deinit();
 }
+#[cfg(not(any(feature = "gfx-hal", feature = "gl")))]
+pub fn main_wrapper<E: Example>(
+    _example: &mut E,
+    _options: Option<webrender::RendererOptions>,
+) {
+    println!("You need to enable one of the native API features (dx12/gl/metal/vulkan) in order to run this example.");
+}
+
