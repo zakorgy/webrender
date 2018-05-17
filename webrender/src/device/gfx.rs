@@ -61,6 +61,15 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 
 const ENTRY_NAME: &str = "main";
 
+pub enum RendererInit<B: hal::Backend> {
+    Gfx {
+        adapter: hal::Adapter<B>,
+        surface: B::Surface,
+        window_size: (u32, u32),
+        api_capabilities: ApiCapabilities,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct Locals {
@@ -293,7 +302,7 @@ pub enum UploadMethod {
     /// Just call `glTexSubImage` directly with the CPU data pointer
     Immediate,
     /// Accumulate the changes in PBO first before transferring to a texture.
-    PixelBuffer,
+    PixelBuffer(VertexUsageHint),
 }
 
 /// Plain old data that can be used to initialize a texture.
@@ -1830,15 +1839,19 @@ pub struct Device<B: hal::Backend> {
 
 impl<B: hal::Backend> Device<B> {
     pub fn new(
+        init: RendererInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
-        adapter: &hal::Adapter<B>,
+        /*adapter: &hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
-        window_size: (u32, u32),
-        api_capabilities: ApiCapabilities,
+        window_size: (u32, u32),*/
+        //api_capabilities: ApiCapabilities,
     ) -> Self {
+        let (adapter, mut surface, window_size, api_capabilities) = match init {
+            RendererInit::Gfx {adapter, surface, window_size, api_capabilities} => (adapter, surface, window_size, api_capabilities)
+        };
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
 
@@ -1915,7 +1928,7 @@ impl<B: hal::Backend> Device<B> {
                 .with_image_usage(
                     hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
                 );
-        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
+        let (swap_chain, backbuffer) = device.create_swapchain(&mut surface, swap_config);
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
 
@@ -3008,7 +3021,7 @@ impl<B: hal::Backend> Device<B> {
 
         match self.upload_method {
             UploadMethod::Immediate => unimplemented!(),
-            UploadMethod::PixelBuffer => {
+            UploadMethod::PixelBuffer(..) => {
                 TextureUploader {
                     device: self,
                     texture,
@@ -3449,6 +3462,10 @@ impl<B: hal::Backend> Device<B> {
         self.features.contains(features)
     }
 
+    pub fn echo_driver_messages(&self) {
+        unimplemented!()
+    }
+
     pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {
         let mut frame_semaphore = self.device.create_semaphore();
         let frame = self.swap_chain
@@ -3616,4 +3633,13 @@ fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
     unsafe {
         slice::from_raw_parts(texels.as_ptr() as *const u8, texels.len() * mem::size_of::<T>())
     }
+}
+
+pub fn build_shader_strings(
+    _gl_version_string: &str,
+    _features: &str,
+    _base_filename: &str,
+    _override_path: &Option<PathBuf>,
+) -> (String, String) {
+    unimplemented!()
 }

@@ -7,6 +7,7 @@ extern crate euclid;
 extern crate gleam;
 extern crate webrender;
 extern crate winit;
+extern crate gfx_backend_empty as back;
 
 use direct_composition::DirectComposition;
 use std::sync::mpsc;
@@ -88,7 +89,7 @@ fn direct_composition_from_window(window: &winit::Window) -> DirectComposition {
 
 struct Rectangle {
     visual: direct_composition::AngleVisual,
-    renderer: Option<webrender::Renderer>,
+    renderer: Option<webrender::Renderer<back::Backend>>,
     api: api::RenderApi,
     document_id: api::DocumentId,
     size: api::DeviceUintSize,

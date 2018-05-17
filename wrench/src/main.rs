@@ -22,6 +22,13 @@ extern crate euclid;
 extern crate font_loader;
 extern crate gleam;
 extern crate glutin;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+extern crate gfx_backend_empty as back;
+extern crate gfx_hal;
 extern crate image;
 #[macro_use]
 extern crate lazy_static;
@@ -39,6 +46,9 @@ extern crate time;
 extern crate webrender;
 extern crate winit;
 extern crate yaml_rust;
+
+#[cfg(any(feature = "vulkan", feature = "dx12"))]
+extern crate winit;
 
 mod angle;
 mod binary_frame_reader;
@@ -69,6 +79,7 @@ use rawtest::RawtestHarness;
 use reftest::{ReftestHarness, ReftestOptions};
 #[cfg(feature = "headless")]
 use std::ffi::CString;
+use std::marker::PhantomData;
 #[cfg(feature = "headless")]
 use std::mem;
 use std::os::raw::c_void;
@@ -82,6 +93,7 @@ use webrender::api::*;
 use winit::VirtualKeyCode;
 use wrench::{Wrench, WrenchThing};
 use yaml_frame_reader::YamlFrameReader;
+use gfx_hal::Instance;
 
 lazy_static! {
     static ref PLATFORM_DEFAULT_FACE_NAME: String = String::from("Arial");
@@ -237,6 +249,14 @@ impl WindowWrapper {
             WindowWrapper::Window(_, ref gl) |
             WindowWrapper::Angle(_, _, ref gl) |
             WindowWrapper::Headless(_, ref gl) => gl.clone(),
+        }
+    }
+
+    #[cfg(any(feature="vulkan", feature="dx12"))]
+    fn get_window(&self) -> &winit::Window {
+        match *self {
+            WindowWrapper::Window(ref window, _) => &window.window,
+            _ => unreachable!(),
         }
     }
 }
@@ -422,6 +442,33 @@ fn main() {
         (None, None)
     };
 
+    #[cfg(not(any(feature="vulkan", feature="dx12")))]
+    let init =
+        webrender::RendererInit::Gl {
+            gl: window.clone_gl(),
+            phantom_data: PhantomData
+        };
+    #[cfg(any(feature="vulkan", feature="dx12"))]
+    let init =
+        {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface(window.get_window());
+            let window_size = window.get_inner_size();
+
+            let mut api_capabilities = webrender::ApiCapabilities::empty();
+            if cfg!(feature = "vulkan") {
+                api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
+            }
+            webrender::RendererInit::Gfx {
+                adapter,
+                surface,
+                window_size: (window_size.width, window_size.height),
+                api_capabilities,
+            }
+        };
+
     let mut wrench = Wrench::new(
         &mut window,
         events_loop.as_mut().map(|el| el.create_proxy()),
@@ -438,6 +485,7 @@ fn main() {
         args.is_present("slow_subpixel"),
         zoom_factor.unwrap_or(1.0),
         notifier,
+        init,
     );
 
     let mut thing = if let Some(subargs) = args.subcommand_matches("show") {
