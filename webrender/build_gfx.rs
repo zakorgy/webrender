@@ -8,13 +8,12 @@ use gfx_hal::format::Format;
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 use std::cmp::max;
-use std::env;
 use std::collections::HashMap;
-use std::fs::{canonicalize, read_dir, File};
+use std::fs::File;
 use std::io::BufReader;
 use std::io::prelude::*;
 use std::mem;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{self, Command, Stdio};
 use vertex_types::*;
 

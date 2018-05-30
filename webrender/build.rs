@@ -2,28 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[macro_use]
+extern crate cfg_if;
+cfg_if! {
+    if #[cfg(feature = "gfx")] {
+        extern crate ron;
+        #[macro_use]
+        extern crate serde;
+        extern crate gfx_hal;
+        #[path = "src/vertex_types.rs"]
+        mod vertex_types;
+        mod build_gfx;
+        use build_gfx::gfx_main;
+    }
+}
 use std::collections::HashMap;
 use std::env;
 use std::fs::{canonicalize, read_dir, File};
 use std::io::prelude::*;
+
 use std::path::{Path, PathBuf};
-
-// TODO
-
-#[cfg(feature = "gfx")]
-extern crate ron;
-#[cfg(feature = "gfx")]
-#[macro_use]
-extern crate serde;
-#[cfg(feature = "gfx")]
-extern crate gfx_hal;
-#[cfg(feature = "gfx")]
-#[path = "src/vertex_types.rs"]
-mod vertex_types;
-#[cfg(feature = "gfx")]
-mod build_gfx;
-#[cfg(feature = "gfx")]
-use build_gfx::gfx_main;
 
 fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) -> HashMap<String, String> {
     let mut shader_file = File::create(shader_file_path).unwrap();
@@ -82,7 +80,7 @@ fn main() {
     // deterministically.
     glsl_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-    let shaders = write_shaders(glsl_files, &shaders_file);
+    let _shaders = write_shaders(glsl_files, &shaders_file);
     #[cfg(feature = "gfx")]
-    gfx_main(&out_dir, shaders);
+    gfx_main(&out_dir, _shaders);
 }
