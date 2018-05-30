@@ -47,9 +47,6 @@ extern crate webrender;
 extern crate winit;
 extern crate yaml_rust;
 
-#[cfg(any(feature = "vulkan", feature = "dx12"))]
-extern crate winit;
-
 mod angle;
 mod binary_frame_reader;
 mod blob;
