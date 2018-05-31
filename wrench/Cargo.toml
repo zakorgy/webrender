@@ -11,6 +11,7 @@ bincode = "1.0"
 byteorder = "1.0"
 env_logger = { version = "0.5", optional = true }
 euclid = "0.17"
+cfg-if = "0.1.2"
 gfx-hal = { git = "https://github.com/gfx-rs/gfx.git" }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }

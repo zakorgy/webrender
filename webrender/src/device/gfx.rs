@@ -1236,6 +1236,7 @@ impl<B: hal::Backend> Program<B> {
         shader_kind: &ShaderKind,
         render_pass: &RenderPass<B>,
     ) -> Program<B> {
+        println!("## Shader name: {}", shader_name);
         let vs_module = device
             .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
             .unwrap();
@@ -1839,7 +1840,7 @@ pub struct Device<B: hal::Backend> {
 
 impl<B: hal::Backend> Device<B> {
     pub fn new(
-        init: RendererInit<B>,
+        init: &mut RendererInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
@@ -2136,7 +2137,7 @@ impl<B: hal::Backend> Device<B> {
             _renderer_name: renderer_name,
             frame_id: FrameId(0),
             features,
-            api_capabilities,
+            api_capabilities: *api_capabilities,
         }
     }
 
@@ -3463,7 +3464,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn echo_driver_messages(&self) {
-        unimplemented!()
+        warn!("echo_driver_messages is unimplemeneted");
     }
 
     pub fn set_next_frame_id_and_return_semaphore(&mut self) -> B::Semaphore {

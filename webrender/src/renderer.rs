@@ -1509,7 +1509,7 @@ impl<B: hal::Backend> Renderer<B>
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        init: RendererInit<B>,
+        init: &mut RendererInit<B>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
     ) -> Result<(Self, RenderApiSender), RendererError> {

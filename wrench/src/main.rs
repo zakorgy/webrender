@@ -8,6 +8,8 @@ extern crate bincode;
 extern crate byteorder;
 #[macro_use]
 extern crate clap;
+#[macro_use]
+extern crate cfg_if;
 #[cfg(target_os = "macos")]
 extern crate core_foundation;
 #[cfg(target_os = "macos")]
@@ -173,6 +175,9 @@ impl HeadlessContext {
 }
 
 pub enum WindowWrapper {
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
+    Window(winit::Window),
+    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
     Window(glutin::GlWindow, Rc<gl::Gl>),
     Angle(winit::Window, angle::Context, Rc<gl::Gl>),
     Headless(HeadlessContext, Rc<gl::Gl>),
@@ -181,13 +186,17 @@ pub enum WindowWrapper {
 pub struct HeadlessEventIterater;
 
 impl WindowWrapper {
+    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
     fn swap_buffers(&self) {
         match *self {
             WindowWrapper::Window(ref window, _) => window.swap_buffers().unwrap(),
             WindowWrapper::Angle(_, ref context, _) => context.swap_buffers().unwrap(),
-            WindowWrapper::Headless(_, _) => {}
+            WindowWrapper::Headless(..) => {}
         }
     }
+
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
+    fn swap_buffers(&self) { }
 
     fn get_inner_size(&self) -> DeviceUintSize {
         //HACK: `winit` needs to figure out its hidpi story...
@@ -202,37 +211,41 @@ impl WindowWrapper {
             window.get_inner_size().unwrap()
         }
         let (w, h) = match *self {
+            #[cfg(any(feature = "dx12", feature = "vulkan"))]
+            WindowWrapper::Window(ref window) => inner_size(window),
+            #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
             WindowWrapper::Window(ref window, _) => inner_size(window.window()),
             WindowWrapper::Angle(ref window, ..) => inner_size(window),
-            WindowWrapper::Headless(ref context, _) => (context.width, context.height),
+            WindowWrapper::Headless(ref context, ..) => (context.width, context.height),
         };
         DeviceUintSize::new(w, h)
     }
 
     fn hidpi_factor(&self) -> f32 {
         match *self {
-            WindowWrapper::Window(ref window, _) => window.hidpi_factor(),
+            WindowWrapper::Window(ref window, ..) => window.hidpi_factor(),
             WindowWrapper::Angle(ref window, ..) => window.hidpi_factor(),
-            WindowWrapper::Headless(_, _) => 1.0,
+            WindowWrapper::Headless(..) => 1.0,
         }
     }
 
     fn resize(&mut self, size: DeviceUintSize) {
         match *self {
-            WindowWrapper::Window(ref mut window, _) => window.set_inner_size(size.width, size.height),
+            WindowWrapper::Window(ref mut window, ..) => window.set_inner_size(size.width, size.height),
             WindowWrapper::Angle(ref mut window, ..) => window.set_inner_size(size.width, size.height),
-            WindowWrapper::Headless(_, _) => unimplemented!(), // requites Glutin update
+            WindowWrapper::Headless(..) => unimplemented!(), // requites Glutin update
         }
     }
 
     fn set_title(&mut self, title: &str) {
         match *self {
-            WindowWrapper::Window(ref window, _) => window.set_title(title),
+            WindowWrapper::Window(ref window, ..) => window.set_title(title),
             WindowWrapper::Angle(ref window, ..) => window.set_title(title),
-            WindowWrapper::Headless(_, _) => (),
+            WindowWrapper::Headless(..) => (),
         }
     }
 
+    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
     pub fn gl(&self) -> &gl::Gl {
         match *self {
             WindowWrapper::Window(_, ref gl) |
@@ -241,6 +254,7 @@ impl WindowWrapper {
         }
     }
 
+    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
     pub fn clone_gl(&self) -> Rc<gl::Gl> {
         match *self {
             WindowWrapper::Window(_, ref gl) |
@@ -252,12 +266,13 @@ impl WindowWrapper {
     #[cfg(any(feature="vulkan", feature="dx12"))]
     fn get_window(&self) -> &winit::Window {
         match *self {
-            WindowWrapper::Window(ref window, _) => &window.window,
+            WindowWrapper::Window(ref window) => &window,
             _ => unreachable!(),
         }
     }
 }
 
+#[cfg(not(any(feature = "dx12", feature = "vulkan")))]
 fn make_window(
     size: DeviceUintSize,
     dp_ratio: Option<f32>,
@@ -338,6 +353,31 @@ fn make_window(
         dp_ratio,
         wrapper.hidpi_factor()
     );
+
+    wrapper
+}
+
+#[cfg(any(feature = "dx12", feature = "vulkan"))]
+fn make_window(
+    size: DeviceUintSize,
+    dp_ratio: Option<f32>,
+    vsync: bool,
+    events_loop: &Option<winit::EventsLoop>,
+    _angle: bool,
+) -> WindowWrapper {
+    let wrapper = match *events_loop {
+        Some(ref events_loop) => {
+            let window = winit::WindowBuilder::new()
+                .with_title("WRech")
+                .with_multitouch()
+                .with_dimensions(size.width, size.height)
+                .build(events_loop)
+                .unwrap();
+
+                WindowWrapper::Window(window)
+        }
+        None => unimplemented!(),
+    };
 
     wrapper
 }
@@ -439,32 +479,28 @@ fn main() {
         (None, None)
     };
 
-    #[cfg(not(any(feature="vulkan", feature="dx12")))]
-    let init =
-        webrender::RendererInit::Gl {
+    let instance = back::Instance::create("gfx-rs instance", 1);
+    let mut adapters = instance.enumerate_adapters();
+    let adapter = adapters.remove(0);
+    let mut surface = instance.create_surface(window.get_window());
+    let window_size = window.get_inner_size();
+    let mut api_capabilities = webrender::ApiCapabilities::empty();
+    if cfg!(feature = "vulkan") {
+        api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
+    }
+
+    let mut init = webrender::RendererInit::Gfx {
+            adapter,
+            surface,
+            window_size: (window_size.width, window_size.height),
+            api_capabilities,
+    };
+
+    /*let init = webrender::RendererInit::Gl {
             gl: window.clone_gl(),
             phantom_data: PhantomData
         };
-    #[cfg(any(feature="vulkan", feature="dx12"))]
-    let init =
-        {
-            let instance = back::Instance::create("gfx-rs instance", 1);
-            let mut adapters = instance.enumerate_adapters();
-            let adapter = adapters.remove(0);
-            let mut surface = instance.create_surface(window.get_window());
-            let window_size = window.get_inner_size();
-
-            let mut api_capabilities = webrender::ApiCapabilities::empty();
-            if cfg!(feature = "vulkan") {
-                api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
-            }
-            webrender::RendererInit::Gfx {
-                adapter,
-                surface,
-                window_size: (window_size.width, window_size.height),
-                api_capabilities,
-            }
-        };
+    }*/
 
     let mut wrench = Wrench::new(
         &mut window,
@@ -482,7 +518,7 @@ fn main() {
         args.is_present("slow_subpixel"),
         zoom_factor.unwrap_or(1.0),
         notifier,
-        init,
+        &mut init,
     );
 
     let mut thing = if let Some(subargs) = args.subcommand_matches("show") {
