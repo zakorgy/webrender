@@ -16,7 +16,6 @@ use std::env;
 use std::path::PathBuf;
 use webrender;
 use webrender::api::*;
-use webrender::ApiCapabilities;
 use winit;
 
 use self::gfx_hal::Instance;
@@ -126,10 +125,6 @@ pub fn main_wrapper<E: Example>(
     let device_pixel_ratio = window.hidpi_factor();
     println!("Device pixel ratio: {}", device_pixel_ratio);
 
-    let mut api_capabilities = ApiCapabilities::empty();
-    if cfg!(feature = "vulkan") {
-        api_capabilities.insert(ApiCapabilities::BLITTING);
-    }
     println!("Loading shaders...");
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
@@ -138,7 +133,6 @@ pub fn main_wrapper<E: Example>(
         clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
         //scatter_gpu_cache_updates: false,
         debug_flags: webrender::DebugFlags::ECHO_DRIVER_MESSAGES,
-        api_capabilities,
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
