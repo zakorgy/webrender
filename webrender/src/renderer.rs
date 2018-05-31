@@ -24,7 +24,7 @@ use device::{DepthFunction, Device, FrameId, UploadMethod, Texture, PrimitiveTyp
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter, ReadPixelsFormat};
 use device::{VertexUsageHint, VAO, PBO, ProgramCache};
-use device::{ApiCapabilities, VertexArrayKind};
+use device::{VertexArrayKind};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 //use gleam::gl;
@@ -1484,7 +1484,6 @@ impl<B: hal::Backend> Renderer<B> {
             adapter,
             surface,
             window_size,
-            options.api_capabilities,
         );
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
@@ -4093,7 +4092,6 @@ pub struct RendererOptions {
     pub disable_dual_source_blending: bool,
     pub scene_builder_hooks: Option<Box<SceneBuilderHooks + Send>>,
     pub sampler: Option<Box<AsyncPropertySampler + Send>>,
-    pub api_capabilities: ApiCapabilities,
 }
 
 impl Default for RendererOptions {
@@ -4127,7 +4125,6 @@ impl Default for RendererOptions {
             disable_dual_source_blending: false,
             scene_builder_hooks: None,
             sampler: None,
-            api_capabilities: ApiCapabilities::empty(),
         }
     }
 }

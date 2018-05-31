@@ -452,12 +452,6 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
-bitflags!(
-    pub struct ApiCapabilities: u8 {
-        const BLITTING = 0x1;
-    }
-);
-
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum VertexArrayKind {
     Primitive,
@@ -1826,7 +1820,6 @@ pub struct Device<B: hal::Backend> {
 
     // Supported features
     features: hal::Features,
-    api_capabilities: ApiCapabilities,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -1838,7 +1831,6 @@ impl<B: hal::Backend> Device<B> {
         adapter: &hal::Adapter<B>,
         surface: &mut <B as hal::Backend>::Surface,
         window_size: (u32, u32),
-        api_capabilities: ApiCapabilities,
     ) -> Self {
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
@@ -2124,7 +2116,6 @@ impl<B: hal::Backend> Device<B> {
             _renderer_name: renderer_name,
             frame_id: FrameId(0),
             features,
-            api_capabilities,
         }
     }
 
@@ -2652,11 +2643,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
-        if !self.api_capabilities.contains(ApiCapabilities::BLITTING) {
-            warn!("Blitting is not supported!");
-            return;
-        }
-
         let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
 
         let image = self.images
@@ -2835,11 +2821,6 @@ impl<B: hal::Backend> Device<B> {
         }
 
         if src_rect.size != dest_rect.size {
-            // TODO remove this if other platforms are supported
-            if !self.api_capabilities.contains(ApiCapabilities::BLITTING) {
-                warn!("Blitting is not supported!");
-                return;
-            }
             cmd_buffer.blit_image(
                 &src_img.image,
                 hal::image::Layout::TransferSrcOptimal,
