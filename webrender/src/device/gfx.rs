@@ -16,12 +16,15 @@ use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
 use std::mem;
-use std::ops::Add;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::slice;
 use std::sync::Arc;
-use std::thread;
+#[cfg(feature = "debug_renderer")]
+use super::Capabilities;
+use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
+use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, FileWatcherHandler};
+use super::{Texture, FBOId, RBOId, VertexUsageHint};
 use vertex_types::*;
 
 use hal;
@@ -118,78 +121,11 @@ fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
     shader
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct FrameId(usize);
-
-impl FrameId {
-    pub fn new(value: usize) -> Self {
-        FrameId(value)
-    }
-}
-
-impl Add<usize> for FrameId {
-    type Output = FrameId;
-
-    fn add(self, other: usize) -> FrameId {
-        FrameId(self.0 + other)
-    }
-}
-
-/*const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
-
-const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
-
-const SHADER_VERSION_GL: &str = "#version 150\n";
-const SHADER_VERSION_GLES: &str = "#version 300 es\n";
-
-const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
-const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
-const SHADER_IMPORT: &str = "#include ";*/
-
-pub struct TextureSlot(pub usize);
-
-// In some places we need to temporarily bind a texture to any slot.
-//const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
-
 #[repr(u32)]
 pub enum DepthFunction {
     #[cfg(feature = "debug_renderer")]
     Less,
     LessEqual,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub enum TextureFilter {
-    Nearest,
-    Linear,
-    Trilinear,
-}
-
-#[derive(Debug)]
-pub enum VertexAttributeKind {
-    F32,
-    #[cfg(feature = "debug_renderer")]
-    U8Norm,
-    U16Norm,
-    I32,
-    U16,
-}
-
-#[derive(Debug)]
-pub struct VertexAttribute {
-    pub name: &'static str,
-    pub count: u32,
-    pub kind: VertexAttributeKind,
-}
-
-#[derive(Debug)]
-pub struct VertexDescriptor {
-    pub vertex_attributes: &'static [VertexAttribute],
-    pub instance_attributes: &'static [VertexAttribute],
 }
 
 pub trait PrimitiveType {
@@ -291,142 +227,11 @@ impl PrimitiveType for gpu_types::PrimitiveInstance {
     }
 }
 
-enum FBOTarget {
-    Read,
-    Draw,
-}
-
-/// Method of uploading texel data from CPU to GPU.
-#[derive(Debug, Clone)]
-pub enum UploadMethod {
-    /// Just call `glTexSubImage` directly with the CPU data pointer
-    Immediate,
-    /// Accumulate the changes in PBO first before transferring to a texture.
-    PixelBuffer(VertexUsageHint),
-}
-
-/// Plain old data that can be used to initialize a texture.
-pub unsafe trait Texel: Copy {}
-unsafe impl Texel for u8 {}
-unsafe impl Texel for f32 {}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReadPixelsFormat {
-    Standard(ImageFormat),
-    Rgba8,
-}
-
-pub trait FileWatcherHandler: Send {
-    fn file_changed(&self, path: PathBuf);
-}
-
-#[cfg_attr(feature = "replay", derive(Clone))]
-pub struct ExternalTexture {
-    id: u32,
-    _target: TextureTarget,
-}
-
-impl ExternalTexture {
-    pub fn new(id: u32, _target: TextureTarget) -> Self {
-        ExternalTexture {
-            id,
-            _target,
-        }
-    }
-
-    #[cfg(feature = "replay")]
-    pub fn internal_id(&self) -> u32 {
-        self.id
-    }
-}
-
-pub struct Texture {
-    id: TextureId,
-    _target: TextureTarget,
-    layer_count: i32,
-    format: ImageFormat,
-    width: u32,
-    height: u32,
-    filter: TextureFilter,
-    render_target: Option<RenderTargetInfo>,
-    fbo_ids: Vec<FBOId>,
-    depth_rb: Option<RBOId>,
-    last_frame_used: FrameId,
-}
-
-impl Texture {
-    pub fn get_dimensions(&self) -> DeviceUintSize {
-        DeviceUintSize::new(self.width, self.height)
-    }
-
-    pub fn get_render_target_layer_count(&self) -> usize {
-        self.fbo_ids.len()
-    }
-
-    pub fn get_layer_count(&self) -> i32 {
-        self.layer_count
-    }
-
-    pub fn get_format(&self) -> ImageFormat {
-        self.format
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn get_filter(&self) -> TextureFilter {
-        self.filter
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn get_render_target(&self) -> Option<RenderTargetInfo> {
-        self.render_target.clone()
-    }
-
-    pub fn has_depth(&self) -> bool {
-        self.depth_rb.is_some()
-    }
-
-    pub fn get_rt_info(&self) -> Option<&RenderTargetInfo> {
-        self.render_target.as_ref()
-    }
-
-    pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
-        self.last_frame_used == frame_id
-    }
-
-    #[cfg(feature = "replay")]
-    pub fn into_external(mut self) -> ExternalTexture {
-        let ext = ExternalTexture {
-            id: self.id,
-            _target: self._target,
-        };
-        self.id = 0; // don't complain, moved out
-        ext
-    }
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        debug_assert!(thread::panicking() || self.id == 0);
-    }
-}
-
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct ProgramId(u32);
 
 pub struct PBO;
 pub struct VAO;
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct FBOId(u32);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct RBOId(u32);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct VBOId(u32);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-struct IBOId(u32);
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 #[cfg_attr(feature = "serialize_program", derive(Deserialize, Serialize))]
@@ -442,63 +247,11 @@ pub trait ProgramCacheObserver {
 
 pub struct ProgramCache;
 
-#[derive(Debug, Copy, Clone)]
-pub enum VertexUsageHint {
-    Static,
-    Dynamic,
-    Stream,
-}
-
-#[cfg(feature = "debug_renderer")]
-pub struct Capabilities {
-    pub supports_multisampling: bool,
-}
-
-#[derive(Clone, Debug)]
-pub enum ShaderError {
-    Compilation(String, String), // name, error message
-    Link(String, String),        // name, error message
-}
-
 bitflags!(
     pub struct ApiCapabilities: u8 {
         const BLITTING = 0x1;
     }
 );
-
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
-    Primitive,
-    Blur,
-    Clip,
-    DashAndDot,
-    VectorStencil,
-    VectorCover,
-    Border,
-}
-
-pub(crate) enum ShaderKind {
-    Primitive,
-    Cache(VertexArrayKind),
-    ClipCache,
-    Brush,
-    Text,
-    #[allow(dead_code)]
-    VectorStencil,
-    #[allow(dead_code)]
-    VectorCover,
-    DebugColor,
-    DebugFont,
-}
-
-impl ShaderKind {
-    fn is_debug(&self) -> bool {
-        match *self {
-            ShaderKind::DebugFont | ShaderKind::DebugColor => true,
-            _ => false,
-        }
-    }
-}
 
 const ALPHA: BlendState = BlendState::On {
     color: BlendOp::Add {
@@ -2145,7 +1898,7 @@ impl<B: hal::Backend> Device<B> {
         self.device_pixel_ratio = ratio;
     }
 
-    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
+    pub fn update_program_cache(&mut self, _cached_programs: Rc<ProgramCache>) {
         unimplemented!();
     }
 
@@ -2500,7 +2253,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> Texture {
         Texture {
             id: 0,
-            _target: target,
+            target: target as _,
             width: 0,
             height: 0,
             layer_count: 0,
@@ -3201,18 +2954,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn bind_vao(&mut self, _vao: &VAO) { }
-
-
-    fn create_vao_with_vbos(
-        &mut self,
-        _descriptor: &VertexDescriptor,
-        _main_vbo_id: VBOId,
-        _instance_vbo_id: VBOId,
-        _ibo_id: IBOId,
-        _owns_vertices_and_indices: bool,
-    ) -> VAO {
-        VAO { }
-    }
 
     pub fn create_vao(&mut self, _descriptor: &VertexDescriptor) -> VAO {
         VAO { }

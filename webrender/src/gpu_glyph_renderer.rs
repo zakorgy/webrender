@@ -7,14 +7,13 @@
 use api::{DeviceIntPoint, DeviceIntRect, DeviceUintSize, FontRenderMode};
 use api::{ImageFormat, TextureTarget};
 use debug_colors;
-use device::{Device, Texture, TextureFilter, VAO};
+use device::{Device, ShaderKind, Texture, TextureFilter, VAO, VertexArrayKind};
 use euclid::{Point2D, Size2D, Transform3D, TypedVector2D, Vector2D};
 use internal_types::RenderTargetInfo;
 use pathfinder_gfx_utils::ShelfBinPacker;
 use profiler::GpuProfileTag;
-use renderer::{self, ImageBufferKind, Renderer, RendererError, RendererStats};
-use renderer::{TextureSampler, VertexArrayKind};
-use shade::{LazilyCompiledShader, ShaderKind};
+use renderer::{self, ImageBufferKind, Renderer, RendererError, RendererStats, TextureSampler};
+use shade::LazilyCompiledShader;
 use tiling::GlyphJob;
 
 // The area lookup table in uncompressed grayscale TGA format (TGA image format 3).

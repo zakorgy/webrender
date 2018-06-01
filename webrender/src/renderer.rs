@@ -24,11 +24,12 @@ use device::{DepthFunction, Device, FrameId, UploadMethod, Texture, PBO};
 use device::{ExternalTexture, FBOId, TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter,
              VertexUsageHint, VAO, PrimitiveType};
-use device::{ProgramCache, ReadPixelsFormat, RendererInit};
+use device::{ProgramCache, ReadPixelsFormat, RendererInit, VertexArrayKind};
 #[cfg(not(feature = "gfx"))]
 use device::{Program, VBO, CustomVAO};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
+#[cfg(not(feature = "gfx"))]
 use gleam::gl;
 use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
@@ -619,17 +620,6 @@ pub(crate) mod desc {
             },
         ],
     };
-}
-
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
-    Primitive,
-    Blur,
-    Clip,
-    DashAndDot,
-    VectorStencil,
-    VectorCover,
-    Border,
 }
 
 #[derive(Clone, Debug, PartialEq)]

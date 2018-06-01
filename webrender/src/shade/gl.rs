@@ -7,14 +7,14 @@ use api::{
     YuvColorSpace, YuvFormat,
 };
 use batch::{BatchKey, BatchKind, BrushBatchKind, TransformBatchKind};
-use device::{Device, Program, ShaderError};
+use device::{Device, Program, ShaderError, ShaderKind, VertexArrayKind};
 use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
 use renderer::{
     desc,
     MAX_VERTEX_TEXTURE_WIDTH,
     BlendMode, ImageBufferKind, RendererError, RendererOptions,
-    TextureSampler, VertexArrayKind,
+    TextureSampler,
 };
 use util::TransformedRectKind;
 
@@ -54,18 +54,6 @@ const TRANSFORM_FEATURE: &str = "TRANSFORM";
 const ALPHA_FEATURE: &str = "ALPHA_PASS";
 const DITHERING_FEATURE: &str = "DITHERING";
 const DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
-
-pub(crate) enum ShaderKind {
-    Primitive,
-    Cache(VertexArrayKind),
-    ClipCache,
-    Brush,
-    Text,
-    #[allow(dead_code)]
-    VectorStencil,
-    #[allow(dead_code)]
-    VectorCover,
-}
 
 pub struct LazilyCompiledShader<B> {
     program: Option<Program>,
