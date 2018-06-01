@@ -207,12 +207,15 @@ impl PrimitiveType for gpu_types::BorderInstance {
     type Primitive = BorderInstance;
     fn to_primitive_type(&self) -> BorderInstance {
         BorderInstance {
+            aData0: [0,0,0,0],
+            aData1: [0,0,0,0],
             aTaskOrigin: [self.task_origin.x, self.task_origin.y],
             aRect: [self.local_rect.origin.x, self.local_rect.origin.y, self.local_rect.size.width, self.local_rect.size.height],
             aColor0: self.color0.to_array(),
             aColor1: self.color1.to_array(),
             aFlags: self.flags,
-            aWidthsRadii: [self.widths.width, self.widths.height, self.radius.width, self.radius.height],
+            aWidths: [self.widths.width, self.widths.height],
+            aRadii: [self.radius.width, self.radius.height],
         }
     }
 }
