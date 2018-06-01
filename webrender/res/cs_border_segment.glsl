@@ -24,7 +24,8 @@ in vec4 aRect;
 in vec4 aColor0;
 in vec4 aColor1;
 in int aFlags;
-in vec4 aWidthsRadii;
+in vec2 aWidths;
+in vec2 aRadii;
 
 #define SEGMENT_TOP_LEFT        0
 #define SEGMENT_TOP_RIGHT       1
@@ -62,8 +63,6 @@ vec2 get_outer_corner_scale(int segment) {
 
 void main(void) {
     vec2 pos = aRect.xy + aRect.zw * aPosition.xy;
-    vec2 widths = aWidthsRadii.xy;
-    vec2 radii = aWidthsRadii.zw;
 
     int segment = aFlags & 0xff;
     int style = (aFlags >> 8) & 0xff;
@@ -78,8 +77,8 @@ void main(void) {
 
     vFeatures = 0;
     vClipSign = clip_sign;
-    vClipCenter = outer + clip_sign * radii;
-    vClipRadii = vec4(radii, radii - widths);
+    vClipCenter = outer + clip_sign * aRadii;
+    vClipRadii = vec4(aRadii, aRadii - aWidths);
     vColorLine = vec4(0.0);
 
     switch (segment) {
@@ -88,7 +87,7 @@ void main(void) {
         case SEGMENT_BOTTOM_RIGHT:
         case SEGMENT_BOTTOM_LEFT:
             vFeatures |= (CLIP_RADII | MIX_COLOR);
-            vColorLine = vec4(outer, widths.y * -clip_sign.y, widths.x * clip_sign.x);
+            vColorLine = vec4(outer, aWidths.y * -clip_sign.y, aWidths.x * clip_sign.x);
             break;
         default:
             break;
