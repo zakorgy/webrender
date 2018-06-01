@@ -92,9 +92,4 @@ float init_transform_rough_fs(vec2 local_pos) {
     );
 }
 
-float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
-    vec2 dir_to_p0 = p0 - p;
-    return dot(normalize(perp_dir), dir_to_p0);
-}
-
 #endif //WR_FRAGMENT_SHADER
