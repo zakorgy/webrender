@@ -61,10 +61,10 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 
 const ENTRY_NAME: &str = "main";
 
-pub enum RendererInit<B: hal::Backend> {
+pub enum RendererInit<'a, B: hal::Backend> {
     Gfx {
-        adapter: hal::Adapter<B>,
-        surface: B::Surface,
+        adapter: &'a hal::Adapter<B>,
+        surface: &'a mut B::Surface,
         window_size: (u32, u32),
         api_capabilities: ApiCapabilities,
     },
@@ -1840,7 +1840,7 @@ pub struct Device<B: hal::Backend> {
 
 impl<B: hal::Backend> Device<B> {
     pub fn new(
-        init: &mut RendererInit<B>,
+        init: RendererInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
@@ -2137,7 +2137,7 @@ impl<B: hal::Backend> Device<B> {
             _renderer_name: renderer_name,
             frame_id: FrameId(0),
             features,
-            api_capabilities: *api_capabilities,
+            api_capabilities,
         }
     }
 

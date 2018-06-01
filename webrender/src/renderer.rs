@@ -1509,7 +1509,7 @@ impl<B: hal::Backend> Renderer<B>
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        init: &mut RendererInit<B>,
+        init: RendererInit<B>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
     ) -> Result<(Self, RenderApiSender), RendererError> {
@@ -1536,8 +1536,12 @@ impl<B: hal::Backend> Renderer<B>
             options.cached_programs.take(),
         );
 
-        let ext_dual_source_blending = !options.disable_dual_source_blending /*&&
-            device.supports_extension("GL_ARB_blend_func_extended")*/;
+        #[cfg(not(feature = "gfx"))]
+        let ext_dual_source_blending = !options.disable_dual_source_blending &&
+            device.supports_extension("GL_ARB_blend_func_extended");
+        #[cfg(feature = "gfx")]
+        let ext_dual_source_blending = !options.disable_dual_source_blending &&
+            device.supports_features(hal::Features::DUAL_SRC_BLENDING);
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
@@ -1573,6 +1577,7 @@ impl<B: hal::Backend> Renderer<B>
         let backend_profile_counters = BackendProfileCounters::new();
 
         let dither_matrix_texture = if options.enable_dithering {
+            #[cfg(not(feature = "gfx"))]
             let dither_matrix: [u8; 64] = [
                 00,
                 48,
@@ -1638,6 +1643,73 @@ impl<B: hal::Backend> Renderer<B>
                 25,
                 37,
                 21,
+            ];
+            #[cfg(feature = "gfx")]
+            let dither_matrix: [u8; 64] = [
+                42,
+                26,
+                38,
+                22,
+                41,
+                25,
+                37,
+                21,
+                10,
+                58,
+                06,
+                54,
+                09,
+                57,
+                05,
+                53,
+                34,
+                18,
+                46,
+                30,
+                33,
+                17,
+                45,
+                29,
+                02,
+                50,
+                14,
+                62,
+                01,
+                49,
+                13,
+                61,
+                40,
+                24,
+                36,
+                20,
+                43,
+                27,
+                39,
+                23,
+                08,
+                56,
+                04,
+                52,
+                11,
+                59,
+                07,
+                55,
+                32,
+                16,
+                44,
+                28,
+                35,
+                19,
+                47,
+                31,
+                00,
+                48,
+                12,
+                60,
+                03,
+                51,
+                15,
+                63
             ];
 
             let mut texture = device
@@ -2341,6 +2413,8 @@ impl<B: hal::Backend> Renderer<B>
             samplers
         };
 
+        #[cfg(feature = "gfx")]
+        let frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2478,6 +2552,8 @@ impl<B: hal::Backend> Renderer<B>
         });
         self.last_time = current_time;
 
+        #[cfg(feature = "gfx")]
+        self.device.swap_buffers(frame_semaphore);
         if self.renderer_errors.is_empty() {
             Ok(stats)
         } else {
@@ -2656,6 +2732,10 @@ impl<B: hal::Backend> Renderer<B>
     )
         where T: PrimitiveType
     {
+        if data.is_empty() {
+            return;
+        }
+
         for i in 0 .. textures.colors.len() {
             self.texture_resolver.bind(
                 &textures.colors[i],
@@ -2668,6 +2748,9 @@ impl<B: hal::Backend> Renderer<B>
         if let Some(ref texture) = self.dither_matrix_texture {
             self.device.bind_texture(TextureSampler::Dither, texture);
         }
+
+        #[cfg(feature = "gfx")]
+        self.device.bind_textures();
 
         self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
     }
@@ -2752,7 +2835,7 @@ impl<B: hal::Backend> Renderer<B>
 
         // Need to invert the y coordinates and flip the image vertically when
         // reading back from the framebuffer.
-        if render_target.is_none() {
+        if cfg!(not(feature = "gfx")) && render_target.is_none() {
             src.origin.y = framebuffer_size.height as i32 - src.size.height - src.origin.y;
             dest.origin.y += dest.size.height;
             dest.size.height = -dest.size.height;
@@ -3067,6 +3150,8 @@ impl<B: hal::Backend> Renderer<B>
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
+                    #[cfg(feature = "gfx")]
+                    self.device.set_uniforms(projection);
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                     // are all set up from the previous draw_instanced_batch call,
@@ -3077,6 +3162,8 @@ impl<B: hal::Backend> Renderer<B>
 
                     self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
+                    #[cfg(feature = "gfx")]
+                    self.device.set_uniforms(projection);
 
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
@@ -3370,6 +3457,7 @@ impl<B: hal::Backend> Renderer<B>
         self.device.disable_depth_write();
         self.device.set_blend(false);
 
+        #[cfg(not(feature = "gfx"))]
         for rect in &target.clears {
             self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, Some(*rect));
         }
@@ -3546,6 +3634,8 @@ impl<B: hal::Backend> Renderer<B>
         let mut index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
+                //TODO add this upstream
+                !texture.used_in_frame(frame_id) &&
                 //TODO: re-use a part of a larger target, if available
                 selector == TargetSelector {
                     size: texture.get_dimensions(),
@@ -3644,6 +3734,11 @@ impl<B: hal::Backend> Renderer<B>
 
         for (pass_index, pass) in frame.passes.iter_mut().enumerate() {
             self.gpu_profile.place_marker(&format!("pass {}", pass_index));
+            //TODO add this upstream
+            // Init SharedCacheA8 with dummy texture
+            if pass_index == 0 {
+                self.device.bind_texture(TextureSampler::SharedCacheA8, &self.texture_resolver.dummy_cache_texture);
+            }
 
             self.texture_resolver.bind(
                 &SourceTexture::CacheA8,
@@ -3662,11 +3757,23 @@ impl<B: hal::Backend> Renderer<B>
                         stats.color_target_count += 1;
 
                         let clear_color = frame.background_color.map(|color| color.to_array());
+
+                        #[cfg(not(feature = "gfx"))]
                         let projection = Transform3D::ortho(
                             0.0,
                             framebuffer_size.width as f32,
                             framebuffer_size.height as f32,
                             0.0,
+                            ORTHO_NEAR_PLANE,
+                            ORTHO_FAR_PLANE,
+                        );
+
+                        #[cfg(feature = "gfx")]
+                        let projection = Transform3D::ortho(
+                            0.0,
+                            framebuffer_size.width as f32,
+                            0.0,
+                            framebuffer_size.height as f32,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
                         );
@@ -4020,6 +4127,8 @@ impl<B: hal::Backend> Renderer<B>
             self.device.delete_external_texture(ext);
         }
         self.device.end_frame();
+        #[cfg(feature = "gfx")]
+        self.device.deinit();
     }
 }
 
@@ -4158,7 +4267,7 @@ impl Default for RendererOptions {
             renderer_kind: RendererKind::Native,
             enable_subpixel_aa: false,
             clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
-            enable_clear_scissor: true,
+            enable_clear_scissor: cfg!(not(feature = "gfx")),
             max_texture_size: None,
             // Scattered GPU cache updates haven't met a test that would show their superiority yet.
             scatter_gpu_cache_updates: false,

@@ -479,28 +479,33 @@ fn main() {
         (None, None)
     };
 
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let instance = back::Instance::create("gfx-rs instance", 1);
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let mut adapters = instance.enumerate_adapters();
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let adapter = adapters.remove(0);
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let mut surface = instance.create_surface(window.get_window());
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let window_size = window.get_inner_size();
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let mut api_capabilities = webrender::ApiCapabilities::empty();
-    if cfg!(feature = "vulkan") {
-        api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
-    }
-
-    let mut init = webrender::RendererInit::Gfx {
-            adapter,
-            surface,
-            window_size: (window_size.width, window_size.height),
-            api_capabilities,
+    #[cfg(feature = "vulkan")]
+    api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
+    #[cfg(any(feature = "dx12", feature = "vulkan"))]
+    let init = webrender::RendererInit::Gfx {
+        adapter: &adapter,
+        surface: &mut surface,
+        window_size: (window_size.width, window_size.height),
+        api_capabilities,
     };
 
-    /*let init = webrender::RendererInit::Gl {
-            gl: window.clone_gl(),
-            phantom_data: PhantomData
-        };
-    }*/
+    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+    let init = webrender::RendererInit::Gl {
+        gl: window.clone_gl(),
+        phantom_data: PhantomData,
+    };
 
     let mut wrench = Wrench::new(
         &mut window,
@@ -518,7 +523,7 @@ fn main() {
         args.is_present("slow_subpixel"),
         zoom_factor.unwrap_or(1.0),
         notifier,
-        &mut init,
+        init,
     );
 
     let mut thing = if let Some(subargs) = args.subcommand_matches("show") {
