@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[cfg(not(feature = "gfx"))]
 extern crate gleam;
+#[cfg(not(feature = "gfx"))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
@@ -11,6 +13,7 @@ extern crate winit;
 mod boilerplate;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
+#[cfg(not(feature = "gfx"))]
 use gleam::gl;
 use std::mem;
 use webrender::api::*;
@@ -293,6 +296,7 @@ impl Example for App {
         false
     }
 
+    #[cfg(not(feature = "gfx"))]
     fn get_image_handlers(
         &mut self,
         _gl: &gl::Gl,

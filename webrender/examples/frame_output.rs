@@ -3,7 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 extern crate euclid;
+#[cfg(not(feature = "gfx"))]
 extern crate gleam;
+#[cfg(not(feature = "gfx"))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
@@ -13,6 +15,7 @@ mod boilerplate;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
 use euclid::TypedScale;
+#[cfg(not(feature = "gfx"))]
 use gleam::gl;
 use webrender::api::*;
 

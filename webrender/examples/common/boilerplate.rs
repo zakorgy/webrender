@@ -4,11 +4,17 @@
 
 extern crate env_logger;
 extern crate euclid;
+#[cfg(not(feature = "gfx"))]
+extern crate gfx_backend_empty as empty;
 
+#[cfg(not(feature = "gfx"))]
 use gleam::gl;
+#[cfg(not(feature = "gfx"))]
 use glutin::{self, GlContext};
 use std::env;
 use std::path::PathBuf;
+#[cfg(not(feature = "gfx"))]
+use std::marker::PhantomData;
 use webrender;
 use winit;
 use webrender::api::*;
@@ -80,6 +86,7 @@ pub trait Example {
     fn on_event(&mut self, winit::WindowEvent, &RenderApi, DocumentId) -> bool {
         false
     }
+    #[cfg(not(feature = "gfx"))]
     fn get_image_handlers(
         &mut self,
         _gl: &gl::Gl,
@@ -87,6 +94,7 @@ pub trait Example {
           Option<Box<webrender::OutputImageHandler>>) {
         (None, None)
     }
+    #[cfg(not(feature = "gfx"))]
     fn draw_custom(&self, _gl: &gl::Gl) {
     }
 }
@@ -105,33 +113,42 @@ pub fn main_wrapper<E: Example>(
     };
 
     let mut events_loop = winit::EventsLoop::new();
-    let context_builder = glutin::ContextBuilder::new()
-        .with_gl(glutin::GlRequest::GlThenGles {
-            opengl_version: (3, 2),
-            opengles_version: (3, 0),
-        });
     let window_builder = winit::WindowBuilder::new()
         .with_title(E::TITLE)
         .with_multitouch()
         .with_dimensions(E::WIDTH, E::HEIGHT);
-    let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
-        .unwrap();
 
-    unsafe {
-        window.make_current().ok();
-    }
+    #[cfg(not(feature = "gfx"))]
+    let (gl, init, window) = {
+        let context_builder = glutin::ContextBuilder::new()
+            .with_gl(glutin::GlRequest::GlThenGles {
+                opengl_version: (3, 2),
+                opengles_version: (3, 0),
+            });
+        let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+            .unwrap();
 
-    let gl = match window.get_api() {
-        glutin::Api::OpenGl => unsafe {
-            gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-        },
-        glutin::Api::OpenGlEs => unsafe {
-            gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-        },
-        glutin::Api::WebGl => unimplemented!(),
+        unsafe {
+            window.make_current().ok();
+        }
+
+        let gl = match window.get_api() {
+            glutin::Api::OpenGl => unsafe {
+                gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+            },
+            glutin::Api::OpenGlEs => unsafe {
+                gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+            },
+            glutin::Api::WebGl => unimplemented!(),
+        };
+
+        println!("OpenGL version {}", gl.get_string(gl::VERSION));
+        let init: webrender::RendererInit<empty::Backend> = webrender::RendererInit::Gl {
+            gl: gl.clone(),
+            phantom_data: PhantomData,
+        };
+        (gl, init, window)
     };
-
-    println!("OpenGL version {}", gl.get_string(gl::VERSION));
     println!("Shader resource path: {:?}", res_path);
     let device_pixel_ratio = window.hidpi_factor();
     println!("Device pixel ratio: {}", device_pixel_ratio);
@@ -152,10 +169,14 @@ pub fn main_wrapper<E: Example>(
         DeviceUintSize::new(width, height)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 
+    #[cfg(feature = "gfx")]
+    let (external, output) = (None, None);
+
+    #[cfg(not(feature = "gfx"))]
     let (external, output) = example.get_image_handlers(&*gl);
 
     if let Some(output_image_handler) = output {
@@ -276,6 +297,7 @@ pub fn main_wrapper<E: Example>(
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
         let _ = renderer.flush_pipeline_info();
+        #[cfg(not(feature = "gfx"))]
         example.draw_custom(&*gl);
         window.swap_buffers().ok();
 

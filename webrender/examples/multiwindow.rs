@@ -4,16 +4,24 @@
 
 extern crate app_units;
 extern crate euclid;
+#[cfg(not(feature = "gfx"))]
+extern crate gfx_backend_empty as empty;
+#[cfg(not(feature = "gfx"))]
 extern crate gleam;
+#[cfg(not(feature = "gfx"))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
 use app_units::Au;
+#[cfg(not(feature = "gfx"))]
 use gleam::gl;
+#[cfg(not(feature = "gfx"))]
 use glutin::GlContext;
 use std::fs::File;
 use std::io::Read;
+#[cfg(not(feature = "gfx"))]
+use std::marker::PhantomData;
 use webrender::api::*;
 
 struct Notifier {
@@ -46,7 +54,7 @@ impl RenderNotifier for Notifier {
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
     window: glutin::GlWindow,
-    renderer: webrender::Renderer,
+    renderer: webrender::Renderer<empty::Backend>,
     name: &'static str,
     pipeline_id: PipelineId,
     document_id: DocumentId,
@@ -58,34 +66,43 @@ struct Window {
 impl Window {
     fn new(name: &'static str, clear_color: ColorF) -> Self {
         let events_loop = winit::EventsLoop::new();
-        let context_builder = glutin::ContextBuilder::new()
-            .with_gl(glutin::GlRequest::GlThenGles {
-                opengl_version: (3, 2),
-                opengles_version: (3, 0),
-            });
         let window_builder = winit::WindowBuilder::new()
             .with_title(name)
             .with_multitouch()
             .with_dimensions(800, 600);
-        let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
-            .unwrap();
 
-        unsafe {
-            window.make_current().ok();
-        }
+        #[cfg(not(feature = "gfx"))]
+        let (init, window) = {
+            let context_builder = glutin::ContextBuilder::new()
+                .with_gl(glutin::GlRequest::GlThenGles {
+                    opengl_version: (3, 2),
+                    opengles_version: (3, 0),
+                });
+            let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+                .unwrap();
 
-        let gl = match window.get_api() {
-            glutin::Api::OpenGl => unsafe {
-                gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-            },
-            glutin::Api::OpenGlEs => unsafe {
-                gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
-            },
-            glutin::Api::WebGl => unimplemented!(),
+            unsafe {
+                window.make_current().ok();
+            }
+
+            let gl = match window.get_api() {
+                glutin::Api::OpenGl => unsafe {
+                    gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+                },
+                glutin::Api::OpenGlEs => unsafe {
+                    gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
+                },
+                glutin::Api::WebGl => unimplemented!(),
+            };
+
+            let init: webrender::RendererInit<empty::Backend> = webrender::RendererInit::Gl {
+                gl,
+                phantom_data: PhantomData,
+            };
+            (init, window)
         };
 
         let device_pixel_ratio = window.hidpi_factor();
-
         let opts = webrender::RendererOptions {
             device_pixel_ratio,
             clear_color: Some(clear_color),
@@ -97,7 +114,7 @@ impl Window {
             DeviceUintSize::new(width, height)
         };
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-        let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(framebuffer_size, 0);
 
