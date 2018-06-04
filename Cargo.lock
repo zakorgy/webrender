@@ -1635,6 +1635,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "webrender_examples"
+version = "0.1.0"
+dependencies = [
+ "app_units 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "env_logger 0.5.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "euclid 0.17.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+ "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+ "gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git)",
+ "gleam 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "glutin 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rayon 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "webrender 0.57.2",
+ "winit 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "winapi"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

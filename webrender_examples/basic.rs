@@ -4,7 +4,9 @@
 
 extern crate app_units;
 extern crate euclid;
+#[cfg(not(feature = "gfx"))]
 extern crate gleam;
+#[cfg(not(feature = "gfx"))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
