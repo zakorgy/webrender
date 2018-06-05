@@ -3240,17 +3240,87 @@ impl<B: hal::Backend> Device<B> {
         self.frame_id.0 += 1;
     }
 
+    fn clear_target_rect(
+        &mut self,
+        rect: DeviceIntRect,
+        color: Option<[f32; 4]>,
+        depth: Option<f32>,
+    ) {
+
+        let mut clears = Vec::new();
+        let mut rects = Vec::new();
+        if let Some(color) =  color {
+            clears.push(hal::command::AttachmentClear::Color(0, hal::command::ClearColor::Float(color)));
+            rects.push(
+                hal::pso::ClearRect {
+                    rect: hal::pso::Rect {
+                        x: rect.origin.x as u16,
+                        y: rect.origin.y as u16,
+                        w: rect.size.width as u16,
+                        h: rect.size.height as u16,
+                    },
+                    layers: 0 .. 1,
+                }
+            );
+        }
+
+        if let Some(depth) = depth {
+            assert!(self.current_depth_test != DepthTest::Off);
+            clears.push(hal::command::AttachmentClear::Depth(depth));
+            rects.push(
+                hal::pso::ClearRect {
+                    rect: hal::pso::Rect {
+                        x: rect.origin.x as u16,
+                        y: rect.origin.y as u16,
+                        w: rect.size.width as u16,
+                        h: rect.size.height as u16,
+                    },
+                    layers: 0 .. 1,
+                }
+            );
+        }
+
+        let submit = {
+            let (frame_buffer, format, has_depth) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+                (&self.fbos[&self.bound_draw_fbo].fbo, self.fbos[&self.bound_draw_fbo].format, self.fbos[&self.bound_draw_fbo].rbo != RBOId(0))
+            } else {
+                if self.current_depth_test == DepthTest::Off {
+                    (&self.framebuffers[self.current_frame_id], ImageFormat::BGRA8, false)
+                } else {
+                    (&self.framebuffers_depth[self.current_frame_id], ImageFormat::BGRA8, true)
+                }
+            };
+
+            let render_pass = self.render_pass.get_render_pass(format, has_depth);
+            let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
+            {
+                let mut encoder = cmd_buffer.begin_render_pass_inline(
+                    render_pass,
+                    frame_buffer,
+                    self.viewport.rect,
+                    &vec![],
+                );
+
+                encoder.clear_attachments(clears, rects);
+            }
+            cmd_buffer.finish()
+        };
+
+        self.upload_queue.push(submit);
+        self.submit_to_gpu();
+    }
+
     pub fn clear_target(
         &mut self,
         color: Option<[f32; 4]>,
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
     ) {
-        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
-
-        if let Some(_rect) = rect {
-            //TODO handle scissors
+        if let Some(rect) = rect {
+            return self.clear_target_rect(rect, color, depth);
         }
+
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
 
         let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
