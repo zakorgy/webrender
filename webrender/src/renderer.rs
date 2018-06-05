@@ -3312,9 +3312,9 @@ impl<B: hal::Backend> Renderer<B> {
         self.device.disable_depth_write();
         self.device.set_blend(false);
 
-        /*for rect in &target.clears {
+        for rect in &target.clears {
             self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, Some(*rect));
-        }*/
+        }
 
         // Handle any blits to this texture from child tasks.
         self.handle_blits(&target.blits, render_tasks);
