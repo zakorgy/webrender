@@ -4,25 +4,35 @@
 
 extern crate app_units;
 extern crate euclid;
-#[cfg(not(feature = "gfx"))]
-extern crate gfx_backend_empty as empty;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate gfx_backend_empty as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "metal")]
+extern crate gfx_backend_metal as back;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate gleam;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
 use app_units::Au;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use gleam::gl;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use glutin::GlContext;
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+use std::boxed::Box;
 use std::fs::File;
 use std::io::Read;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use std::marker::PhantomData;
 use webrender::api::*;
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+use webrender::hal::{self, Instance};
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -53,14 +63,19 @@ impl RenderNotifier for Notifier {
 
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
+    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
     window: glutin::GlWindow,
-    renderer: webrender::Renderer<empty::Backend>,
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    window: winit::Window,
+    renderer: webrender::Renderer<back::Backend>,
     name: &'static str,
     pipeline_id: PipelineId,
     document_id: DocumentId,
     epoch: Epoch,
     api: RenderApi,
     font_instance_key: FontInstanceKey,
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    surface: Box<hal::Surface<back::Backend>>,
 }
 
 impl Window {
@@ -71,7 +86,7 @@ impl Window {
             .with_multitouch()
             .with_dimensions(800, 600);
 
-        #[cfg(not(feature = "gfx"))]
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
         let (init, window) = {
             let context_builder = glutin::ContextBuilder::new()
                 .with_gl(glutin::GlRequest::GlThenGles {
@@ -95,26 +110,52 @@ impl Window {
                 glutin::Api::WebGl => unimplemented!(),
             };
 
-            let init: webrender::RendererInit<empty::Backend> = webrender::RendererInit::Gl {
+            let init: webrender::RendererInit<back::Backend> = webrender::RendererInit::Gl {
                 gl,
                 phantom_data: PhantomData,
             };
             (init, window)
         };
 
-        let device_pixel_ratio = window.hidpi_factor();
-        let opts = webrender::RendererOptions {
-            device_pixel_ratio,
-            clear_color: Some(clear_color),
-            ..webrender::RendererOptions::default()
-        };
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let window = window_builder.build(&events_loop).unwrap();
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let instance = back::Instance::create("gfx-rs instance", 1);
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let mut adapters = instance.enumerate_adapters();
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let adapter = adapters.remove(0);
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let mut surface = instance.create_surface(&window);
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let window_size = window.get_inner_size().unwrap();
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        let mut api_capabilities = webrender::ApiCapabilities::empty();
+        #[cfg(feature = "vulkan")]
+            api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
 
         let framebuffer_size = {
             let (width, height) = window.get_inner_size().unwrap();
             DeviceUintSize::new(width, height)
         };
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-        let (renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
+        let (renderer, sender) = {
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            let init = webrender::RendererInit::Gfx {
+                adapter: &adapter,
+                surface: &mut surface,
+                window_size: (window_size.0, window_size.1),
+                api_capabilities,
+            };
+
+            let device_pixel_ratio = window.hidpi_factor();
+            let opts = webrender::RendererOptions {
+                device_pixel_ratio,
+                clear_color: Some(clear_color),
+                ..webrender::RendererOptions::default()
+            };
+            webrender::Renderer::new(init, notifier, opts).unwrap()
+        };
         let api = sender.create_api();
         let document_id = api.add_document(framebuffer_size, 0);
 
@@ -141,10 +182,13 @@ impl Window {
             document_id,
             api,
             font_instance_key,
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            surface: Box::new(surface),
         }
     }
 
     fn tick(&mut self) -> bool {
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
         unsafe {
             self.window.make_current().ok();
         }
@@ -290,6 +334,7 @@ impl Window {
 
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
         self.window.swap_buffers().ok();
 
         false

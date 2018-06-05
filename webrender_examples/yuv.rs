@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate gleam;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
@@ -13,10 +13,11 @@ extern crate winit;
 mod boilerplate;
 
 use boilerplate::Example;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use gleam::gl;
 use webrender::api::*;
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 fn init_gl_texture(
     id: gl::GLuint,
     internal: gl::GLenum,
@@ -43,10 +44,12 @@ fn init_gl_texture(
     gl.bind_texture(gl::TEXTURE_2D, 0);
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 struct YuvImageProvider {
     texture_ids: Vec<gl::GLuint>,
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl YuvImageProvider {
     fn new(gl: &gl::Gl) -> Self {
         let texture_ids = gl.gen_textures(4);
@@ -62,6 +65,7 @@ impl YuvImageProvider {
     }
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl webrender::ExternalImageHandler for YuvImageProvider {
     fn lock(&mut self, key: ExternalImageId, _channel_index: u8) -> webrender::ExternalImage {
         let id = self.texture_ids[key.0 as usize];
@@ -77,6 +81,7 @@ impl webrender::ExternalImageHandler for YuvImageProvider {
 struct App {
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl Example for App {
     fn render(
         &mut self,
@@ -196,8 +201,14 @@ impl Example for App {
     }
 }
 
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 fn main() {
     let mut app = App {
     };
     boilerplate::main_wrapper(&mut app, None);
+}
+
+#[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+fn main() {
+    println!("This example only runs with OpenGL.");
 }

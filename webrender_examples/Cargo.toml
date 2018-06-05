@@ -54,10 +54,11 @@ name = "yuv"
 path = "yuv.rs"
 
 [features]
-default = []
+default = ["gl"]
 debug = ["webrender/capture", "webrender/replay", "webrender/debugger", "webrender/png", "webrender/profiler"]
 gl = ["gleam", "glutin"]
 dx12 = [ "gfx-backend-dx12", "webrender/gfx" ]
+metal = [ "gfx-backend-metal", "webrender/gfx" ]
 vulkan = [ "gfx-backend-vulkan", "webrender/gfx" ]
 
 [dependencies]
@@ -73,5 +74,9 @@ webrender = {path = "../webrender" }
 winit = "0.13"
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx12]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true
+
+[target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
 git = "https://github.com/gfx-rs/gfx.git"
 optional = true

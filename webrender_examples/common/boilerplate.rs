@@ -4,20 +4,29 @@
 
 extern crate env_logger;
 extern crate euclid;
-#[cfg(not(feature = "gfx"))]
-extern crate gfx_backend_empty as empty;
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+extern crate gfx_backend_empty as back;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "metal")]
+extern crate gfx_backend_metal as back;
 
-#[cfg(not(feature = "gfx"))]
+
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use gleam::gl;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use glutin::{self, GlContext};
 use std::env;
 use std::path::PathBuf;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use std::marker::PhantomData;
 use webrender;
-use winit;
 use webrender::api::*;
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+use webrender::hal::Instance;
+use winit;
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -86,7 +95,7 @@ pub trait Example {
     fn on_event(&mut self, winit::WindowEvent, &RenderApi, DocumentId) -> bool {
         false
     }
-    #[cfg(not(feature = "gfx"))]
+    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
     fn get_image_handlers(
         &mut self,
         _gl: &gl::Gl,
@@ -94,7 +103,7 @@ pub trait Example {
           Option<Box<webrender::OutputImageHandler>>) {
         (None, None)
     }
-    #[cfg(not(feature = "gfx"))]
+    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
     fn draw_custom(&self, _gl: &gl::Gl) {
     }
 }
@@ -118,7 +127,7 @@ pub fn main_wrapper<E: Example>(
         .with_multitouch()
         .with_dimensions(E::WIDTH, E::HEIGHT);
 
-    #[cfg(not(feature = "gfx"))]
+    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
     let (gl, init, window) = {
         let context_builder = glutin::ContextBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
@@ -143,12 +152,37 @@ pub fn main_wrapper<E: Example>(
         };
 
         println!("OpenGL version {}", gl.get_string(gl::VERSION));
-        let init: webrender::RendererInit<empty::Backend> = webrender::RendererInit::Gl {
+        let init: webrender::RendererInit<back::Backend> = webrender::RendererInit::Gl {
             gl: gl.clone(),
             phantom_data: PhantomData,
         };
         (gl, init, window)
     };
+
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let window = window_builder.build(&events_loop).unwrap();
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let instance = back::Instance::create("gfx-rs instance", 1);
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let mut adapters = instance.enumerate_adapters();
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let adapter = adapters.remove(0);
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let mut surface = instance.create_surface(&window);
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let window_size = window.get_inner_size().unwrap();
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let mut api_capabilities = webrender::ApiCapabilities::empty();
+    #[cfg(feature = "vulkan")]
+        api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    let init = webrender::RendererInit::Gfx {
+        adapter: &adapter,
+        surface: &mut surface,
+        window_size: (window_size.0, window_size.1),
+        api_capabilities,
+    };
+
     println!("Shader resource path: {:?}", res_path);
     let device_pixel_ratio = window.hidpi_factor();
     println!("Device pixel ratio: {}", device_pixel_ratio);
@@ -173,11 +207,11 @@ pub fn main_wrapper<E: Example>(
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 
-    #[cfg(feature = "gfx")]
-    let (external, output) = (None, None);
-
-    #[cfg(not(feature = "gfx"))]
+    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
     let (external, output) = example.get_image_handlers(&*gl);
+
+    #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+    let (external, output) = (None, None);
 
     if let Some(output_image_handler) = output {
         renderer.set_output_image_handler(output_image_handler);
@@ -297,8 +331,9 @@ pub fn main_wrapper<E: Example>(
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
         let _ = renderer.flush_pipeline_info();
-        #[cfg(not(feature = "gfx"))]
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
         example.draw_custom(&*gl);
+        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
         window.swap_buffers().ok();
 
         winit::ControlFlow::Continue

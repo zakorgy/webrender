@@ -4,9 +4,9 @@
 
 extern crate app_units;
 extern crate euclid;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate gleam;
-#[cfg(not(feature = "gfx"))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
@@ -166,13 +166,6 @@ impl TouchState {
     }
 }
 
-fn main() {
-    let mut app = App {
-        touch_state: TouchState::new(),
-    };
-    boilerplate::main_wrapper(&mut app, None);
-}
-
 struct App {
     touch_state: TouchState,
 }
@@ -299,4 +292,11 @@ impl Example for App {
 
         false
     }
+}
+
+fn main() {
+    let mut app = App {
+        touch_state: TouchState::new(),
+    };
+    boilerplate::main_wrapper(&mut app, None);
 }
