@@ -1232,7 +1232,7 @@ impl<B: hal::Backend> Program<B> {
             .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
             .unwrap();
 
-        let descriptor_set_layout = device.create_descriptor_set_layout(&pipeline_requirements.descriptor_set_layouts);
+        let descriptor_set_layout = device.create_descriptor_set_layout(&pipeline_requirements.descriptor_set_layouts, &[]);
         let mut descriptor_pool =
             device.create_descriptor_pool(
                 1, //The number of descriptor sets
@@ -1344,13 +1344,11 @@ impl<B: hal::Backend> Program<B> {
                         blend_state,
                     ));
 
-                pipeline_descriptor.depth_stencil = Some(
-                    hal::pso::DepthStencilDesc {
-                        depth: depth_test,
-                        depth_bounds: false,
-                        stencil: hal::pso::StencilTest::Off,
-                    }
-                );
+                pipeline_descriptor.depth_stencil = hal::pso::DepthStencilDesc {
+                    depth: depth_test,
+                    depth_bounds: false,
+                    stencil: hal::pso::StencilTest::Off,
+                };
 
                 pipeline_descriptor.vertex_buffers = pipeline_requirements.vertex_buffer_descriptors.clone();
                 pipeline_descriptor.attributes = pipeline_requirements.attribute_descriptors.clone();
@@ -1588,6 +1586,7 @@ impl<B: hal::Backend> Program<B> {
             &self.pipeline_layout,
             0,
             Some(&self.descriptor_set),
+            &[],
         );
 
         if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
@@ -3250,7 +3249,12 @@ impl<B: hal::Backend> Device<B> {
         let mut clears = Vec::new();
         let mut rects = Vec::new();
         if let Some(color) =  color {
-            clears.push(hal::command::AttachmentClear::Color(0, hal::command::ClearColor::Float(color)));
+            clears.push(
+                hal::command::AttachmentClear::Color {
+                    index: 0,
+                    value: hal::command::ClearColor::Float(color),
+                }
+            );
             rects.push(
                 hal::pso::ClearRect {
                     rect: hal::pso::Rect {
@@ -3266,7 +3270,12 @@ impl<B: hal::Backend> Device<B> {
 
         if let Some(depth) = depth {
             assert!(self.current_depth_test != DepthTest::Off);
-            clears.push(hal::command::AttachmentClear::Depth(depth));
+            clears.push(
+                hal::command::AttachmentClear::DepthStencil {
+                    depth: Some(depth),
+                    stencil: None,
+                },
+            );
             rects.push(
                 hal::pso::ClearRect {
                     rect: hal::pso::Rect {
