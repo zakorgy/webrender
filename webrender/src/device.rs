@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, ImageFormat};
-use api::{DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{DeviceIntPoint, DeviceIntSize, DeviceIntRect, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
@@ -3245,7 +3245,6 @@ impl<B: hal::Backend> Device<B> {
         color: Option<[f32; 4]>,
         depth: Option<f32>,
     ) {
-
         let mut clears = Vec::new();
         let mut rects = Vec::new();
         if let Some(color) =  color {
@@ -3319,18 +3318,11 @@ impl<B: hal::Backend> Device<B> {
         self.submit_to_gpu();
     }
 
-    pub fn clear_target(
+    fn clear_target_image(
         &mut self,
         color: Option<[f32; 4]>,
         depth: Option<f32>,
-        rect: Option<DeviceIntRect>,
     ) {
-        if let Some(rect) = rect {
-            return self.clear_target_rect(rect, color, depth);
-        }
-
-        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
-
         let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture];
@@ -3339,12 +3331,12 @@ impl<B: hal::Backend> Device<B> {
             } else {
                 None
             };
-            let layer = fbo.layer_index;
-            (&img.core, layer, dimg)
+            (&img.core, fbo.layer_index, dimg)
         } else {
             (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depth.core))
         };
 
+        let mut cmd_buffer = self.command_pool.acquire_command_buffer(false);
         //Note: this function is assumed to be called within an active FBO
         // thus, we bring back the targets into renderable state
 
@@ -3418,6 +3410,29 @@ impl<B: hal::Backend> Device<B> {
             }
         }
         self.upload_queue.push(cmd_buffer.finish());
+    }
+
+    pub fn clear_target(
+        &mut self,
+        color: Option<[f32; 4]>,
+        depth: Option<f32>,
+        rect: Option<DeviceIntRect>,
+    ) {
+        if let Some(rect) = rect {
+            let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+                let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture].kind.extent();
+                DeviceIntRect::new(DeviceIntPoint::zero(), DeviceIntSize::new(extent.width as _, extent.height as _))
+            } else {
+                DeviceIntRect::new(DeviceIntPoint::zero(), DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _))
+            };
+            if rect == target_rect {
+                self.clear_target_image(color, depth);
+            } else {
+                self.clear_target_rect(rect, color, depth);
+            }
+        } else {
+            self.clear_target_image(color, depth);
+        }
     }
 
     pub fn enable_depth(&mut self) {
