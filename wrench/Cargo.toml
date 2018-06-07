@@ -14,7 +14,6 @@ euclid = "0.17"
 cfg-if = "0.1.2"
 gfx-hal = { git = "https://github.com/gfx-rs/gfx.git" }
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
-gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 gleam = "0.5"
 glutin = "0.15"
@@ -43,12 +42,18 @@ core-foundation = "0.5"
 [features]
 headless = [ "osmesa-sys", "osmesa-src" ]
 pathfinder = [ "webrender/pathfinder" ]
-vulkan = [ "gfx-backend-vulkan", "webrender/gfx" ]
 dx12 = [ "gfx-backend-dx12", "webrender/gfx" ]
+metal = [ "gfx-backend-metal", "webrender/gfx" ]
+vulkan = [ "gfx-backend-vulkan", "webrender/gfx" ]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 dwrote = "0.4.1"
+gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 mozangle = {version = "0.1.5", features = ["egl"]}
+
+[target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
+git = "https://github.com/gfx-rs/gfx.git"
+optional = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 font-loader = "0.6"
