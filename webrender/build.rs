@@ -213,10 +213,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let mut binding = 1; // 0 is reserved for Locals
     let mut in_location = 0;
     let mut out_location = 0;
-    // The indexing of varying variables starts from 16, since 0..15 is reserved for in_location,
-    // because Vulkan has a limitation for the maximum number of vertex input attributes,
-    // and the layout location index isn't allowed to exceed that value.
-    let mut varying_location = MAX_INPUT_ATTRIBUTES;
+    let mut varying_location = 0;
     let mut attribute_descriptors: Vec<AttributeDesc> = Vec::new();
     let mut bindings_map: HashMap<String, usize> = HashMap::new();
     let mut descriptor_set_layouts: Vec<DescriptorSetLayoutBinding> = Vec::new();
