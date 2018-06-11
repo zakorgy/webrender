@@ -26,6 +26,9 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
                                      #extension GL_ARB_explicit_attrib_location : enable\n\
                                      #extension GL_ARB_separate_shader_objects : enable\n";
 
+// https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
+const MAX_INPUT_ATTRIBUTES: u32 = 16;
+
 #[derive(Deserialize)]
 struct Shader {
     name: String,
@@ -167,6 +170,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let mut binding = 1; // 0 is reserved for Locals
     let mut in_location = 0;
     let mut out_location = 0;
+    let mut varying_location = 0;
     let mut attribute_descriptors: Vec<AttributeDesc> = Vec::new();
     let mut bindings_map: HashMap<String, usize> = HashMap::new();
     let mut descriptor_set_layouts: Vec<DescriptorSetLayoutBinding> = Vec::new();
@@ -222,10 +226,11 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 extend_non_uniform_variables_with_location_info(
                     &mut attribute_descriptors,
                     &mut in_location,
+                    &mut out_location,
+                    &mut varying_location,
                     &mut instance_offset,
                     trimmed,
                     &mut new_data,
-                    &mut out_location,
                     &mut vertex_offset,
                     write_ron,
                 );
@@ -395,10 +400,11 @@ fn add_locals_to_descriptor_set_layout(
 fn extend_non_uniform_variables_with_location_info(
     attribute_descriptors: &mut Vec<AttributeDesc>,
     in_location: &mut u32,
+    out_location: &mut u32,
+    varying_location: &mut u32,
     instance_offset: &mut u32,
     line: &str,
     new_data: &mut String,
-    out_location: &mut u32,
     vertex_offset: &mut u32,
     write_ron: bool,
 ) {
@@ -416,14 +422,13 @@ fn extend_non_uniform_variables_with_location_info(
             );
         }
         *in_location += location_size;
+        assert!(*in_location < MAX_INPUT_ATTRIBUTES);
     } else if line.starts_with("out") {
         layout_str = format!("layout(location = {}) {}\n", out_location, line);
         *out_location += location_size;
     } else {
-        let location = max(*in_location, *out_location);
-        layout_str = format!("layout(location = {}) {}\n", location, line);
-        *in_location = location + location_size;
-        *out_location = location + location_size;
+        layout_str = format!("layout(location = {}) {}\n", varying_location, line);
+        *varying_location += location_size;
     }
     new_data.push_str(&layout_str)
 }
