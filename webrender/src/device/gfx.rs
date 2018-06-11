@@ -992,7 +992,6 @@ impl<B: hal::Backend> Program<B> {
         shader_kind: &ShaderKind,
         render_pass: &RenderPass<B>,
     ) -> Program<B> {
-        println!("## Shader name: {}", shader_name);
         let vs_module = device
             .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
             .unwrap();
