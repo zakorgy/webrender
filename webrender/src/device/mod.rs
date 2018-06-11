@@ -6,6 +6,8 @@ use api::{DeviceUintSize, ImageFormat, TextureTarget};
 #[cfg(not(feature = "gfx"))]
 use gleam::gl::{GLuint, DYNAMIC_DRAW, STATIC_DRAW, STREAM_DRAW};
 use internal_types::RenderTargetInfo;
+#[cfg(feature = "gfx")]
+use std::cell::Cell;
 use std::ops::Add;
 use std::path::PathBuf;
 use std::thread;
@@ -31,7 +33,8 @@ pub struct Capabilities {
     pub supports_multisampling: bool,
 }
 
-pub(crate) enum ShaderKind {
+#[derive(Debug, Copy, Clone)]
+pub enum ShaderKind {
     Primitive,
     Cache(VertexArrayKind),
     ClipCache,
@@ -58,7 +61,7 @@ impl ShaderKind {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
+pub enum VertexArrayKind {
     Primitive,
     Blur,
     Clip,
@@ -187,6 +190,8 @@ pub struct Texture {
     fbo_ids: Vec<FBOId>,
     depth_rb: Option<RBOId>,
     last_frame_used: FrameId,
+    #[cfg(feature = "gfx")]
+    bound_in_frame: Cell<FrameId>,
 }
 
 impl Texture {
@@ -226,6 +231,16 @@ impl Texture {
 
     pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
         self.last_frame_used == frame_id
+    }
+
+    #[cfg(feature = "gfx")]
+    fn still_in_flight(&self, frame_id: FrameId) -> bool {
+        for i in 0..MAX_FRAME_COUNT {
+            if self.bound_in_frame.get() == FrameId(frame_id.0 - i) {
+                return true
+            }
+        }
+        false
     }
 
     #[cfg(feature = "replay")]

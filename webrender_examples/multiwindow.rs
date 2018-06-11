@@ -129,10 +129,6 @@ impl Window {
         let mut surface = instance.create_surface(&window);
         #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
         let window_size = window.get_inner_size().unwrap();
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let mut api_capabilities = webrender::ApiCapabilities::empty();
-        #[cfg(feature = "vulkan")]
-            api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
 
         let framebuffer_size = {
             let (width, height) = window.get_inner_size().unwrap();
@@ -145,7 +141,6 @@ impl Window {
                 adapter: &adapter,
                 surface: &mut surface,
                 window_size: (window_size.0, window_size.1),
-                api_capabilities,
             };
 
             let device_pixel_ratio = window.hidpi_factor();

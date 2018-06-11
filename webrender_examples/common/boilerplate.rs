@@ -172,15 +172,10 @@ pub fn main_wrapper<E: Example>(
     #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
     let window_size = window.get_inner_size().unwrap();
     #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let mut api_capabilities = webrender::ApiCapabilities::empty();
-    #[cfg(feature = "vulkan")]
-        api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
     let init = webrender::RendererInit::Gfx {
         adapter: &adapter,
         surface: &mut surface,
         window_size: (window_size.0, window_size.1),
-        api_capabilities,
     };
 
     println!("Shader resource path: {:?}", res_path);

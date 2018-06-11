@@ -2404,7 +2404,7 @@ impl<B: hal::Backend> Renderer<B>
         };
 
         #[cfg(feature = "gfx")]
-        let frame_semaphore = self.device.set_next_frame_id_and_return_semaphore();
+        let frame_semaphore = self.device.set_next_frame_id();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             let _gm = self.gpu_profile.start_marker("begin frame");
@@ -2543,7 +2543,7 @@ impl<B: hal::Backend> Renderer<B>
         self.last_time = current_time;
 
         #[cfg(feature = "gfx")]
-        self.device.swap_buffers(frame_semaphore);
+        self.device.swap_buffers();
         if self.renderer_errors.is_empty() {
             Ok(stats)
         } else {
@@ -3142,6 +3142,8 @@ impl<B: hal::Backend> Renderer<B>
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
                     #[cfg(feature = "gfx")]
                     self.device.set_uniforms(projection);
+                    #[cfg(feature = "gfx")]
+                    self.device.bind_textures();
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                     // are all set up from the previous draw_instanced_batch call,
@@ -3154,6 +3156,8 @@ impl<B: hal::Backend> Renderer<B>
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
                     #[cfg(feature = "gfx")]
                     self.device.set_uniforms(projection);
+                    #[cfg(feature = "gfx")]
+                    self.device.bind_textures();
 
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
@@ -4086,6 +4090,8 @@ impl<B: hal::Backend> Renderer<B>
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
+        #[cfg(feature = "gfx")]
+        self.device.wait_for_resources_and_reset();
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
@@ -4257,7 +4263,7 @@ impl Default for RendererOptions {
             renderer_kind: RendererKind::Native,
             enable_subpixel_aa: false,
             clear_color: Some(ColorF::new(1.0, 1.0, 1.0, 1.0)),
-            enable_clear_scissor: cfg!(not(feature = "gfx")),
+            enable_clear_scissor: true,
             max_texture_size: None,
             // Scattered GPU cache updates haven't met a test that would show their superiority yet.
             scatter_gpu_cache_updates: false,

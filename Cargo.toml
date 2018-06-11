@@ -16,7 +16,7 @@ panic = "abort"
 #serde_derive = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums7", feature="deserialize_in_place" }
 
 [replace]
-"https://github.com/gfx-rs/gfx.git#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="8d2b93a8dfd9c99b7cbec703924a628d56cc9c73"}
-"https://github.com/gfx-rs/gfx.git#gfx-backend-vulkan:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="8d2b93a8dfd9c99b7cbec703924a628d56cc9c73" }
-"https://github.com/gfx-rs/gfx.git#gfx-backend-dx12:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="8d2b93a8dfd9c99b7cbec703924a628d56cc9c73" }
-"https://github.com/gfx-rs/gfx.git#gfx-backend-empty:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="8d2b93a8dfd9c99b7cbec703924a628d56cc9c73" }
+"https://github.com/gfx-rs/gfx.git#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003"}
+"https://github.com/gfx-rs/gfx.git#gfx-backend-vulkan:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-dx12:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-empty:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003" }

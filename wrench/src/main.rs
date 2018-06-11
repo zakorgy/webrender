@@ -28,7 +28,7 @@ extern crate glutin;
 extern crate gfx_backend_vulkan as back;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as back;
-#[cfg(not(any(feature = "vulkan", feature = "dx12")))]
+#[cfg(not(any(feature = "vulkan", feature = "dx12",feature = "metal" )))]
 extern crate gfx_backend_empty as back;
 extern crate gfx_hal;
 extern crate image;
@@ -177,7 +177,7 @@ impl HeadlessContext {
 pub enum WindowWrapper {
     #[cfg(any(feature = "dx12", feature = "vulkan"))]
     Window(winit::Window),
-    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+    #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
     Window(glutin::GlWindow, Rc<gl::Gl>),
     Angle(winit::Window, angle::Context, Rc<gl::Gl>),
     Headless(HeadlessContext, Rc<gl::Gl>),
@@ -186,7 +186,7 @@ pub enum WindowWrapper {
 pub struct HeadlessEventIterater;
 
 impl WindowWrapper {
-    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+    #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
     fn swap_buffers(&self) {
         match *self {
             WindowWrapper::Window(ref window, _) => window.swap_buffers().unwrap(),
@@ -213,7 +213,7 @@ impl WindowWrapper {
         let (w, h) = match *self {
             #[cfg(any(feature = "dx12", feature = "vulkan"))]
             WindowWrapper::Window(ref window) => inner_size(window),
-            #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+            #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
             WindowWrapper::Window(ref window, _) => inner_size(window.window()),
             WindowWrapper::Angle(ref window, ..) => inner_size(window),
             WindowWrapper::Headless(ref context, ..) => (context.width, context.height),
@@ -245,7 +245,7 @@ impl WindowWrapper {
         }
     }
 
-    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+    #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
     pub fn gl(&self) -> &gl::Gl {
         match *self {
             WindowWrapper::Window(_, ref gl) |
@@ -254,7 +254,7 @@ impl WindowWrapper {
         }
     }
 
-    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+    #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
     pub fn clone_gl(&self) -> Rc<gl::Gl> {
         match *self {
             WindowWrapper::Window(_, ref gl) |
@@ -272,7 +272,7 @@ impl WindowWrapper {
     }
 }
 
-#[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+#[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
 fn make_window(
     size: DeviceUintSize,
     dp_ratio: Option<f32>,
@@ -360,26 +360,25 @@ fn make_window(
 #[cfg(any(feature = "dx12", feature = "vulkan"))]
 fn make_window(
     size: DeviceUintSize,
-    dp_ratio: Option<f32>,
-    vsync: bool,
+    _dp_ratio: Option<f32>,
+    _vsync: bool,
     events_loop: &Option<winit::EventsLoop>,
     _angle: bool,
 ) -> WindowWrapper {
-    let wrapper = match *events_loop {
+    match *events_loop {
         Some(ref events_loop) => {
             let window = winit::WindowBuilder::new()
                 .with_title("WRech")
                 .with_multitouch()
-                .with_dimensions(size.width, size.height)
-                .build(events_loop)
-                .unwrap();
+                .with_min_dimensions(size.width, size.height)
+                .build(events_loop).unwrap();
 
-                WindowWrapper::Window(window)
-        }
-        None => unimplemented!(),
-    };
+                assert!(window.get_inner_size().unwrap() == (size.width, size.height));
 
-    wrapper
+                return WindowWrapper::Window(window);
+        },
+        None => unimplemented!(), //return WindowWrapper::Headless(HeadlessContext::new(size.width, size.height)),
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -490,18 +489,13 @@ fn main() {
     #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let window_size = window.get_inner_size();
     #[cfg(any(feature = "dx12", feature = "vulkan"))]
-    let mut api_capabilities = webrender::ApiCapabilities::empty();
-    #[cfg(feature = "vulkan")]
-    api_capabilities.insert(webrender::ApiCapabilities::BLITTING);
-    #[cfg(any(feature = "dx12", feature = "vulkan"))]
     let init = webrender::RendererInit::Gfx {
         adapter: &adapter,
         surface: &mut surface,
         window_size: (window_size.width, window_size.height),
-        api_capabilities,
     };
 
-    #[cfg(not(any(feature = "dx12", feature = "vulkan")))]
+    #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
     let init = webrender::RendererInit::Gl {
         gl: window.clone_gl(),
         phantom_data: PhantomData,

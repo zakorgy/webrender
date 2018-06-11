@@ -37,8 +37,6 @@ use super::{VBOId, VertexAttribute, VertexAttributeKind, VertexDescriptor, Verte
 // In some places we need to temporarily bind a texture to any slot.
 const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 
-pub struct ApiCapabilities;
-
 pub enum RendererInit<B> {
     Gl {
         gl: Rc<gl::Gl>,

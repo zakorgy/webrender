@@ -337,6 +337,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
                     ty: DescriptorType::SampledImage,
                     count: 1,
                     stage_flags: ShaderStageFlags::ALL,
+                    immutable_samplers: false,
                 });
             bindings_map.insert(texture_name.clone(), *binding);
         }
@@ -361,6 +362,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
                     ty: DescriptorType::Sampler,
                     count: 1,
                     stage_flags: ShaderStageFlags::ALL,
+                    immutable_samplers: false,
                 });
             bindings_map.insert(String::from(*sampler_name), *binding);
         }
@@ -391,6 +393,7 @@ fn add_locals_to_descriptor_set_layout(
             ty: DescriptorType::UniformBuffer,
             count: 1,
             stage_flags: ShaderStageFlags::VERTEX,
+            immutable_samplers: false,
         }
     );
     bindings_map.insert("Locals".to_owned(), 0);
