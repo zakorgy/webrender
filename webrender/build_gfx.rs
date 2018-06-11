@@ -7,7 +7,6 @@ use gfx_hal::pso::{DescriptorType, Element, ShaderStageFlags, VertexBufferDesc};
 use gfx_hal::format::Format;
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
-use std::cmp::max;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -519,6 +518,14 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
             VertexBufferDesc {
                 binding: 1,
                 stride: mem::size_of::<BlurInstance>() as _,
+                rate: 1,
+            }
+        );
+    } else if file_name.starts_with("cs_border") {
+        descriptors.push(
+            VertexBufferDesc {
+                binding: 1,
+                stride: mem::size_of::<BorderInstance>() as _,
                 rate: 1,
             }
         );

@@ -5,12 +5,15 @@
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct BorderInstance {
+    pub aData0: [i32; 4],
+    pub aData1: [i32; 4],
     pub aTaskOrigin: [f32; 2],
     pub aRect: [f32; 4],
     pub aColor0: [f32; 4],
     pub aColor1: [f32; 4],
     pub aFlags: i32,
-    pub aWidthsRadii: [f32; 4],
+    pub aWidths: [f32; 2],
+    pub aRadii: [f32; 2],
 }
 
 #[derive(Debug, Clone, Copy)]
