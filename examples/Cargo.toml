@@ -1,5 +1,5 @@
 [package]
-name = "webrender_examples"
+name = "webrender-examples"
 version = "0.1.0"
 authors = ["Zakor Gyula <gyula.zakor@h-lab.eu>"]
 license = "MPL-2.0"
