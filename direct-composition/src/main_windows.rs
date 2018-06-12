@@ -10,6 +10,7 @@ extern crate winit;
 extern crate gfx_backend_empty as back;
 
 use direct_composition::DirectComposition;
+use std::marker::PhantomData;
 use std::sync::mpsc;
 use webrender::api;
 use winit::os::windows::WindowExt;
@@ -104,7 +105,10 @@ impl Rectangle {
         visual.make_current();
 
         let (renderer, sender) = webrender::Renderer::new(
-            composition.gleam.clone(),
+            webrender::RendererInit::Gl {
+                gl: composition.gleam.clone(),
+                phantom_data: PhantomData,
+            },
             notifier.clone(),
             webrender::RendererOptions {
                 clear_color: Some(api::ColorF::new(0., 0., 0., 0.)),

@@ -8,6 +8,8 @@ use gleam::gl::{GLuint, DYNAMIC_DRAW, STATIC_DRAW, STREAM_DRAW};
 use internal_types::RenderTargetInfo;
 #[cfg(feature = "gfx")]
 use std::cell::Cell;
+use std::io::Read;
+use std::fs::File;
 use std::ops::Add;
 use std::path::PathBuf;
 use std::thread;
@@ -21,12 +23,24 @@ cfg_if! {
         pub use self::gl::*;
     }
 }
+mod shader_source {
+    include!(concat!(env!("OUT_DIR"), "/shaders.rs"));
+}
+
+const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
+const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
+const SHADER_IMPORT: &str = "#include ";
 
 #[cfg(feature = "gfx")]
 type IdType = u32;
 
 #[cfg(not(feature = "gfx"))]
 type IdType = GLuint;
+
+/// Plain old data that can be used to initialize a texture.
+pub unsafe trait Texel: Copy {}
+unsafe impl Texel for u8 {}
+unsafe impl Texel for f32 {}
 
 #[cfg(feature = "debug_renderer")]
 pub struct Capabilities {
@@ -70,6 +84,18 @@ pub enum VertexArrayKind {
     VectorCover,
     Border,
 }
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct FBOId(IdType);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct RBOId(IdType);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct VBOId(IdType);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+struct IBOId(IdType);
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -138,11 +164,6 @@ pub enum UploadMethod {
     /// Accumulate the changes in PBO first before transferring to a texture.
     PixelBuffer(VertexUsageHint),
 }
-
-/// Plain old data that can be used to initialize a texture.
-pub unsafe trait Texel: Copy {}
-unsafe impl Texel for u8 {}
-unsafe impl Texel for f32 {}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReadPixelsFormat {
@@ -260,18 +281,6 @@ impl Drop for Texture {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct FBOId(IdType);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct RBOId(IdType);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct VBOId(IdType);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-struct IBOId(IdType);
-
 #[derive(Debug, Copy, Clone)]
 pub enum VertexUsageHint {
     Static,
@@ -294,4 +303,84 @@ impl VertexUsageHint {
 pub enum ShaderError {
     Compilation(String, String), // name, error message
     Link(String, String),        // name, error message
+}
+
+// Get a shader string by name, from the built in resources or
+// an override path, if supplied.
+fn get_shader_source(shader_name: &str, base_path: &Option<PathBuf>) -> Option<String> {
+    if let Some(ref base) = *base_path {
+        let shader_path = base.join(&format!("{}.glsl", shader_name));
+        if shader_path.exists() {
+            let mut source = String::new();
+            File::open(&shader_path)
+                .unwrap()
+                .read_to_string(&mut source)
+                .unwrap();
+            return Some(source);
+        }
+    }
+
+    shader_source::SHADERS
+        .get(shader_name)
+        .map(|s| s.to_string())
+}
+
+// Parse a shader string for imports. Imports are recursively processed, and
+// prepended to the list of outputs.
+fn parse_shader_source(source: String, base_path: &Option<PathBuf>, output: &mut String) {
+    for line in source.lines() {
+        if line.starts_with(SHADER_IMPORT) {
+            let imports = line[SHADER_IMPORT.len() ..].split(',');
+
+            // For each import, get the source, and recurse.
+            for import in imports {
+                if let Some(include) = get_shader_source(import, base_path) {
+                    parse_shader_source(include, base_path, output);
+                }
+            }
+        } else {
+            output.push_str(line);
+            output.push_str("\n");
+        }
+    }
+}
+
+pub fn build_shader_strings(
+    gl_version_string: &str,
+    features: &str,
+    base_filename: &str,
+    override_path: &Option<PathBuf>,
+) -> (String, String) {
+    // Construct a list of strings to be passed to the shader compiler.
+    let mut vs_source = String::new();
+    let mut fs_source = String::new();
+
+    // GLSL requires that the version number comes first.
+    vs_source.push_str(gl_version_string);
+    fs_source.push_str(gl_version_string);
+
+    // Insert the shader name to make debugging easier.
+    let name_string = format!("// {}\n", base_filename);
+    vs_source.push_str(&name_string);
+    fs_source.push_str(&name_string);
+
+    // Define a constant depending on whether we are compiling VS or FS.
+    vs_source.push_str(SHADER_KIND_VERTEX);
+    fs_source.push_str(SHADER_KIND_FRAGMENT);
+
+    // Add any defines that were passed by the caller.
+    vs_source.push_str(features);
+    fs_source.push_str(features);
+
+    // Parse the main .glsl file, including any imports
+    // and append them to the list of sources.
+    let mut shared_result = String::new();
+    if let Some(shared_source) = get_shader_source(base_filename, override_path) {
+        parse_shader_source(shared_source, override_path, &mut shared_result);
+    }
+
+    vs_source.push_str(&shared_result);
+    fs_source.push_str(&shared_result);
+
+    (vs_source, fs_source)
 }

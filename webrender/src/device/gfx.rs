@@ -3723,12 +3723,3 @@ fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
         slice::from_raw_parts(texels.as_ptr() as *const u8, texels.len() * mem::size_of::<T>())
     }
 }
-
-pub fn build_shader_strings(
-    _gl_version_string: &str,
-    _features: &str,
-    _base_filename: &str,
-    _override_path: &Option<PathBuf>,
-) -> (String, String) {
-    unimplemented!()
-}
