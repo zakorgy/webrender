@@ -8,7 +8,7 @@ use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
 use parse_function::parse_function;
-#[cfg(any(feature = "dx12", feature = "vulkan"))]
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 use png::{save, SaveSettings};
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
 use png::save_flipped;
@@ -469,7 +469,7 @@ impl<'a> ReftestHarness<'a> {
     fn load_image(&mut self, filename: &Path, format: ImageFormat) -> ReftestImage {
         let file = BufReader::new(File::open(filename).unwrap());
         let img_raw = load_piston_image(file, format).unwrap();
-        #[cfg(any(feature = "dx12", feature = "vulkan"))]
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
         let img = img_raw.to_rgba();
         #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
         let img = img_raw.flipv().to_rgba();
@@ -503,7 +503,7 @@ impl<'a> ReftestHarness<'a> {
             format!("size={:?} ws={:?}", size, window_size)
         );
 
-        #[cfg(any(feature = "dx12", feature = "vulkan"))]
+        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
         let rect = DeviceUintRect::new(DeviceUintPoint::new(0, 0), size);
 
         // taking the bottom left sub-rectangle
@@ -515,7 +515,7 @@ impl<'a> ReftestHarness<'a> {
         let write_debug_images = false;
         if write_debug_images {
             let debug_path = filename.with_extension("yaml.png");
-            #[cfg(any(feature = "dx12", feature = "vulkan"))]
+            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
                         save(debug_path, pixels.clone(), size,
                              SaveSettings {
                                  flip_vertical: false,

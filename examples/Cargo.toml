@@ -63,6 +63,7 @@ vulkan = [ "gfx-backend-vulkan", "webrender/gfx" ]
 
 [dependencies]
 app_units = "0.6"
+cfg-if = "0.1.2"
 env_logger = "0.5"
 euclid = "0.17.3"
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }

@@ -68,12 +68,10 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 
 const ENTRY_NAME: &str = "main";
 
-pub enum RendererInit<'a, B: hal::Backend> {
-    Gfx {
-        adapter: &'a hal::Adapter<B>,
-        surface: &'a mut B::Surface,
-        window_size: (u32, u32),
-    },
+pub struct RendererInit<'a, B: hal::Backend> {
+    pub adapter: &'a hal::Adapter<B>,
+    pub surface: &'a mut B::Surface,
+    pub window_size: (u32, u32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1773,9 +1771,7 @@ impl<B: hal::Backend> Device<B> {
         _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
     ) -> Self {
-        let (adapter, mut surface, window_size) = match init {
-            RendererInit::Gfx { adapter, surface, window_size } => (adapter, surface, window_size)
-        };
+        let (adapter, mut surface, window_size) = (init.adapter, init.surface, init.window_size);
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
 

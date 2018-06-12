@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[macro_use]
+extern crate cfg_if;
 #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate gleam;
 #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
@@ -208,7 +210,7 @@ fn main() {
     boilerplate::main_wrapper(&mut app, None);
 }
 
-#[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 fn main() {
     println!("This example only runs with OpenGL.");
 }

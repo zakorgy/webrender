@@ -1507,9 +1507,7 @@ impl<B: hal::Backend> Renderer<B>
         let (payload_tx, payload_rx) = channel::payload_channel()?;
         let (result_tx, result_rx) = channel();
         #[cfg(not(feature = "gfx"))]
-        let gl_type = match init {
-            RendererInit::Gl { ref gl, .. } => gl.get_type(),
-        };
+        let gl_type = init.gl.get_type();
 
         let debug_server = DebugServer::new(api_tx.clone());
 

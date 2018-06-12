@@ -4,28 +4,33 @@
 
 extern crate env_logger;
 extern crate euclid;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-extern crate gfx_backend_empty as back;
-#[cfg(feature = "dx12")]
-extern crate gfx_backend_dx12 as back;
-#[cfg(feature = "vulkan")]
-extern crate gfx_backend_vulkan as back;
-#[cfg(feature = "metal")]
-extern crate gfx_backend_metal as back;
 
+cfg_if! {
+    if #[cfg(feature = "dx12")] {
+        extern crate gfx_backend_dx12 as back;
+    } else if #[cfg(feature = "metal")] {
+        extern crate gfx_backend_metal as back;
+    } else if #[cfg(feature = "vulkan")] {
+        extern crate gfx_backend_vulkan as back;
+    } else {
+        extern crate gfx_backend_empty as back;
+    }
+}
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-use gleam::gl;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-use glutin::{self, GlContext};
+cfg_if! {
+    if #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))] {
+        use webrender::hal::Instance;
+    } else {
+        use gleam::gl;
+        use glutin::{self, GlContext};
+        use std::marker::PhantomData;
+    }
+}
+
 use std::env;
 use std::path::PathBuf;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-use std::marker::PhantomData;
 use webrender;
 use webrender::api::*;
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-use webrender::hal::Instance;
 use winit;
 
 struct Notifier {
@@ -152,7 +157,7 @@ pub fn main_wrapper<E: Example>(
         };
 
         println!("OpenGL version {}", gl.get_string(gl::VERSION));
-        let init: webrender::RendererInit<back::Backend> = webrender::RendererInit::Gl {
+        let init: webrender::RendererInit<back::Backend> = webrender::RendererInit {
             gl: gl.clone(),
             phantom_data: PhantomData,
         };
@@ -160,22 +165,22 @@ pub fn main_wrapper<E: Example>(
     };
 
     #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let window = window_builder.build(&events_loop).unwrap();
+    let (window, adapter, mut surface) = {
+        let window = window_builder.build(&events_loop).unwrap();
+        let instance = back::Instance::create("gfx-rs instance", 1);
+        let mut adapters = instance.enumerate_adapters();
+        let adapter = adapters.remove(0);
+        let mut surface = instance.create_surface(&window);
+        (window, adapter, surface)
+    };
+
+    let (width, height) = window.get_inner_size().unwrap();
+
     #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let instance = back::Instance::create("gfx-rs instance", 1);
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let mut adapters = instance.enumerate_adapters();
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let adapter = adapters.remove(0);
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let mut surface = instance.create_surface(&window);
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let window_size = window.get_inner_size().unwrap();
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-    let init = webrender::RendererInit::Gfx {
+    let init = webrender::RendererInit {
         adapter: &adapter,
         surface: &mut surface,
-        window_size: (window_size.0, window_size.1),
+        window_size: (width, height),
     };
 
     println!("Shader resource path: {:?}", res_path);
@@ -193,10 +198,7 @@ pub fn main_wrapper<E: Example>(
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
-    let framebuffer_size = {
-        let (width, height) = window.get_inner_size().unwrap();
-        DeviceUintSize::new(width, height)
-    };
+    let framebuffer_size = DeviceUintSize::new(width, height);
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
     let (mut renderer, sender) = webrender::Renderer::new(init, notifier, opts).unwrap();
     let api = sender.create_api();
@@ -205,7 +207,7 @@ pub fn main_wrapper<E: Example>(
     #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
     let (external, output) = example.get_image_handlers(&*gl);
 
-    #[cfg(any(feature = "vulkan", feature = "dx12", feature = "metal"))]
+    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
     let (external, output) = (None, None);
 
     if let Some(output_image_handler) = output {

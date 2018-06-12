@@ -105,7 +105,7 @@ impl Rectangle {
         visual.make_current();
 
         let (renderer, sender) = webrender::Renderer::new(
-            webrender::RendererInit::Gl {
+            webrender::RendererInit {
                 gl: composition.gleam.clone(),
                 phantom_data: PhantomData,
             },

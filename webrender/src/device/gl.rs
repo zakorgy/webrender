@@ -31,11 +31,9 @@ use super::{VBOId, VertexAttribute, VertexAttributeKind, VertexDescriptor, Verte
 // In some places we need to temporarily bind a texture to any slot.
 const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 
-pub enum RendererInit<B> {
-    Gl {
-        gl: Rc<gl::Gl>,
-        phantom_data: PhantomData<B>
-    },
+pub struct RendererInit<B> {
+    pub gl: Rc<gl::Gl>,
+    pub phantom_data: PhantomData<B>
 }
 
 const GL_FORMAT_RGBA: gl::GLuint = gl::RGBA;
@@ -451,9 +449,7 @@ impl<B> Device<B> {
         _file_changed_handler: Box<FileWatcherHandler>,
         cached_programs: Option<Rc<ProgramCache>>,
     ) -> Device<B> {
-        let gl = match init {
-            RendererInit::Gl {gl, ..} => gl,
-        };
+        let gl = init.gl;
         let mut max_texture_size = [0];
         unsafe {
             gl.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut max_texture_size);

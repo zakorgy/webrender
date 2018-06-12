@@ -2,37 +2,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[macro_use]
+extern crate cfg_if;
 extern crate app_units;
 extern crate euclid;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-extern crate gfx_backend_empty as back;
-#[cfg(feature = "dx12")]
-extern crate gfx_backend_dx12 as back;
-#[cfg(feature = "vulkan")]
-extern crate gfx_backend_vulkan as back;
-#[cfg(feature = "metal")]
-extern crate gfx_backend_metal as back;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-extern crate gleam;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
+cfg_if! {
+    if #[cfg(feature = "dx12")] {
+        extern crate gfx_backend_dx12 as back;
+    } else if #[cfg(feature = "metal")] {
+        extern crate gfx_backend_metal as back;
+    } else if #[cfg(feature = "vulkan")] {
+        extern crate gfx_backend_vulkan as back;
+    } else {
+        extern crate gfx_backend_empty as back;
+    }
+}
+
+cfg_if! {
+    if #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))] {
+        use std::boxed::Box;
+        use webrender::hal::{self, Instance};
+    } else {
+        extern crate gleam;
+        extern crate glutin;
+        use gleam::gl;
+        use glutin::GlContext;
+        use std::marker::PhantomData;
+    }
+}
+
 use app_units::Au;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-use gleam::gl;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-use glutin::GlContext;
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-use std::boxed::Box;
 use std::fs::File;
 use std::io::Read;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
-use std::marker::PhantomData;
 use webrender::api::*;
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-use webrender::hal::{self, Instance};
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -110,7 +115,7 @@ impl Window {
                 glutin::Api::WebGl => unimplemented!(),
             };
 
-            let init: webrender::RendererInit<back::Backend> = webrender::RendererInit::Gl {
+            let init = webrender::RendererInit {
                 gl,
                 phantom_data: PhantomData,
             };
@@ -118,31 +123,26 @@ impl Window {
         };
 
         #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let window = window_builder.build(&events_loop).unwrap();
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let instance = back::Instance::create("gfx-rs instance", 1);
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let mut adapters = instance.enumerate_adapters();
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let adapter = adapters.remove(0);
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let mut surface = instance.create_surface(&window);
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-        let window_size = window.get_inner_size().unwrap();
-
-        let framebuffer_size = {
-            let (width, height) = window.get_inner_size().unwrap();
-            DeviceUintSize::new(width, height)
+        let (window, adapter, mut surface) = {
+            let window = window_builder.build(&events_loop).unwrap();
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface(&window);
+            (window, adapter, surface)
         };
+
+        let (width, height) = window.get_inner_size().unwrap();
+
+        let framebuffer_size = DeviceUintSize::new(width, height);
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
         let (renderer, sender) = {
             #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-            let init = webrender::RendererInit::Gfx {
+            let init = webrender::RendererInit {
                 adapter: &adapter,
                 surface: &mut surface,
-                window_size: (window_size.0, window_size.1),
+                window_size: (width, height),
             };
-
             let device_pixel_ratio = window.hidpi_factor();
             let opts = webrender::RendererOptions {
                 device_pixel_ratio,
