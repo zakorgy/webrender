@@ -73,3 +73,27 @@ pub struct PrimitiveInstance {
 pub struct Vertex {
     pub aPosition: [f32; 3],
 }
+
+#[cfg(feature = "pathfinder")]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct VectorStencilInstance {
+    pub aFromPosition: [f32; 2],
+    pub aCtrlPosition: [f32; 2],
+    pub aToPosition: [f32; 2],
+    pub aFromNormal: [f32; 2],
+    pub aCtrlNormal: [f32; 2],
+    pub aToNormal: [f32; 2],
+    pub aPathID: i32,
+    pub aPad: i32,
+}
+
+#[cfg(feature = "pathfinder")]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct VectorCoverInstance {
+    pub aTargetRect: [i32; 4],
+    pub aStencilOrigin: [i32; 2],
+    pub aSubpixel: i32,
+    pub aPad: i32,
+}

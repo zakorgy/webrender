@@ -29,7 +29,8 @@ use std::marker::PhantomData;
 
 
 impl ImageBufferKind {
-    pub(crate) fn _get_feature_string(&self) -> &'static str {
+    #[cfg(feature = "pathfinder")]
+    pub(crate) fn get_feature_string(&self) -> &'static str {
         match *self {
             ImageBufferKind::Texture2D => "TEXTURE_2D",
             ImageBufferKind::Texture2DArray => "",

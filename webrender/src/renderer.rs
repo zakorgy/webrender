@@ -4700,10 +4700,11 @@ impl<B: hal::Backend> Renderer<B>
 }
 
 #[cfg(feature = "pathfinder")]
-fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs,
-               gpu_glyph_renderer: &'a GpuGlyphRenderer)
-               -> &'a VAO {
+fn get_vao<'a, B: hal::Backend>(
+    vertex_array_kind: VertexArrayKind,
+    vaos: &'a RendererVAOs,
+    gpu_glyph_renderer: &'a GpuGlyphRenderer<B>,
+) -> &'a VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
@@ -4716,10 +4717,11 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
 }
 
 #[cfg(not(feature = "pathfinder"))]
-fn get_vao<'a, B: hal::Backend>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs,
-               _: &'a GpuGlyphRenderer<B>)
-               -> &'a VAO {
+fn get_vao<'a, B: hal::Backend>(
+    vertex_array_kind: VertexArrayKind,
+    vaos: &'a RendererVAOs,
+    _: &'a GpuGlyphRenderer<B>
+) -> &'a VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
