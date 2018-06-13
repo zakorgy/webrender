@@ -119,7 +119,7 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
                 return;
             }
         };
-        device.bind_program(program);
+        device.bind_program(&program);
         device.set_uniforms(projection);
     }
 

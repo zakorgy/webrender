@@ -14,6 +14,8 @@ use rand::{self, Rng};
 use ron::de::from_reader;
 use smallvec::SmallVec;
 use std::cell::Cell;
+#[cfg(feature = "debug_renderer")]
+use std::convert::Into;
 use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
@@ -2169,11 +2171,11 @@ impl<B: hal::Backend> Device<B> {
         id
     }
 
-    pub fn bind_program(&mut self, program_id: ProgramId) {
+    pub fn bind_program(&mut self, program_id: &ProgramId) {
         debug_assert!(self.inside_frame);
 
-        if self.bound_program != program_id {
-            self.bound_program = program_id;
+        if self.bound_program != *program_id {
+            self.bound_program = *program_id;
         }
     }
 
@@ -2207,7 +2209,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     #[cfg(feature = "debug_renderer")]
-    pub fn update_indices(&mut self, indices: &[u32]) {
+    pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
@@ -3187,7 +3189,7 @@ impl<B: hal::Backend> Device<B> {
 
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
-        self.attach_read_texture_raw(texture.id, texture._target, layer_id)
+        self.attach_read_texture_raw(texture.id, texture.target.into(), layer_id)
     }
 
     pub fn bind_vao(&mut self, _vao: &VAO) { }
@@ -3211,7 +3213,14 @@ impl<B: hal::Backend> Device<B> {
         _vao: &VAO,
         _vertices: &[V],
         _usage_hint: VertexUsageHint,
-    ) { }
+    )
+        where V: Copy
+    {
+        if self.bound_program != INVALID_PROGRAM_ID {
+            #[cfg(feature = "debug_renderer")]
+                self.update_vertices(_vertices);
+        }
+    }
 
     pub fn update_vao_instances<V>(
         &mut self,
@@ -3225,9 +3234,34 @@ impl<B: hal::Backend> Device<B> {
         self.update_instances(&data);
     }
 
-    pub fn update_vao_indices<I>(&mut self, _vao: &VAO, _indices: &[I], _usage_hint: VertexUsageHint) { }
+    pub fn update_vao_indices<I>(
+        &mut self,
+        _vao: &VAO,
+        indices: &[I],
+        _usage_hint: VertexUsageHint
+    )
+        where I: Copy,
+    {
+        if self.bound_program != INVALID_PROGRAM_ID {
+            #[cfg(feature = "debug_renderer")]
+            self.update_indices(indices);
+        }
+    }
 
     pub fn draw_triangles_u16(&mut self, _first_vertex: i32, _index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.draw();
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    pub fn draw_triangles_u32(&mut self, _first_vertex: i32, _index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.bind_textures();
+        self.draw();
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    pub fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
         debug_assert!(self.inside_frame);
         self.draw();
     }

@@ -4340,6 +4340,7 @@ struct PlainRenderer {
 
 #[cfg(feature = "replay")]
 enum CapturedExternalImageData {
+    #[cfg(not(feature = "gfx"))]
     NativeTexture(gl::GLuint),
     Buffer(Arc<Vec<u8>>),
 }
@@ -4356,6 +4357,7 @@ impl ExternalImageHandler for DummyExternalImageHandler {
         ExternalImage {
             uv: *uv,
             source: match *captured_data {
+                #[cfg(not(feature = "gfx"))]
                 CapturedExternalImageData::NativeTexture(tid) => ExternalImageSource::NativeTexture(tid),
                 CapturedExternalImageData::Buffer(ref arc) => ExternalImageSource::RawData(&*arc),
             }
@@ -4652,7 +4654,9 @@ impl<B: hal::Backend> Renderer<B>
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 
             info!("loading external texture-backed images");
+            #[cfg(not(feature = "gfx"))]
             let mut native_map = FastHashMap::<String, gl::GLuint>::default();
+            #[cfg(not(feature = "gfx"))]
             for ExternalCaptureImage { short_path, external, descriptor } in renderer.external_images {
                 let target = match external.image_type {
                     ExternalImageType::TextureHandle(target) => target,
