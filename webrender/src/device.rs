@@ -2316,6 +2316,8 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub(crate) fn bound_program(&self) -> ProgramId { self.bound_program }
+
     pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
         self.device_pixel_ratio = ratio;
     }
@@ -2447,10 +2449,12 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn set_uniforms(
         &mut self,
+        program: &ProgramId,
         transform: &Transform3D<f32>,
     ) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        assert_eq!(*program, self.bound_program);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
         let desc_set = &self.descriptor_pools[self.next_id].get(&program.shader_kind);
         program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id, self.next_id);

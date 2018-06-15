@@ -262,7 +262,7 @@ impl DebugRenderer {
             // Triangles
             if !self.tri_vertices.is_empty() {
                 device.bind_program(self.color_program);
-                device.set_uniforms(&projection);
+                device.set_uniforms(&self.color_program, &projection);
                 device.update_indices(self.tri_indices.as_slice());
                 device.update_vertices(&self.tri_vertices);
                 device.draw();
@@ -271,7 +271,7 @@ impl DebugRenderer {
             // Lines
             if !self.line_vertices.is_empty() {
                 device.bind_program(self.color_program);
-                device.set_uniforms(&projection);
+                device.set_uniforms(&self.color_program, &projection);
                 device.update_vertices(&self.line_vertices);
                 device.draw();
             }
@@ -279,7 +279,7 @@ impl DebugRenderer {
             // Glyph
             if !self.font_indices.is_empty() {
                 device.bind_program(self.font_program);
-                device.set_uniforms(&projection);
+                device.set_uniforms(&self.font_program, &projection);
                 device.bind_texture(DebugSampler::Font, &self.font_texture);
                 device.update_indices(self.font_indices.as_slice());
                 device.update_vertices(&self.font_vertices);
