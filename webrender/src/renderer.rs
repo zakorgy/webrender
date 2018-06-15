@@ -3060,7 +3060,8 @@ impl<B: hal::Backend> Renderer<B> {
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     self.device.set_blend_mode_subpixel_with_bg_color_pass1();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
-                    self.device.set_uniforms(projection);
+                    let program = self.device.bound_program();
+                    self.device.set_uniforms(&program, projection);
                     self.device.bind_textures();
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
@@ -3072,7 +3073,9 @@ impl<B: hal::Backend> Renderer<B> {
 
                     self.device.set_blend_mode_subpixel_with_bg_color_pass2();
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
-                    self.device.set_uniforms(projection);
+                    // In case of gfx we can't avoid re-uploading and re-binding,
+                    // since we have a new pipeline for the new draw.
+                    self.device.set_uniforms(&program, projection);
                     self.device.bind_textures();
 
                     self.device

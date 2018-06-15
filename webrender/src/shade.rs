@@ -116,7 +116,7 @@ impl LazilyCompiledShader {
             }
         };
         device.bind_program(program);
-        device.set_uniforms(projection);
+        device.set_uniforms(&program, projection);
     }
 
     fn get<B: hal::Backend>(&mut self, device: &mut Device<B>) -> Result<ProgramId, ShaderError> {
