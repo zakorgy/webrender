@@ -20,7 +20,7 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DepthFunction, Device, ExternalTexture, FBOId, FileWatcherHandler, FrameId};
+use device::{create_projection, DepthFunction, Device, ExternalTexture, FBOId, FileWatcherHandler, FrameId};
 use device::{PBO, PrimitiveType, ProgramCache, ShaderError, ReadPixelsFormat, RendererInit};
 use device::{Texture, TextureSlot, TextureFilter, UploadMethod, VertexArrayKind, VertexUsageHint, VAO};
 #[cfg(feature = "gleam")]
@@ -34,7 +34,7 @@ use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 #[cfg(feature = "pathfinder")]
 use gpu_glyph_renderer::GpuGlyphRenderer;
 use hal;
-use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, ResourceCacheError};
+use internal_types::{SourceTexture, ResourceCacheError};
 use internal_types::{CacheTextureId, DebugOutput, FastHashMap, RenderedDocument, ResultMsg};
 use internal_types::{TextureUpdateList, TextureUpdateOp, TextureUpdateSource};
 use internal_types::{RenderTargetInfo, SavedTargetIndex};
@@ -3430,13 +3430,12 @@ impl<B: hal::Backend> Renderer<B>
                 .resolve(texture)
                 .expect("BUG: invalid target texture");
             let target_size = texture.get_dimensions();
-            let projection = Transform3D::ortho(
+            let projection = create_projection(
                 0.0,
                 target_size.width as f32,
                 0.0,
                 target_size.height as f32,
-                ORTHO_NEAR_PLANE,
-                ORTHO_FAR_PLANE,
+                false,
             );
             (target_size, projection)
         };
@@ -3781,24 +3780,12 @@ impl<B: hal::Backend> Renderer<B>
 
                         let clear_color = frame.background_color.map(|color| color.to_array());
 
-                        #[cfg(feature = "gfx")]
-                        let projection = Transform3D::ortho(
-                            0.0,
-                            framebuffer_size.width as f32,
-                            0.0,
-                            framebuffer_size.height as f32,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
-                        );
-
-                        #[cfg(not(feature = "gfx"))]
-                        let projection = Transform3D::ortho(
+                        let projection = create_projection(
                             0.0,
                             framebuffer_size.width as f32,
                             framebuffer_size.height as f32,
                             0.0,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
+                            true,
                         );
 
                         self.draw_color_target(
@@ -3839,13 +3826,12 @@ impl<B: hal::Backend> Renderer<B>
                     for (target_index, target) in alpha.targets.iter().enumerate() {
                         stats.alpha_target_count += 1;
 
-                        let projection = Transform3D::ortho(
+                        let projection = create_projection(
                             0.0,
                             alpha.max_size.width as f32,
                             0.0,
                             alpha.max_size.height as f32,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
+                            false,
                         );
 
                         self.draw_alpha_target(
@@ -3861,13 +3847,12 @@ impl<B: hal::Backend> Renderer<B>
                     for (target_index, target) in color.targets.iter().enumerate() {
                         stats.color_target_count += 1;
 
-                        let projection = Transform3D::ortho(
+                        let projection = create_projection(
                             0.0,
                             color.max_size.width as f32,
                             0.0,
                             color.max_size.height as f32,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
+                            false,
                         );
 
                         self.draw_color_target(
