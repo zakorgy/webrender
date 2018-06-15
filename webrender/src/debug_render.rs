@@ -4,10 +4,9 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, Texture, TextureSlot, VertexDescriptor, VAO};
+use device::{create_projection, Device, Texture, TextureSlot, VertexDescriptor, VAO};
 use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
-use euclid::{Point2D, Rect, Size2D, Transform3D};
-use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
+use euclid::{Point2D, Rect, Size2D};
 use std::f32;
 use hal;
 
@@ -324,24 +323,12 @@ impl DebugRenderer {
             device.set_blend(true);
             device.set_blend_mode_premultiplied_alpha();
 
-            #[cfg(feature = "gfx")]
-            let projection = Transform3D::ortho(
-                0.0,
-                viewport_size.width as f32,
-                0.0,
-                viewport_size.height as f32,
-                ORTHO_NEAR_PLANE,
-                ORTHO_FAR_PLANE,
-            );
-
-            #[cfg(not(feature = "gfx"))]
-            let projection = Transform3D::ortho(
+            let projection = create_projection(
                 0.0,
                 viewport_size.width as f32,
                 viewport_size.height as f32,
                 0.0,
-                ORTHO_NEAR_PLANE,
-                ORTHO_FAR_PLANE,
+                false,
             );
 
             // Triangles

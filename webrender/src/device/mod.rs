@@ -4,9 +4,10 @@
 
 use super::shader_source;
 use api::{DeviceUintSize, ImageFormat, TextureTarget};
+use euclid::Transform3D;
 #[cfg(feature = "gleam")]
 use gleam::gl::GLuint;
-use internal_types::RenderTargetInfo;
+use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, RenderTargetInfo};
 #[cfg(not(feature = "gleam"))]
 use std::cell::Cell;
 use std::io::Read;
@@ -343,4 +344,25 @@ pub fn build_shader_strings(
     fs_source.push_str(&shared_result);
 
     (vs_source, fs_source)
+}
+
+pub(crate) fn create_projection(
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    main_frame_buffer: bool
+) -> Transform3D<f32> {
+    let projection = Transform3D::ortho(
+        left,
+        right,
+        bottom,
+        top,
+        ORTHO_NEAR_PLANE,
+        ORTHO_FAR_PLANE,
+    );
+    if main_frame_buffer && cfg!(not(feature = "gleam")) {
+        return projection.post_scale(1.0, -1.0, 1.0);
+    }
+    projection
 }
