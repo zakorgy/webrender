@@ -133,17 +133,6 @@ impl Add<usize> for FrameId {
     }
 }
 
-/*const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
-
-const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
-
-const SHADER_VERSION_GL: &str = "#version 150\n";
-const SHADER_VERSION_GLES: &str = "#version 300 es\n";
-
-const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
-const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
-const SHADER_IMPORT: &str = "#include ";*/
-
 pub struct TextureSlot(pub usize);
 
 // In some places we need to temporarily bind a texture to any slot.
@@ -961,15 +950,13 @@ impl<B: hal::Backend> Buffer<B> {
         }
     }
 
-    pub fn update<T>(
+    pub fn update<T: Copy>(
         &mut self,
         device: &B::Device,
         buffer_offset: u64,
         buffer_width: u64,
         update_data: &[T],
-    ) where
-        T: Copy,
-    {
+    ) {
         //TODO:
         //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
         let mut data = device
@@ -1061,17 +1048,14 @@ impl<B: hal::Backend> CopyBuffer<B> {
         }
     }
 
-    pub fn update<T>(
+    pub fn update<T: Copy>(
         &mut self,
         device: &B::Device,
         buffer_offset: u64,
         image_data_width_in_bytes: u64,
         image_data: &[T],
         offset_alignment: usize,
-    ) -> usize
-        where
-            T: Copy,
-    {
+    ) -> usize {
         //assert!(self.state.get().contains(hal::buffer::Access::HOST_WRITE));
         let buffer_data_width_in_bytes = self.data_width * self.data_stride;
         let mut needed_height = image_data_width_in_bytes / buffer_data_width_in_bytes as u64;
@@ -1144,13 +1128,11 @@ impl<B: hal::Backend> InstanceBuffer<B> {
         }
     }
 
-    fn update<T>(
+    fn update<T: Copy>(
         &mut self,
         device: &B::Device,
         instances: &[T],
-    )where
-        T: Copy,
-    {
+    ) {
         let data_stride = self.buffer.data_stride;
         self.buffer.update(
             device,
@@ -1190,12 +1172,11 @@ impl<B: hal::Backend> UniformBuffer<B> {
         }
     }
 
-    fn add<T>(
+    fn add<T: Copy>(
         &mut self,
         device: &B::Device,
         instances: &[T],
-    ) where T: Copy,
-    {
+    ) {
         if self.buffers.len() == self.size {
             let buffer = Buffer::create(
                 device,
@@ -1467,14 +1448,12 @@ impl<B: hal::Backend> Program<B> {
     }
 
 
-    pub fn bind_instances<T>(
+    pub fn bind_instances<T: Copy>(
         &mut self,
         device: &B::Device,
         instances: &[T],
         buffer_id: usize,
-    ) where
-        T: Copy,
-    {
+    ) {
         if !instances.is_empty() {
             self.instance_buffer[buffer_id].update(
                 device,
@@ -1537,19 +1516,6 @@ impl<B: hal::Backend> Program<B> {
             ]);
         }
     }
-
-    /*pub fn bind<T>(
-        &mut self,
-        device: &Device<B>,
-        projection: &Transform3D<f32>,
-        instances: &[T],
-    ) where
-        T: Copy,
-    {
-        self.bind_instances(&device.device, instances);
-        self.bind_locals(&device.device, &projection, device.program_mode_id);
-        self.bind_textures(device);
-    }*/
 
     pub fn submit(
         &mut self,
@@ -2375,13 +2341,13 @@ impl<B: hal::Backend> Device<B> {
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
     }
 
-    pub fn reset_image_buffer_offsets(&mut self) {
+    fn reset_image_buffer_offsets(&mut self) {
         for img in self.images.values_mut() {
             img.upload_buffer.reset();
         }
     }
 
-    pub fn reset_program_buffer_offsets(&mut self) {
+    fn reset_program_buffer_offsets(&mut self) {
         for program in self.programs.values_mut() {
             program.instance_buffer[self.next_id].reset();
             program.locals_buffer[self.next_id].reset();
@@ -2391,12 +2357,6 @@ impl<B: hal::Backend> Device<B> {
     pub fn delete_program(&mut self, mut _program: ProgramId) {
         // TODO delete program
         _program = INVALID_PROGRAM_ID;
-    }
-
-    pub fn reset_program(&mut self, program: &ProgramId) {
-        let program = self.programs.get_mut(program).expect("Program not found.");
-        program.instance_buffer[self.next_id].reset();
-        program.locals_buffer[self.next_id].reset();
     }
 
     pub(crate) fn create_program(
@@ -2496,12 +2456,10 @@ impl<B: hal::Backend> Device<B> {
         program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id, self.next_id);
     }
 
-    pub fn update_instances<T>(
+    fn update_instances<T: Copy>(
         &mut self,
         instances: &[T],
-    ) where
-        T: Copy
-    {
+    ) {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         self.programs.get_mut(&self.bound_program).expect("Program not found.").bind_instances(&self.device, instances, self.next_id);
     }
@@ -3473,14 +3431,12 @@ impl<B: hal::Backend> Device<B> {
         _usage_hint: VertexUsageHint,
     ) { }
 
-    pub fn update_vao_instances<V>(
+    pub fn update_vao_instances<V: PrimitiveType>(
         &mut self,
         _vao: &VAO,
         instances: &[V],
         _usage_hint: VertexUsageHint,
-    )
-        where V: PrimitiveType
-    {
+    ) {
         let data = instances.iter().map(|pi| pi.to_primitive_type()).collect::<Vec<V::Primitive>>();
         self.update_instances(&data);
     }
