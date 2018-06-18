@@ -48,7 +48,7 @@ extern crate cfg_if;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[cfg(any(feature = "gfx", feature = "serde"))]
+#[cfg(feature = "serde")]
 #[macro_use]
 extern crate serde;
 #[macro_use]
