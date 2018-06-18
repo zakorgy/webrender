@@ -20,14 +20,11 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DepthFunction, Device, FrameId, Program, UploadMethod, Texture, PBO};
-use device::{ExternalTexture, FBOId, TextureSlot};
-use device::{FileWatcherHandler, ShaderError, TextureFilter,
-             VertexUsageHint, VAO, VBO, CustomVAO};
-use device::{ProgramCache, ReadPixelsFormat};
+use device::{DeviceInit, DepthFunction, FileWatcherHandler, FrameId};
+use device::{ProgramCache, ReadPixelsFormat, ShaderError, TextureFilter};
+use device::{TextureMethods, TextureSlot, UploadMethod, VertexUsageHint, VBO};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
-use gleam::gl;
 use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 #[cfg(feature = "pathfinder")]
@@ -53,6 +50,7 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::f32;
+use std::marker::PhantomData;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -696,12 +694,14 @@ impl CpuProfile {
 }
 
 #[cfg(not(feature = "pathfinder"))]
-pub struct GpuGlyphRenderer;
+pub struct GpuGlyphRenderer<D: DeviceMethods> {
+    phantom: PhantomData<D>,
+}
 
 #[cfg(not(feature = "pathfinder"))]
-impl GpuGlyphRenderer {
-    fn new(_: &mut Device, _: &VAO, _: bool) -> Result<GpuGlyphRenderer, RendererError> {
-        Ok(GpuGlyphRenderer)
+impl<D: DeviceMethods> GpuGlyphRenderer<D> {
+    fn new(_: &mut D, _: &D::VAO, _: bool) -> Result<GpuGlyphRenderer<D>, RendererError> {
+        Ok(GpuGlyphRenderer {phantom: PhantomData})
     }
 }
 
@@ -714,7 +714,7 @@ struct ActiveTexture {
     is_shared: bool,
 }
 
-struct SourceTextureResolver {
+struct SourceTextureResolver<D: DeviceMethods> {
     /// A vector for fast resolves of texture cache IDs to
     /// native texture IDs. This maps to a free-list managed
     /// by the backend thread / texture cache. We free the
@@ -746,10 +746,11 @@ struct SourceTextureResolver {
 
     /// General pool of render targets.
     render_target_pool: Vec<Texture>,
+    phantom: PhantomData<D>,
 }
 
-impl SourceTextureResolver {
-    fn new(device: &mut Device) -> SourceTextureResolver {
+impl<D: DeviceMethods> SourceTextureResolver<D> {
+    fn new(device: &mut D) -> SourceTextureResolver<D> {
         let mut dummy_cache_texture = device
             .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
         device.init_texture::<u8>(
@@ -771,10 +772,11 @@ impl SourceTextureResolver {
             shared_alpha_texture: None,
             saved_textures: Vec::default(),
             render_target_pool: Vec::new(),
+            phantom: PhantomData,
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut D) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -839,7 +841,7 @@ impl SourceTextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device) {
+    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut D) {
         match *texture_id {
             SourceTexture::Invalid => {}
             SourceTexture::CacheA8 => {
@@ -930,12 +932,12 @@ impl CacheRow {
 
 /// The bus over which CPU and GPU versions of the cache
 /// get synchronized.
-enum CacheBus {
+enum CacheBus<D: DeviceMethods> {
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
         /// PBO used for transfers.
-        buffer: PBO,
+        buffer: D::PBO,
         /// Meta-data about the cached rows.
         rows: Vec<CacheRow>,
         /// Mirrored block data on CPU.
@@ -945,9 +947,9 @@ enum CacheBus {
     /// of points into the GPU texture, each carrying a `GpuBlockData`.
     Scatter {
         /// Special program to run the scattered update.
-        program: Program,
+        program: D::Program,
         /// VAO containing the source vertex buffers.
-        vao: CustomVAO,
+        vao: D::CustomVAO,
         /// VBO for positional data, supplied as normalized `u16`.
         buf_position: VBO<[u16; 2]>,
         /// VBO for gpu block data.
@@ -958,13 +960,13 @@ enum CacheBus {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct CacheTexture {
+struct CacheTexture<D: DeviceMethods> {
     texture: Texture,
-    bus: CacheBus,
+    bus: CacheBus<D>,
 }
 
-impl CacheTexture {
-    fn new(device: &mut Device, use_scatter: bool) -> Result<Self, RendererError> {
+impl<D: DeviceMethods> CacheTexture<D> {
+    fn new(device: &mut D, use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         let bus = if use_scatter {
@@ -994,13 +996,10 @@ impl CacheTexture {
             }
         };
 
-        Ok(CacheTexture {
-            texture,
-            bus,
-        })
+        Ok(CacheTexture { texture, bus })
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut D) {
         device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { buffer, ..} => {
@@ -1021,7 +1020,7 @@ impl CacheTexture {
 
     fn prepare_for_updates(
         &mut self,
-        device: &mut Device,
+        device: &mut D,
         total_block_count: usize,
         max_height: u32,
     ) {
@@ -1085,7 +1084,7 @@ impl CacheTexture {
         }
     }
 
-    fn update(&mut self, device: &mut Device, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, device: &mut D, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1156,7 +1155,7 @@ impl CacheTexture {
         }
     }
 
-    fn flush(&mut self, device: &mut Device) -> usize {
+    fn flush(&mut self, device: &mut D) -> usize {
         match self.bus {
             CacheBus::PixelBuffer { ref buffer, ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
@@ -1209,20 +1208,20 @@ impl CacheTexture {
     }
 }
 
-struct VertexDataTexture {
-    texture: Texture,
-    pbo: PBO,
+struct VertexDataTexture<D: DeviceMethods> {
+    texture: D::Texture,
+    pbo: D::PBO,
 }
 
-impl VertexDataTexture {
-    fn new(device: &mut Device) -> VertexDataTexture {
+impl<D: DeviceMethods> VertexDataTexture<D> {
+    fn new(device: &mut D) -> VertexDataTexture<D> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
         let pbo = device.create_pbo();
 
         VertexDataTexture { texture, pbo }
     }
 
-    fn update<T>(&mut self, device: &mut Device, data: &mut Vec<T>) {
+    fn update<T>(&mut self, device: &mut D, data: &mut Vec<T>) {
         if data.is_empty() {
             return;
         }
@@ -1270,7 +1269,7 @@ impl VertexDataTexture {
             .upload(rect, 0, None, data);
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut D) {
         device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
@@ -1288,9 +1287,9 @@ impl FileWatcherHandler for FileWatcher {
     }
 }
 
-struct FrameOutput {
+struct FrameOutput<D: DeviceMethods> {
     last_access: FrameId,
-    fbo_id: FBOId,
+    fbo_id: D::FBOId,
 }
 
 #[derive(PartialEq)]
@@ -1301,51 +1300,51 @@ struct TargetSelector {
 }
 
 #[cfg(feature = "debug_renderer")]
-struct LazyInitializedDebugRenderer {
-    debug_renderer: Option<DebugRenderer>,
+struct LazyInitializedDebugRenderer<D: DeviceMethods> {
+    debug_renderer: Option<DebugRenderer<D>>,
 }
 
 #[cfg(feature = "debug_renderer")]
-impl LazyInitializedDebugRenderer {
+impl<D: DeviceMethods> LazyInitializedDebugRenderer<D> {
     pub fn new() -> Self {
         Self {
             debug_renderer: None,
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self, device: &mut Device) -> &'a mut DebugRenderer {
+    pub fn get_mut<'a>(&'a mut self, device: &mut D) -> &'a mut DebugRenderer<D> {
         self.debug_renderer.get_or_insert_with(|| DebugRenderer::new(device))
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut D) {
         if let Some(debug_renderer) = self.debug_renderer {
             debug_renderer.deinit(device);
         }
     }
 }
 
-pub struct RendererVAOs {
-    prim_vao: VAO,
-    blur_vao: VAO,
-    clip_vao: VAO,
-    dash_and_dot_vao: VAO,
-    border_vao: VAO,
+pub struct RendererVAOs<D: DeviceMethods> {
+    prim_vao: D::VAO,
+    blur_vao: D::VAO,
+    clip_vao: D::VAO,
+    dash_and_dot_vao: D::VAO,
+    border_vao: D::VAO,
 }
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
-pub struct Renderer {
+pub struct Renderer<D: DeviceMethods> {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
-    pub device: Device,
+    pub device: D,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
     active_documents: Vec<(DocumentId, RenderedDocument)>,
 
-    shaders: Shaders,
+    shaders: Shaders<D>,
 
-    pub gpu_glyph_renderer: GpuGlyphRenderer,
+    pub gpu_glyph_renderer: GpuGlyphRenderer<D>,
 
     max_texture_size: u32,
     max_recorded_profiles: usize,
@@ -1353,12 +1352,12 @@ pub struct Renderer {
     clear_color: Option<ColorF>,
     enable_clear_scissor: bool,
     #[cfg(feature = "debug_renderer")]
-    debug: LazyInitializedDebugRenderer,
+    debug: LazyInitializedDebugRenderer<D>,
     debug_flags: DebugFlags,
     backend_profile_counters: BackendProfileCounters,
     profile_counters: RendererProfileCounters,
     #[cfg(feature = "debug_renderer")]
-    profiler: Profiler,
+    profiler: Profiler<D>,
     #[cfg(feature = "debug_renderer")]
     new_frame_indicator: ChangeIndicator,
     #[cfg(feature = "debug_renderer")]
@@ -1367,12 +1366,12 @@ pub struct Renderer {
     last_time: u64,
 
     pub gpu_profile: GpuProfiler<GpuProfileTag>,
-    vaos: RendererVAOs,
+    vaos: RendererVAOs<D>,
 
-    node_data_texture: VertexDataTexture,
-    local_clip_rects_texture: VertexDataTexture,
-    render_task_texture: VertexDataTexture,
-    gpu_cache_texture: CacheTexture,
+    node_data_texture: VertexDataTexture<D>,
+    local_clip_rects_texture: VertexDataTexture<D>,
+    render_task_texture: VertexDataTexture<D>,
+    gpu_cache_texture: CacheTexture<D>,
 
     gpu_cache_frame_id: FrameId,
     gpu_cache_overflow: bool,
@@ -1380,10 +1379,10 @@ pub struct Renderer {
     pipeline_info: PipelineInfo,
 
     // Manages and resolves source textures IDs to real texture IDs.
-    texture_resolver: SourceTextureResolver,
+    texture_resolver: SourceTextureResolver<D>,
 
     // A PBO used to do asynchronous texture cache uploads.
-    texture_cache_upload_pbo: PBO,
+    texture_cache_upload_pbo: D::PBO,
 
     dither_matrix_texture: Option<Texture>,
 
@@ -1397,7 +1396,7 @@ pub struct Renderer {
     output_image_handler: Option<Box<OutputImageHandler>>,
 
     // Currently allocated FBOs for output frames.
-    output_targets: FastHashMap<u32, FrameOutput>,
+    output_targets: FastHashMap<u32, FrameOutput<D>>,
 
     pub renderer_errors: Vec<RendererError>,
 
@@ -1407,7 +1406,7 @@ pub struct Renderer {
     gpu_profiles: VecDeque<GpuProfile>,
 
     #[cfg(feature = "capture")]
-    read_fbo: FBOId,
+    read_fbo: D::FBOId,
     #[cfg(feature = "replay")]
     owned_external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
 }
@@ -1438,7 +1437,7 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
-impl Renderer {
+impl<D: DeviceMethods> Renderer<D> {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
     /// # Examples
@@ -1457,14 +1456,14 @@ impl Renderer {
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        gl: Rc<gl::Gl>,
+        init: DeviceInit,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
-    ) -> Result<(Self, RenderApiSender), RendererError> {
+    ) -> Result<(Renderer<D>, RenderApiSender), RendererError> {
         let (api_tx, api_rx) = channel::msg_channel()?;
         let (payload_tx, payload_rx) = channel::payload_channel()?;
         let (result_tx, result_rx) = channel();
-        let gl_type = gl.get_type();
+        let gl_type = init.get_type();
 
         let debug_server = DebugServer::new(api_tx.clone());
 
@@ -1473,8 +1472,8 @@ impl Renderer {
             notifier: notifier.clone(),
         };
 
-        let mut device = Device::new(
-            gl,
+        let mut device: D = DeviceMethods::new(
+            init,
             options.resource_override_path.clone(),
             options.upload_method.clone(),
             Box::new(file_watch_handler),
@@ -1482,7 +1481,7 @@ impl Renderer {
         );
 
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
-            device.supports_extension("GL_ARB_blend_func_extended");
+            device.supports_extension( "GL_ARB_blend_func_extended");
 
         let device_max_size = device.max_texture_size();
         // 512 is the minimum that the texture cache can work with.
@@ -1746,7 +1745,7 @@ impl Renderer {
             }
         })?;
 
-        let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()));
+        let gpu_profile = GpuProfiler::new(Rc::clone(device.get_context()));
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo_for_external_texture(0);
 
@@ -1819,8 +1818,8 @@ impl Renderer {
     pub fn get_graphics_api_info(&self) -> GraphicsApiInfo {
         GraphicsApiInfo {
             kind: GraphicsApi::OpenGL,
-            version: self.device.gl().get_string(gl::VERSION),
-            renderer: self.device.gl().get_string(gl::RENDERER),
+            version: self.device.version(),
+            renderer: self.device.renderer(),
         }
     }
 
@@ -3729,7 +3728,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "debug_renderer")]
-    pub fn debug_renderer<'b>(&'b mut self) -> &'b mut DebugRenderer {
+    pub fn debug_renderer<'b>(&'b mut self) -> &'b mut DebugRenderer<D> {
         self.debug.get_mut(&mut self.device)
     }
 
@@ -4173,7 +4172,7 @@ struct PlainRenderer {
 
 #[cfg(feature = "replay")]
 enum CapturedExternalImageData {
-    NativeTexture(gl::GLuint),
+    NativeTexture(u32),  // It's a gl::GLuint texture handle
     Buffer(Arc<Vec<u8>>),
 }
 
@@ -4213,10 +4212,10 @@ pub struct PipelineInfo {
     pub removed_pipelines: Vec<PipelineId>,
 }
 
-impl Renderer {
+impl<D: DeviceMethods> Renderer<D> {
     #[cfg(feature = "capture")]
     fn save_texture(
-        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device
+        texture: &Texture, name: &str, root: &PathBuf, device: &mut D
     ) -> PlainTexture {
         use std::fs;
         use std::io::Write;
@@ -4272,7 +4271,7 @@ impl Renderer {
     }
 
     #[cfg(feature = "replay")]
-    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device) -> Vec<u8> {
+    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut D) -> Vec<u8> {
         use std::fs::File;
         use std::io::Read;
 
@@ -4343,7 +4342,7 @@ impl Renderer {
                                 };
                                 info!("\t\tnative texture of target {:?}", target);
                                 let layer_index = 0; //TODO: what about layered textures?
-                                self.device.attach_read_texture_external(gl_id, target, layer_index);
+                                self.device.attach_read_texture_external(gl_id.into(), target, layer_index);
                                 let data = self.device.read_pixels(&def.descriptor);
                                 let short_path = format!("externals/t{}.raw", tex_id);
                                 (Some(data), e.insert(short_path).clone())
@@ -4483,7 +4482,7 @@ impl Renderer {
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 
             info!("loading external texture-backed images");
-            let mut native_map = FastHashMap::<String, gl::GLuint>::default();
+            let mut native_map = FastHashMap::<String, u32>::default();
             for ExternalCaptureImage { short_path, external, descriptor } in renderer.external_images {
                 let target = match external.image_type {
                     ExternalImageType::TextureHandle(target) => target,
@@ -4527,10 +4526,10 @@ impl Renderer {
 }
 
 #[cfg(feature = "pathfinder")]
-fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs,
-               gpu_glyph_renderer: &'a GpuGlyphRenderer)
-               -> &'a VAO {
+fn get_vao<'a, D: DeviceMethods>(vertex_array_kind: VertexArrayKind,
+                                 vaos: &'a RendererVAOs<D>,
+                                 gpu_glyph_renderer: &'a GpuGlyphRenderer<D>)
+                                 -> &'a D::VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
@@ -4542,10 +4541,10 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
 }
 
 #[cfg(not(feature = "pathfinder"))]
-fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs,
-               _: &'a GpuGlyphRenderer)
-               -> &'a VAO {
+fn get_vao<'a, D: DeviceMethods>(vertex_array_kind: VertexArrayKind,
+                                 vaos: &'a RendererVAOs<D>,
+                                 _: &'a GpuGlyphRenderer<D>)
+                                 -> &'a D::VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,

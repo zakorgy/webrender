@@ -12,10 +12,12 @@ cfg_if! {
     if #[cfg(feature = "debug_renderer")] {
         use api::ColorU;
         use debug_render::DebugRenderer;
+        use device::DeviceMethods;
         use euclid::{Point2D, Rect, Size2D, vec2};
         use query::GpuSampler;
         use internal_types::FastHashMap;
         use renderer::MAX_VERTEX_TEXTURE_WIDTH;
+        use std::marker::PhantomData;
         use std::mem;
     }
 }
@@ -552,12 +554,12 @@ impl ProfileGraph {
     }
 
     #[cfg(feature = "debug_renderer")]
-    fn draw_graph(
+    fn draw_graph<D: DeviceMethods>(
         &self,
         x: f32,
         y: f32,
         description: &'static str,
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
     ) -> Rect<f32> {
         let size = Size2D::new(600.0, 120.0);
         let line_height = debug_renderer.line_height();
@@ -683,7 +685,7 @@ impl GpuFrameCollection {
 
 #[cfg(feature = "debug_renderer")]
 impl GpuFrameCollection {
-    fn draw(&self, x: f32, y: f32, debug_renderer: &mut DebugRenderer) -> Rect<f32> {
+    fn draw<D: DeviceMethods>(&self, x: f32, y: f32, debug_renderer: &mut DebugRenderer<D>) -> Rect<f32> {
         let graph_rect = Rect::new(
             Point2D::new(x, y),
             Size2D::new(GRAPH_WIDTH, GRAPH_HEIGHT),
@@ -781,17 +783,18 @@ struct DrawState {
 }
 
 #[cfg(feature = "debug_renderer")]
-pub struct Profiler {
+pub struct Profiler<D: DeviceMethods> {
     draw_state: DrawState,
     backend_time: ProfileGraph,
     compositor_time: ProfileGraph,
     gpu_time: ProfileGraph,
     gpu_frames: GpuFrameCollection,
     ipc_time: ProfileGraph,
+    phantom: PhantomData<D>,
 }
 
 #[cfg(feature = "debug_renderer")]
-impl Profiler {
+impl<D: DeviceMethods> Profiler<D> {
 
     pub fn new() -> Self {
         Profiler {
@@ -806,12 +809,13 @@ impl Profiler {
             gpu_time: ProfileGraph::new(600, "GPU:"),
             gpu_frames: GpuFrameCollection::new(),
             ipc_time: ProfileGraph::new(600, "IPC:"),
+            phantom: PhantomData,
         }
     }
 
     fn draw_counters<T: ProfileCounter + ?Sized>(
         counters: &[&T],
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
         left: bool,
         draw_state: &mut DrawState,
     ) {
@@ -882,7 +886,7 @@ impl Profiler {
         label: &str,
         label_color: ColorU,
         counters: &[(ColorU, &IntProfileCounter)],
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
     ) -> Rect<f32> {
         let mut rect = debug_renderer.add_text(
             self.draw_state.x_left,
@@ -920,7 +924,7 @@ impl Profiler {
     fn draw_gpu_cache_bars(
         &mut self,
         counters: &GpuCacheProfileCounters,
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
     ) {
         let color_updated = ColorU::new(0xFF, 0, 0, 0xFF);
         let color_free = ColorU::new(0, 0, 0xFF, 0xFF);
@@ -973,7 +977,7 @@ impl Profiler {
     fn draw_frame_bars(
         &mut self,
         counters: &FrameProfileCounters,
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
     ) {
         let rect0 = self.draw_bar(
             &format!("primitives ({}):", counters.total_primitives.value),
@@ -1012,7 +1016,7 @@ impl Profiler {
     fn draw_compact_profile(
         &mut self,
         renderer_profile: &RendererProfileCounters,
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
     ) {
         Profiler::draw_counters(
             &[
@@ -1039,7 +1043,7 @@ impl Profiler {
         renderer_timers: &mut RendererProfileTimers,
         gpu_samplers: &[GpuSampler<GpuProfileTag>],
         screen_fraction: f32,
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
     ) {
         Profiler::draw_counters(
             &[
@@ -1172,7 +1176,7 @@ impl Profiler {
         renderer_timers: &mut RendererProfileTimers,
         gpu_samplers: &[GpuSampler<GpuProfileTag>],
         screen_fraction: f32,
-        debug_renderer: &mut DebugRenderer,
+        debug_renderer: &mut DebugRenderer<D>,
         compact: bool,
     ) {
         self.draw_state.x_left = 20.0;
@@ -1232,11 +1236,11 @@ impl ChangeIndicator {
         self.counter = (self.counter + 1) % 15;
     }
 
-    pub fn draw(
+    pub fn draw<D: DeviceMethods>(
         &self,
         x: f32, y: f32,
         color: ColorU,
-        debug_renderer: &mut DebugRenderer
+        debug_renderer: &mut DebugRenderer<D>
     ) {
         let margin = 0.0;
         let w = 10.0;

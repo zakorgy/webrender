@@ -7,7 +7,7 @@ use api::{
     YuvColorSpace, YuvFormat,
 };
 use batch::{BatchKey, BatchKind, BrushBatchKind};
-use device::{Device, Program, ShaderError};
+use device::{DeviceMethods, ShaderError};
 use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
 use renderer::{
@@ -65,19 +65,19 @@ pub(crate) enum ShaderKind {
     VectorCover,
 }
 
-pub struct LazilyCompiledShader {
-    program: Option<Program>,
+pub struct LazilyCompiledShader<D: DeviceMethods> {
+    program: Option<D::Program>,
     name: &'static str,
     kind: ShaderKind,
     features: Vec<&'static str>,
 }
 
-impl LazilyCompiledShader {
+impl<D: DeviceMethods> LazilyCompiledShader<D> {
     pub(crate) fn new(
         kind: ShaderKind,
         name: &'static str,
         features: &[&'static str],
-        device: &mut Device,
+        device: &mut D,
         precache: bool,
     ) -> Result<Self, ShaderError> {
         let mut shader = LazilyCompiledShader {
@@ -107,7 +107,7 @@ impl LazilyCompiledShader {
 
     pub fn bind(
         &mut self,
-        device: &mut Device,
+        device: &mut D,
         projection: &Transform3D<f32>,
         renderer_errors: &mut Vec<RendererError>,
     ) {
@@ -122,7 +122,7 @@ impl LazilyCompiledShader {
         device.set_uniforms(program, projection);
     }
 
-    fn get(&mut self, device: &mut Device) -> Result<&Program, ShaderError> {
+    fn get(&mut self, device: &mut D) -> Result<&D::Program, ShaderError> {
         if self.program.is_none() {
             let program = match self.kind {
                 ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
@@ -159,7 +159,7 @@ impl LazilyCompiledShader {
         Ok(self.program.as_ref().unwrap())
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut D) {
         if let Some(program) = self.program {
             device.delete_program(program);
         }
@@ -177,16 +177,16 @@ impl LazilyCompiledShader {
 //   pass. Assumes that AA should be applied
 //   along the primitive edge, and also that
 //   clip mask is present.
-struct BrushShader {
-    opaque: LazilyCompiledShader,
-    alpha: LazilyCompiledShader,
-    dual_source: Option<LazilyCompiledShader>,
+struct BrushShader<D: DeviceMethods> {
+    opaque: LazilyCompiledShader<D>,
+    alpha: LazilyCompiledShader<D>,
+    dual_source: Option<LazilyCompiledShader<D>>,
 }
 
-impl BrushShader {
+impl<D: DeviceMethods> BrushShader<D> {
     fn new(
         name: &'static str,
-        device: &mut Device,
+        device: &mut D,
         features: &[&'static str],
         precache: bool,
         dual_source: bool,
@@ -234,7 +234,7 @@ impl BrushShader {
         })
     }
 
-    fn get(&mut self, blend_mode: BlendMode) -> &mut LazilyCompiledShader {
+    fn get(&mut self, blend_mode: BlendMode) -> &mut LazilyCompiledShader<D> {
         match blend_mode {
             BlendMode::None => &mut self.opaque,
             BlendMode::Alpha |
@@ -250,7 +250,7 @@ impl BrushShader {
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut D) {
         self.opaque.deinit(device);
         self.alpha.deinit(device);
         if let Some(dual_source) = self.dual_source {
@@ -259,15 +259,15 @@ impl BrushShader {
     }
 }
 
-pub struct TextShader {
-    simple: LazilyCompiledShader,
-    glyph_transform: LazilyCompiledShader,
+pub struct TextShader<D: DeviceMethods> {
+    simple: LazilyCompiledShader<D>,
+    glyph_transform: LazilyCompiledShader<D>,
 }
 
-impl TextShader {
+impl<D: DeviceMethods> TextShader<D> {
     fn new(
         name: &'static str,
-        device: &mut Device,
+        device: &mut D,
         features: &[&'static str],
         precache: bool,
     ) -> Result<Self, ShaderError> {
@@ -296,7 +296,7 @@ impl TextShader {
     pub fn get(
         &mut self,
         glyph_format: GlyphFormat,
-    ) -> &mut LazilyCompiledShader {
+    ) -> &mut LazilyCompiledShader<D> {
         match glyph_format {
             GlyphFormat::Alpha |
             GlyphFormat::Subpixel |
@@ -307,18 +307,18 @@ impl TextShader {
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut D) {
         self.simple.deinit(device);
         self.glyph_transform.deinit(device);
     }
 }
 
-fn create_prim_shader(
+fn create_prim_shader<D: DeviceMethods>(
     name: &'static str,
-    device: &mut Device,
+    device: &mut D,
     features: &[&'static str],
     vertex_format: VertexArrayKind,
-) -> Result<Program, ShaderError> {
+) -> Result<D::Program, ShaderError> {
     let mut prefix = format!(
         "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
         MAX_VERTEX_TEXTURE_WIDTH
@@ -363,7 +363,7 @@ fn create_prim_shader(
     program
 }
 
-fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program, ShaderError> {
+fn create_clip_shader<D: DeviceMethods>(name: &'static str, device: &mut D) -> Result<D::Program, ShaderError> {
     let prefix = format!(
         "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
         #define WR_FEATURE_TRANSFORM\n",
@@ -392,30 +392,30 @@ fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program
 }
 
 
-pub struct Shaders {
+pub struct Shaders<D: DeviceMethods> {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
-    pub cs_blur_a8: LazilyCompiledShader,
-    pub cs_blur_rgba8: LazilyCompiledShader,
-    pub cs_border_segment: LazilyCompiledShader,
+    pub cs_blur_a8: LazilyCompiledShader<D>,
+    pub cs_blur_rgba8: LazilyCompiledShader<D>,
+    pub cs_border_segment: LazilyCompiledShader<D>,
 
     // Brush shaders
-    brush_solid: BrushShader,
-    brush_image: Vec<Option<BrushShader>>,
-    brush_blend: BrushShader,
-    brush_mix_blend: BrushShader,
-    brush_yuv_image: Vec<Option<BrushShader>>,
-    brush_radial_gradient: BrushShader,
-    brush_linear_gradient: BrushShader,
+    brush_solid: BrushShader<D>,
+    brush_image: Vec<Option<BrushShader<D>>>,
+    brush_blend: BrushShader<D>,
+    brush_mix_blend: BrushShader<D>,
+    brush_yuv_image: Vec<Option<BrushShader<D>>>,
+    brush_radial_gradient: BrushShader<D>,
+    brush_linear_gradient: BrushShader<D>,
 
     /// These are "cache clip shaders". These shaders are used to
     /// draw clip instances into the cached clip mask. The results
     /// of these shaders are also used by the primitive shaders.
-    pub cs_clip_rectangle: LazilyCompiledShader,
-    pub cs_clip_box_shadow: LazilyCompiledShader,
-    pub cs_clip_image: LazilyCompiledShader,
-    pub cs_clip_line: LazilyCompiledShader,
+    pub cs_clip_rectangle: LazilyCompiledShader<D>,
+    pub cs_clip_box_shadow: LazilyCompiledShader<D>,
+    pub cs_clip_image: LazilyCompiledShader<D>,
+    pub cs_clip_line: LazilyCompiledShader<D>,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -424,15 +424,15 @@ pub struct Shaders {
     // shadow primitive shader stretches the box shadow cache
     // output, and the cache_image shader blits the results of
     // a cache shader (e.g. blur) to the screen.
-    pub ps_text_run: TextShader,
-    pub ps_text_run_dual_source: TextShader,
+    pub ps_text_run: TextShader<D>,
+    pub ps_text_run_dual_source: TextShader<D>,
 
-    ps_split_composite: LazilyCompiledShader,
+    ps_split_composite: LazilyCompiledShader<D>,
 }
 
-impl Shaders {
+impl<D: DeviceMethods> Shaders<D> {
     pub fn new(
-        device: &mut Device,
+        device: &mut D,
         gl_type: GlType,
         options: &RendererOptions,
     ) -> Result<Self, ShaderError> {
@@ -671,7 +671,7 @@ impl Shaders {
             (color_space as usize)
     }
 
-    pub fn get(&mut self, key: &BatchKey) -> &mut LazilyCompiledShader {
+    pub fn get(&mut self, key: &BatchKey) -> &mut LazilyCompiledShader<D> {
         match key.kind {
             BatchKind::SplitComposite => {
                 &mut self.ps_split_composite
@@ -718,7 +718,7 @@ impl Shaders {
         }
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut D) {
         self.cs_blur_a8.deinit(device);
         self.cs_blur_rgba8.deinit(device);
         self.brush_solid.deinit(device);

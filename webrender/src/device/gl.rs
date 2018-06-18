@@ -2,48 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use super::shader_source;
-use api::{ColorF, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize};
-use api::TextureTarget;
-#[cfg(any(feature = "debug_renderer", feature="capture"))]
+use api::{ColorF, DeviceIntPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize, ImageFormat, TextureTarget};
+#[cfg(any(feature = "debug_renderer", feature = "capture"))]
 use api::ImageDescriptor;
+use device::common::*;
+use device::device_trait::DeviceMethods;
 use euclid::Transform3D;
 use gleam::gl;
-use internal_types::{FastHashMap, RenderTargetInfo};
+use internal_types::RenderTargetInfo;
 use log::Level;
 use smallvec::SmallVec;
-use std::cell::RefCell;
-use std::fs::File;
-use std::io::Read;
 use std::marker::PhantomData;
 use std::mem;
-use std::ops::Add;
 use std::path::PathBuf;
 use std::ptr;
 use std::rc::Rc;
-use std::slice;
 use std::sync::Arc;
 use std::thread;
-
-#[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct FrameId(usize);
-
-impl FrameId {
-    pub fn new(value: usize) -> Self {
-        FrameId(value)
-    }
-}
-
-impl Add<usize> for FrameId {
-    type Output = FrameId;
-
-    fn add(self, other: usize) -> FrameId {
-        FrameId(self.0 + other)
-    }
-}
 
 const GL_FORMAT_RGBA: gl::GLuint = gl::RGBA;
 
@@ -54,14 +29,10 @@ const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
 const SHADER_VERSION_GL: &str = "#version 150\n";
 const SHADER_VERSION_GLES: &str = "#version 300 es\n";
 
-const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
-const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
-const SHADER_IMPORT: &str = "#include ";
-
-pub struct TextureSlot(pub usize);
-
 // In some places we need to temporarily bind a texture to any slot.
 const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
+
+pub type DeviceInit = Rc<gl::Gl>;
 
 #[repr(u32)]
 pub enum DepthFunction {
@@ -70,61 +41,9 @@ pub enum DepthFunction {
     LessEqual = gl::LEQUAL,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub enum TextureFilter {
-    Nearest,
-    Linear,
-    Trilinear,
-}
-
-#[derive(Debug)]
-pub enum VertexAttributeKind {
-    F32,
-    #[cfg(feature = "debug_renderer")]
-    U8Norm,
-    U16Norm,
-    I32,
-    U16,
-}
-
-#[derive(Debug)]
-pub struct VertexAttribute {
-    pub name: &'static str,
-    pub count: u32,
-    pub kind: VertexAttributeKind,
-}
-
-#[derive(Debug)]
-pub struct VertexDescriptor {
-    pub vertex_attributes: &'static [VertexAttribute],
-    pub instance_attributes: &'static [VertexAttribute],
-}
-
 enum FBOTarget {
     Read,
     Draw,
-}
-
-/// Method of uploading texel data from CPU to GPU.
-#[derive(Debug, Clone)]
-pub enum UploadMethod {
-    /// Just call `glTexSubImage` directly with the CPU data pointer
-    Immediate,
-    /// Accumulate the changes in PBO first before transferring to a texture.
-    PixelBuffer(VertexUsageHint),
-}
-
-/// Plain old data that can be used to initialize a texture.
-pub unsafe trait Texel: Copy {}
-unsafe impl Texel for u8 {}
-unsafe impl Texel for f32 {}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReadPixelsFormat {
-    Standard(ImageFormat),
-    Rgba8,
 }
 
 pub fn get_gl_target(target: TextureTarget) -> gl::GLuint {
@@ -145,90 +64,6 @@ fn get_shader_version(gl: &gl::Gl) -> &'static str {
         gl::GlType::Gl => SHADER_VERSION_GL,
         gl::GlType::Gles => SHADER_VERSION_GLES,
     }
-}
-
-// Get a shader string by name, from the built in resources or
-// an override path, if supplied.
-fn get_shader_source(shader_name: &str, base_path: &Option<PathBuf>) -> Option<String> {
-    if let Some(ref base) = *base_path {
-        let shader_path = base.join(&format!("{}.glsl", shader_name));
-        if shader_path.exists() {
-            let mut source = String::new();
-            File::open(&shader_path)
-                .unwrap()
-                .read_to_string(&mut source)
-                .unwrap();
-            return Some(source);
-        }
-    }
-
-    shader_source::SHADERS
-        .get(shader_name)
-        .map(|s| s.to_string())
-}
-
-// Parse a shader string for imports. Imports are recursively processed, and
-// prepended to the list of outputs.
-fn parse_shader_source(source: String, base_path: &Option<PathBuf>, output: &mut String) {
-    for line in source.lines() {
-        if line.starts_with(SHADER_IMPORT) {
-            let imports = line[SHADER_IMPORT.len() ..].split(',');
-
-            // For each import, get the source, and recurse.
-            for import in imports {
-                if let Some(include) = get_shader_source(import, base_path) {
-                    parse_shader_source(include, base_path, output);
-                }
-            }
-        } else {
-            output.push_str(line);
-            output.push_str("\n");
-        }
-    }
-}
-
-pub fn build_shader_strings(
-    gl_version_string: &str,
-    features: &str,
-    base_filename: &str,
-    override_path: &Option<PathBuf>,
-) -> (String, String) {
-    // Construct a list of strings to be passed to the shader compiler.
-    let mut vs_source = String::new();
-    let mut fs_source = String::new();
-
-    // GLSL requires that the version number comes first.
-    vs_source.push_str(gl_version_string);
-    fs_source.push_str(gl_version_string);
-
-    // Insert the shader name to make debugging easier.
-    let name_string = format!("// {}\n", base_filename);
-    vs_source.push_str(&name_string);
-    fs_source.push_str(&name_string);
-
-    // Define a constant depending on whether we are compiling VS or FS.
-    vs_source.push_str(SHADER_KIND_VERTEX);
-    fs_source.push_str(SHADER_KIND_FRAGMENT);
-
-    // Add any defines that were passed by the caller.
-    vs_source.push_str(features);
-    fs_source.push_str(features);
-
-    // Parse the main .glsl file, including any imports
-    // and append them to the list of sources.
-    let mut shared_result = String::new();
-    if let Some(shared_source) = get_shader_source(base_filename, override_path) {
-        parse_shader_source(shared_source, override_path, &mut shared_result);
-    }
-
-    vs_source.push_str(&shared_result);
-    fs_source.push_str(&shared_result);
-
-    (vs_source, fs_source)
-}
-
-pub trait FileWatcherHandler: Send {
-    fn file_changed(&self, path: PathBuf);
 }
 
 impl VertexAttributeKind {
@@ -571,89 +406,10 @@ pub struct FBOId(gl::GLuint);
 pub struct RBOId(gl::GLuint);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct VBOId(gl::GLuint);
+struct VBOId(gl::GLuint);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct IBOId(gl::GLuint);
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-#[cfg_attr(feature = "serialize_program", derive(Deserialize, Serialize))]
-pub struct ProgramSources {
-    renderer_name: String,
-    vs_source: String,
-    fs_source: String,
-}
-
-impl ProgramSources {
-    fn new(renderer_name: String, vs_source: String, fs_source: String) -> Self {
-        ProgramSources {
-            renderer_name,
-            vs_source,
-            fs_source,
-        }
-    }
-}
-
-#[cfg_attr(feature = "serialize_program", derive(Deserialize, Serialize))]
-pub struct ProgramBinary {
-    binary: Vec<u8>,
-    format: gl::GLenum,
-    #[cfg(feature = "serialize_program")]
-    sources: ProgramSources,
-}
-
-impl ProgramBinary {
-    #[allow(unused_variables)]
-    fn new(binary: Vec<u8>,
-           format: gl::GLenum,
-           sources: &ProgramSources) -> Self {
-        ProgramBinary {
-            binary,
-            format,
-            #[cfg(feature = "serialize_program")]
-            sources: sources.clone(),
-        }
-    }
-}
-
-/// The interfaces that an application can implement to handle ProgramCache update
-pub trait ProgramCacheObserver {
-    fn notify_binary_added(&self, program_binary: &Arc<ProgramBinary>);
-    fn notify_program_binary_failed(&self, program_binary: &Arc<ProgramBinary>);
-}
-
-pub struct ProgramCache {
-    binaries: RefCell<FastHashMap<ProgramSources, Arc<ProgramBinary>>>,
-
-    /// Optional trait object that allows the client
-    /// application to handle ProgramCache updating
-    program_cache_handler: Option<Box<ProgramCacheObserver>>,
-}
-
-impl ProgramCache {
-    pub fn new(program_cache_observer: Option<Box<ProgramCacheObserver>>) -> Rc<Self> {
-        Rc::new(
-            ProgramCache {
-                binaries: RefCell::new(FastHashMap::default()),
-                program_cache_handler: program_cache_observer,
-            }
-        )
-    }
-    /// Load ProgramBinary to ProgramCache.
-    /// The function is typically used to load ProgramBinary from disk.
-    #[cfg(feature = "serialize_program")]
-    pub fn load_program_binary(&self, program_binary: Arc<ProgramBinary>) {
-        let sources = program_binary.sources.clone();
-        self.binaries.borrow_mut().insert(sources, program_binary);
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum VertexUsageHint {
-    Static,
-    Dynamic,
-    Stream,
-}
 
 impl VertexUsageHint {
     fn to_gl(&self) -> gl::GLuint {
@@ -670,17 +426,6 @@ pub struct UniformLocation(gl::GLint);
 
 impl UniformLocation {
     pub const INVALID: Self = UniformLocation(-1);
-}
-
-#[cfg(feature = "debug_renderer")]
-pub struct Capabilities {
-    pub supports_multisampling: bool,
-}
-
-#[derive(Clone, Debug)]
-pub enum ShaderError {
-    Compilation(String, String), // name, error message
-    Link(String, String),        // name, error message
 }
 
 pub struct Device {
@@ -723,13 +468,13 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(
+    /*fn new(
         gl: Rc<gl::Gl>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,
         cached_programs: Option<Rc<ProgramCache>>,
-    ) -> Device {
+    ) -> GlDevice {
         let mut max_texture_size = [0];
         unsafe {
             gl.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut max_texture_size);
@@ -757,7 +502,7 @@ impl Device {
             }
         };
 
-        Device {
+        GlDevice {
             gl,
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
@@ -788,38 +533,14 @@ impl Device {
             frame_id: FrameId(0),
             extensions,
         }
-    }
+    }*/
 
-    pub fn gl(&self) -> &gl::Gl {
+    fn gl(&self) -> &gl::Gl {
         &*self.gl
     }
 
-    pub fn rc_gl(&self) -> &Rc<gl::Gl> {
+    fn rc_gl(&self) -> &Rc<gl::Gl> {
         &self.gl
-    }
-
-    pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
-        self.device_pixel_ratio = ratio;
-    }
-
-    pub fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>) {
-        self.cached_programs = Some(cached_programs);
-    }
-
-    pub fn max_texture_size(&self) -> u32 {
-        self.max_texture_size
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn get_capabilities(&self) -> &Capabilities {
-        &self.capabilities
-    }
-
-    pub fn reset_state(&mut self) {
-        self.bound_textures = [0; 16];
-        self.bound_vao = 0;
-        self.bound_read_fbo = FBOId(0);
-        self.bound_draw_fbo = FBOId(0);
     }
 
     #[cfg(debug_assertions)]
@@ -841,7 +562,7 @@ impl Device {
         }
     }
 
-    pub fn compile_shader(
+    fn compile_shader(
         gl: &gl::Gl,
         name: &str,
         shader_type: gl::GLenum,
@@ -869,52 +590,6 @@ impl Device {
         }
     }
 
-    pub fn begin_frame(&mut self) -> FrameId {
-        debug_assert!(!self.inside_frame);
-        self.inside_frame = true;
-
-        // Retrieve the currently set FBO.
-        let mut default_read_fbo = [0];
-        unsafe {
-            self.gl.get_integer_v(gl::READ_FRAMEBUFFER_BINDING, &mut default_read_fbo);
-        }
-        self.default_read_fbo = default_read_fbo[0] as gl::GLuint;
-        let mut default_draw_fbo = [0];
-        unsafe {
-            self.gl.get_integer_v(gl::DRAW_FRAMEBUFFER_BINDING, &mut default_draw_fbo);
-        }
-        self.default_draw_fbo = default_draw_fbo[0] as gl::GLuint;
-
-        // Texture state
-        for i in 0 .. self.bound_textures.len() {
-            self.bound_textures[i] = 0;
-            self.gl.active_texture(gl::TEXTURE0 + i as gl::GLuint);
-            self.gl.bind_texture(gl::TEXTURE_2D, 0);
-        }
-
-        // Shader state
-        self.bound_program = 0;
-        self.program_mode_id = UniformLocation::INVALID;
-        self.gl.use_program(0);
-
-        // Vertex state
-        self.bound_vao = 0;
-        self.gl.bind_vertex_array(0);
-
-        // FBO state
-        self.bound_read_fbo = FBOId(self.default_read_fbo);
-        self.bound_draw_fbo = FBOId(self.default_draw_fbo);
-
-        // Pixel op state
-        self.gl.pixel_store_i(gl::UNPACK_ALIGNMENT, 1);
-        self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, 0);
-
-        // Default is sampler 0, always
-        self.gl.active_texture(gl::TEXTURE0);
-
-        self.frame_id
-    }
-
     fn bind_texture_impl(&mut self, slot: TextureSlot, id: gl::GLuint, target: gl::GLenum) {
         debug_assert!(self.inside_frame);
 
@@ -926,37 +601,6 @@ impl Device {
         }
     }
 
-    pub fn bind_texture<S>(&mut self, sampler: S, texture: &Texture)
-    where
-        S: Into<TextureSlot>,
-    {
-        self.bind_texture_impl(sampler.into(), texture.id, texture.target);
-    }
-
-    pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
-    where
-        S: Into<TextureSlot>,
-    {
-        self.bind_texture_impl(sampler.into(), external_texture.id, external_texture.target);
-    }
-
-    pub fn bind_read_target_impl(&mut self, fbo_id: FBOId) {
-        debug_assert!(self.inside_frame);
-
-        if self.bound_read_fbo != fbo_id {
-            self.bound_read_fbo = fbo_id;
-            fbo_id.bind(self.gl(), FBOTarget::Read);
-        }
-    }
-
-    pub fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
-        let fbo_id = texture_and_layer.map_or(FBOId(self.default_read_fbo), |texture_and_layer| {
-            texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
-        });
-
-        self.bind_read_target_impl(fbo_id)
-    }
-
     fn bind_draw_target_impl(&mut self, fbo_id: FBOId) {
         debug_assert!(self.inside_frame);
 
@@ -966,81 +610,12 @@ impl Device {
         }
     }
 
-    pub fn bind_draw_target(
-        &mut self,
-        texture_and_layer: Option<(&Texture, i32)>,
-        dimensions: Option<DeviceUintSize>,
-    ) {
-        let fbo_id = texture_and_layer.map_or(FBOId(self.default_draw_fbo), |texture_and_layer| {
-            texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
-        });
-
-        self.bind_draw_target_impl(fbo_id);
-
-        if let Some(dimensions) = dimensions {
-            self.gl.viewport(
-                0,
-                0,
-                dimensions.width as _,
-                dimensions.height as _,
-            );
-        }
-    }
-
-    pub fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> FBOId {
-        let fbo = FBOId(self.gl.gen_framebuffers(1)[0]);
-        fbo.bind(self.gl(), FBOTarget::Draw);
-        self.gl.framebuffer_texture_2d(
-            gl::DRAW_FRAMEBUFFER,
-            gl::COLOR_ATTACHMENT0,
-            gl::TEXTURE_2D,
-            texture_id,
-            0,
-        );
-        self.bound_draw_fbo.bind(self.gl(), FBOTarget::Draw);
-        fbo
-    }
-
-    pub fn delete_fbo(&mut self, fbo: FBOId) {
-        self.gl.delete_framebuffers(&[fbo.0]);
-    }
-
     pub fn bind_external_draw_target(&mut self, fbo_id: FBOId) {
         debug_assert!(self.inside_frame);
 
         if self.bound_draw_fbo != fbo_id {
             self.bound_draw_fbo = fbo_id;
             fbo_id.bind(self.gl(), FBOTarget::Draw);
-        }
-    }
-
-    pub fn bind_program(&mut self, program: &Program) {
-        debug_assert!(self.inside_frame);
-
-        if self.bound_program != program.id {
-            self.gl.use_program(program.id);
-            self.bound_program = program.id;
-            self.program_mode_id = UniformLocation(program.u_mode);
-        }
-    }
-
-    pub fn create_texture(
-        &mut self,
-        target: TextureTarget,
-        format: ImageFormat,
-    ) -> Texture {
-        Texture {
-            id: self.gl.gen_textures(1)[0],
-            target: get_gl_target(target),
-            width: 0,
-            height: 0,
-            layer_count: 0,
-            format,
-            filter: TextureFilter::Nearest,
-            render_target: None,
-            fbo_ids: vec![],
-            depth_rb: None,
-            last_frame_used: self.frame_id,
         }
     }
 
@@ -1065,80 +640,6 @@ impl Device {
             .tex_parameter_i(target, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as gl::GLint);
         self.gl
             .tex_parameter_i(target, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as gl::GLint);
-    }
-
-    /// Resizes a texture with enabled render target views,
-    /// preserves the data by blitting the old texture contents over.
-    pub fn resize_renderable_texture(
-        &mut self,
-        texture: &mut Texture,
-        new_size: DeviceUintSize,
-    ) {
-        debug_assert!(self.inside_frame);
-
-        let old_size = texture.get_dimensions();
-        let old_fbos = mem::replace(&mut texture.fbo_ids, Vec::new());
-        let old_texture_id = mem::replace(&mut texture.id, self.gl.gen_textures(1)[0]);
-
-        texture.width = new_size.width;
-        texture.height = new_size.height;
-        let rt_info = texture.render_target
-            .clone()
-            .expect("Only renderable textures are expected for resize here");
-
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        self.set_texture_parameters(texture.target, texture.filter);
-        self.update_target_storage::<u8>(texture, &rt_info, true, None);
-
-        let rect = DeviceIntRect::new(DeviceIntPoint::zero(), old_size.to_i32());
-        for (read_fbo, &draw_fbo) in old_fbos.into_iter().zip(&texture.fbo_ids) {
-            self.bind_read_target_impl(read_fbo);
-            self.bind_draw_target_impl(draw_fbo);
-            self.blit_render_target(rect, rect);
-            self.delete_fbo(read_fbo);
-        }
-        self.gl.delete_textures(&[old_texture_id]);
-        self.bind_read_target(None);
-    }
-
-    pub fn init_texture<T: Texel>(
-        &mut self,
-        texture: &mut Texture,
-        mut width: u32,
-        mut height: u32,
-        filter: TextureFilter,
-        render_target: Option<RenderTargetInfo>,
-        layer_count: i32,
-        pixels: Option<&[T]>,
-    ) {
-        debug_assert!(self.inside_frame);
-
-        if width > self.max_texture_size || height > self.max_texture_size {
-            error!("Attempting to allocate a texture of size {}x{} above the limit, trimming", width, height);
-            width = width.min(self.max_texture_size);
-            height = height.min(self.max_texture_size);
-        }
-
-        let is_resized = texture.width != width || texture.height != height;
-
-        texture.width = width;
-        texture.height = height;
-        texture.filter = filter;
-        texture.layer_count = layer_count;
-        texture.render_target = render_target;
-        texture.last_frame_used = self.frame_id;
-
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        self.set_texture_parameters(texture.target, filter);
-
-        match render_target {
-            Some(info) => {
-                self.update_target_storage(texture, &info, is_resized, pixels);
-            }
-            None => {
-                self.update_texture_storage(texture, pixels);
-            }
-        }
     }
 
     /// Updates the render target storage for the texture, creating FBOs as required.
@@ -1299,23 +800,6 @@ impl Device {
         }
     }
 
-    pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
-        debug_assert!(self.inside_frame);
-
-        self.gl.blit_framebuffer(
-            src_rect.origin.x,
-            src_rect.origin.y,
-            src_rect.origin.x + src_rect.size.width,
-            src_rect.origin.y + src_rect.size.height,
-            dest_rect.origin.x,
-            dest_rect.origin.y,
-            dest_rect.origin.x + dest_rect.size.width,
-            dest_rect.origin.y + dest_rect.size.height,
-            gl::COLOR_BUFFER_BIT,
-            gl::LINEAR,
-        );
-    }
-
     fn free_texture_storage_impl(&mut self, target: gl::GLenum, desc: FormatDesc) {
         match target {
             gl::TEXTURE_2D_ARRAY => {
@@ -1348,337 +832,9 @@ impl Device {
         }
     }
 
-    pub fn free_texture_storage(&mut self, texture: &mut Texture) {
-        debug_assert!(self.inside_frame);
-
-        if texture.width + texture.height == 0 {
-            return;
-        }
-
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        let desc = self.gl_describe_format(texture.format);
-
-        self.free_texture_storage_impl(texture.target, desc);
-
-        if let Some(RBOId(depth_rb)) = texture.depth_rb.take() {
-            self.gl.delete_renderbuffers(&[depth_rb]);
-        }
-
-        if !texture.fbo_ids.is_empty() {
-            let fbo_ids: Vec<_> = texture
-                .fbo_ids
-                .drain(..)
-                .map(|FBOId(fbo_id)| fbo_id)
-                .collect();
-            self.gl.delete_framebuffers(&fbo_ids[..]);
-        }
-
-        texture.width = 0;
-        texture.height = 0;
-        texture.layer_count = 0;
-    }
-
-    pub fn delete_texture(&mut self, mut texture: Texture) {
-        self.free_texture_storage(&mut texture);
-        self.gl.delete_textures(&[texture.id]);
-
-        for bound_texture in &mut self.bound_textures {
-            if *bound_texture == texture.id {
-                *bound_texture = 0
-            }
-        }
-
-        texture.id = 0;
-    }
-
-    #[cfg(feature = "replay")]
-    pub fn delete_external_texture(&mut self, mut external: ExternalTexture) {
-        self.bind_external_texture(DEFAULT_TEXTURE, &external);
-        //Note: the format descriptor here doesn't really matter
-        self.free_texture_storage_impl(external.target, FormatDesc {
-            internal: gl::R8 as _,
-            external: gl::RED,
-            pixel_type: gl::UNSIGNED_BYTE,
-        });
-        self.gl.delete_textures(&[external.id]);
-        external.id = 0;
-    }
-
-    pub fn delete_program(&mut self, mut program: Program) {
-        self.gl.delete_program(program.id);
-        program.id = 0;
-    }
-
-    pub fn create_program(
-        &mut self,
-        base_filename: &str,
-        features: &str,
-        descriptor: &VertexDescriptor,
-    ) -> Result<Program, ShaderError> {
-        debug_assert!(self.inside_frame);
-
-        let gl_version_string = get_shader_version(&*self.gl);
-
-        let (vs_source, fs_source) = build_shader_strings(
-            gl_version_string,
-            features,
-            base_filename,
-            &self.resource_override_path,
-        );
-
-        let sources = ProgramSources::new(self.renderer_name.clone(), vs_source, fs_source);
-
-        // Create program
-        let pid = self.gl.create_program();
-
-        let mut loaded = false;
-
-        if let Some(ref cached_programs) = self.cached_programs {
-            if let Some(binary) = cached_programs.binaries.borrow().get(&sources)
-            {
-                self.gl.program_binary(pid, binary.format, &binary.binary);
-
-                let mut link_status = [0];
-                unsafe {
-                    self.gl.get_program_iv(pid, gl::LINK_STATUS, &mut link_status);
-                }
-                if link_status[0] == 0 {
-                    let error_log = self.gl.get_program_info_log(pid);
-                    error!(
-                      "Failed to load a program object with a program binary: {} renderer {}\n{}",
-                      base_filename,
-                      self.renderer_name,
-                      error_log
-                    );
-                    if let Some(ref program_cache_handler) = cached_programs.program_cache_handler {
-                        program_cache_handler.notify_program_binary_failed(&binary);
-                    }
-                } else {
-                    loaded = true;
-                }
-            }
-        }
-
-        if loaded == false {
-            // Compile the vertex shader
-            let vs_id =
-                match Device::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
-                    Ok(vs_id) => vs_id,
-                    Err(err) => return Err(err),
-                };
-
-            // Compiler the fragment shader
-            let fs_id =
-                match Device::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
-                    Ok(fs_id) => fs_id,
-                    Err(err) => {
-                        self.gl.delete_shader(vs_id);
-                        return Err(err);
-                    }
-                };
-
-            // Attach shaders
-            self.gl.attach_shader(pid, vs_id);
-            self.gl.attach_shader(pid, fs_id);
-
-            // Bind vertex attributes
-            for (i, attr) in descriptor
-                .vertex_attributes
-                .iter()
-                .chain(descriptor.instance_attributes.iter())
-                .enumerate()
-            {
-                self.gl
-                    .bind_attrib_location(pid, i as gl::GLuint, attr.name);
-            }
-
-            if self.cached_programs.is_some() {
-                self.gl.program_parameter_i(pid, gl::PROGRAM_BINARY_RETRIEVABLE_HINT, gl::TRUE as gl::GLint);
-            }
-
-            // Link!
-            self.gl.link_program(pid);
-
-            // GL recommends detaching and deleting shaders once the link
-            // is complete (whether successful or not). This allows the driver
-            // to free any memory associated with the parsing and compilation.
-            self.gl.detach_shader(pid, vs_id);
-            self.gl.detach_shader(pid, fs_id);
-            self.gl.delete_shader(vs_id);
-            self.gl.delete_shader(fs_id);
-
-            let mut link_status = [0];
-            unsafe {
-                self.gl.get_program_iv(pid, gl::LINK_STATUS, &mut link_status);
-            }
-            if link_status[0] == 0 {
-                let error_log = self.gl.get_program_info_log(pid);
-                error!(
-                    "Failed to link shader program: {}\n{}",
-                    base_filename,
-                    error_log
-                );
-                self.gl.delete_program(pid);
-                return Err(ShaderError::Link(base_filename.to_string(), error_log));
-            }
-        }
-
-        if let Some(ref cached_programs) = self.cached_programs {
-            if !cached_programs.binaries.borrow().contains_key(&sources) {
-                let (buffer, format) = self.gl.get_program_binary(pid);
-                if buffer.len() > 0 {
-                    let program_binary = Arc::new(ProgramBinary::new(buffer, format, &sources));
-                    if let Some(ref program_cache_handler) = cached_programs.program_cache_handler {
-                        program_cache_handler.notify_binary_added(&program_binary);
-                    }
-                    cached_programs.binaries.borrow_mut().insert(sources, program_binary);
-                }
-            }
-        }
-
-        let u_transform = self.gl.get_uniform_location(pid, "uTransform");
-        let u_device_pixel_ratio = self.gl.get_uniform_location(pid, "uDevicePixelRatio");
-        let u_mode = self.gl.get_uniform_location(pid, "uMode");
-
-        let program = Program {
-            id: pid,
-            u_transform,
-            u_device_pixel_ratio,
-            u_mode,
-        };
-
-        self.bind_program(&program);
-
-        Ok(program)
-    }
-
-    pub fn bind_shader_samplers<S>(&mut self, program: &Program, bindings: &[(&'static str, S)])
-    where
-        S: Into<TextureSlot> + Copy,
-    {
-        for binding in bindings {
-            let u_location = self.gl.get_uniform_location(program.id, binding.0);
-            if u_location != -1 {
-                self.bind_program(program);
-                self.gl
-                    .uniform_1i(u_location, binding.1.into().0 as gl::GLint);
-            }
-        }
-    }
-
     #[cfg(feature = "debug_renderer")]
     pub fn get_uniform_location(&self, program: &Program, name: &str) -> UniformLocation {
         UniformLocation(self.gl.get_uniform_location(program.id, name))
-    }
-
-    pub fn set_uniforms(
-        &self,
-        program: &Program,
-        transform: &Transform3D<f32>,
-    ) {
-        debug_assert!(self.inside_frame);
-        self.gl
-            .uniform_matrix_4fv(program.u_transform, false, &transform.to_row_major_array());
-        self.gl
-            .uniform_1f(program.u_device_pixel_ratio, self.device_pixel_ratio);
-    }
-
-    pub fn switch_mode(&self, mode: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.uniform_1i(self.program_mode_id.0, mode);
-    }
-
-    pub fn create_pbo(&mut self) -> PBO {
-        let id = self.gl.gen_buffers(1)[0];
-        PBO { id }
-    }
-
-    pub fn delete_pbo(&mut self, mut pbo: PBO) {
-        self.gl.delete_buffers(&[pbo.id]);
-        pbo.id = 0;
-    }
-
-    pub fn upload_texture<'a, T>(
-        &'a mut self,
-        texture: &'a Texture,
-        pbo: &PBO,
-        upload_count: usize,
-    ) -> TextureUploader<'a, T> {
-        debug_assert!(self.inside_frame);
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-
-        let buffer = match self.upload_method {
-            UploadMethod::Immediate => None,
-            UploadMethod::PixelBuffer(hint) => {
-                let upload_size = upload_count * mem::size_of::<T>();
-                self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, pbo.id);
-                if upload_size != 0 {
-                    self.gl.buffer_data_untyped(
-                        gl::PIXEL_UNPACK_BUFFER,
-                        upload_size as _,
-                        ptr::null(),
-                        hint.to_gl(),
-                    );
-                }
-                Some(PixelBuffer::new(hint.to_gl(), upload_size))
-            },
-        };
-
-        TextureUploader {
-            target: UploadTarget {
-                gl: &*self.gl,
-                bgra_format: self.bgra_format,
-                texture,
-            },
-            buffer,
-            marker: PhantomData,
-        }
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
-        let desc = self.gl_describe_format(img_desc.format);
-        self.gl.read_pixels(
-            0, 0,
-            img_desc.size.width as i32,
-            img_desc.size.height as i32,
-            desc.external,
-            desc.pixel_type,
-        )
-    }
-
-    /// Read rectangle of pixels into the specified output slice.
-    pub fn read_pixels_into(
-        &mut self,
-        rect: DeviceUintRect,
-        format: ReadPixelsFormat,
-        output: &mut [u8],
-    ) {
-        let (bytes_per_pixel, desc) = match format {
-            ReadPixelsFormat::Standard(imf) => {
-                (imf.bytes_per_pixel(), self.gl_describe_format(imf))
-            }
-            ReadPixelsFormat::Rgba8 => {
-                (4, FormatDesc {
-                    external: gl::RGBA,
-                    internal: gl::RGBA8 as _,
-                    pixel_type: gl::UNSIGNED_BYTE,
-                })
-            }
-        };
-        let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
-        assert_eq!(output.len(), size_in_bytes);
-
-        self.gl.flush();
-        self.gl.read_pixels_into_buffer(
-            rect.origin.x as _,
-            rect.origin.y as _,
-            rect.size.width as _,
-            rect.size.height as _,
-            desc.external,
-            desc.pixel_type,
-            output,
-        );
     }
 
     /// Get texels of a texture into the specified output slice.
@@ -1728,18 +884,6 @@ impl Device {
         }
     }
 
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
-    pub fn attach_read_texture_external(
-        &mut self, texture_id: gl::GLuint, target: TextureTarget, layer_id: i32
-    ) {
-        self.attach_read_texture_raw(texture_id, get_gl_target(target), layer_id)
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
-    pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
-        self.attach_read_texture_raw(texture.id, texture.target, layer_id)
-    }
-
     fn bind_vao_impl(&mut self, id: gl::GLuint) {
         debug_assert!(self.inside_frame);
 
@@ -1747,14 +891,6 @@ impl Device {
             self.bound_vao = id;
             self.gl.bind_vertex_array(id);
         }
-    }
-
-    pub fn bind_vao(&mut self, vao: &VAO) {
-        self.bind_vao_impl(vao.id)
-    }
-
-    pub fn bind_custom_vao(&mut self, vao: &CustomVAO) {
-        self.bind_vao_impl(vao.id)
     }
 
     fn create_vao_with_vbos(
@@ -1787,114 +923,6 @@ impl Device {
         }
     }
 
-    pub fn create_custom_vao(
-        &mut self,
-        streams: &[Stream],
-    ) -> CustomVAO {
-        debug_assert!(self.inside_frame);
-
-        let vao_id = self.gl.gen_vertex_arrays(1)[0];
-        self.gl.bind_vertex_array(vao_id);
-
-        let mut attrib_index = 0;
-        for stream in streams {
-            VertexDescriptor::bind_attributes(
-                stream.attributes,
-                attrib_index,
-                0,
-                self.gl(),
-                stream.vbo,
-            );
-            attrib_index += stream.attributes.len();
-        }
-
-        self.gl.bind_vertex_array(0);
-
-        CustomVAO {
-            id: vao_id,
-        }
-    }
-
-    pub fn delete_custom_vao(&mut self, mut vao: CustomVAO) {
-        self.gl.delete_vertex_arrays(&[vao.id]);
-        vao.id = 0;
-    }
-
-    pub fn create_vbo<T>(&mut self) -> VBO<T> {
-        let ids = self.gl.gen_buffers(1);
-        VBO {
-            id: ids[0],
-            target: gl::ARRAY_BUFFER,
-            allocated_count: 0,
-            marker: PhantomData,
-        }
-    }
-
-    pub fn delete_vbo<T>(&mut self, mut vbo: VBO<T>) {
-        self.gl.delete_buffers(&[vbo.id]);
-        vbo.id = 0;
-    }
-
-    pub fn create_vao(&mut self, descriptor: &VertexDescriptor) -> VAO {
-        debug_assert!(self.inside_frame);
-
-        let buffer_ids = self.gl.gen_buffers(3);
-        let ibo_id = IBOId(buffer_ids[0]);
-        let main_vbo_id = VBOId(buffer_ids[1]);
-        let intance_vbo_id = VBOId(buffer_ids[2]);
-
-        self.create_vao_with_vbos(descriptor, main_vbo_id, intance_vbo_id, ibo_id, true)
-    }
-
-    pub fn delete_vao(&mut self, mut vao: VAO) {
-        self.gl.delete_vertex_arrays(&[vao.id]);
-        vao.id = 0;
-
-        if vao.owns_vertices_and_indices {
-            self.gl.delete_buffers(&[vao.ibo_id.0]);
-            self.gl.delete_buffers(&[vao.main_vbo_id.0]);
-        }
-
-        self.gl.delete_buffers(&[vao.instance_vbo_id.0])
-    }
-
-    pub fn allocate_vbo<V>(
-        &mut self,
-        vbo: &mut VBO<V>,
-        count: usize,
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert!(self.inside_frame);
-        vbo.allocated_count = count;
-
-        self.gl.bind_buffer(vbo.target, vbo.id);
-        self.gl.buffer_data_untyped(
-            vbo.target,
-            (count * mem::size_of::<V>()) as _,
-            ptr::null(),
-            usage_hint.to_gl(),
-        );
-    }
-
-    pub fn fill_vbo<V>(
-        &mut self,
-        vbo: &VBO<V>,
-        data: &[V],
-        offset: usize,
-    ) {
-        debug_assert!(self.inside_frame);
-        assert!(offset + data.len() <= vbo.allocated_count);
-        let stride = mem::size_of::<V>();
-
-        self.gl.bind_buffer(vbo.target, vbo.id);
-        self.gl.buffer_sub_data_untyped(
-            vbo.target,
-            (offset * stride) as _,
-            (data.len() * stride) as _,
-            data.as_ptr() as _,
-        );
-    }
-
     fn update_vbo_data<V>(
         &mut self,
         vbo: VBOId,
@@ -1905,310 +933,6 @@ impl Device {
 
         vbo.bind(self.gl());
         gl::buffer_data(self.gl(), gl::ARRAY_BUFFER, vertices, usage_hint.to_gl());
-    }
-
-    pub fn create_vao_with_new_instances(
-        &mut self,
-        descriptor: &VertexDescriptor,
-        base_vao: &VAO,
-    ) -> VAO {
-        debug_assert!(self.inside_frame);
-
-        let buffer_ids = self.gl.gen_buffers(1);
-        let intance_vbo_id = VBOId(buffer_ids[0]);
-
-        self.create_vao_with_vbos(
-            descriptor,
-            base_vao.main_vbo_id,
-            intance_vbo_id,
-            base_vao.ibo_id,
-            false,
-        )
-    }
-
-    pub fn update_vao_main_vertices<V>(
-        &mut self,
-        vao: &VAO,
-        vertices: &[V],
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert_eq!(self.bound_vao, vao.id);
-        self.update_vbo_data(vao.main_vbo_id, vertices, usage_hint)
-    }
-
-    pub fn update_vao_instances<V>(
-        &mut self,
-        vao: &VAO,
-        instances: &[V],
-        usage_hint: VertexUsageHint,
-    ) {
-        debug_assert_eq!(self.bound_vao, vao.id);
-        debug_assert_eq!(vao.instance_stride as usize, mem::size_of::<V>());
-
-        self.update_vbo_data(vao.instance_vbo_id, instances, usage_hint)
-    }
-
-    pub fn update_vao_indices<I>(&mut self, vao: &VAO, indices: &[I], usage_hint: VertexUsageHint) {
-        debug_assert!(self.inside_frame);
-        debug_assert_eq!(self.bound_vao, vao.id);
-
-        vao.ibo_id.bind(self.gl());
-        gl::buffer_data(
-            self.gl(),
-            gl::ELEMENT_ARRAY_BUFFER,
-            indices,
-            usage_hint.to_gl(),
-        );
-    }
-
-    pub fn draw_triangles_u16(&mut self, first_vertex: i32, index_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_elements(
-            gl::TRIANGLES,
-            index_count,
-            gl::UNSIGNED_SHORT,
-            first_vertex as u32 * 2,
-        );
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn draw_triangles_u32(&mut self, first_vertex: i32, index_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_elements(
-            gl::TRIANGLES,
-            index_count,
-            gl::UNSIGNED_INT,
-            first_vertex as u32 * 4,
-        );
-    }
-
-    pub fn draw_nonindexed_points(&mut self, first_vertex: i32, vertex_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_arrays(gl::POINTS, first_vertex, vertex_count);
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_arrays(gl::LINES, first_vertex, vertex_count);
-    }
-
-    pub fn draw_indexed_triangles_instanced_u16(&mut self, index_count: i32, instance_count: i32) {
-        debug_assert!(self.inside_frame);
-        self.gl.draw_elements_instanced(
-            gl::TRIANGLES,
-            index_count,
-            gl::UNSIGNED_SHORT,
-            0,
-            instance_count,
-        );
-    }
-
-    pub fn end_frame(&mut self) {
-        self.bind_draw_target(None, None);
-        self.bind_read_target(None);
-
-        debug_assert!(self.inside_frame);
-        self.inside_frame = false;
-
-        self.gl.bind_texture(gl::TEXTURE_2D, 0);
-        self.gl.use_program(0);
-
-        for i in 0 .. self.bound_textures.len() {
-            self.gl.active_texture(gl::TEXTURE0 + i as gl::GLuint);
-            self.gl.bind_texture(gl::TEXTURE_2D, 0);
-        }
-
-        self.gl.active_texture(gl::TEXTURE0);
-
-        self.frame_id.0 += 1;
-    }
-
-    pub fn clear_target(
-        &self,
-        color: Option<[f32; 4]>,
-        depth: Option<f32>,
-        rect: Option<DeviceIntRect>,
-    ) {
-        let mut clear_bits = 0;
-
-        if let Some(color) = color {
-            self.gl.clear_color(color[0], color[1], color[2], color[3]);
-            clear_bits |= gl::COLOR_BUFFER_BIT;
-        }
-
-        if let Some(depth) = depth {
-            if cfg!(debug_assertions) {
-                let mut mask = [0];
-                unsafe {
-                    self.gl.get_boolean_v(gl::DEPTH_WRITEMASK, &mut mask);
-                }
-                assert_ne!(mask[0], 0);
-            }
-            self.gl.clear_depth(depth as f64);
-            clear_bits |= gl::DEPTH_BUFFER_BIT;
-        }
-
-        if clear_bits != 0 {
-            match rect {
-                Some(rect) => {
-                    self.gl.enable(gl::SCISSOR_TEST);
-                    self.gl.scissor(
-                        rect.origin.x,
-                        rect.origin.y,
-                        rect.size.width,
-                        rect.size.height,
-                    );
-                    self.gl.clear(clear_bits);
-                    self.gl.disable(gl::SCISSOR_TEST);
-                }
-                None => {
-                    self.gl.clear(clear_bits);
-                }
-            }
-        }
-    }
-
-    pub fn enable_depth(&self) {
-        self.gl.enable(gl::DEPTH_TEST);
-    }
-
-    pub fn disable_depth(&self) {
-        self.gl.disable(gl::DEPTH_TEST);
-    }
-
-    pub fn set_depth_func(&self, depth_func: DepthFunction) {
-        self.gl.depth_func(depth_func as gl::GLuint);
-    }
-
-    pub fn enable_depth_write(&self) {
-        self.gl.depth_mask(true);
-    }
-
-    pub fn disable_depth_write(&self) {
-        self.gl.depth_mask(false);
-    }
-
-    pub fn disable_stencil(&self) {
-        self.gl.disable(gl::STENCIL_TEST);
-    }
-
-    pub fn set_scissor_rect(&self, rect: DeviceIntRect) {
-        self.gl.scissor(
-            rect.origin.x,
-            rect.origin.y,
-            rect.size.width,
-            rect.size.height,
-        );
-    }
-
-    pub fn enable_scissor(&self) {
-        self.gl.enable(gl::SCISSOR_TEST);
-    }
-
-    pub fn disable_scissor(&self) {
-        self.gl.disable(gl::SCISSOR_TEST);
-    }
-
-    pub fn set_blend(&self, enable: bool) {
-        if enable {
-            self.gl.enable(gl::BLEND);
-        } else {
-            self.gl.disable(gl::BLEND);
-        }
-    }
-
-    pub fn set_blend_mode_alpha(&self) {
-        self.gl.blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA,
-                                    gl::ONE, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-
-    pub fn set_blend_mode_premultiplied_alpha(&self) {
-        self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-
-    pub fn set_blend_mode_premultiplied_dest_out(&self) {
-        self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-
-    pub fn set_blend_mode_multiply(&self) {
-        self.gl
-            .blend_func_separate(gl::ZERO, gl::SRC_COLOR, gl::ZERO, gl::SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_max(&self) {
-        self.gl
-            .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
-        self.gl.blend_equation_separate(gl::MAX, gl::FUNC_ADD);
-    }
-    #[cfg(feature = "debug_renderer")]
-    pub fn set_blend_mode_min(&self) {
-        self.gl
-            .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
-        self.gl.blend_equation_separate(gl::MIN, gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_pass0(&self) {
-        self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_COLOR);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_pass1(&self) {
-        self.gl.blend_func(gl::ONE, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_with_bg_color_pass0(&self) {
-        self.gl.blend_func_separate(gl::ZERO, gl::ONE_MINUS_SRC_COLOR, gl::ZERO, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_with_bg_color_pass1(&self) {
-        self.gl.blend_func_separate(gl::ONE_MINUS_DST_ALPHA, gl::ONE, gl::ZERO, gl::ONE);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_with_bg_color_pass2(&self) {
-        self.gl.blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_constant_text_color(&self, color: ColorF) {
-        // color is an unpremultiplied color.
-        self.gl.blend_color(color.r, color.g, color.b, 1.0);
-        self.gl
-            .blend_func(gl::CONSTANT_COLOR, gl::ONE_MINUS_SRC_COLOR);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-    pub fn set_blend_mode_subpixel_dual_source(&self) {
-        self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC1_COLOR);
-        self.gl.blend_equation(gl::FUNC_ADD);
-    }
-
-    pub fn supports_extension(&self, extension: &str) -> bool {
-        supports_extension(&self.extensions, extension)
-    }
-
-    pub fn echo_driver_messages(&self) {
-        for msg in self.gl.get_debug_messages() {
-            let level = match msg.severity {
-                gl::DEBUG_SEVERITY_HIGH => Level::Error,
-                gl::DEBUG_SEVERITY_MEDIUM => Level::Warn,
-                gl::DEBUG_SEVERITY_LOW => Level::Info,
-                gl::DEBUG_SEVERITY_NOTIFICATION => Level::Debug,
-                _ => Level::Trace,
-            };
-            let ty = match msg.ty {
-                gl::DEBUG_TYPE_ERROR => "error",
-                gl::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "deprecated",
-                gl::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "undefined",
-                gl::DEBUG_TYPE_PORTABILITY => "portability",
-                gl::DEBUG_TYPE_PERFORMANCE => "perf",
-                gl::DEBUG_TYPE_MARKER => "marker",
-                gl::DEBUG_TYPE_PUSH_GROUP => "group push",
-                gl::DEBUG_TYPE_POP_GROUP => "group pop",
-                gl::DEBUG_TYPE_OTHER => "other",
-                _ => "?",
-            };
-            log!(level, "({}) {}", ty, msg.message);
-        }
     }
 
     fn gl_describe_format(&self, format: ImageFormat) -> FormatDesc {
@@ -2421,8 +1145,1121 @@ impl<'a> UploadTarget<'a> {
     }
 }
 
-fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
-    unsafe {
-        slice::from_raw_parts(texels.as_ptr() as *const u8, texels.len() * mem::size_of::<T>())
+impl DeviceMethods for Device {
+    type CustomVAO = CustomVAO;
+    type FBOId = FBOId;
+    type PBO = PBO;
+    type Program = Program;
+    type RBOId = RBOId;
+    type TextureId = gl::GLuint;
+    type VAO = VAO;
+
+    fn new(
+        init: Rc<gl::Gl>,
+        resource_override_path: Option<PathBuf>,
+        upload_method: UploadMethod,
+        _file_changed_handler: Box<FileWatcherHandler>,
+        cached_programs: Option<Rc<ProgramCache>>,
+    ) -> Self {
+        let gl = init;
+        let mut max_texture_size = [0];
+        unsafe {
+            gl.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut max_texture_size);
+        }
+        let max_texture_size = max_texture_size[0] as u32;
+        let renderer_name = gl.get_string(gl::RENDERER);
+
+        let mut extension_count = [0];
+        unsafe {
+            gl.get_integer_v(gl::NUM_EXTENSIONS, &mut extension_count);
+        }
+        let extension_count = extension_count[0] as gl::GLuint;
+        let mut extensions = Vec::new();
+        for i in 0 .. extension_count {
+            extensions.push(gl.get_string_i(gl::EXTENSIONS, i));
+        }
+
+        let supports_bgra = supports_extension(&extensions, "GL_EXT_texture_format_BGRA8888");
+        let bgra_format = match gl.get_type() {
+            gl::GlType::Gl => GL_FORMAT_BGRA_GL,
+            gl::GlType::Gles => if supports_bgra {
+                GL_FORMAT_BGRA_GLES
+            } else {
+                GL_FORMAT_RGBA
+            }
+        };
+
+        Device {
+            gl,
+            resource_override_path,
+            // This is initialized to 1 by default, but it is reset
+            // at the beginning of each frame in `Renderer::bind_frame_data`.
+            device_pixel_ratio: 1.0,
+            upload_method,
+            inside_frame: false,
+
+            #[cfg(feature = "debug_renderer")]
+            capabilities: Capabilities {
+                supports_multisampling: false, //TODO
+            },
+
+            bgra_format,
+
+            bound_textures: [0; 16],
+            bound_program: 0,
+            bound_vao: 0,
+            bound_read_fbo: FBOId(0),
+            bound_draw_fbo: FBOId(0),
+            program_mode_id: UniformLocation::INVALID,
+            default_read_fbo: 0,
+            default_draw_fbo: 0,
+
+            max_texture_size,
+            renderer_name,
+            cached_programs,
+            frame_id: FrameId(0),
+            extensions,
+        }
     }
+
+    fn renderer(&self) -> String { self.gl().get_string(gl::RENDERER) }
+
+    fn version(&self) -> String { self.gl().get_string(gl::VERSION) }
+
+    fn get_context(&self) -> &Rc<gl::Gl> { self.rc_gl() }
+
+    fn set_device_pixel_ratio(&mut self, ratio: f32) {
+        self.device_pixel_ratio = ratio;
+    }
+
+    fn update_program_cache(&mut self, cached_programs: Rc<ProgramCache>)  {
+        self.cached_programs = Some(cached_programs);
+    }
+
+    fn max_texture_size(&self) -> u32 {
+        self.max_texture_size
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    fn get_capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
+    fn reset_state(&mut self) {
+        self.bound_textures = [0; 16];
+        self.bound_vao = 0;
+        self.bound_read_fbo = FBOId(0);
+        self.bound_draw_fbo = FBOId(0);
+    }
+
+    fn begin_frame(&mut self) -> FrameId {
+        debug_assert!(!self.inside_frame);
+        self.inside_frame = true;
+
+        // Retrieve the currently set FBO.
+        let mut default_read_fbo = [0];
+        unsafe {
+            self.gl.get_integer_v(gl::READ_FRAMEBUFFER_BINDING, &mut default_read_fbo);
+        }
+        self.default_read_fbo = default_read_fbo[0] as gl::GLuint;
+        let mut default_draw_fbo = [0];
+        unsafe {
+            self.gl.get_integer_v(gl::DRAW_FRAMEBUFFER_BINDING, &mut default_draw_fbo);
+        }
+        self.default_draw_fbo = default_draw_fbo[0] as gl::GLuint;
+
+        // Texture state
+        for i in 0 .. self.bound_textures.len() {
+            self.bound_textures[i] = 0;
+            self.gl.active_texture(gl::TEXTURE0 + i as gl::GLuint);
+            self.gl.bind_texture(gl::TEXTURE_2D, 0);
+        }
+
+        // Shader state
+        self.bound_program = 0;
+        self.program_mode_id = UniformLocation::INVALID;
+        self.gl.use_program(0);
+
+        // Vertex state
+        self.bound_vao = 0;
+        self.gl.bind_vertex_array(0);
+
+        // FBO state
+        self.bound_read_fbo = FBOId(self.default_read_fbo);
+        self.bound_draw_fbo = FBOId(self.default_draw_fbo);
+
+        // Pixel op state
+        self.gl.pixel_store_i(gl::UNPACK_ALIGNMENT, 1);
+        self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, 0);
+
+        // Default is sampler 0, always
+        self.gl.active_texture(gl::TEXTURE0);
+
+        self.frame_id
+    }
+
+    fn bind_texture<S>(&mut self, sampler: S, texture: &Texture)
+        where
+            S: Into<TextureSlot>
+    {
+        self.bind_texture_impl(sampler.into(), texture.id, texture.target);
+    }
+
+    fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
+        where
+            S: Into<TextureSlot>
+    {
+        self.bind_texture_impl(sampler.into(), external_texture.id, external_texture.target);
+    }
+
+    fn bind_read_target_impl(&mut self, fbo_id: FBOId){
+        debug_assert!(self.inside_frame);
+
+        if self.bound_read_fbo != fbo_id {
+            self.bound_read_fbo = fbo_id;
+            fbo_id.bind(self.gl(), FBOTarget::Read);
+        }
+    }
+
+    fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
+        let fbo_id = texture_and_layer.map_or(FBOId(self.default_read_fbo), |texture_and_layer| {
+            texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
+        });
+
+        self.bind_read_target_impl(fbo_id)
+    }
+
+    fn bind_draw_target(
+        &mut self,
+        texture_and_layer: Option<(&Texture, i32)>,
+        dimensions: Option<DeviceUintSize>,
+    ) {
+        let fbo_id = texture_and_layer.map_or(FBOId(self.default_draw_fbo), |texture_and_layer| {
+            texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
+        });
+
+        self.bind_draw_target_impl(fbo_id);
+
+        if let Some(dimensions) = dimensions {
+            self.gl.viewport(
+                0,
+                0,
+                dimensions.width as _,
+                dimensions.height as _,
+            );
+        }
+    }
+
+    fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> FBOId {
+        let fbo = FBOId(self.gl.gen_framebuffers(1)[0]);
+        fbo.bind(self.gl(), FBOTarget::Draw);
+        self.gl.framebuffer_texture_2d(
+            gl::DRAW_FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            gl::TEXTURE_2D,
+            texture_id,
+            0,
+        );
+        self.bound_draw_fbo.bind(self.gl(), FBOTarget::Draw);
+        fbo
+    }
+
+    fn delete_fbo(&mut self, fbo: FBOId) {
+        self.gl.delete_framebuffers(&[fbo.0]);
+    }
+
+    fn bind_external_draw_target(&mut self, fbo_id: FBOId) {
+        debug_assert!(self.inside_frame);
+
+        if self.bound_draw_fbo != fbo_id {
+            self.bound_draw_fbo = fbo_id;
+            fbo_id.bind(self.gl(), FBOTarget::Draw);
+        }
+    }
+
+    fn bind_program(&mut self, program: &Program) {
+        debug_assert!(self.inside_frame);
+
+        if self.bound_program != program.id {
+            self.gl.use_program(program.id);
+            self.bound_program = program.id;
+            self.program_mode_id = UniformLocation(program.u_mode);
+        }
+    }
+
+    fn create_texture(
+        &mut self,
+        target: TextureTarget,
+        format: ImageFormat,
+    ) -> Texture {
+        Texture {
+            id: self.gl.gen_textures(1)[0],
+            target: get_gl_target(target),
+            width: 0,
+            height: 0,
+            layer_count: 0,
+            format,
+            filter: TextureFilter::Nearest,
+            render_target: None,
+            fbo_ids: vec![],
+            depth_rb: None,
+            last_frame_used: self.frame_id,
+        }
+    }
+
+    fn resize_renderable_texture(
+        &mut self,
+        texture: &mut Texture,
+        new_size: DeviceUintSize,
+    ) {
+        debug_assert!(self.inside_frame);
+
+        let old_size = texture.get_dimensions();
+        let old_fbos = mem::replace(&mut texture.fbo_ids, Vec::new());
+        let old_texture_id = mem::replace(&mut texture.id, self.gl.gen_textures(1)[0]);
+
+        texture.width = new_size.width;
+        texture.height = new_size.height;
+        let rt_info = texture.render_target
+            .clone()
+            .expect("Only renderable textures are expected for resize here");
+
+        self.bind_texture(DEFAULT_TEXTURE, texture);
+        self.set_texture_parameters(texture.target, texture.filter);
+        self.update_target_storage::<u8>(texture, &rt_info, true, None);
+
+        let rect = DeviceIntRect::new(DeviceIntPoint::zero(), old_size.to_i32());
+        for (read_fbo, &draw_fbo) in old_fbos.into_iter().zip(&texture.fbo_ids) {
+            self.bind_read_target_impl(read_fbo);
+            self.bind_draw_target_impl(draw_fbo);
+            self.blit_render_target(rect, rect);
+            self.delete_fbo(read_fbo);
+        }
+        self.gl.delete_textures(&[old_texture_id]);
+        self.bind_read_target(None);
+    }
+
+    fn init_texture<T: Texel>(
+        &mut self,
+        texture: &mut Texture,
+        mut width: u32,
+        mut height: u32,
+        filter: TextureFilter,
+        render_target: Option<RenderTargetInfo>,
+        layer_count: i32,
+        pixels: Option<&[T]>,
+    ) {
+        debug_assert!(self.inside_frame);
+
+        if width > self.max_texture_size || height > self.max_texture_size {
+            error!("Attempting to allocate a texture of size {}x{} above the limit, trimming", width, height);
+            width = width.min(self.max_texture_size);
+            height = height.min(self.max_texture_size);
+        }
+
+        let is_resized = texture.width != width || texture.height != height;
+
+        texture.width = width;
+        texture.height = height;
+        texture.filter = filter;
+        texture.layer_count = layer_count;
+        texture.render_target = render_target;
+        texture.last_frame_used = self.frame_id;
+
+        self.bind_texture(DEFAULT_TEXTURE, texture);
+        self.set_texture_parameters(texture.target, filter);
+
+        match render_target {
+            Some(info) => {
+                self.update_target_storage(texture, &info, is_resized, pixels);
+            }
+            None => {
+                self.update_texture_storage(texture, pixels);
+            }
+        }
+    }
+
+    fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
+        debug_assert!(self.inside_frame);
+
+        self.gl.blit_framebuffer(
+            src_rect.origin.x,
+            src_rect.origin.y,
+            src_rect.origin.x + src_rect.size.width,
+            src_rect.origin.y + src_rect.size.height,
+            dest_rect.origin.x,
+            dest_rect.origin.y,
+            dest_rect.origin.x + dest_rect.size.width,
+            dest_rect.origin.y + dest_rect.size.height,
+            gl::COLOR_BUFFER_BIT,
+            gl::LINEAR,
+        );
+    }
+
+    fn free_texture_storage(&mut self, texture: &mut Texture) {
+        debug_assert!(self.inside_frame);
+
+        if texture.width + texture.height == 0 {
+            return;
+        }
+
+        self.bind_texture(DEFAULT_TEXTURE, texture);
+        let desc = self.gl_describe_format(texture.format);
+
+        self.free_texture_storage_impl(texture.target, desc);
+
+        if let Some(RBOId(depth_rb)) = texture.depth_rb.take() {
+            self.gl.delete_renderbuffers(&[depth_rb]);
+        }
+
+        if !texture.fbo_ids.is_empty() {
+            let fbo_ids: Vec<_> = texture
+                .fbo_ids
+                .drain(..)
+                .map(|FBOId(fbo_id)| fbo_id)
+                .collect();
+            self.gl.delete_framebuffers(&fbo_ids[..]);
+        }
+
+        texture.width = 0;
+        texture.height = 0;
+        texture.layer_count = 0;
+    }
+
+    fn delete_texture(&mut self, mut texture: Texture) {
+        self.free_texture_storage(&mut texture);
+        self.gl.delete_textures(&[texture.id]);
+
+        for bound_texture in &mut self.bound_textures {
+            if *bound_texture == texture.id {
+                *bound_texture = 0
+            }
+        }
+
+        texture.id = 0;
+    }
+
+    #[cfg(feature = "replay")]
+    fn delete_external_texture(&mut self, mut external: ExternalTexture) {
+        self.bind_external_texture(DEFAULT_TEXTURE, &external);
+        //Note: the format descriptor here doesn't really matter
+        self.free_texture_storage_impl(external.target, FormatDesc {
+            internal: gl::R8 as _,
+            external: gl::RED,
+            pixel_type: gl::UNSIGNED_BYTE,
+        });
+        self.gl.delete_textures(&[external.id]);
+        external.id = 0;
+    }
+
+    fn delete_program(&mut self, mut program: Program) {
+        self.gl.delete_program(program.id);
+        program.id = 0;
+    }
+
+    fn create_program(
+        &mut self,
+        base_filename: &str,
+        features: &str,
+        descriptor: &VertexDescriptor,
+    ) -> Result<Program, ShaderError> {
+        debug_assert!(self.inside_frame);
+
+        let gl_version_string = get_shader_version(&*self.gl);
+
+        let (vs_source, fs_source) = build_shader_strings(
+            gl_version_string,
+            features,
+            base_filename,
+            &self.resource_override_path,
+        );
+
+        let sources = ProgramSources::new(self.renderer_name.clone(), vs_source, fs_source);
+
+        // Create program
+        let pid = self.gl.create_program();
+
+        let mut loaded = false;
+
+        if let Some(ref cached_programs) = self.cached_programs {
+            if let Some(binary) = cached_programs.binaries.borrow().get(&sources)
+            {
+                self.gl.program_binary(pid, binary.format, &binary.binary);
+
+                let mut link_status = [0];
+                unsafe {
+                    self.gl.get_program_iv(pid, gl::LINK_STATUS, &mut link_status);
+                }
+                if link_status[0] == 0 {
+                    let error_log = self.gl.get_program_info_log(pid);
+                    error!(
+                        "Failed to load a program object with a program binary: {} renderer {}\n{}",
+                        base_filename,
+                        self.renderer_name,
+                        error_log
+                    );
+                    if let Some(ref program_cache_handler) = cached_programs.program_cache_handler {
+                        program_cache_handler.notify_program_binary_failed(&binary);
+                    }
+                } else {
+                    loaded = true;
+                }
+            }
+        }
+
+        if loaded == false {
+            // Compile the vertex shader
+            let vs_id =
+                match Device::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
+                    Ok(vs_id) => vs_id,
+                    Err(err) => return Err(err),
+                };
+
+            // Compiler the fragment shader
+            let fs_id =
+                match Device::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
+                    Ok(fs_id) => fs_id,
+                    Err(err) => {
+                        self.gl.delete_shader(vs_id);
+                        return Err(err);
+                    }
+                };
+
+            // Attach shaders
+            self.gl.attach_shader(pid, vs_id);
+            self.gl.attach_shader(pid, fs_id);
+
+            // Bind vertex attributes
+            for (i, attr) in descriptor
+                .vertex_attributes
+                .iter()
+                .chain(descriptor.instance_attributes.iter())
+                .enumerate()
+                {
+                self.gl
+                    .bind_attrib_location(pid, i as gl::GLuint, attr.name);
+                }
+
+            if self.cached_programs.is_some() {
+                self.gl.program_parameter_i(pid, gl::PROGRAM_BINARY_RETRIEVABLE_HINT, gl::TRUE as gl::GLint);
+            }
+
+            // Link!
+            self.gl.link_program(pid);
+
+            // GL recommends detaching and deleting shaders once the link
+            // is complete (whether successful or not). This allows the driver
+            // to free any memory associated with the parsing and compilation.
+            self.gl.detach_shader(pid, vs_id);
+            self.gl.detach_shader(pid, fs_id);
+            self.gl.delete_shader(vs_id);
+            self.gl.delete_shader(fs_id);
+
+            let mut link_status = [0];
+            unsafe {
+                self.gl.get_program_iv(pid, gl::LINK_STATUS, &mut link_status);
+            }
+            if link_status[0] == 0 {
+                let error_log = self.gl.get_program_info_log(pid);
+                error!(
+                    "Failed to link shader program: {}\n{}",
+                    base_filename,
+                    error_log
+                );
+                self.gl.delete_program(pid);
+                return Err(ShaderError::Link(base_filename.to_string(), error_log));
+            }
+        }
+
+        if let Some(ref cached_programs) = self.cached_programs {
+            if !cached_programs.binaries.borrow().contains_key(&sources) {
+                let (buffer, format) = self.gl.get_program_binary(pid);
+                if buffer.len() > 0 {
+                    let program_binary = Arc::new(ProgramBinary::new(buffer, format, &sources));
+                    if let Some(ref program_cache_handler) = cached_programs.program_cache_handler {
+                        program_cache_handler.notify_binary_added(&program_binary);
+                    }
+                    cached_programs.binaries.borrow_mut().insert(sources, program_binary);
+                }
+            }
+        }
+
+        let u_transform = self.gl.get_uniform_location(pid, "uTransform");
+        let u_device_pixel_ratio = self.gl.get_uniform_location(pid, "uDevicePixelRatio");
+        let u_mode = self.gl.get_uniform_location(pid, "uMode");
+
+        let program = Program {
+            id: pid,
+            u_transform,
+            u_device_pixel_ratio,
+            u_mode,
+        };
+
+        self.bind_program(&program);
+
+        Ok(program)
+    }
+
+    fn bind_shader_samplers<S>(&mut self, program: &Program, bindings: &[(&'static str, S)])
+        where
+            S: Into<TextureSlot> + Copy,
+    {
+        for binding in bindings {
+            let u_location = self.gl.get_uniform_location(program.id, binding.0);
+            if u_location != -1 {
+                self.bind_program(program);
+                self.gl
+                    .uniform_1i(u_location, binding.1.into().0 as gl::GLint);
+            }
+        }
+    }
+
+    fn set_uniforms(
+        &self,
+        program: &Program,
+        transform: &Transform3D<f32>,
+    ) {
+        debug_assert!(self.inside_frame);
+        self.gl
+            .uniform_matrix_4fv(program.u_transform, false, &transform.to_row_major_array());
+        self.gl
+            .uniform_1f(program.u_device_pixel_ratio, self.device_pixel_ratio);
+    }
+
+    fn switch_mode(&self, mode: i32) {
+        debug_assert!(self.inside_frame);
+        self.gl.uniform_1i(self.program_mode_id.0, mode);
+    }
+
+    fn create_pbo(&mut self) -> PBO {
+        let id = self.gl.gen_buffers(1)[0];
+        PBO { id }
+    }
+
+    fn delete_pbo(&mut self, mut pbo: PBO) {
+        self.gl.delete_buffers(&[pbo.id]);
+        pbo.id = 0;
+    }
+
+    fn upload_texture<'a, T>(
+        &'a mut self,
+        texture: &'a Texture,
+        pbo: &PBO,
+        upload_count: usize,
+    ) -> TextureUploader<'a, T> {
+        debug_assert!(self.inside_frame);
+        self.bind_texture(DEFAULT_TEXTURE, texture);
+
+        let buffer = match self.upload_method {
+            UploadMethod::Immediate => None,
+            UploadMethod::PixelBuffer(hint) => {
+                let upload_size = upload_count * mem::size_of::<T>();
+                self.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, pbo.id);
+                if upload_size != 0 {
+                    self.gl.buffer_data_untyped(
+                        gl::PIXEL_UNPACK_BUFFER,
+                        upload_size as _,
+                        ptr::null(),
+                        hint.to_gl(),
+                    );
+                }
+                Some(PixelBuffer::new(hint.to_gl(), upload_size))
+            },
+        };
+
+        TextureUploader {
+            target: UploadTarget {
+                gl: &*self.gl,
+                bgra_format: self.bgra_format,
+                texture,
+            },
+            buffer,
+            marker: PhantomData,
+        }
+    }
+
+    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
+        let desc = self.gl_describe_format(img_desc.format);
+        self.gl.read_pixels(
+            0, 0,
+            img_desc.size.width as i32,
+            img_desc.size.height as i32,
+            desc.external,
+            desc.pixel_type,
+        )
+    }
+
+    fn read_pixels_into(
+        &mut self,
+        rect: DeviceUintRect,
+        format: ReadPixelsFormat,
+        output: &mut [u8],
+    ) {
+        let (bytes_per_pixel, desc) = match format {
+            ReadPixelsFormat::Standard(imf) => {
+                (imf.bytes_per_pixel(), self.gl_describe_format(imf))
+            }
+            ReadPixelsFormat::Rgba8 => {
+                (4, FormatDesc {
+                    external: gl::RGBA,
+                    internal: gl::RGBA8 as _,
+                    pixel_type: gl::UNSIGNED_BYTE,
+                })
+            }
+        };
+        let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
+        assert_eq!(output.len(), size_in_bytes);
+
+        self.gl.flush();
+        self.gl.read_pixels_into_buffer(
+            rect.origin.x as _,
+            rect.origin.y as _,
+            rect.size.width as _,
+            rect.size.height as _,
+            desc.external,
+            desc.pixel_type,
+            output,
+        );
+    }
+
+    #[cfg(any(feature = "debug_renderer", feature="capture"))]
+    fn attach_read_texture_external(
+        &mut self,
+        texture_id: gl::GLuint,
+        target: TextureTarget,
+        layer_id: i32,
+    ) {
+        self.attach_read_texture_raw(texture_id, get_gl_target(target), layer_id)
+    }
+
+    #[cfg(any(feature = "debug_renderer", feature="capture"))]
+    fn attach_read_texture(
+        &mut self,
+        texture: &Texture,
+        layer_id: i32,
+    ) {
+        self.attach_read_texture_raw(texture.id, texture.target, layer_id)
+    }
+
+    fn bind_vao(&mut self, vao: &VAO) {
+        self.bind_vao_impl(vao.id)
+    }
+
+    fn bind_custom_vao(&mut self, vao: &CustomVAO) {
+        self.bind_vao_impl(vao.id)
+    }
+
+    fn create_custom_vao(
+        &mut self,
+        streams: &[Stream],
+    ) -> CustomVAO {
+        debug_assert!(self.inside_frame);
+
+        let vao_id = self.gl.gen_vertex_arrays(1)[0];
+        self.gl.bind_vertex_array(vao_id);
+
+        let mut attrib_index = 0;
+        for stream in streams {
+            VertexDescriptor::bind_attributes(
+                stream.attributes,
+                attrib_index,
+                0,
+                self.gl(),
+                stream.vbo,
+            );
+            attrib_index += stream.attributes.len();
+        }
+
+        self.gl.bind_vertex_array(0);
+
+        CustomVAO {
+            id: vao_id,
+        }
+    }
+
+    fn delete_custom_vao(&mut self, mut vao: CustomVAO) {
+        self.gl.delete_vertex_arrays(&[vao.id]);
+        vao.id = 0;
+    }
+
+    fn create_vbo<T>(&mut self) -> VBO<T> {
+        let ids = self.gl.gen_buffers(1);
+        VBO {
+            id: ids[0],
+            target: gl::ARRAY_BUFFER,
+            allocated_count: 0,
+            marker: PhantomData,
+        }
+    }
+
+    fn delete_vbo<V>(&mut self, mut vbo: VBO<V>) {
+        self.gl.delete_buffers(&[vbo.id]);
+        vbo.id = 0;
+    }
+
+    fn create_vao(&mut self, descriptor: &VertexDescriptor) -> VAO {
+        debug_assert!(self.inside_frame);
+
+        let buffer_ids = self.gl.gen_buffers(3);
+        let ibo_id = IBOId(buffer_ids[0]);
+        let main_vbo_id = VBOId(buffer_ids[1]);
+        let intance_vbo_id = VBOId(buffer_ids[2]);
+
+        self.create_vao_with_vbos(descriptor, main_vbo_id, intance_vbo_id, ibo_id, true)
+    }
+
+    fn delete_vao(&mut self, mut vao: VAO) {
+        self.gl.delete_vertex_arrays(&[vao.id]);
+        vao.id = 0;
+
+        if vao.owns_vertices_and_indices {
+            self.gl.delete_buffers(&[vao.ibo_id.0]);
+            self.gl.delete_buffers(&[vao.main_vbo_id.0]);
+        }
+
+        self.gl.delete_buffers(&[vao.instance_vbo_id.0])
+    }
+
+    fn allocate_vbo<V>(
+        &mut self,
+        vbo: &mut VBO<V>,
+        count: usize,
+        usage_hint: VertexUsageHint,
+    ) {
+        debug_assert!(self.inside_frame);
+        vbo.allocated_count = count;
+
+        self.gl.bind_buffer(vbo.target, vbo.id);
+        self.gl.buffer_data_untyped(
+            vbo.target,
+            (count * mem::size_of::<V>()) as _,
+            ptr::null(),
+            usage_hint.to_gl(),
+        );
+    }
+
+    fn fill_vbo<V>(
+        &mut self,
+        vbo: &VBO<V>,
+        data: &[V],
+        offset: usize,
+    ) {
+        debug_assert!(self.inside_frame);
+        assert!(offset + data.len() <= vbo.allocated_count);
+        let stride = mem::size_of::<V>();
+
+        self.gl.bind_buffer(vbo.target, vbo.id);
+        self.gl.buffer_sub_data_untyped(
+            vbo.target,
+            (offset * stride) as _,
+            (data.len() * stride) as _,
+            data.as_ptr() as _,
+        );
+    }
+
+    fn create_vao_with_new_instances(
+        &mut self,
+        descriptor: &VertexDescriptor,
+        base_vao: &VAO,
+    ) -> VAO {
+        debug_assert!(self.inside_frame);
+
+        let buffer_ids = self.gl.gen_buffers(1);
+        let intance_vbo_id = VBOId(buffer_ids[0]);
+
+        self.create_vao_with_vbos(
+            descriptor,
+            base_vao.main_vbo_id,
+            intance_vbo_id,
+            base_vao.ibo_id,
+            false,
+        )
+    }
+
+    fn update_vao_main_vertices<V>(
+        &mut self,
+        vao: &VAO,
+        vertices: &[V],
+        usage_hint: VertexUsageHint,
+    ) {
+        debug_assert_eq!(self.bound_vao, vao.id);
+        self.update_vbo_data(vao.main_vbo_id, vertices, usage_hint)
+    }
+
+    fn update_vao_instances<V>(
+        &mut self,
+        vao: &VAO,
+        instances: &[V],
+        usage_hint: VertexUsageHint,
+    ) {
+        debug_assert_eq!(self.bound_vao, vao.id);
+        debug_assert_eq!(vao.instance_stride as usize, mem::size_of::<V>());
+
+        self.update_vbo_data(vao.instance_vbo_id, instances, usage_hint)
+    }
+
+    fn update_vao_indices<I>(&mut self, vao: &VAO, indices: &[I], usage_hint: VertexUsageHint) {
+        debug_assert!(self.inside_frame);
+        debug_assert_eq!(self.bound_vao, vao.id);
+
+        vao.ibo_id.bind(self.gl());
+        gl::buffer_data(
+            self.gl(),
+            gl::ELEMENT_ARRAY_BUFFER,
+            indices,
+            usage_hint.to_gl(),
+        );
+    }
+
+    fn draw_triangles_u16(&mut self, first_vertex: i32, index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.gl.draw_elements(
+            gl::TRIANGLES,
+            index_count,
+            gl::UNSIGNED_SHORT,
+            first_vertex as u32 * 2,
+        );
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    fn draw_triangles_u32(&mut self, first_vertex: i32, index_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.gl.draw_elements(
+            gl::TRIANGLES,
+            index_count,
+            gl::UNSIGNED_INT,
+            first_vertex as u32 * 4,
+        );
+    }
+
+    fn draw_nonindexed_points(&mut self, first_vertex: i32, vertex_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.gl.draw_arrays(gl::POINTS, first_vertex, vertex_count);
+    }
+
+    #[cfg(feature = "debug_renderer")]
+    fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.gl.draw_arrays(gl::LINES, first_vertex, vertex_count);
+    }
+
+    fn draw_indexed_triangles_instanced_u16(&mut self, index_count: i32, instance_count: i32) {
+        debug_assert!(self.inside_frame);
+        self.gl.draw_elements_instanced(
+            gl::TRIANGLES,
+            index_count,
+            gl::UNSIGNED_SHORT,
+            0,
+            instance_count,
+        );
+    }
+
+    fn end_frame(&mut self) {
+        self.bind_draw_target(None, None);
+        self.bind_read_target(None);
+
+        debug_assert!(self.inside_frame);
+        self.inside_frame = false;
+
+        self.gl.bind_texture(gl::TEXTURE_2D, 0);
+        self.gl.use_program(0);
+
+        for i in 0 .. self.bound_textures.len() {
+            self.gl.active_texture(gl::TEXTURE0 + i as gl::GLuint);
+            self.gl.bind_texture(gl::TEXTURE_2D, 0);
+        }
+
+        self.gl.active_texture(gl::TEXTURE0);
+
+        self.frame_id.0 += 1;
+    }
+
+    fn clear_target(
+        &self,
+        color: Option<[f32; 4]>,
+        depth: Option<f32>,
+        rect: Option<DeviceIntRect>,
+    ) {
+        let mut clear_bits = 0;
+
+        if let Some(color) = color {
+            self.gl.clear_color(color[0], color[1], color[2], color[3]);
+            clear_bits |= gl::COLOR_BUFFER_BIT;
+        }
+
+        if let Some(depth) = depth {
+            if cfg!(debug_assertions) {
+                let mut mask = [0];
+                unsafe {
+                    self.gl.get_boolean_v(gl::DEPTH_WRITEMASK, &mut mask);
+                }
+                assert_ne!(mask[0], 0);
+            }
+            self.gl.clear_depth(depth as f64);
+            clear_bits |= gl::DEPTH_BUFFER_BIT;
+        }
+
+        if clear_bits != 0 {
+            match rect {
+                Some(rect) => {
+                    self.gl.enable(gl::SCISSOR_TEST);
+                    self.gl.scissor(
+                        rect.origin.x,
+                        rect.origin.y,
+                        rect.size.width,
+                        rect.size.height,
+                    );
+                    self.gl.clear(clear_bits);
+                    self.gl.disable(gl::SCISSOR_TEST);
+                }
+                None => {
+                    self.gl.clear(clear_bits);
+                }
+            }
+        }
+    }
+
+    fn enable_depth(&self) {
+        self.gl.enable(gl::DEPTH_TEST);
+    }
+
+    fn disable_depth(&self) {
+        self.gl.disable(gl::DEPTH_TEST);
+    }
+
+    fn set_depth_func(&self, depth_func: DepthFunction) {
+        self.gl.depth_func(depth_func as gl::GLuint);
+    }
+
+    fn enable_depth_write(&self) {
+        self.gl.depth_mask(true);
+    }
+
+    fn disable_depth_write(&self) {
+        self.gl.depth_mask(false);
+    }
+
+    fn disable_stencil(&self) {
+        self.gl.disable(gl::STENCIL_TEST);
+    }
+
+    fn set_scissor_rect(&self, rect: DeviceIntRect) {
+        self.gl.scissor(
+            rect.origin.x,
+            rect.origin.y,
+            rect.size.width,
+            rect.size.height,
+        );
+    }
+
+    fn enable_scissor(&self) {
+        self.gl.enable(gl::SCISSOR_TEST);
+    }
+
+    fn disable_scissor(&self) {
+        self.gl.disable(gl::SCISSOR_TEST);
+    }
+
+    fn set_blend(&self, enable: bool) {
+        if enable {
+            self.gl.enable(gl::BLEND);
+        } else {
+            self.gl.disable(gl::BLEND);
+        }
+    }
+
+    fn set_blend_mode_alpha(&self) {
+        self.gl.blend_func_separate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA,
+                                    gl::ONE, gl::ONE);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+
+    fn set_blend_mode_premultiplied_alpha(&self) {
+        self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+
+    fn set_blend_mode_premultiplied_dest_out(&self) {
+        self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_ALPHA);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+
+    fn set_blend_mode_multiply(&self) {
+        self.gl
+            .blend_func_separate(gl::ZERO, gl::SRC_COLOR, gl::ZERO, gl::SRC_ALPHA);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_max(&self) {
+        self.gl
+            .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
+        self.gl.blend_equation_separate(gl::MAX, gl::FUNC_ADD);
+    }
+    #[cfg(feature = "debug_renderer")]
+    fn set_blend_mode_min(&self) {
+        self.gl
+            .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
+        self.gl.blend_equation_separate(gl::MIN, gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_pass0(&self) {
+        self.gl.blend_func(gl::ZERO, gl::ONE_MINUS_SRC_COLOR);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_pass1(&self) {
+        self.gl.blend_func(gl::ONE, gl::ONE);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_with_bg_color_pass0(&self) {
+        self.gl.blend_func_separate(gl::ZERO, gl::ONE_MINUS_SRC_COLOR, gl::ZERO, gl::ONE);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_with_bg_color_pass1(&self) {
+        self.gl.blend_func_separate(gl::ONE_MINUS_DST_ALPHA, gl::ONE, gl::ZERO, gl::ONE);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_with_bg_color_pass2(&self) {
+        self.gl.blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_constant_text_color(&self, color: ColorF) {
+        // color is an unpremultiplied color.
+        self.gl.blend_color(color.r, color.g, color.b, 1.0);
+        self.gl
+            .blend_func(gl::CONSTANT_COLOR, gl::ONE_MINUS_SRC_COLOR);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+    fn set_blend_mode_subpixel_dual_source(&self) {
+        self.gl.blend_func(gl::ONE, gl::ONE_MINUS_SRC1_COLOR);
+        self.gl.blend_equation(gl::FUNC_ADD);
+    }
+
+    fn supports_extension(&self, extension: &str) -> bool {
+        supports_extension(&self.extensions, extension)
+    }
+
+    fn echo_driver_messages(&self) {
+        for msg in self.gl.get_debug_messages() {
+            let level = match msg.severity {
+                gl::DEBUG_SEVERITY_HIGH => Level::Error,
+                gl::DEBUG_SEVERITY_MEDIUM => Level::Warn,
+                gl::DEBUG_SEVERITY_LOW => Level::Info,
+                gl::DEBUG_SEVERITY_NOTIFICATION => Level::Debug,
+                _ => Level::Trace,
+            };
+            let ty = match msg.ty {
+                gl::DEBUG_TYPE_ERROR => "error",
+                gl::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "deprecated",
+                gl::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "undefined",
+                gl::DEBUG_TYPE_PORTABILITY => "portability",
+                gl::DEBUG_TYPE_PERFORMANCE => "perf",
+                gl::DEBUG_TYPE_MARKER => "marker",
+                gl::DEBUG_TYPE_PUSH_GROUP => "group push",
+                gl::DEBUG_TYPE_POP_GROUP => "group pop",
+                gl::DEBUG_TYPE_OTHER => "other",
+                _ => "?",
+            };
+            log!(level, "({}) {}", ty, msg.message);
+        }
+    }
+
 }

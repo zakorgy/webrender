@@ -4,7 +4,7 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{Device, Program, Texture, TextureSlot, VertexDescriptor, VAO};
+use device::{DeviceMethods, TextureSlot, VertexDescriptor};
 use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
@@ -88,23 +88,23 @@ impl DebugColorVertex {
     }
 }
 
-pub struct DebugRenderer {
+pub struct DebugRenderer<D: DeviceMethods> {
     font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
-    font_program: Program,
-    font_vao: VAO,
+    font_program: D::Program,
+    font_vao: D::VAO,
     font_texture: Texture,
 
     tri_vertices: Vec<DebugColorVertex>,
     tri_indices: Vec<u32>,
-    tri_vao: VAO,
+    tri_vao: D::VAO,
     line_vertices: Vec<DebugColorVertex>,
-    line_vao: VAO,
-    color_program: Program,
+    line_vao: D::VAO,
+    color_program: D::Program,
 }
 
-impl DebugRenderer {
-    pub fn new(device: &mut Device) -> Self {
+impl<D: DeviceMethods> DebugRenderer<D> {
+    pub fn new(device: &mut D) -> Self {
         let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
         device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);
 
@@ -142,7 +142,7 @@ impl DebugRenderer {
         }
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut D) {
         device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
@@ -262,7 +262,7 @@ impl DebugRenderer {
 
     pub fn render(
         &mut self,
-        device: &mut Device,
+        device: &mut D,
         viewport_size: Option<DeviceUintSize>,
     ) {
         if let Some(viewport_size) = viewport_size {
