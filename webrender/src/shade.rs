@@ -115,7 +115,7 @@ impl LazilyCompiledShader {
                 return;
             }
         };
-        device.bind_program(program);
+        device.bind_program(&program);
         device.set_uniforms(&program, projection);
     }
 
