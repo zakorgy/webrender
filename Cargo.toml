@@ -12,7 +12,7 @@ debug = true
 panic = "abort"
 
 [replace]
-#"https://github.com/serde-rs/serde#serde_derive:1.0.58" = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums7", feature="deserialize_in_place" }
+"https://github.com/rust-lang/crates.io-index#serde_derive:1.0.58" = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums7", feature="deserialize_in_place" }
 "https://github.com/gfx-rs/gfx.git#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003"}
 "https://github.com/gfx-rs/gfx.git#gfx-backend-vulkan:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003" }
 "https://github.com/gfx-rs/gfx.git#gfx-backend-dx12:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="e2f040d8ff0c903ba38f68aa301d041deb512003" }
