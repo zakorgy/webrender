@@ -3508,7 +3508,7 @@ impl<B: hal::Backend> Renderer<B> {
         let mut index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
-                //TODO add this upstream
+                //TODO: fix this, our init_texture is handling this case incorrectly.
                 !texture.used_in_frame(frame_id) &&
                 //TODO: re-use a part of a larger target, if available
                 selector == TargetSelector {
