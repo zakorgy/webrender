@@ -70,6 +70,7 @@ mod debug_render;
 #[cfg(feature = "debugger")]
 mod debug_server;
 mod device;
+mod device_new;
 mod display_list_flattener;
 mod ellipse;
 mod frame_builder;

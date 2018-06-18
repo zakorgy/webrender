@@ -841,7 +841,7 @@ impl Device {
         }
     }
 
-    pub fn compile_shader(
+    fn compile_shader(
         gl: &gl::Gl,
         name: &str,
         shader_type: gl::GLenum,
