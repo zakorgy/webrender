@@ -1993,10 +1993,7 @@ impl<B: hal::Backend> Device<B> {
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
 
-        let pixel_width = window_size.0;
-        let pixel_height = window_size.1;
-
-        let (caps, formats) = surface.capabilities_and_formats(&adapter.physical_device);
+        let (caps, formats, _present_modes) = surface.compatibility(&adapter.physical_device);
         let surface_format = formats
             .map_or(
                 hal::format::Format::Bgra8Unorm,
@@ -2009,6 +2006,13 @@ impl<B: hal::Backend> Device<B> {
                         .unwrap()
                 },
             );
+
+        let extent = caps.current_extent.unwrap_or(
+            hal::window::Extent2D {
+                width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
+                height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
+            }
+        );
 
         let memory_types = adapter
             .physical_device
@@ -2060,7 +2064,7 @@ impl<B: hal::Backend> Device<B> {
                 .with_image_usage(
                     hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
                 );
-        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config);
+        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config, None, &extent);
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
 
@@ -2147,14 +2151,14 @@ impl<B: hal::Backend> Device<B> {
             }
         };
 
-        let frame_depth = DepthBuffer::new(&device, &memory_types, pixel_width, pixel_height, depth_format);
+        let frame_depth = DepthBuffer::new(&device, &memory_types, extent.width, extent.height, depth_format);
 
         // Framebuffer and render target creation
         let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
             Backbuffer::Images(images) => {
                 let extent = hal::image::Extent {
-                    width: pixel_width as _,
-                    height: pixel_height as _,
+                    width: extent.width as _,
+                    height: extent.height as _,
                     depth: 1,
                 };
                 let cores = images
@@ -2198,8 +2202,8 @@ impl<B: hal::Backend> Device<B> {
             rect: hal::pso::Rect {
                 x: 0,
                 y: 0,
-                w: pixel_width as u16,
-                h: pixel_height as u16,
+                w: extent.width as _,
+                h: extent.height as _,
             },
             depth: 0.0 .. 1.0,
         };
@@ -3784,9 +3788,8 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn set_next_frame_id(&mut self) {
-        let frame = self.swap_chain
-            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore));
-        self.current_frame_id = frame.id();
+        self.current_frame_id = self.swap_chain
+            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
     }
 
     pub fn swap_buffers(&mut self) {
@@ -3817,7 +3820,7 @@ impl<B: hal::Backend> Device<B> {
 
             // present frame
             self.swap_chain
-                .present(&mut self.queue_group.queues[0], Some(&self.render_finished_semaphore));
+                .present(&mut self.queue_group.queues[0], self.current_frame_id as _, Some(&self.render_finished_semaphore));
         }
         self.upload_queue.clear();
         self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
