@@ -473,72 +473,6 @@ pub struct Device {
 }
 
 impl Device {
-    /*fn new(
-        gl: Rc<gl::Gl>,
-        resource_override_path: Option<PathBuf>,
-        upload_method: UploadMethod,
-        _file_changed_handler: Box<FileWatcherHandler>,
-        cached_programs: Option<Rc<ProgramCache>>,
-    ) -> GlDevice {
-        let mut max_texture_size = [0];
-        unsafe {
-            gl.get_integer_v(gl::MAX_TEXTURE_SIZE, &mut max_texture_size);
-        }
-        let max_texture_size = max_texture_size[0] as u32;
-        let renderer_name = gl.get_string(gl::RENDERER);
-
-        let mut extension_count = [0];
-        unsafe {
-            gl.get_integer_v(gl::NUM_EXTENSIONS, &mut extension_count);
-        }
-        let extension_count = extension_count[0] as gl::GLuint;
-        let mut extensions = Vec::new();
-        for i in 0 .. extension_count {
-            extensions.push(gl.get_string_i(gl::EXTENSIONS, i));
-        }
-
-        let supports_bgra = supports_extension(&extensions, "GL_EXT_texture_format_BGRA8888");
-        let bgra_format = match gl.get_type() {
-            gl::GlType::Gl => GL_FORMAT_BGRA_GL,
-            gl::GlType::Gles => if supports_bgra {
-                GL_FORMAT_BGRA_GLES
-            } else {
-                GL_FORMAT_RGBA
-            }
-        };
-
-        GlDevice {
-            gl,
-            resource_override_path,
-            // This is initialized to 1 by default, but it is reset
-            // at the beginning of each frame in `Renderer::bind_frame_data`.
-            device_pixel_ratio: 1.0,
-            upload_method,
-            inside_frame: false,
-
-            #[cfg(feature = "debug_renderer")]
-            capabilities: Capabilities {
-                supports_multisampling: false, //TODO
-            },
-
-            bgra_format,
-
-            bound_textures: [0; 16],
-            bound_program: 0,
-            bound_vao: 0,
-            bound_read_fbo: FBOId(0),
-            bound_draw_fbo: FBOId(0),
-            program_mode_id: UniformLocation::INVALID,
-            default_read_fbo: 0,
-            default_draw_fbo: 0,
-
-            max_texture_size,
-            renderer_name,
-            cached_programs,
-            frame_id: FrameId(0),
-            extensions,
-        }
-    }*/
 
     fn gl(&self) -> &gl::Gl {
         &*self.gl
@@ -835,30 +769,6 @@ impl Device {
                 );
             }
         }
-    }
-
-    #[cfg(feature = "debug_renderer")]
-    pub fn get_uniform_location(&self, program: &Program, name: &str) -> UniformLocation {
-        UniformLocation(self.gl.get_uniform_location(program.id, name))
-    }
-
-    /// Get texels of a texture into the specified output slice.
-    #[cfg(feature = "debug_renderer")]
-    pub fn get_tex_image_into(
-        &mut self,
-        texture: &Texture,
-        format: ImageFormat,
-        output: &mut [u8],
-    ) {
-        self.bind_texture(DEFAULT_TEXTURE, texture);
-        let desc = self.gl_describe_format(format);
-        self.gl.get_tex_image_into_buffer(
-            texture.target,
-            0,
-            desc.external,
-            desc.pixel_type,
-            output,
-        );
     }
 
     /// Attaches the provided texture to the current Read FBO binding.
