@@ -3,21 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::ColorF;
-use device::DeviceApi;
 use query::{GpuTimer, NamedTag};
 use std::collections::vec_deque::VecDeque;
 use std::f32;
-use std::marker::PhantomData;
 use time::precise_time_ns;
 
 cfg_if! {
     if #[cfg(feature = "debug_renderer")] {
         use api::ColorU;
         use debug_render::DebugRenderer;
+        use device::DeviceApi;
         use euclid::{Point2D, Rect, Size2D, vec2};
         use query::GpuSampler;
         use internal_types::FastHashMap;
         use renderer::MAX_VERTEX_TEXTURE_WIDTH;
+        use std::marker::PhantomData;
         use std::mem;
     }
 }

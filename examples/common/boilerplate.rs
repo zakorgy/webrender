@@ -152,7 +152,7 @@ pub fn main_wrapper<E: Example>(
         DeviceUintSize::new(width, height)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::<webrender::GlDevice>::new(gl.clone(), notifier, opts).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::<webrender::Device>::new(gl.clone(), notifier, opts).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 

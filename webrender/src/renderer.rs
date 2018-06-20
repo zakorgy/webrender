@@ -20,18 +20,17 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{GlDevice, DeviceInit, DepthFunction, DeviceApi, FrameId, /*Program,*/ UploadMethod, Texture/*, PBO*/};
+use device::{DeviceInit, DepthFunction, DeviceApi, FrameId, /*Program,*/ UploadMethod, Texture/*, PBO*/};
 use device::{ExternalTexture, /*FBOId,*/ TextureSlot};
 use device::{FileWatcherHandler, ShaderError, TextureFilter,
-             VertexUsageHint, VAO, VBO/*, CustomVAO*/};
+             VertexUsageHint, /*VAO,*/ VBO/*, CustomVAO*/};
 use device::{ProgramCache, ReadPixelsFormat};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
-use gleam::gl;
 use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
-//#[cfg(feature = "pathfinder")]
-//use gpu_glyph_renderer::GpuGlyphRenderer;
+#[cfg(feature = "pathfinder")]
+use gpu_glyph_renderer::GpuGlyphRenderer;
 use internal_types::{SourceTexture, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, ResourceCacheError};
 use internal_types::{CacheTextureId, DebugOutput, FastHashMap, RenderedDocument, ResultMsg};
 use internal_types::{TextureUpdateList, TextureUpdateOp, TextureUpdateSource};
@@ -697,12 +696,14 @@ impl CpuProfile {
 }
 
 #[cfg(not(feature = "pathfinder"))]
-pub struct GpuGlyphRenderer;
+pub struct GpuGlyphRenderer<D: DeviceApi> {
+    phantom: PhantomData<D>,
+}
 
 #[cfg(not(feature = "pathfinder"))]
-impl GpuGlyphRenderer {
-    fn new(_: &mut GlDevice, _: &VAO, _: bool) -> Result<GpuGlyphRenderer, RendererError> {
-        Ok(GpuGlyphRenderer)
+impl<D: DeviceApi> GpuGlyphRenderer<D> {
+    fn new(_: &mut D, _: &D::VAO, _: bool) -> Result<GpuGlyphRenderer<D>, RendererError> {
+        Ok(GpuGlyphRenderer {phantom: PhantomData})
     }
 }
 
@@ -1350,7 +1351,7 @@ pub struct Renderer<D: DeviceApi> {
 
     shaders: Shaders<D>,
 
-    //pub gpu_glyph_renderer: GpuGlyphRenderer,
+    pub gpu_glyph_renderer: GpuGlyphRenderer<D>,
 
     max_texture_size: u32,
     max_recorded_profiles: usize,
@@ -1620,9 +1621,9 @@ impl<D: DeviceApi> Renderer<D> {
         device.update_vao_indices(&prim_vao, &quad_indices, VertexUsageHint::Static);
         device.update_vao_main_vertices(&prim_vao, &quad_vertices, VertexUsageHint::Static);
 
-        /*let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(&mut device,
+        let gpu_glyph_renderer = try!(GpuGlyphRenderer::new(&mut device,
                                                             &prim_vao,
-                                                            options.precache_shaders));*/
+                                                            options.precache_shaders));
 
         let blur_vao = device.create_vao_with_new_instances(&desc::BLUR, &prim_vao);
         let clip_vao = device.create_vao_with_new_instances(&desc::CLIP, &prim_vao);
@@ -1781,7 +1782,7 @@ impl<D: DeviceApi> Renderer<D> {
             enable_clear_scissor: options.enable_clear_scissor,
             last_time: 0,
             gpu_profile,
-            //gpu_glyph_renderer,
+            gpu_glyph_renderer,
             vaos: RendererVAOs {
                 prim_vao,
                 blur_vao,
@@ -2636,7 +2637,7 @@ impl<D: DeviceApi> Renderer<D> {
         // the batch.
         debug_assert!(!data.is_empty());
 
-        let vao = get_vao(vertex_array_kind, &self.vaos/*, &self.gpu_glyph_renderer*/);
+        let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
 
         self.device.bind_vao(vao);
 
@@ -4178,7 +4179,7 @@ struct PlainRenderer {
 
 #[cfg(feature = "replay")]
 enum CapturedExternalImageData {
-    NativeTexture(gl::GLuint),
+    NativeTexture(u32),  // It's a gl::GLuint texture handle
     Buffer(Arc<Vec<u8>>),
 }
 
@@ -4488,7 +4489,7 @@ impl<D: DeviceApi> Renderer<D> {
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 
             info!("loading external texture-backed images");
-            let mut native_map = FastHashMap::<String, gl::GLuint>::default();
+            let mut native_map = FastHashMap::<String, u32>::default();
             for ExternalCaptureImage { short_path, external, descriptor } in renderer.external_images {
                 let target = match external.image_type {
                     ExternalImageType::TextureHandle(target) => target,
@@ -4534,7 +4535,7 @@ impl<D: DeviceApi> Renderer<D> {
 #[cfg(feature = "pathfinder")]
 fn get_vao<'a, D: DeviceApi>(vertex_array_kind: VertexArrayKind,
                vaos: &'a RendererVAOs<D>,
-               gpu_glyph_renderer: &'a GpuGlyphRenderer)
+               gpu_glyph_renderer: &'a GpuGlyphRenderer<D>)
                -> &'a D::VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
@@ -4549,7 +4550,7 @@ fn get_vao<'a, D: DeviceApi>(vertex_array_kind: VertexArrayKind,
 #[cfg(not(feature = "pathfinder"))]
 fn get_vao<'a, D: DeviceApi>(vertex_array_kind: VertexArrayKind,
                vaos: &'a RendererVAOs<D>,
-               /*_: &'a GpuGlyphRenderer*/)
+               _: &'a GpuGlyphRenderer<D>)
                -> &'a D::VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,

@@ -46,7 +46,7 @@ impl RenderNotifier for Notifier {
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
     window: glutin::GlWindow,
-    renderer: webrender::Renderer<webrender::GlDevice>,
+    renderer: webrender::Renderer<webrender::Device>,
     name: &'static str,
     pipeline_id: PipelineId,
     document_id: DocumentId,

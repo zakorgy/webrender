@@ -2,25 +2,35 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use api::{ColorF, DeviceIntRect, DeviceUintSize, DeviceUintRect, ImageFormat, TextureTarget};
+#[cfg(any(feature = "debug_renderer", feature = "capture"))]
+use api::{ImageDescriptor};
+use device::gl::{DeviceInit, DepthFunction, Stream, TextureUploader, VBO, Texture, ExternalTexture};
+use device::common::{FileWatcherHandler, FrameId, ProgramCache, ReadPixelsFormat, ShaderError,
+                     Texel, TextureFilter, TextureSlot, UploadMethod, VertexDescriptor, VertexUsageHint};
+#[cfg(feature = "debug_renderer")]
+use device::common::Capabilities;
 use euclid::Transform3D;
-//use self::gl::{DeviceInit, DepthFunction, Stream, TextureUploader, VBO, Texture, ExternalTexture};
+use internal_types::RenderTargetInfo;
 use std::convert::From;
+use std::hash::Hash;
+use std::fmt::Debug;
 use std::marker::Sized;
-use super::*;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 pub trait DeviceApi
     where Self: Sized,
 {
     type CustomVAO;
-    //type DepthFunction;
-    //type ExternalTexture;
-    type FBOId: PartialEq + Eq + Copy + Clone;
+    type FBOId: PartialEq + Eq + Hash + Debug + Copy + Clone;
     type PBO;
     type Program;
-    type RBOId: PartialEq + Eq + Copy + Clone;
-    //type Texture;
-    type TextureId: PartialEq + Eq + Copy + Clone + From<u32>;
+    type RBOId: PartialEq + Eq + Hash + Debug + Copy + Clone;
+    type TextureId: PartialEq + Eq + Hash + Debug + Copy + Clone + From<u32>;
     type VAO;
+    //type ExternalTexture;
+    //type Texture;
 
     fn new(
         init: DeviceInit,
@@ -107,7 +117,7 @@ pub trait DeviceApi
     fn delete_texture(&mut self, texture: /*Self::*/Texture);
 
     #[cfg(feature = "replay")]
-    fn delete_external_texture(&mut self, mut external: /*Self::*/ExternalTexture);
+    fn delete_external_texture(&mut self, external: /*Self::*/ExternalTexture);
 
     fn delete_program(&mut self, program: Self::Program);
 

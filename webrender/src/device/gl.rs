@@ -2,15 +2,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DeviceIntPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize};
+use api::{ColorF, DeviceIntPoint, DeviceIntRect, DeviceUintRect, DeviceUintSize, ImageFormat, TextureTarget};
+#[cfg(any(feature = "debug_renderer", feature = "capture"))]
+use api::{ImageDescriptor};
+use device::common::{build_shader_strings, texels_to_u8_slice, FileWatcherHandler, FrameId,
+                     ProgramBinary, ProgramCache, ProgramSources, ReadPixelsFormat, ShaderError,
+                     Texel, TextureFilter, TextureSlot, UploadMethod, VertexAttribute,
+                     VertexAttributeKind, VertexDescriptor, VertexUsageHint};
+#[cfg(feature = "debug_renderer")]
+use device::common::Capabilities;
+use device::device_api::DeviceApi;
 use euclid::{Transform3D};
 use gleam::gl;
+use internal_types::RenderTargetInfo;
 use log::Level;
 use smallvec::SmallVec;
-use self::device_api::DeviceApi;
 use std::marker::PhantomData;
+use std::mem;
+use std::path::PathBuf;
 use std::ptr;
-use super::*;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::thread;
 
 const GL_FORMAT_RGBA: gl::GLuint = gl::RGBA;
 
@@ -420,7 +433,7 @@ impl UniformLocation {
     pub const INVALID: Self = UniformLocation(-1);
 }
 
-pub struct GlDevice {
+pub struct Device {
     gl: Rc<gl::Gl>,
     // device state
     bound_textures: [gl::GLuint; 16],
@@ -459,7 +472,7 @@ pub struct GlDevice {
     extensions: Vec<String>,
 }
 
-impl GlDevice {
+impl Device {
     /*fn new(
         gl: Rc<gl::Gl>,
         resource_override_path: Option<PathBuf>,
@@ -1137,15 +1150,12 @@ impl<'a> UploadTarget<'a> {
     }
 }
 
-impl DeviceApi for GlDevice {
+impl DeviceApi for Device {
     type CustomVAO = CustomVAO;
-    //type DepthFunction = DepthFunction;
-    //type ExternalTexture = ExternalTexture;
     type FBOId = FBOId;
     type PBO = PBO;
     type Program = Program;
     type RBOId = RBOId;
-    //type Texture = Texture;
     type TextureId = gl::GLuint;
     type VAO = VAO;
 
@@ -1184,7 +1194,7 @@ impl DeviceApi for GlDevice {
             }
         };
 
-        GlDevice {
+        Device {
             gl,
             resource_override_path,
             // This is initialized to 1 by default, but it is reset
@@ -1605,14 +1615,14 @@ impl DeviceApi for GlDevice {
         if loaded == false {
             // Compile the vertex shader
             let vs_id =
-                match GlDevice::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
+                match Device::compile_shader(&*self.gl, base_filename, gl::VERTEX_SHADER, &sources.vs_source) {
                     Ok(vs_id) => vs_id,
                     Err(err) => return Err(err),
                 };
 
             // Compiler the fragment shader
             let fs_id =
-                match GlDevice::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
+                match Device::compile_shader(&*self.gl, base_filename, gl::FRAGMENT_SHADER, &sources.fs_source) {
                     Ok(fs_id) => fs_id,
                     Err(err) => {
                         self.gl.delete_shader(vs_id);

@@ -7,7 +7,7 @@
 use api::{DeviceIntPoint, DeviceIntRect, DeviceUintSize, FontRenderMode};
 use api::{ImageFormat, TextureTarget};
 use debug_colors;
-use device::{DeviceApi, Texture, TextureFilter, VAO};
+use device::{DeviceApi, Texture, TextureFilter, /*VAO*/};
 use euclid::{Point2D, Size2D, Transform3D, TypedVector2D, Vector2D};
 use internal_types::RenderTargetInfo;
 use pathfinder_gfx_utils::ShelfBinPacker;
@@ -31,19 +31,19 @@ const GPU_TAG_GLYPH_COVER: GpuProfileTag = GpuProfileTag {
     color: debug_colors::LIGHTSTEELBLUE,
 };
 
-pub struct GpuGlyphRenderer {
+pub struct GpuGlyphRenderer<D: DeviceApi> {
     pub area_lut_texture: Texture,
-    pub vector_stencil_vao: VAO,
-    pub vector_cover_vao: VAO,
+    pub vector_stencil_vao: D::VAO,
+    pub vector_cover_vao: D::VAO,
 
     // These are Pathfinder shaders, used for rendering vector graphics.
-    vector_stencil: LazilyCompiledShader,
-    vector_cover: LazilyCompiledShader,
+    vector_stencil: LazilyCompiledShader<D>,
+    vector_cover: LazilyCompiledShader<D>,
 }
 
-impl GpuGlyphRenderer {
-    pub fn new(device: &mut DeviceApi, prim_vao: &VAO, precache_shaders: bool)
-               -> Result<GpuGlyphRenderer, RendererError> {
+impl<D: DeviceApi> GpuGlyphRenderer<D> {
+    pub fn new(device: &mut D, prim_vao: &D::VAO, precache_shaders: bool)
+               -> Result<GpuGlyphRenderer<D>, RendererError> {
         // Make sure the area LUT is uncompressed grayscale TGA, 8bpp.
         debug_assert!(AREA_LUT_TGA_BYTES[2] == 3);
         debug_assert!(AREA_LUT_TGA_BYTES[16] == 8);
@@ -94,7 +94,7 @@ impl GpuGlyphRenderer {
     }
 }
 
-impl Renderer {
+impl<D: DeviceApi> Renderer<D> {
     /// Renders glyphs using the vector graphics shaders (Pathfinder).
     pub fn stencil_glyphs(&mut self,
                           glyphs: &[GlyphJob],

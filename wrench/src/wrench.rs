@@ -147,7 +147,7 @@ pub struct Wrench {
     pub device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer,
+    pub renderer: webrender::Renderer<webrender::Device>,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
