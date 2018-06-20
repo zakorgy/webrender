@@ -3,8 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::ImageFormat;
-#[cfg(any(feature = "debug_renderer", feature="capture"))]
-use api::ImageDescriptor;
 use internal_types::FastHashMap;
 use shader_source;
 use std::cell::RefCell;

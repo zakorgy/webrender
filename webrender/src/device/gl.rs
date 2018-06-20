@@ -11,7 +11,7 @@ use device::common::{build_shader_strings, texels_to_u8_slice, FileWatcherHandle
                      VertexAttributeKind, VertexDescriptor, VertexUsageHint};
 #[cfg(feature = "debug_renderer")]
 use device::common::Capabilities;
-use device::device_api::DeviceApi;
+use device::device_api::DeviceMethods;
 use euclid::{Transform3D};
 use gleam::gl;
 use internal_types::RenderTargetInfo;
@@ -1060,7 +1060,7 @@ impl<'a> UploadTarget<'a> {
     }
 }
 
-impl DeviceApi for Device {
+impl DeviceMethods for Device {
     type CustomVAO = CustomVAO;
     type FBOId = FBOId;
     type PBO = PBO;

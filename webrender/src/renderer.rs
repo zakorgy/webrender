@@ -20,11 +20,9 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DeviceInit, DepthFunction, DeviceApi, FrameId, /*Program,*/ UploadMethod, Texture/*, PBO*/};
-use device::{ExternalTexture, /*FBOId,*/ TextureSlot};
-use device::{FileWatcherHandler, ShaderError, TextureFilter,
-             VertexUsageHint, /*VAO,*/ VBO/*, CustomVAO*/};
-use device::{ProgramCache, ReadPixelsFormat};
+use device::{DeviceInit, DepthFunction, FileWatcherHandler, FrameId};
+use device::{ProgramCache, ReadPixelsFormat, ShaderError, TextureFilter};
+use device::{TextureMethods, TextureSlot, UploadMethod, VertexUsageHint, VBO};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
@@ -696,12 +694,12 @@ impl CpuProfile {
 }
 
 #[cfg(not(feature = "pathfinder"))]
-pub struct GpuGlyphRenderer<D: DeviceApi> {
+pub struct GpuGlyphRenderer<D: DeviceMethods> {
     phantom: PhantomData<D>,
 }
 
 #[cfg(not(feature = "pathfinder"))]
-impl<D: DeviceApi> GpuGlyphRenderer<D> {
+impl<D: DeviceMethods> GpuGlyphRenderer<D> {
     fn new(_: &mut D, _: &D::VAO, _: bool) -> Result<GpuGlyphRenderer<D>, RendererError> {
         Ok(GpuGlyphRenderer {phantom: PhantomData})
     }
@@ -716,7 +714,7 @@ struct ActiveTexture {
     is_shared: bool,
 }
 
-struct SourceTextureResolver<D: DeviceApi> {
+struct SourceTextureResolver<D: DeviceMethods> {
     /// A vector for fast resolves of texture cache IDs to
     /// native texture IDs. This maps to a free-list managed
     /// by the backend thread / texture cache. We free the
@@ -751,7 +749,7 @@ struct SourceTextureResolver<D: DeviceApi> {
     phantom: PhantomData<D>,
 }
 
-impl<D: DeviceApi> SourceTextureResolver<D> {
+impl<D: DeviceMethods> SourceTextureResolver<D> {
     fn new(device: &mut D) -> SourceTextureResolver<D> {
         let mut dummy_cache_texture = device
             .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
@@ -934,7 +932,7 @@ impl CacheRow {
 
 /// The bus over which CPU and GPU versions of the cache
 /// get synchronized.
-enum CacheBus<D: DeviceApi> {
+enum CacheBus<D: DeviceMethods> {
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
@@ -962,12 +960,12 @@ enum CacheBus<D: DeviceApi> {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct CacheTexture<D: DeviceApi> {
+struct CacheTexture<D: DeviceMethods> {
     texture: Texture,
     bus: CacheBus<D>,
 }
 
-impl<D: DeviceApi> CacheTexture<D> {
+impl<D: DeviceMethods> CacheTexture<D> {
     fn new(device: &mut D, use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
@@ -1210,22 +1208,17 @@ impl<D: DeviceApi> CacheTexture<D> {
     }
 }
 
-struct VertexDataTexture<D: DeviceApi> {
-    texture: Texture,
+struct VertexDataTexture<D: DeviceMethods> {
+    texture: D::Texture,
     pbo: D::PBO,
-    phantom: PhantomData<D>,
 }
 
-impl<D: DeviceApi> VertexDataTexture<D> {
+impl<D: DeviceMethods> VertexDataTexture<D> {
     fn new(device: &mut D) -> VertexDataTexture<D> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
         let pbo = device.create_pbo();
 
-        VertexDataTexture {
-            texture,
-            pbo,
-            phantom: PhantomData,
-        }
+        VertexDataTexture { texture, pbo }
     }
 
     fn update<T>(&mut self, device: &mut D, data: &mut Vec<T>) {
@@ -1294,7 +1287,7 @@ impl FileWatcherHandler for FileWatcher {
     }
 }
 
-struct FrameOutput<D: DeviceApi> {
+struct FrameOutput<D: DeviceMethods> {
     last_access: FrameId,
     fbo_id: D::FBOId,
 }
@@ -1307,12 +1300,12 @@ struct TargetSelector {
 }
 
 #[cfg(feature = "debug_renderer")]
-struct LazyInitializedDebugRenderer<D: DeviceApi> {
+struct LazyInitializedDebugRenderer<D: DeviceMethods> {
     debug_renderer: Option<DebugRenderer<D>>,
 }
 
 #[cfg(feature = "debug_renderer")]
-impl<D: DeviceApi> LazyInitializedDebugRenderer<D> {
+impl<D: DeviceMethods> LazyInitializedDebugRenderer<D> {
     pub fn new() -> Self {
         Self {
             debug_renderer: None,
@@ -1330,7 +1323,7 @@ impl<D: DeviceApi> LazyInitializedDebugRenderer<D> {
     }
 }
 
-pub struct RendererVAOs<D: DeviceApi> {
+pub struct RendererVAOs<D: DeviceMethods> {
     prim_vao: D::VAO,
     blur_vao: D::VAO,
     clip_vao: D::VAO,
@@ -1340,7 +1333,7 @@ pub struct RendererVAOs<D: DeviceApi> {
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
-pub struct Renderer<D: DeviceApi> {
+pub struct Renderer<D: DeviceMethods> {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
     pub device: D,
@@ -1444,7 +1437,7 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
-impl<D: DeviceApi> Renderer<D> {
+impl<D: DeviceMethods> Renderer<D> {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
     /// # Examples
@@ -1479,7 +1472,7 @@ impl<D: DeviceApi> Renderer<D> {
             notifier: notifier.clone(),
         };
 
-        let mut device: D = DeviceApi::new(
+        let mut device: D = DeviceMethods::new(
             init,
             options.resource_override_path.clone(),
             options.upload_method.clone(),
@@ -4219,7 +4212,7 @@ pub struct PipelineInfo {
     pub removed_pipelines: Vec<PipelineId>,
 }
 
-impl<D: DeviceApi> Renderer<D> {
+impl<D: DeviceMethods> Renderer<D> {
     #[cfg(feature = "capture")]
     fn save_texture(
         texture: &Texture, name: &str, root: &PathBuf, device: &mut D
@@ -4533,10 +4526,10 @@ impl<D: DeviceApi> Renderer<D> {
 }
 
 #[cfg(feature = "pathfinder")]
-fn get_vao<'a, D: DeviceApi>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs<D>,
-               gpu_glyph_renderer: &'a GpuGlyphRenderer<D>)
-               -> &'a D::VAO {
+fn get_vao<'a, D: DeviceMethods>(vertex_array_kind: VertexArrayKind,
+                                 vaos: &'a RendererVAOs<D>,
+                                 gpu_glyph_renderer: &'a GpuGlyphRenderer<D>)
+                                 -> &'a D::VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
@@ -4548,10 +4541,10 @@ fn get_vao<'a, D: DeviceApi>(vertex_array_kind: VertexArrayKind,
 }
 
 #[cfg(not(feature = "pathfinder"))]
-fn get_vao<'a, D: DeviceApi>(vertex_array_kind: VertexArrayKind,
-               vaos: &'a RendererVAOs<D>,
-               _: &'a GpuGlyphRenderer<D>)
-               -> &'a D::VAO {
+fn get_vao<'a, D: DeviceMethods>(vertex_array_kind: VertexArrayKind,
+                                 vaos: &'a RendererVAOs<D>,
+                                 _: &'a GpuGlyphRenderer<D>)
+                                 -> &'a D::VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,

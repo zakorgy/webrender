@@ -4,7 +4,7 @@
 
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
-use device::{DeviceApi, Program, Texture, TextureSlot, VertexDescriptor, VAO};
+use device::{DeviceMethods, TextureSlot, VertexDescriptor};
 use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
@@ -88,7 +88,7 @@ impl DebugColorVertex {
     }
 }
 
-pub struct DebugRenderer<D: DeviceApi> {
+pub struct DebugRenderer<D: DeviceMethods> {
     font_vertices: Vec<DebugFontVertex>,
     font_indices: Vec<u32>,
     font_program: D::Program,
@@ -103,7 +103,7 @@ pub struct DebugRenderer<D: DeviceApi> {
     color_program: D::Program,
 }
 
-impl<D: DeviceApi> DebugRenderer<D> {
+impl<D: DeviceMethods> DebugRenderer<D> {
     pub fn new(device: &mut D) -> Self {
         let font_program = device.create_program("debug_font", "", &DESC_FONT).unwrap();
         device.bind_shader_samplers(&font_program, &[("sColor0", DebugSampler::Font)]);

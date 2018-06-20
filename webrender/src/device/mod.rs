@@ -10,5 +10,5 @@ mod shader_source {
 }
 
 pub use self::common::*;
-pub use self::device_api::DeviceApi;
+pub use self::device_api::DeviceMethods;
 pub use self::gl::*;

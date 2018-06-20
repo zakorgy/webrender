@@ -19,7 +19,7 @@ use std::marker::Sized;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-pub trait DeviceApi
+pub trait DeviceMethods
     where Self: Sized,
 {
     type CustomVAO;
@@ -266,7 +266,7 @@ pub trait DeviceApi
 
     fn disable_depth(&self);
 
-    fn set_depth_func(&self, depth_func: /*Self::*/DepthFunction);
+    fn set_depth_func(&self, depth_func: DepthFunction);
 
     fn enable_depth_write(&self);
 

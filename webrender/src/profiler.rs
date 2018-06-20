@@ -12,7 +12,7 @@ cfg_if! {
     if #[cfg(feature = "debug_renderer")] {
         use api::ColorU;
         use debug_render::DebugRenderer;
-        use device::DeviceApi;
+        use device::DeviceMethods;
         use euclid::{Point2D, Rect, Size2D, vec2};
         use query::GpuSampler;
         use internal_types::FastHashMap;
@@ -554,7 +554,7 @@ impl ProfileGraph {
     }
 
     #[cfg(feature = "debug_renderer")]
-    fn draw_graph<D: DeviceApi>(
+    fn draw_graph<D: DeviceMethods>(
         &self,
         x: f32,
         y: f32,
@@ -685,7 +685,7 @@ impl GpuFrameCollection {
 
 #[cfg(feature = "debug_renderer")]
 impl GpuFrameCollection {
-    fn draw<D: DeviceApi>(&self, x: f32, y: f32, debug_renderer: &mut DebugRenderer<D>) -> Rect<f32> {
+    fn draw<D: DeviceMethods>(&self, x: f32, y: f32, debug_renderer: &mut DebugRenderer<D>) -> Rect<f32> {
         let graph_rect = Rect::new(
             Point2D::new(x, y),
             Size2D::new(GRAPH_WIDTH, GRAPH_HEIGHT),
@@ -783,7 +783,7 @@ struct DrawState {
 }
 
 #[cfg(feature = "debug_renderer")]
-pub struct Profiler<D: DeviceApi> {
+pub struct Profiler<D: DeviceMethods> {
     draw_state: DrawState,
     backend_time: ProfileGraph,
     compositor_time: ProfileGraph,
@@ -794,7 +794,7 @@ pub struct Profiler<D: DeviceApi> {
 }
 
 #[cfg(feature = "debug_renderer")]
-impl<D: DeviceApi> Profiler<D> {
+impl<D: DeviceMethods> Profiler<D> {
 
     pub fn new() -> Self {
         Profiler {
@@ -1236,7 +1236,7 @@ impl ChangeIndicator {
         self.counter = (self.counter + 1) % 15;
     }
 
-    pub fn draw<D: DeviceApi>(
+    pub fn draw<D: DeviceMethods>(
         &self,
         x: f32, y: f32,
         color: ColorU,

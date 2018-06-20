@@ -7,7 +7,7 @@ use api::{
     YuvColorSpace, YuvFormat,
 };
 use batch::{BatchKey, BatchKind, BrushBatchKind};
-use device::{DeviceApi, ShaderError};
+use device::{DeviceMethods, ShaderError};
 use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
 use renderer::{
@@ -66,7 +66,7 @@ pub(crate) enum ShaderKind {
     VectorCover,
 }
 
-pub struct LazilyCompiledShader<D: DeviceApi> {
+pub struct LazilyCompiledShader<D: DeviceMethods> {
     program: Option<D::Program>,
     name: &'static str,
     kind: ShaderKind,
@@ -74,7 +74,7 @@ pub struct LazilyCompiledShader<D: DeviceApi> {
     phantom: PhantomData<D>,
 }
 
-impl<D: DeviceApi> LazilyCompiledShader<D> {
+impl<D: DeviceMethods> LazilyCompiledShader<D> {
     pub(crate) fn new(
         kind: ShaderKind,
         name: &'static str,
@@ -180,13 +180,13 @@ impl<D: DeviceApi> LazilyCompiledShader<D> {
 //   pass. Assumes that AA should be applied
 //   along the primitive edge, and also that
 //   clip mask is present.
-struct BrushShader<D: DeviceApi> {
+struct BrushShader<D: DeviceMethods> {
     opaque: LazilyCompiledShader<D>,
     alpha: LazilyCompiledShader<D>,
     dual_source: Option<LazilyCompiledShader<D>>,
 }
 
-impl<D: DeviceApi> BrushShader<D> {
+impl<D: DeviceMethods> BrushShader<D> {
     fn new(
         name: &'static str,
         device: &mut D,
@@ -262,12 +262,12 @@ impl<D: DeviceApi> BrushShader<D> {
     }
 }
 
-pub struct TextShader<D: DeviceApi> {
+pub struct TextShader<D: DeviceMethods> {
     simple: LazilyCompiledShader<D>,
     glyph_transform: LazilyCompiledShader<D>,
 }
 
-impl<D: DeviceApi> TextShader<D> {
+impl<D: DeviceMethods> TextShader<D> {
     fn new(
         name: &'static str,
         device: &mut D,
@@ -316,7 +316,7 @@ impl<D: DeviceApi> TextShader<D> {
     }
 }
 
-fn create_prim_shader<D: DeviceApi>(
+fn create_prim_shader<D: DeviceMethods>(
     name: &'static str,
     device: &mut D,
     features: &[&'static str],
@@ -366,7 +366,7 @@ fn create_prim_shader<D: DeviceApi>(
     program
 }
 
-fn create_clip_shader<D: DeviceApi>(name: &'static str, device: &mut D) -> Result<D::Program, ShaderError> {
+fn create_clip_shader<D: DeviceMethods>(name: &'static str, device: &mut D) -> Result<D::Program, ShaderError> {
     let prefix = format!(
         "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
         #define WR_FEATURE_TRANSFORM\n",
@@ -395,7 +395,7 @@ fn create_clip_shader<D: DeviceApi>(name: &'static str, device: &mut D) -> Resul
 }
 
 
-pub struct Shaders<D: DeviceApi> {
+pub struct Shaders<D: DeviceMethods> {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
@@ -433,7 +433,7 @@ pub struct Shaders<D: DeviceApi> {
     ps_split_composite: LazilyCompiledShader<D>,
 }
 
-impl<D: DeviceApi> Shaders<D> {
+impl<D: DeviceMethods> Shaders<D> {
     pub fn new(
         device: &mut D,
         gl_type: GlType,
