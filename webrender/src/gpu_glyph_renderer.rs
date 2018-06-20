@@ -7,7 +7,7 @@
 use api::{DeviceIntPoint, DeviceIntRect, DeviceUintSize, FontRenderMode};
 use api::{ImageFormat, TextureTarget};
 use debug_colors;
-use device::{Device, Texture, TextureFilter, VAO};
+use device::{DeviceApi, Texture, TextureFilter, VAO};
 use euclid::{Point2D, Size2D, Transform3D, TypedVector2D, Vector2D};
 use internal_types::RenderTargetInfo;
 use pathfinder_gfx_utils::ShelfBinPacker;
@@ -42,7 +42,7 @@ pub struct GpuGlyphRenderer {
 }
 
 impl GpuGlyphRenderer {
-    pub fn new(device: &mut Device, prim_vao: &VAO, precache_shaders: bool)
+    pub fn new(device: &mut DeviceApi, prim_vao: &VAO, precache_shaders: bool)
                -> Result<GpuGlyphRenderer, RendererError> {
         // Make sure the area LUT is uncompressed grayscale TGA, 8bpp.
         debug_assert!(AREA_LUT_TGA_BYTES[2] == 3);

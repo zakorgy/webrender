@@ -283,5 +283,5 @@ fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
     }
 }
 
-pub use self::device_api::Device;
+pub use self::device_api::DeviceApi;
 pub use self::gl::*;
