@@ -11,6 +11,7 @@ extern crate winit;
 use direct_composition::DirectComposition;
 use std::sync::mpsc;
 use webrender::api;
+use webrender::Device;
 use winit::os::windows::WindowExt;
 
 fn main() {
@@ -88,7 +89,7 @@ fn direct_composition_from_window(window: &winit::Window) -> DirectComposition {
 
 struct Rectangle {
     visual: direct_composition::AngleVisual,
-    renderer: Option<webrender::Renderer>,
+    renderer: Option<webrender::Renderer<Device>>,
     api: api::RenderApi,
     document_id: api::DocumentId,
     size: api::DeviceUintSize,
