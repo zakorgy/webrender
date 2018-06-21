@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::ImageFormat;
-use internal_types::FastHashMap;
+use api::{ImageFormat, DeviceUintSize};
+use device::gl::IdType;
+use internal_types::{FastHashMap, RenderTargetInfo};
 use shader_source;
 use std::cell::RefCell;
 use std::fs::File;
@@ -14,7 +15,119 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::slice;
 use std::sync::Arc;
+use std::thread;
 
+const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
+const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
+const SHADER_IMPORT: &str = "#include ";
+
+pub struct CustomVAO {
+    pub(crate) id: IdType,
+}
+
+impl Drop for CustomVAO {
+    fn drop(&mut self) {
+        debug_assert!(
+            thread::panicking() || self.id == 0,
+            "renderer::deinit not called"
+        );
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct FBOId(pub(crate) IdType);
+
+#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+pub struct RBOId(pub(crate) IdType);
+
+pub struct PBO {
+    pub(crate) id: IdType,
+}
+
+impl Drop for PBO {
+    fn drop(&mut self) {
+        debug_assert!(
+            thread::panicking() || self.id == 0,
+            "renderer::deinit not called"
+        );
+    }
+}
+
+#[cfg_attr(feature = "replay", derive(Clone))]
+pub struct ExternalTexture {
+    pub(crate) id: IdType,
+    pub(crate) target: IdType,
+}
+
+pub struct Texture {
+    pub(crate) id: IdType,
+    pub(crate) target: IdType,
+    pub(crate) layer_count: i32,
+    pub(crate) format: ImageFormat,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) filter: TextureFilter,
+    pub(crate) render_target: Option<RenderTargetInfo>,
+    pub(crate) fbo_ids: Vec<FBOId>,
+    pub(crate) depth_rb: Option<RBOId>,
+    pub(crate) last_frame_used: FrameId,
+}
+
+impl Texture {
+    pub fn get_dimensions(&self) -> DeviceUintSize {
+        DeviceUintSize::new(self.width, self.height)
+    }
+
+    pub fn get_render_target_layer_count(&self) -> usize {
+        self.fbo_ids.len()
+    }
+
+    pub fn get_layer_count(&self) -> i32 {
+        self.layer_count
+    }
+
+    pub fn get_format(&self) -> ImageFormat {
+        self.format
+    }
+
+    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    pub fn get_filter(&self) -> TextureFilter {
+        self.filter
+    }
+
+    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    pub fn get_render_target(&self) -> Option<RenderTargetInfo> {
+        self.render_target.clone()
+    }
+
+    pub fn has_depth(&self) -> bool {
+        self.depth_rb.is_some()
+    }
+
+    pub fn get_rt_info(&self) -> Option<&RenderTargetInfo> {
+        self.render_target.as_ref()
+    }
+
+    pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
+        self.last_frame_used == frame_id
+    }
+
+    #[cfg(feature = "replay")]
+    pub fn into_external(mut self) -> ExternalTexture {
+        let ext = ExternalTexture {
+            id: self.id,
+            target: self.target,
+        };
+        self.id = 0; // don't complain, moved out
+        ext
+    }
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        debug_assert!(thread::panicking() || self.id == 0);
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -34,10 +147,6 @@ impl Add<usize> for FrameId {
         FrameId(self.0 + other)
     }
 }
-
-const SHADER_KIND_VERTEX: &str = "#define WR_VERTEX_SHADER\n";
-const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
-const SHADER_IMPORT: &str = "#include ";
 
 pub struct TextureSlot(pub usize);
 

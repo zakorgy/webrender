@@ -33,6 +33,7 @@ const SHADER_VERSION_GLES: &str = "#version 300 es\n";
 const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 
 pub type DeviceInit = Rc<gl::Gl>;
+pub type IdType = gl::GLuint;
 
 #[repr(u32)]
 pub enum DepthFunction {
@@ -249,12 +250,6 @@ impl<T> Drop for VBO<T> {
     }
 }
 
-#[cfg_attr(feature = "replay", derive(Clone))]
-pub struct ExternalTexture {
-    id: gl::GLuint,
-    target: gl::GLuint,
-}
-
 impl ExternalTexture {
     pub fn new(id: u32, target: TextureTarget) -> Self {
         ExternalTexture {
@@ -269,76 +264,6 @@ impl ExternalTexture {
     }
 }
 
-pub struct Texture {
-    id: gl::GLuint,
-    target: gl::GLuint,
-    layer_count: i32,
-    format: ImageFormat,
-    width: u32,
-    height: u32,
-    filter: TextureFilter,
-    render_target: Option<RenderTargetInfo>,
-    fbo_ids: Vec<FBOId>,
-    depth_rb: Option<RBOId>,
-    last_frame_used: FrameId,
-}
-
-impl Texture {
-    pub fn get_dimensions(&self) -> DeviceUintSize {
-        DeviceUintSize::new(self.width, self.height)
-    }
-
-    pub fn get_render_target_layer_count(&self) -> usize {
-        self.fbo_ids.len()
-    }
-
-    pub fn get_layer_count(&self) -> i32 {
-        self.layer_count
-    }
-
-    pub fn get_format(&self) -> ImageFormat {
-        self.format
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn get_filter(&self) -> TextureFilter {
-        self.filter
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
-    pub fn get_render_target(&self) -> Option<RenderTargetInfo> {
-        self.render_target.clone()
-    }
-
-    pub fn has_depth(&self) -> bool {
-        self.depth_rb.is_some()
-    }
-
-    pub fn get_rt_info(&self) -> Option<&RenderTargetInfo> {
-        self.render_target.as_ref()
-    }
-
-    pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
-        self.last_frame_used == frame_id
-    }
-
-    #[cfg(feature = "replay")]
-    pub fn into_external(mut self) -> ExternalTexture {
-        let ext = ExternalTexture {
-            id: self.id,
-            target: self.target,
-        };
-        self.id = 0; // don't complain, moved out
-        ext
-    }
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        debug_assert!(thread::panicking() || self.id == 0);
-    }
-}
-
 pub struct Program {
     id: gl::GLuint,
     u_transform: gl::GLint,
@@ -347,19 +272,6 @@ pub struct Program {
 }
 
 impl Drop for Program {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
-
-pub struct CustomVAO {
-    id: gl::GLuint,
-}
-
-impl Drop for CustomVAO {
     fn drop(&mut self) {
         debug_assert!(
             thread::panicking() || self.id == 0,
@@ -385,25 +297,6 @@ impl Drop for VAO {
         );
     }
 }
-
-pub struct PBO {
-    id: gl::GLuint,
-}
-
-impl Drop for PBO {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct FBOId(gl::GLuint);
-
-#[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct RBOId(gl::GLuint);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct VBOId(gl::GLuint);
@@ -1056,12 +949,7 @@ impl<'a> UploadTarget<'a> {
 }
 
 impl DeviceMethods for Device {
-    type CustomVAO = CustomVAO;
-    type FBOId = FBOId;
-    type PBO = PBO;
     type Program = Program;
-    type RBOId = RBOId;
-    type TextureId = gl::GLuint;
     type VAO = VAO;
 
     fn new(

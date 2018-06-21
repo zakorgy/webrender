@@ -20,9 +20,9 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
-use device::{DeviceInit, DepthFunction, FileWatcherHandler, FrameId};
-use device::{ProgramCache, ReadPixelsFormat, ShaderError, TextureFilter};
-use device::{TextureMethods, TextureSlot, UploadMethod, VertexUsageHint, VBO};
+use device::{CustomVAO, DepthFunction, DeviceInit, DeviceMethods, ExternalTexture, FBOId};
+use device::{FileWatcherHandler, FrameId, PBO, ProgramCache, ReadPixelsFormat, ShaderError};
+use device::{Texture, TextureFilter, TextureSlot, UploadMethod, VBO, VertexUsageHint};
 use euclid::{rect, Transform3D};
 use frame_builder::FrameBuilderConfig;
 use glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
@@ -937,7 +937,7 @@ enum CacheBus<D: DeviceMethods> {
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
         /// PBO used for transfers.
-        buffer: D::PBO,
+        buffer: PBO,
         /// Meta-data about the cached rows.
         rows: Vec<CacheRow>,
         /// Mirrored block data on CPU.
@@ -949,7 +949,7 @@ enum CacheBus<D: DeviceMethods> {
         /// Special program to run the scattered update.
         program: D::Program,
         /// VAO containing the source vertex buffers.
-        vao: D::CustomVAO,
+        vao: CustomVAO,
         /// VBO for positional data, supplied as normalized `u16`.
         buf_position: VBO<[u16; 2]>,
         /// VBO for gpu block data.
@@ -1209,8 +1209,9 @@ impl<D: DeviceMethods> CacheTexture<D> {
 }
 
 struct VertexDataTexture<D: DeviceMethods> {
-    texture: D::Texture,
-    pbo: D::PBO,
+    texture: Texture,
+    pbo: PBO,
+    phantom: PhantomData<D>,
 }
 
 impl<D: DeviceMethods> VertexDataTexture<D> {
@@ -1218,7 +1219,11 @@ impl<D: DeviceMethods> VertexDataTexture<D> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
         let pbo = device.create_pbo();
 
-        VertexDataTexture { texture, pbo }
+        VertexDataTexture {
+            texture,
+            pbo,
+            phantom: PhantomData,
+        }
     }
 
     fn update<T>(&mut self, device: &mut D, data: &mut Vec<T>) {
@@ -1287,9 +1292,9 @@ impl FileWatcherHandler for FileWatcher {
     }
 }
 
-struct FrameOutput<D: DeviceMethods> {
+struct FrameOutput {
     last_access: FrameId,
-    fbo_id: D::FBOId,
+    fbo_id: FBOId,
 }
 
 #[derive(PartialEq)]
@@ -1382,7 +1387,7 @@ pub struct Renderer<D: DeviceMethods> {
     texture_resolver: SourceTextureResolver<D>,
 
     // A PBO used to do asynchronous texture cache uploads.
-    texture_cache_upload_pbo: D::PBO,
+    texture_cache_upload_pbo: PBO,
 
     dither_matrix_texture: Option<Texture>,
 
@@ -1396,7 +1401,7 @@ pub struct Renderer<D: DeviceMethods> {
     output_image_handler: Option<Box<OutputImageHandler>>,
 
     // Currently allocated FBOs for output frames.
-    output_targets: FastHashMap<u32, FrameOutput<D>>,
+    output_targets: FastHashMap<u32, FrameOutput>,
 
     pub renderer_errors: Vec<RendererError>,
 
@@ -1406,7 +1411,7 @@ pub struct Renderer<D: DeviceMethods> {
     gpu_profiles: VecDeque<GpuProfile>,
 
     #[cfg(feature = "capture")]
-    read_fbo: D::FBOId,
+    read_fbo: FBOId,
     #[cfg(feature = "replay")]
     owned_external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
 }
