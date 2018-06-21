@@ -5,7 +5,7 @@
 use api::{ColorU, DeviceIntRect, DeviceUintSize, ImageFormat, TextureTarget};
 use debug_font_data;
 use device::{DeviceMethods, TextureSlot, VertexDescriptor};
-use device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
+use device::{Texture, TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
 use euclid::{Point2D, Rect, Size2D, Transform3D};
 use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE};
 use std::f32;

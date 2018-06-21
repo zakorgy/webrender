@@ -5,16 +5,16 @@
 use api::{ColorF, DeviceIntRect, DeviceUintSize, DeviceUintRect, ImageFormat, TextureTarget};
 #[cfg(any(feature = "debug_renderer", feature = "capture"))]
 use api::{ImageDescriptor};
-use device::gl::{DeviceInit, DepthFunction, Stream, TextureUploader, VBO, Texture, ExternalTexture};
-use device::common::{FileWatcherHandler, FrameId, ProgramCache, ReadPixelsFormat, ShaderError,
+#[cfg(any(feature = "debug_renderer", feature="capture"))]
+use device::gl::IdType;
+use device::gl::{DeviceInit, DepthFunction, Stream, TextureUploader, VBO};
+use device::common::{FBOId, PBO, ExternalTexture, Texture,
+                     CustomVAO, FileWatcherHandler, FrameId, ProgramCache, ReadPixelsFormat, ShaderError,
                      Texel, TextureFilter, TextureSlot, UploadMethod, VertexDescriptor, VertexUsageHint};
 #[cfg(feature = "debug_renderer")]
 use device::common::Capabilities;
 use euclid::Transform3D;
 use internal_types::RenderTargetInfo;
-use std::convert::From;
-use std::hash::Hash;
-use std::fmt::Debug;
 use std::marker::Sized;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -22,15 +22,8 @@ use std::rc::Rc;
 pub trait DeviceMethods
     where Self: Sized,
 {
-    type CustomVAO;
-    type FBOId: PartialEq + Eq + Hash + Debug + Copy + Clone;
-    type PBO;
     type Program;
-    type RBOId: PartialEq + Eq + Hash + Debug + Copy + Clone;
-    type TextureId: PartialEq + Eq + Hash + Debug + Copy + Clone + From<u32>;
     type VAO;
-    //type ExternalTexture;
-    //type Texture;
 
     fn new(
         init: DeviceInit,
@@ -59,29 +52,29 @@ pub trait DeviceMethods
 
     fn begin_frame(&mut self) -> FrameId;
 
-    fn bind_texture<S>(&mut self, sampler: S, texture: &/*Self::*/Texture)
+    fn bind_texture<S>(&mut self, sampler: S, texture: &Texture)
         where
             S: Into<TextureSlot>;
 
-    fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &/*Self::*/ExternalTexture)
+    fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
         where
             S: Into<TextureSlot>;
 
-    fn bind_read_target_impl(&mut self, fbo_id: Self::FBOId);
+    fn bind_read_target_impl(&mut self, fbo_id: FBOId);
 
-    fn bind_read_target(&mut self, texture_and_layer: Option<(&/*Self::*/Texture, i32)>);
+    fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>);
 
     fn bind_draw_target(
         &mut self,
-        texture_and_layer: Option<(&/*Self::*/Texture, i32)>,
+        texture_and_layer: Option<(&Texture, i32)>,
         dimensions: Option<DeviceUintSize>,
     );
 
-    fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> Self::FBOId;
+    fn create_fbo_for_external_texture(&mut self, texture_id: u32) -> FBOId;
 
-    fn delete_fbo(&mut self, fbo: Self::FBOId);
+    fn delete_fbo(&mut self, fbo: FBOId);
 
-    fn bind_external_draw_target(&mut self, fbo_id: Self::FBOId);
+    fn bind_external_draw_target(&mut self, fbo_id: FBOId);
 
     fn bind_program(&mut self, program: &Self::Program);
 
@@ -89,19 +82,19 @@ pub trait DeviceMethods
         &mut self,
         target: TextureTarget,
         format: ImageFormat,
-    ) -> /*Self::*/Texture;
+    ) -> Texture;
 
     /// Resizes a texture with enabled render target views,
     /// preserves the data by blitting the old texture contents over.
     fn resize_renderable_texture(
         &mut self,
-        texture: &mut /*Self::*/Texture,
+        texture: &mut Texture,
         new_size: DeviceUintSize,
     );
 
     fn init_texture<T: Texel>(
         &mut self,
-        texture: &mut /*Self::*/Texture,
+        texture: &mut Texture,
         width: u32,
         height: u32,
         filter: TextureFilter,
@@ -112,12 +105,12 @@ pub trait DeviceMethods
 
     fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect);
 
-    fn free_texture_storage(&mut self, texture: &mut /*Self::*/Texture);
+    fn free_texture_storage(&mut self, texture: &mut Texture);
 
-    fn delete_texture(&mut self, texture: /*Self::*/Texture);
+    fn delete_texture(&mut self, texture: Texture);
 
     #[cfg(feature = "replay")]
-    fn delete_external_texture(&mut self, external: /*Self::*/ExternalTexture);
+    fn delete_external_texture(&mut self, external: ExternalTexture);
 
     fn delete_program(&mut self, program: Self::Program);
 
@@ -140,14 +133,14 @@ pub trait DeviceMethods
 
     fn switch_mode(&self, mode: i32);
 
-    fn create_pbo(&mut self) -> Self::PBO;
+    fn create_pbo(&mut self) -> PBO;
 
-    fn delete_pbo(&mut self, pbo: Self::PBO);
+    fn delete_pbo(&mut self, pbo: PBO);
 
     fn upload_texture<'a, T>(
         &'a mut self,
-        texture: &'a /*Self::*/Texture,
-        pbo: &Self::PBO,
+        texture: &'a Texture,
+        pbo: &PBO,
         upload_count: usize,
     ) -> TextureUploader<'a, T>;
 
@@ -165,7 +158,7 @@ pub trait DeviceMethods
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     fn attach_read_texture_external(
         &mut self,
-        texture_id: Self::TextureId,
+        texture_id: IdType,
         target: TextureTarget,
         layer_id: i32,
     );
@@ -173,20 +166,20 @@ pub trait DeviceMethods
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     fn attach_read_texture(
         &mut self,
-        texture: &/*Self::*/Texture,
+        texture: &Texture,
         layer_id: i32,
     );
 
     fn bind_vao(&mut self, vao: &Self::VAO);
 
-    fn bind_custom_vao(&mut self, vao: &Self::CustomVAO);
+    fn bind_custom_vao(&mut self, vao: &CustomVAO);
 
     fn create_custom_vao(
         &mut self,
         streams: &[Stream],
-    ) -> Self::CustomVAO;
+    ) -> CustomVAO;
 
-    fn delete_custom_vao(&mut self, vao: Self::CustomVAO);
+    fn delete_custom_vao(&mut self, vao: CustomVAO);
 
     fn create_vbo<V>(&mut self) -> VBO<V>;
 
