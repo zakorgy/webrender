@@ -69,8 +69,8 @@ optional = true
 [dev-dependencies]
 mozangle = "0.1"
 env_logger = "0.5"
-glutin = "0.15"             # for the example apps
-winit = "0.13"              # for the example apps
+glutin = "0.16"             # for the example apps
+winit = "0.15"              # for the example apps
 gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git" }
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 

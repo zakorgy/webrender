@@ -18,7 +18,7 @@ gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx.git", optional = tru
 gfx-backend-dx12 = { git = "https://github.com/gfx-rs/gfx.git", optional = true }
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 gleam = { version = "0.4", optional = true }
-glutin = { version = "0.13", optional = true }
+glutin = { version = "0.16", optional = true }
 app_units = "0.6"
 image = "0.18"
 clap = { version = "2", features = ["yaml"] }
@@ -34,7 +34,7 @@ osmesa-src = { git = "https://github.com/jrmuizel/osmesa-src", optional = true, 
 #webrender = {path = "../webrender", features=["capture","replay","debugger","png","profiler"]}
 webrender = {path = "../webrender" }
 webrender_api = {path = "../webrender_api", features=["serialize","deserialize"]}
-winit = "0.13"
+winit = "0.15"
 serde = {version = "1.0", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
