@@ -540,6 +540,7 @@ impl<B: hal::Backend> Image<B> {
             1, // Data stride is 1, because we receive image data as [u8].
             (image_width * image_format.bytes_per_pixel()) as usize,
             image_height as usize,
+            image_depth as _,
             pitch_alignment,
         );
 
@@ -766,13 +767,14 @@ impl<B: hal::Backend> CopyBuffer<B> {
         data_stride: usize,
         data_width: usize, // without stride
         data_height: usize,
+        layers: usize,
         pitch_alignment: usize,
     ) -> Self {
         let mut row_pitch_in_bytes = (data_width * data_stride + pitch_alignment) & !pitch_alignment;
         if row_pitch_in_bytes % data_width > 0 {
             row_pitch_in_bytes = ((data_width + pitch_alignment) & !pitch_alignment) * data_stride;
         }
-        let buffer_size = row_pitch_in_bytes * data_height;
+        let buffer_size = row_pitch_in_bytes * data_height * layers;
         let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
         let requirements = device.get_buffer_requirements(&unbound_buffer);
         let mem_type = memory_types
@@ -834,6 +836,7 @@ impl<B: hal::Backend> CopyBuffer<B> {
             let upper_bound = cmp::min(lower_bound + self.data_width, image_data.len());
             let row = &(*image_data)[lower_bound .. upper_bound];
             let dest_base = y * self.row_pitch();
+            assert!(dest_base + row.len() <= data.len());
             data[dest_base .. dest_base + row.len()].copy_from_slice(row);
         }
         device.release_mapping_writer(data);
@@ -1691,6 +1694,7 @@ pub struct Device<B: hal::Backend> {
     bound_textures: [u32; 16],
     bound_program: ProgramId,
     bound_sampler: [TextureFilter; 16],
+    bound_read_texture: (TextureId, i32),
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
     program_mode_id: i32,
@@ -1896,6 +1900,7 @@ impl<B: hal::Backend> Device<B> {
             bound_program: INVALID_PROGRAM_ID,
             bound_sampler: [TextureFilter::Linear; 16],
             bound_read_fbo: DEFAULT_READ_FBO,
+            bound_read_texture: (INVALID_TEXTURE_ID, 0),
             bound_draw_fbo: DEFAULT_DRAW_FBO,
             program_mode_id: 0,
             scissor_rect: None,
@@ -2179,7 +2184,6 @@ impl<B: hal::Backend> Device<B> {
             },
             depth: 0.0 .. 1.0,
         };
-
         (swap_chain, surface_format, depth_format, render_pass,
          framebuffers, framebuffers_depth, frame_depth, frame_images, viewport)
     }
@@ -2440,6 +2444,11 @@ impl<B: hal::Backend> Device<B> {
         self.bind_read_target_impl(fbo_id)
     }
 
+    #[cfg(feature = "capture")]
+    fn bind_read_texture(&mut self, texture_id: TextureId, layer_id: i32 ) {
+        self.bound_read_texture = (texture_id, layer_id);
+    }
+
     fn bind_draw_target_impl(&mut self, fbo_id: FBOId) {
         debug_assert!(self.inside_frame);
 
@@ -2602,6 +2611,9 @@ impl<B: hal::Backend> Device<B> {
         pixels: Option<&[T]>,
     ) {
         debug_assert!(self.inside_frame);
+        if width == 0 || height == 0 || layer_count == 0 {
+            return;
+        }
 
         if width > self.max_texture_size || height > self.max_texture_size {
             error!("Attempting to allocate a texture of size {}x{} above the limit, trimming", width, height);
@@ -2710,23 +2722,27 @@ impl<B: hal::Backend> Device<B> {
 
 
         if let Some(data) = pixels {
-            self.upload_queue
-                .push(
-                    self.images
-                        .get_mut(&texture.id)
-                        .expect("Texture not found.")
-                        .update(
-                            &mut self.device,
-                            &mut self.command_pool[self.next_id],
-                            DeviceUintRect::new(
-                                DeviceUintPoint::new(0, 0),
-                                DeviceUintSize::new(texture.width, texture.height),
-                            ),
-                            0,
-                            texels_to_u8_slice(data),
-                            (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
-                        )
-                );
+            let len = data.len() / layer_count as usize;
+            for i in 0..layer_count {
+                let start = len * i as usize;
+                self.upload_queue
+                    .push(
+                        self.images
+                            .get_mut(&texture.id)
+                            .expect("Texture not found.")
+                            .update(
+                                &mut self.device,
+                                &mut self.command_pool[self.next_id],
+                                DeviceUintRect::new(
+                                    DeviceUintPoint::new(0, 0),
+                                    DeviceUintSize::new(texture.width, texture.height),
+                                ),
+                                i,
+                                texels_to_u8_slice(&data[start .. (start + len)]),
+                                (self.limits.min_buffer_copy_offset_alignment - 1) as usize,
+                            )
+                    );
+            }
             if texture.filter == TextureFilter::Trilinear {
                 self.generate_mipmaps(texture);
             }
@@ -3132,7 +3148,12 @@ impl<B: hal::Backend> Device<B> {
         };
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
-        let (image, layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+        let capture_read = cfg!(feature = "capture") && self.bound_read_texture.0 != INVALID_TEXTURE_ID;
+
+        let (image, layer) = if capture_read {
+            let img = &self.images[&self.bound_read_texture.0];
+            (&img.core, self.bound_read_texture.1 as u16)
+        } else if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
             let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
@@ -3147,6 +3168,7 @@ impl<B: hal::Backend> Device<B> {
             1,
             (rect.size.width * bytes_per_pixel) as usize,
             rect.size.height as usize,
+            1,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
         );
 
@@ -3235,10 +3257,13 @@ impl<B: hal::Backend> Device<B> {
             {
                 assert_eq!(reader.len() * 4, output.len());
                 let mut offset = 0;
-                let (i0, i1, i2, i3) = match self.surface_format.base_format().0 {
-                    hal::format::SurfaceType::B8_G8_R8_A8 => (2, 1, 0, 3),
-                    //hal::format::SurfaceType::R8_G8_B8_A8 => (0, 1, 2, 3),
-                    _ => (0, 1, 2, 3)
+                let (i0, i1, i2, i3) = if capture_read {
+                    (0, 1, 2, 3)
+                } else {
+                    match self.surface_format.base_format().0 {
+                        hal::format::SurfaceType::B8_G8_R8_A8 => (2, 1, 0, 3),
+                        _ => (0, 1, 2, 3),
+                    }
                 };
                 for d in reader.iter() {
                     let data = *d;
@@ -3272,21 +3297,25 @@ impl<B: hal::Backend> Device<B> {
     /// Attaches the provided texture to the current Read FBO binding.
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     fn attach_read_texture_raw(
+        &mut self, texture_id: u32, _target: TextureTarget, layer_id: i32
+    ) {
+        self.bind_read_texture(texture_id, layer_id);
+    }
+
+    #[cfg(any(feature = "debug_renderer", feature="capture"))]
+    pub fn attach_read_texture_external(
         &mut self, _texture_id: u32, _target: TextureTarget, _layer_id: i32
     ) {
         unimplemented!();
     }
 
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
-    pub fn attach_read_texture_external(
-        &mut self, texture_id: u32, target: TextureTarget, layer_id: i32
-    ) {
-        self.attach_read_texture_raw(texture_id, target, layer_id)
-    }
-
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
         self.attach_read_texture_raw(texture.id, texture.target.into(), layer_id)
+    }
+
+    pub fn invalidate_read_texture(&mut self) {
+        self.bound_read_texture = (INVALID_TEXTURE_ID, 0);
     }
 
     pub fn bind_vao(&mut self, _vao: &VAO) { }

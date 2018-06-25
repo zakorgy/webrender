@@ -660,6 +660,18 @@ fn render<'a>(
         println!("loaded {:?}", documents.iter().map(|cd| cd.document_id).collect::<Vec<_>>());
         let captured = documents.swap_remove(0);
         window.resize(captured.window_size);
+
+        #[cfg(feature = "gfx")]
+        {
+            let dim = window.get_window().get_inner_size().unwrap();
+            let init = webrender::DeviceInit {
+                adapter: _adapter.as_ref().unwrap(),
+                surface: _instance.create_surface(window.get_window()),
+                window_size: (dim.width as _, dim.height as _),
+            };
+            let _ = wrench.renderer.resize(Some(init));
+        }
+
         wrench.document_id = captured.document_id;
         Box::new(captured) as Box<WrenchThing>
     } else {
@@ -774,7 +786,11 @@ fn render<'a>(
                         cpu_profile_index += 1;
                     }
                     VirtualKeyCode::C => {
-                        let path = PathBuf::from("../captures/wrench");
+                        let path = if cfg!(feature = "gl") {
+                            PathBuf::from("../captures/wrench/gl")
+                        } else {
+                            PathBuf::from("../captures/wrench/gfx")
+                        };
                         wrench.api.save_capture(path, CaptureBits::all());
                     }
                     VirtualKeyCode::Up | VirtualKeyCode::Down => {

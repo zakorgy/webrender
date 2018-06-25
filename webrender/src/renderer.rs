@@ -21,6 +21,8 @@ use batch::{BatchKind, BatchTextures, BrushBatchKind};
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
 use device::desc;
+#[cfg(feature = "replay")]
+use device::IdType;
 use device::{create_projection, DepthFunction, Device, ExternalTexture, FBOId, FileWatcherHandler, FrameId};
 use device::{PBO, PrimitiveType, ProgramCache, ShaderError, ReadPixelsFormat, DeviceInit};
 use device::{Texture, TextureSampler, TextureFilter, UploadMethod, VertexArrayKind, VertexUsageHint, VAO};
@@ -4018,8 +4020,7 @@ struct PlainRenderer {
 
 #[cfg(feature = "replay")]
 enum CapturedExternalImageData {
-    #[cfg(feature = "gleam")]
-    NativeTexture(gl::GLuint),
+    NativeTexture(IdType),
     Buffer(Arc<Vec<u8>>),
 }
 
@@ -4035,7 +4036,6 @@ impl ExternalImageHandler for DummyExternalImageHandler {
         ExternalImage {
             uv: *uv,
             source: match *captured_data {
-                #[cfg(feature = "gleam")]
                 CapturedExternalImageData::NativeTexture(tid) => ExternalImageSource::NativeTexture(tid),
                 CapturedExternalImageData::Buffer(ref arc) => ExternalImageSource::RawData(&*arc),
             }
@@ -4106,6 +4106,8 @@ impl<B: hal::Backend> Renderer<B>
                 );
             }
             device.read_pixels_into(rect, read_format, &mut data);
+            #[cfg(not(feature = "gleam"))]
+            device.invalidate_read_texture();
             file.write_all(&data)
                 .unwrap();
         }
@@ -4332,9 +4334,8 @@ impl<B: hal::Backend> Renderer<B>
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 
             info!("loading external texture-backed images");
-            #[cfg(feature = "gleam")]
-            let mut native_map = FastHashMap::<String, gl::GLuint>::default();
-            #[cfg(feature = "gleam")]
+
+            let mut native_map = FastHashMap::<String, IdType>::default();
             for ExternalCaptureImage { short_path, external, descriptor } in renderer.external_images {
                 let target = match external.image_type {
                     ExternalImageType::TextureHandle(target) => target,

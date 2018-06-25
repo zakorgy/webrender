@@ -37,10 +37,10 @@ const SHADER_KIND_FRAGMENT: &str = "#define WR_FRAGMENT_SHADER\n";
 const SHADER_IMPORT: &str = "#include ";
 
 #[cfg(not(feature = "gleam"))]
-type IdType = u32;
+pub type IdType = u32;
 
 #[cfg(feature = "gleam")]
-type IdType = GLuint;
+pub type IdType = GLuint;
 
 /// Plain old data that can be used to initialize a texture.
 pub unsafe trait Texel: Copy {}
