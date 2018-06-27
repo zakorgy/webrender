@@ -80,7 +80,7 @@ impl<T> GpuFrameProfile<T> {
         }
     }
 
-    fn enable_timers(&mut self, count: i32) {
+    fn enable_timers(&mut self, _count: i32) {
         self.timers.set = Vec::new();
     }
 
@@ -91,7 +91,7 @@ impl<T> GpuFrameProfile<T> {
         self.timers.set = Vec::new();
     }
 
-    fn enable_samplers(&mut self, count: i32) {
+    fn enable_samplers(&mut self, _count: i32) {
         self.samplers.set = Vec::new();
     }
 
@@ -136,7 +136,7 @@ impl<T: NamedTag> GpuFrameProfile<T> {
 
         let marker = GpuMarker::new(tag.get_label());
 
-        if let Some(query) = self.timers.add(GpuTimer { tag, time_ns: 0 }) {
+        if let Some(_query) = self.timers.add(GpuTimer { tag, time_ns: 0 }) {
         }
 
         GpuTimeQuery(marker)
@@ -146,7 +146,6 @@ impl<T: NamedTag> GpuFrameProfile<T> {
         self.finish_sampler();
 
         if let Some(_query) = self.samplers.add(GpuSampler { tag, count: 0 }) {
-
         }
 
         GpuSampleQuery
@@ -158,10 +157,10 @@ impl<T: NamedTag> GpuFrameProfile<T> {
 
         (
             self.frame_id,
-            self.timers.take(|timer, query| {
+            self.timers.take(|timer, _query| {
                 timer.time_ns = 0
             }),
-            self.samplers.take(|sampler, query| {
+            self.samplers.take(|sampler, _query| {
                 sampler.count = 0
             }),
         )

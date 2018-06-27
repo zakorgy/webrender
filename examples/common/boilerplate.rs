@@ -2,35 +2,34 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#![cfg_attr(
+    not(any(feature = "gfx-hal", feature = "gl")),
+    allow(dead_code, unused_imports)
+)]
+
 extern crate env_logger;
 extern crate euclid;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(feature = "metal")]
+extern crate gfx_backend_metal as back;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(feature = "gl")]
+extern crate gfx_backend_empty as back;
 
-cfg_if! {
-    if #[cfg(feature = "dx12")] {
-        extern crate gfx_backend_dx12 as back;
-    } else if #[cfg(feature = "metal")] {
-        extern crate gfx_backend_metal as back;
-    } else if #[cfg(feature = "vulkan")] {
-        extern crate gfx_backend_vulkan as back;
-    } else {
-        extern crate gfx_backend_empty as back;
-    }
-}
-
-cfg_if! {
-    if #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))] {
-        use webrender::hal::Instance;
-    } else {
-        use gleam::gl;
-        use glutin::{self, GlContext};
-        use std::marker::PhantomData;
-    }
-}
-
+#[cfg(feature = "gl")]
+use gleam::gl;
+#[cfg(feature = "gl")]
+use glutin::{self, GlContext};
 use std::env;
+#[cfg(feature = "gl")]
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use webrender;
 use webrender::api::*;
+#[cfg(feature = "gfx-hal")]
+use webrender::hal::Instance;
 use winit;
 
 struct Notifier {
@@ -104,7 +103,8 @@ pub trait Example {
     fn on_event(&mut self, winit::WindowEvent, &RenderApi, DocumentId) -> bool {
         false
     }
-    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+
+    #[cfg(feature = "gl")]
     fn get_image_handlers(
         &mut self,
         _gl: &gl::Gl,
@@ -112,11 +112,13 @@ pub trait Example {
           Option<Box<webrender::OutputImageHandler>>) {
         (None, None)
     }
-    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+
+    #[cfg(feature = "gl")]
     fn draw_custom(&self, _gl: &gl::Gl) {
     }
 }
 
+#[cfg(any(feature = "gfx-hal", feature = "gl"))]
 pub fn main_wrapper<E: Example>(
     example: &mut E,
     options: Option<webrender::RendererOptions>,
@@ -136,7 +138,7 @@ pub fn main_wrapper<E: Example>(
         .with_multitouch()
         .with_dimensions(E::WIDTH, E::HEIGHT);
 
-    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+    #[cfg(feature = "gl")]
     let (gl, init, window) = {
         let context_builder = glutin::ContextBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
@@ -168,7 +170,7 @@ pub fn main_wrapper<E: Example>(
         (gl, init, window)
     };
 
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx-hal")]
     let (window, adapter, mut surface) = {
         let window = window_builder.build(&events_loop).unwrap();
         let instance = back::Instance::create("gfx-rs instance", 1);
@@ -180,7 +182,7 @@ pub fn main_wrapper<E: Example>(
 
     let (width, height) = window.get_inner_size().unwrap();
 
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx-hal")]
     let init = webrender::RendererInit {
         adapter: &adapter,
         surface: &mut surface,
@@ -208,10 +210,10 @@ pub fn main_wrapper<E: Example>(
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 
-    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+    #[cfg(feature = "gl")]
     let (external, output) = example.get_image_handlers(&*gl);
 
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx-hal")]
     let (external, output) = (None, None);
 
     if let Some(output_image_handler) = output {
@@ -332,9 +334,9 @@ pub fn main_wrapper<E: Example>(
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
         let _ = renderer.flush_pipeline_info();
-        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        #[cfg(feature = "gl")]
         example.draw_custom(&*gl);
-        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        #[cfg(feature = "gl")]
         window.swap_buffers().ok();
 
         winit::ControlFlow::Continue
@@ -342,3 +344,11 @@ pub fn main_wrapper<E: Example>(
 
     renderer.deinit();
 }
+#[cfg(not(any(feature = "gfx-hal", feature = "gl")))]
+pub fn main_wrapper<E: Example>(
+    _example: &mut E,
+    _options: Option<webrender::RendererOptions>,
+) {
+    println!("You need to enable one of the native API features (dx12/gl/metal/vulkan) in order to run this example.");
+}
+

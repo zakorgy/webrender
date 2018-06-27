@@ -9,6 +9,8 @@
 //!
 //! [renderer]: struct.Renderer.html
 
+#![cfg_attr(not(feature = "gleam"), allow(dead_code))]
+
 use api::{BlobImageRenderer, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentId, Epoch, ExternalImageId};
 use api::{ExternalImageType, FontRenderMode, FrameMsg, ImageFormat, PipelineId};
@@ -962,12 +964,12 @@ struct CacheTexture<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> CacheTexture<B> {
-    fn new(device: &mut Device<B>, use_scatter: bool) -> Result<Self, RendererError> {
+    fn new(device: &mut Device<B>, _use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         #[cfg(feature = "gleam")]
         {
-            let bus = if use_scatter {
+            let bus = if _use_scatter {
                 let program = device
                     .create_program("gpu_cache_update", "", &desc::GPU_CACHE_UPDATE)?;
                 let buf_position = device.create_vbo();
@@ -1039,7 +1041,7 @@ impl<B: hal::Backend> CacheTexture<B> {
     fn prepare_for_updates(
         &mut self,
         device: &mut Device<B>,
-        total_block_count: usize,
+        _total_block_count: usize,
         max_height: u32,
     ) {
         // See if we need to create or resize the texture.
@@ -1077,9 +1079,9 @@ impl<B: hal::Backend> CacheTexture<B> {
                 ..
             } => {
                 *count = 0;
-                if total_block_count > buf_value.allocated_count() {
-                    device.allocate_vbo(buf_position, total_block_count, VertexUsageHint::Stream);
-                    device.allocate_vbo(buf_value,    total_block_count, VertexUsageHint::Stream);
+                if _total_block_count > buf_value.allocated_count() {
+                    device.allocate_vbo(buf_position, _total_block_count, VertexUsageHint::Stream);
+                    device.allocate_vbo(buf_value,    _total_block_count, VertexUsageHint::Stream);
                 }
 
                 if new_size.height > old_size.height || GPU_CACHE_RESIZE_TEST {
@@ -1103,7 +1105,7 @@ impl<B: hal::Backend> CacheTexture<B> {
         }
     }
 
-    fn update(&mut self, device: &mut Device<B>, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, _device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -1168,8 +1170,8 @@ impl<B: hal::Backend> CacheTexture<B> {
                     }
                 }
 
-                device.fill_vbo(buf_value, &updates.blocks, *count);
-                device.fill_vbo(buf_position, &position_data, *count);
+                _device.fill_vbo(buf_value, &updates.blocks, *count);
+                _device.fill_vbo(buf_position, &position_data, *count);
                 *count += position_data.len();
             }
         }
@@ -2405,7 +2407,7 @@ impl<B: hal::Backend> Renderer<B>
         };
 
         #[cfg(not(feature = "gleam"))]
-        let frame_semaphore = self.device.set_next_frame_id();
+        self.device.set_next_frame_id();
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
             let _gm = self.gpu_profile.start_marker("begin frame");
