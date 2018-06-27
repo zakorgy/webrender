@@ -1153,7 +1153,7 @@ impl<B> Device<B> {
         shader_kind: &ShaderKind,
         features: &[&'static str],
     ) -> Result<Program, ShaderError> {
-        match shader_kind {
+        match *shader_kind {
             ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
                 self.create_prim_shader(base_filename,
                                         features,
@@ -1162,7 +1162,7 @@ impl<B> Device<B> {
             ShaderKind::Cache(format) => {
                 self.create_prim_shader(base_filename,
                                         features,
-                                        *format)
+                                        format)
             }
             ShaderKind::VectorStencil => {
                 self.create_prim_shader(base_filename,
