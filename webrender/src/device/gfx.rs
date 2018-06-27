@@ -42,19 +42,13 @@ use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
 
-pub const MAX_INSTANCE_COUNT: usize = 1024;
-const MAX_DEBUG_COLOR_INDEX_COUNT: usize = 14544;
-const MAX_DEBUG_FONT_INDEX_COUNT: usize = 4296;
-const MAX_DEBUG_COLOR_VERTEX_COUNT: usize = 9696;
-const MAX_DEBUG_FONT_VERTEX_COUNT: usize = 2864;
-
 pub type TextureId = u32;
 
+pub const MAX_INSTANCE_COUNT: usize = 1024;
 pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
-
 pub const MAX_FRAME_COUNT: usize = 2;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
@@ -69,6 +63,15 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 };
 
 const ENTRY_NAME: &str = "main";
+
+cfg_if! {
+    if #[cfg(feature = "debug_renderer")]{
+        const MAX_DEBUG_COLOR_INDEX_COUNT: usize = 14544;
+        const MAX_DEBUG_FONT_INDEX_COUNT: usize = 4296;
+        const MAX_DEBUG_COLOR_VERTEX_COUNT: usize = 9696;
+        const MAX_DEBUG_FONT_VERTEX_COUNT: usize = 2864;
+    }
+}
 
 pub struct RendererInit<'a, B: hal::Backend> {
     pub adapter: &'a hal::Adapter<B>,
@@ -233,6 +236,7 @@ pub trait ProgramCacheObserver {
 impl ShaderKind {
     fn is_debug(&self) -> bool {
         match *self {
+            #[cfg(feature = "debug_renderer")]
             ShaderKind::DebugFont | ShaderKind::DebugColor => true,
             _ => false,
         }
@@ -1030,6 +1034,7 @@ impl<B: hal::Backend> Program<B> {
                     (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
                     (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
                 ],
+                #[cfg(feature = "debug_renderer")]
                 ShaderKind::DebugColor | ShaderKind::DebugFont => vec![
                     (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
                 ],
@@ -1099,10 +1104,12 @@ impl<B: hal::Backend> Program<B> {
         device.destroy_shader_module(fs_module);
 
         let (vertex_buffer_stride, vertex_buffer_len) = match shader_kind {
+            #[cfg(feature = "debug_renderer")]
             ShaderKind::DebugColor => {
                 let stride = mem::size_of::<DebugColorVertex>();
                 (stride, MAX_DEBUG_COLOR_VERTEX_COUNT * stride)
             },
+            #[cfg(feature = "debug_renderer")]
             ShaderKind::DebugFont => {
                 let stride = mem::size_of::<DebugFontVertex>();
                 (stride, MAX_DEBUG_FONT_VERTEX_COUNT * stride)
@@ -1143,7 +1150,6 @@ impl<B: hal::Backend> Program<B> {
             ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => mem::size_of::<ClipMaskInstance>(),
             ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<BlurInstance>(),
             ShaderKind::Cache(VertexArrayKind::Border) => mem::size_of::<BorderInstance>(),
-            ShaderKind::DebugColor | ShaderKind::DebugFont => 1,
             sk if sk.is_debug() => 1,
             _ => unreachable!()
         };
@@ -1613,6 +1619,7 @@ impl<B: hal::Backend> DescriptorPools<B> {
 
     fn get_pool(&mut self, shader_kind: &ShaderKind) -> &mut DescPool<B> {
         match *shader_kind {
+            #[cfg(feature = "debug_renderer")]
             ShaderKind::DebugColor | ShaderKind::DebugFont => &mut self.debug_pool,
             ShaderKind::ClipCache => &mut self.cache_clip_pool,
             _ => &mut self.default_pool,
@@ -1793,11 +1800,9 @@ impl<B: hal::Backend> Device<B> {
 
         println!("{:?}", surface_format);
         assert_eq!(surface_format, hal::format::Format::Bgra8Unorm);
-        //let min_image_count = caps.image_count.start;
         let swap_config =
             SwapchainConfig::new()
                 .with_color(surface_format)
-                //.with_image_count(min_image_count)
                 .with_image_count(MAX_FRAME_COUNT as _)
                 .with_image_usage(
                     hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
@@ -3120,9 +3125,9 @@ impl<B: hal::Backend> Device<B> {
     #[cfg(feature = "debug_renderer")]
     pub fn get_tex_image_into(
         &mut self,
-        texture: &Texture,
-        format: ImageFormat,
-        output: &mut [u8],
+        _texture: &Texture,
+        _format: ImageFormat,
+        _output: &mut [u8],
     ) {
         unimplemented!();
     }
@@ -3130,7 +3135,7 @@ impl<B: hal::Backend> Device<B> {
     /// Attaches the provided texture to the current Read FBO binding.
     #[cfg(any(feature = "debug_renderer", feature="capture"))]
     fn attach_read_texture_raw(
-        &mut self, texture_id: u32, target: TextureTarget, layer_id: i32
+        &mut self, _texture_id: u32, _target: TextureTarget, _layer_id: i32
     ) {
         unimplemented!();
     }
@@ -3188,12 +3193,12 @@ impl<B: hal::Backend> Device<B> {
     pub fn update_vao_indices<I: Copy>(
         &mut self,
         _vao: &VAO,
-        indices: &[I],
+        _indices: &[I],
         _usage_hint: VertexUsageHint
     ) {
         if self.bound_program != INVALID_PROGRAM_ID {
             #[cfg(feature = "debug_renderer")]
-            self.update_indices(indices);
+            self.update_indices(_indices);
         }
     }
 
@@ -3210,7 +3215,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     #[cfg(feature = "debug_renderer")]
-    pub fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
+    pub fn draw_nonindexed_lines(&mut self, _first_vertex: i32, _vertex_count: i32) {
         debug_assert!(self.inside_frame);
         self.draw();
     }

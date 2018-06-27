@@ -63,9 +63,9 @@ pub enum ShaderKind {
     VectorStencil,
     #[allow(dead_code)]
     VectorCover,
-    #[cfg(not(feature = "gleam"))]
+    #[cfg(all(not(feature = "gleam"), feature = "debug_renderer"))]
     DebugColor,
-    #[cfg(not(feature = "gleam"))]
+    #[cfg(all(not(feature = "gleam"), feature = "debug_renderer"))]
     DebugFont,
 }
 
@@ -74,9 +74,11 @@ pub enum VertexArrayKind {
     Primitive,
     Blur,
     Clip,
-    VectorStencil,
-    VectorCover,
     Border,
+    #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
+    VectorStencil,
+    #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
+    VectorCover,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
@@ -166,6 +168,7 @@ pub trait FileWatcherHandler: Send {
 #[cfg_attr(feature = "replay", derive(Clone))]
 pub struct ExternalTexture {
     id: IdType,
+    #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
     target: IdType,
 }
 
@@ -174,10 +177,10 @@ impl ExternalTexture {
     pub fn new(id: u32, target: TextureTarget) -> Self {
         ExternalTexture {
             id,
-            #[cfg(not(feature = "gleam"))]
-            target: target as _,
             #[cfg(feature = "gleam")]
             target: get_gl_target(target),
+            #[cfg(not(feature = "gleam"))]
+            target: target as _,
         }
     }
 
@@ -189,6 +192,7 @@ impl ExternalTexture {
 
 pub struct Texture {
     id: IdType,
+    #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
     target: IdType,
     layer_count: i32,
     format: ImageFormat,

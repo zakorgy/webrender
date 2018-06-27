@@ -23,7 +23,7 @@ use webrender;
 use webrender::api::*;
 use webrender::{DebugFlags, RendererStats};
 use yaml_frame_writer::YamlFrameWriterReceiver;
-use {WindowWrapper, NotifierEvent, BLACK_COLOR, WHITE_COLOR};
+use {NotifierEvent, BLACK_COLOR, WHITE_COLOR};
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -170,7 +170,6 @@ pub struct Wrench {
 
 impl Wrench {
     pub fn new(
-        window: &mut WindowWrapper,
         proxy: Option<EventsLoopProxy>,
         shader_override_path: Option<PathBuf>,
         dp_ratio: f32,
