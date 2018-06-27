@@ -2,12 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#[macro_use]
-extern crate cfg_if;
 extern crate euclid;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate gleam;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
@@ -17,7 +13,6 @@ mod boilerplate;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
 use euclid::TypedScale;
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 use gleam::gl;
 use webrender::api::*;
 
@@ -38,17 +33,14 @@ struct App {
     output_document: Option<Document>
 }
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 struct OutputHandler {
     texture_id: gl::GLuint
 }
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 struct ExternalHandler {
     texture_id: gl::GLuint
 }
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl webrender::OutputImageHandler for OutputHandler {
     fn lock(&mut self, _id: PipelineId) -> Option<(u32, DeviceIntSize)> {
         Some((self.texture_id, DeviceIntSize::new(500, 500)))
@@ -57,7 +49,6 @@ impl webrender::OutputImageHandler for OutputHandler {
     fn unlock(&mut self, _id: PipelineId) {}
 }
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl webrender::ExternalImageHandler for ExternalHandler {
     fn lock(&mut self, _key: ExternalImageId, _channel_index: u8) -> webrender::ExternalImage {
         webrender::ExternalImage {
@@ -135,7 +126,6 @@ impl App {
     }
 }
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 impl Example for App {
     fn render(
         &mut self,
@@ -222,7 +212,6 @@ impl Example for App {
     }
 }
 
-#[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
 fn main() {
     let mut app = App {
         external_image_key: None,
@@ -230,9 +219,4 @@ fn main() {
     };
 
     boilerplate::main_wrapper(&mut app, None);
-}
-
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-fn main() {
-    println!("This example only runs with OpenGL.");
 }

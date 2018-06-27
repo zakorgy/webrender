@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![cfg_attr(
-    not(any(feature = "vulkan", feature = "dx12", feature = "metal", feature = "gl")),
+    not(any(feature = "gfx", feature = "gl")),
     allow(dead_code, unused_extern_crates, unused_imports, unused_variables)
 )]
 
@@ -48,20 +48,18 @@ extern crate yaml_rust;
 cfg_if! {
     if #[cfg(feature = "dx12")] {
         extern crate gfx_backend_dx12 as back;
+        extern crate gfx_hal;
+        use gfx_hal::Instance;
     } else if #[cfg(feature = "metal")] {
         extern crate gfx_backend_metal as back;
+        extern crate gfx_hal;
+        use gfx_hal::Instance;
     } else if #[cfg(feature = "vulkan")] {
         extern crate gfx_backend_vulkan as back;
-    } else {
-        extern crate gfx_backend_empty as back;
-    }
-}
-
-cfg_if! {
-    if #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))] {
         extern crate gfx_hal;
         use gfx_hal::Instance;
     } else if #[cfg(feature = "gl")] {
+        extern crate gfx_backend_empty as back;
         extern crate gleam;
         extern crate glutin;
         mod angle;
@@ -69,7 +67,11 @@ cfg_if! {
         use gleam::gl;
         use glutin::GlContext;
         use std::marker::PhantomData;
+        use std::os::raw::c_void;
+        use std::ptr;
         use std::rc::Rc;
+    } else {
+        extern crate gfx_backend_empty as back;
     }
 }
 
@@ -100,10 +102,8 @@ use reftest::{ReftestHarness, ReftestOptions};
 use std::ffi::CString;
 #[cfg(feature = "headless")]
 use std::mem;
-use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::ptr;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use webrender::DebugFlags;
 use webrender::api::*;
@@ -119,7 +119,7 @@ lazy_static! {
 
 pub static mut CURRENT_FRAME_NUMBER: u32 = 0;
 
-#[cfg(all(feature = "headless", not(any(feature = "dx12", feature = "metal", feature = "vulkan"))))]
+#[cfg(all(feature = "headless", not(feature = "gfx")))]
 pub struct HeadlessContext {
     width: u32,
     height: u32,
@@ -127,14 +127,14 @@ pub struct HeadlessContext {
     _buffer: Vec<u32>,
 }
 
-#[cfg(any(not(feature = "headless"), any(feature = "dx12", feature = "metal", feature = "vulkan")))]
+#[cfg(any(not(feature = "headless"), feature = "gfx"))]
 pub struct HeadlessContext {
     width: u32,
     height: u32,
 }
 
 impl HeadlessContext {
-    #[cfg(all(feature = "headless", not(any(feature = "dx12", feature = "metal", feature = "vulkan"))))]
+    #[cfg(all(feature = "headless", not(feature = "gfx")))]
     fn new(width: u32, height: u32) -> Self {
         let mut attribs = Vec::new();
 
@@ -174,24 +174,24 @@ impl HeadlessContext {
         }
     }
 
-    #[cfg(any(not(feature = "headless"), any(feature = "dx12", feature = "metal", feature = "vulkan")))]
+    #[cfg(any(not(feature = "headless"), feature = "gfx"))]
     fn new(width: u32, height: u32) -> Self {
         HeadlessContext { width, height }
     }
 
-    #[cfg(all(feature = "headless", not(any(feature = "dx12", feature = "metal", feature = "vulkan"))))]
+    #[cfg(all(feature = "gl", feature = "headless"))]
     fn get_proc_address(s: &str) -> *const c_void {
         let c_str = CString::new(s).expect("Unable to create CString");
         unsafe { mem::transmute(osmesa_sys::OSMesaGetProcAddress(c_str.as_ptr())) }
     }
 
-    #[cfg(any(not(feature = "headless"), any(feature = "dx12", feature = "metal", feature = "vulkan")))]
+    #[cfg(all(feature = "gl", not(feature = "headless")))]
     fn get_proc_address(_: &str) -> *const c_void {
         ptr::null() as *const _
     }
 }
 
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+#[cfg(feature = "gfx")]
 pub enum WindowWrapper {
     Window(winit::Window),
     Headless(HeadlessContext),
@@ -204,7 +204,7 @@ pub enum WindowWrapper {
     Headless(HeadlessContext, Rc<gl::Gl>),
 }
 
-#[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl")))]
+#[cfg(not(any(feature = "gfx", feature = "gl")))]
 pub enum WindowWrapper {}
 
 pub struct HeadlessEventIterater;
@@ -232,9 +232,8 @@ impl WindowWrapper {
             window.get_inner_size().unwrap()
         }
 
-        let (w, h) = (0, 0);
 
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        #[cfg(feature = "gfx")]
         let (w, h) = match *self {
             WindowWrapper::Window(ref window) => inner_size(window),
             WindowWrapper::Headless(ref context) => (context.width, context.height),
@@ -246,23 +245,27 @@ impl WindowWrapper {
             WindowWrapper::Angle(ref window, ..) => inner_size(window),
             WindowWrapper::Headless(ref context, _) => (context.width, context.height),
         };
+
+        #[cfg(not(any(feature = "gfx", feature = "gl")))]
+        let (w, h) = (0, 0);
+
         DeviceUintSize::new(w, h)
     }
 
     fn hidpi_factor(&self) -> f32 {
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl"))]
+        #[cfg(any(feature = "gfx", feature = "gl"))]
         match *self {
             WindowWrapper::Window(ref window, ..) => window.hidpi_factor(),
             WindowWrapper::Headless(..) => 1.0,
             #[cfg(feature = "gl")]
             WindowWrapper::Angle(ref window, ..) => window.hidpi_factor(),
         }
-        #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl")))]
+        #[cfg(not(any(feature = "gfx", feature = "gl")))]
         0.0
     }
 
     fn resize(&mut self, size: DeviceUintSize) {
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl"))]
+        #[cfg(any(feature = "gfx", feature = "gl"))]
         match *self {
             WindowWrapper::Window(ref mut window, ..) => window.set_inner_size(size.width, size.height),
             WindowWrapper::Headless(..) => unimplemented!(), // requites Glutin update
@@ -272,7 +275,7 @@ impl WindowWrapper {
     }
 
     fn set_title(&mut self, title: &str) {
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl"))]
+        #[cfg(any(feature = "gfx", feature = "gl"))]
         match *self {
             WindowWrapper::Window(ref window, ..) => window.set_title(title),
             WindowWrapper::Headless(..) => (),
@@ -299,7 +302,7 @@ impl WindowWrapper {
         }
     }
 
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx")]
     fn get_window(&self) -> &winit::Window {
         match *self {
             WindowWrapper::Window(ref window) => &window,
@@ -393,7 +396,7 @@ fn make_window(
     wrapper
 }
 
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+#[cfg(feature = "gfx")]
 fn make_window(
     size: DeviceUintSize,
     _dp_ratio: Option<f32>,
@@ -478,7 +481,7 @@ fn reftest<'a>(
     num_failures
 }
 
-#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl"))]
+#[cfg(any(feature = "gfx", feature = "gl"))]
 fn main() {
     #[cfg(feature = "env_logger")]
     env_logger::init();
@@ -552,7 +555,7 @@ fn main() {
         (None, None)
     };
 
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx")]
     let (adapter, mut surface) = {
         let instance = back::Instance::create("gfx-rs instance", 1);
         let mut adapters = instance.enumerate_adapters();
@@ -561,7 +564,7 @@ fn main() {
         (adapter, surface)
     };
 
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx")]
     let init = webrender::RendererInit {
         adapter: &adapter,
         surface: &mut surface,
@@ -575,7 +578,6 @@ fn main() {
     };
 
     let mut wrench = Wrench::new(
-        &mut window,
         events_loop.as_mut().map(|el| el.create_proxy()),
         res_path,
         dp_ratio,
@@ -631,9 +633,9 @@ fn main() {
     wrench.renderer.deinit();
 }
 
-#[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan", feature = "gl")))]
+#[cfg(not(any(feature = "gfx", feature = "gl")))]
 fn main() {
-    println!("You need to enable one of the native API features (dx12/gl/metal/vulkan) in order to run wrench");
+    println!("You need to enable one of the native API features (dx12/gl/metal/vulkan) in order to run wrench.");
 }
 
 fn render<'a>(

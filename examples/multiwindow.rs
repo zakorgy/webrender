@@ -2,42 +2,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#[macro_use]
-extern crate cfg_if;
+#![cfg_attr(
+    not(any(feature = "gfx-hal", feature = "gl")),
+    allow(dead_code, unused_imports)
+)]
+
 extern crate app_units;
 extern crate euclid;
 extern crate webrender;
 extern crate winit;
-
-cfg_if! {
-    if #[cfg(feature = "dx12")] {
-        extern crate gfx_backend_dx12 as back;
-    } else if #[cfg(feature = "metal")] {
-        extern crate gfx_backend_metal as back;
-    } else if #[cfg(feature = "vulkan")] {
-        extern crate gfx_backend_vulkan as back;
-    } else {
-        extern crate gfx_backend_empty as back;
-    }
-}
-
-cfg_if! {
-    if #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))] {
-        use std::boxed::Box;
-        use webrender::hal::{self, Instance};
-    } else {
-        extern crate gleam;
-        extern crate glutin;
-        use gleam::gl;
-        use glutin::GlContext;
-        use std::marker::PhantomData;
-    }
-}
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+#[cfg(feature = "metal")]
+extern crate gfx_backend_metal as back;
+#[cfg(feature = "vulkan")]
+extern crate gfx_backend_vulkan as back;
+#[cfg(not(feature = "gfx-hal"))]
+extern crate gfx_backend_empty as back;
+#[cfg(feature = "gl")]
+extern crate gleam;
+#[cfg(feature = "gl")]
+extern crate glutin;
 
 use app_units::Au;
+#[cfg(feature = "gl")]
+use gleam::gl;
+#[cfg(feature = "gl")]
+use glutin::GlContext;
+#[cfg(feature = "gfx-hal")]
+use std::boxed::Box;
 use std::fs::File;
 use std::io::Read;
+#[cfg(feature = "gl")]
+use std::marker::PhantomData;
 use webrender::api::*;
+#[cfg(feature = "gfx-hal")]
+use webrender::hal::{self, Instance};
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -66,11 +66,12 @@ impl RenderNotifier for Notifier {
     }
 }
 
+
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
-    #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+    #[cfg(feature = "gl")]
     window: glutin::GlWindow,
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx-hal")]
     window: winit::Window,
     renderer: webrender::Renderer<back::Backend>,
     name: &'static str,
@@ -79,10 +80,11 @@ struct Window {
     epoch: Epoch,
     api: RenderApi,
     font_instance_key: FontInstanceKey,
-    #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+    #[cfg(feature = "gfx-hal")]
     surface: Box<hal::Surface<back::Backend>>,
 }
 
+#[cfg(any(feature = "gfx-hal", feature = "gl"))]
 impl Window {
     fn new(name: &'static str, clear_color: ColorF) -> Self {
         let events_loop = winit::EventsLoop::new();
@@ -91,7 +93,7 @@ impl Window {
             .with_multitouch()
             .with_dimensions(800, 600);
 
-        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        #[cfg(feature = "gl")]
         let (init, window) = {
             let context_builder = glutin::ContextBuilder::new()
                 .with_gl(glutin::GlRequest::GlThenGles {
@@ -122,7 +124,7 @@ impl Window {
             (init, window)
         };
 
-        #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+        #[cfg(feature = "gfx-hal")]
         let (window, adapter, mut surface) = {
             let window = window_builder.build(&events_loop).unwrap();
             let instance = back::Instance::create("gfx-rs instance", 1);
@@ -137,7 +139,7 @@ impl Window {
         let framebuffer_size = DeviceUintSize::new(width, height);
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
         let (renderer, sender) = {
-            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            #[cfg(feature = "gfx-hal")]
             let init = webrender::RendererInit {
                 adapter: &adapter,
                 surface: &mut surface,
@@ -177,7 +179,7 @@ impl Window {
             document_id,
             api,
             font_instance_key,
-            #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+            #[cfg(feature = "gfx-hal")]
             surface: Box::new(surface),
         }
     }
@@ -327,7 +329,7 @@ impl Window {
 
         renderer.update();
         renderer.render(framebuffer_size).unwrap();
-        #[cfg(not(any(feature = "vulkan", feature = "dx12", feature = "metal")))]
+        #[cfg(feature = "gl")]
         self.window.swap_buffers().ok();
 
         false
@@ -338,6 +340,7 @@ impl Window {
     }
 }
 
+#[cfg(any(feature = "gfx-hal", feature = "gl"))]
 fn main() {
     let mut win1 = Window::new("window1", ColorF::new(0.3, 0.0, 0.0, 1.0));
     let mut win2 = Window::new("window2", ColorF::new(0.0, 0.3, 0.0, 1.0));
@@ -353,6 +356,11 @@ fn main() {
 
     win1.deinit();
     win2.deinit();
+}
+
+#[cfg(not(any(feature = "gfx-hal", feature = "gl")))]
+fn main() {
+    println!("You need to enable one of the native API features (dx12/gl/metal/vulkan) in order to run this example.");
 }
 
 fn load_file(name: &str) -> Vec<u8> {

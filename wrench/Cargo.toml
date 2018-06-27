@@ -42,10 +42,11 @@ core-foundation = "0.5"
 default = []
 headless = ["gl", "osmesa-sys", "osmesa-src" ]
 pathfinder = ["webrender/pathfinder"]
+gfx = []
 gl = ["gleam", "glutin", "webrender/gleam"]
-dx12 = ["gfx-backend-dx12"]
-metal = ["gfx-backend-metal"]
-vulkan = ["gfx-backend-vulkan"]
+dx12 = ["gfx-backend-dx12", "gfx"]
+metal = ["gfx-backend-metal", "gfx"]
+vulkan = ["gfx-backend-vulkan", "gfx"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 dwrote = "0.4.1"

@@ -48,7 +48,7 @@ extern crate cfg_if;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[cfg(feature = "serde")]
+#[cfg_attr(feature = "gleam", allow(unused_imports))]
 #[macro_use]
 extern crate serde;
 #[macro_use]
