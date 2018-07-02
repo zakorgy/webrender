@@ -37,16 +37,16 @@ pub struct ClipMaskInstance {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct DebugColorVertex {
-    aPosition: [f32; 3],
-    aColor: [u8; 4],
+    pub aPosition: [f32; 3],
+    pub aColor: [f32; 4],
 }
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct DebugFontVertex {
-    aPosition: [f32; 3],
-    aColor: [u8; 4],
-    aColorTexCoord: [f32; 2],
+    pub aPosition: [f32; 3],
+    pub aColor: [f32; 4],
+    pub aColorTexCoord: [f32; 2],
 }
 
 #[derive(Debug, Clone, Copy)]

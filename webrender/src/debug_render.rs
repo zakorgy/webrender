@@ -14,10 +14,12 @@ cfg_if! {
     if #[cfg(feature = "gleam")] {
         use device::Program;
     } else {
-        use device::{PipelineRequirements, ProgramId as Program, ShaderKind};
+        use api::ColorF;
+        use device::{PipelineRequirements, PrimitiveType, ProgramId as Program, ShaderKind};
         use ron::de::from_reader;
         use std::collections::HashMap;
         use std::fs::File;
+        use vertex_types;
     }
 }
 
@@ -38,7 +40,7 @@ const DESC_FONT: VertexDescriptor = VertexDescriptor {
     vertex_attributes: &[
         VertexAttribute {
             name: "aPosition",
-            count: 3,
+            count: 2,
             kind: VertexAttributeKind::F32,
         },
         VertexAttribute {
@@ -59,7 +61,7 @@ const DESC_COLOR: VertexDescriptor = VertexDescriptor {
     vertex_attributes: &[
         VertexAttribute {
             name: "aPosition",
-            count: 3,
+            count: 2,
             kind: VertexAttributeKind::F32,
         },
         VertexAttribute {
@@ -76,7 +78,6 @@ const DESC_COLOR: VertexDescriptor = VertexDescriptor {
 pub struct DebugFontVertex {
     pub x: f32,
     pub y: f32,
-    z: f32,
     pub color: ColorU,
     pub u: f32,
     pub v: f32,
@@ -84,7 +85,7 @@ pub struct DebugFontVertex {
 
 impl DebugFontVertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32, color: ColorU) -> DebugFontVertex {
-        DebugFontVertex { x, y, z: 0.0, color, u, v }
+        DebugFontVertex { x, y, color, u, v }
     }
 }
 
@@ -93,13 +94,35 @@ impl DebugFontVertex {
 pub struct DebugColorVertex {
     pub x: f32,
     pub y: f32,
-    z: f32,
     pub color: ColorU,
 }
 
 impl DebugColorVertex {
     pub fn new(x: f32, y: f32, color: ColorU) -> DebugColorVertex {
-        DebugColorVertex { x, y, z: 0.0, color }
+        DebugColorVertex { x, y, color }
+    }
+}
+
+#[cfg(not(feature = "gleam"))]
+impl PrimitiveType for DebugColorVertex {
+    type Primitive = vertex_types::DebugColorVertex;
+    fn to_primitive_type(&self) -> vertex_types::DebugColorVertex {
+        vertex_types::DebugColorVertex {
+            aPosition: [self.x, self.y, 0.0],
+            aColor: ColorF::from(self.color).to_array(),
+        }
+    }
+}
+
+#[cfg(not(feature = "gleam"))]
+impl PrimitiveType for DebugFontVertex {
+    type Primitive = vertex_types::DebugFontVertex;
+    fn to_primitive_type(&self) -> vertex_types::DebugFontVertex {
+        vertex_types::DebugFontVertex {
+            aPosition: [self.x, self.y, 0.0],
+            aColor: ColorF::from(self.color).to_array(),
+            aColorTexCoord: [self.u, self.v],
+        }
     }
 }
 
@@ -328,7 +351,7 @@ impl DebugRenderer {
                 viewport_size.width as f32,
                 viewport_size.height as f32,
                 0.0,
-                false,
+                true,
             );
 
             // Triangles

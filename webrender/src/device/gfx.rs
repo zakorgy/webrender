@@ -3168,7 +3168,7 @@ impl<B: hal::Backend> Device<B> {
         VAO { }
     }
 
-    pub fn update_vao_main_vertices<V: Copy>(
+    pub fn update_vao_main_vertices<V: Copy + PrimitiveType>(
         &mut self,
         _vao: &VAO,
         _vertices: &[V],
@@ -3176,7 +3176,7 @@ impl<B: hal::Backend> Device<B> {
     ) {
         if self.bound_program != INVALID_PROGRAM_ID {
             #[cfg(feature = "debug_renderer")]
-                self.update_vertices(_vertices);
+                self.update_vertices(&_vertices.iter().map(|v| v.to_primitive_type()).collect::<Vec<_>>());
         }
     }
 
