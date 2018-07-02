@@ -324,6 +324,12 @@ pub struct PackedVertex {
     pub pos: [f32; 2],
 }
 
+#[cfg(not(feature = "gleam"))]
+impl PrimitiveType for PackedVertex {
+    type Primitive = [f32; 2];
+    fn to_primitive_type(&self) -> [f32; 2] { self.pos }
+}
+
 pub(crate) mod desc {
     use device::{VertexAttribute, VertexAttributeKind, VertexDescriptor};
 

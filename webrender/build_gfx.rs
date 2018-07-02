@@ -462,7 +462,6 @@ fn add_attribute_descriptors(
         "ivec4" => (Format::Rgba32Int, 16),
         "vec2" => (Format::Rg32Float, 8),
         "vec3" => (Format::Rgb32Float, 12),
-        "vec4" if var_name == "aColor" => (Format::Rgba8Unorm, 4),
         "vec4" => (Format::Rgba32Float, 16),
         _ => unimplemented!(),
     };
