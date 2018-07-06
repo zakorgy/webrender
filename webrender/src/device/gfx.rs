@@ -1568,52 +1568,52 @@ impl<B: hal::Backend> DescriptorPools<B> {
         let debug_range = vec![
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 20,
+                count: 100,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 20,
+                count: 100,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 5,
+                count: 20,
             }
         ];
 
         let cache_clip_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 400,
+                count: 1600,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 400,
+                count: 1600,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: 160,
             }
         ];
 
         let default_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 400,
+                count: 1600,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 400,
+                count: 1600,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: 160,
             }
         ];
 
         DescriptorPools {
-            debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, 40, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, 40, default_range, default_layout),
+            debug_pool: DescPool::new(device, 20, debug_range, debug_layout),
+            cache_clip_pool: DescPool::new(device, 160, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, 160, default_range, default_layout),
         }
     }
 
