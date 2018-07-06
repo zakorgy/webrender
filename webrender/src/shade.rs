@@ -7,19 +7,24 @@ use api::{
     YuvColorSpace, YuvFormat,
 };
 use batch::{BatchKey, BatchKind, BrushBatchKind};
-use device::{Device, Program, ShaderError, ShaderKind, VertexArrayKind};
+use device::{Device, ShaderError, ShaderKind, VertexArrayKind};
 use euclid::{Transform3D};
 use glyph_rasterizer::GlyphFormat;
-use renderer::{
-    desc,
-    MAX_VERTEX_TEXTURE_WIDTH,
-    BlendMode, ImageBufferKind, RendererError, RendererOptions,
-    TextureSampler,
-};
-
-use gleam::gl::GlType;
-use time::precise_time_ns;
+use hal;
+use renderer::{BlendMode, ImageBufferKind, RendererError, RendererOptions};
 use std::marker::PhantomData;
+use time::precise_time_ns;
+
+cfg_if! {
+    if #[cfg(feature = "gleam")] {
+        use gleam::gl::GlType;
+        use device::Program;
+        use renderer::{desc, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
+    } else {
+        use device::ProgramId as Program;
+        type GlType = ();
+    }
+}
 
 impl ImageBufferKind {
     pub(crate) fn get_feature_string(&self) -> &'static str {
@@ -31,6 +36,7 @@ impl ImageBufferKind {
         }
     }
 
+    #[cfg(feature = "gleam")]
     fn has_platform_support(&self, gl_type: &GlType) -> bool {
         match (*self, gl_type) {
             (ImageBufferKind::Texture2D, _) => true,
@@ -38,6 +44,14 @@ impl ImageBufferKind {
             (ImageBufferKind::TextureRect, _) => true,
             (ImageBufferKind::TextureExternal, &GlType::Gles) => true,
             (ImageBufferKind::TextureExternal, &GlType::Gl) => false,
+        }
+    }
+
+    #[cfg(not(feature = "gleam"))]
+    fn has_platform_support(&self) -> bool {
+        match *self {
+            ImageBufferKind::Texture2DArray => true,
+            _ => false,
         }
     }
 }
@@ -61,7 +75,7 @@ pub struct LazilyCompiledShader<B> {
     phantom_data: PhantomData<B>,
 }
 
-impl<B> LazilyCompiledShader<B> {
+impl<B: hal::Backend> LazilyCompiledShader<B> {
     pub(crate) fn new(
         kind: ShaderKind,
         name: &'static str,
@@ -77,7 +91,7 @@ impl<B> LazilyCompiledShader<B> {
             phantom_data: PhantomData,
         };
 
-        if precache {
+        if precache && cfg!(feature = "gleam") {
             let t0 = precise_time_ns();
             let program = shader.get(device)?;
             let t1 = precise_time_ns();
@@ -114,6 +128,7 @@ impl<B> LazilyCompiledShader<B> {
 
     fn get(&mut self, device: &mut Device<B>) -> Result<&Program, ShaderError> {
         if self.program.is_none() {
+            #[cfg(feature = "gleam")]
             let program = match self.kind {
                 ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
                     create_prim_shader(self.name,
@@ -143,6 +158,16 @@ impl<B> LazilyCompiledShader<B> {
                     create_clip_shader(self.name, device)
                 }
             };
+
+            #[cfg(not(feature = "gleam"))]
+            let program = Ok(device.create_program(
+                self.name,
+                &self.kind,
+                match self.kind {
+                    ShaderKind::ClipCache  => &["TRANSFORM"],
+                    _ => &self.features,
+                },
+            ));
             self.program = Some(program?);
         }
 
@@ -167,14 +192,13 @@ impl<B> LazilyCompiledShader<B> {
 //   pass. Assumes that AA should be applied
 //   along the primitive edge, and also that
 //   clip mask is present.
-struct BrushShader<B> {
+struct BrushShader<B: hal::Backend> {
     opaque: LazilyCompiledShader<B>,
     alpha: LazilyCompiledShader<B>,
     dual_source: Option<LazilyCompiledShader<B>>,
-    phantom_data: PhantomData<B>,
 }
 
-impl<B> BrushShader<B> {
+impl<B: hal::Backend> BrushShader<B> {
     fn new(
         name: &'static str,
         device: &mut Device<B>,
@@ -222,7 +246,6 @@ impl<B> BrushShader<B> {
             opaque,
             alpha,
             dual_source,
-            phantom_data: PhantomData,
         })
     }
 
@@ -251,13 +274,12 @@ impl<B> BrushShader<B> {
     }
 }
 
-pub struct TextShader<B> {
+pub struct TextShader<B: hal::Backend> {
     simple: LazilyCompiledShader<B>,
     glyph_transform: LazilyCompiledShader<B>,
-    phantom_data: PhantomData<B>,
 }
 
-impl<B> TextShader<B> {
+impl<B: hal::Backend> TextShader<B> {
     fn new(
         name: &'static str,
         device: &mut Device<B>,
@@ -283,7 +305,7 @@ impl<B> TextShader<B> {
             precache,
         )?;
 
-        Ok(TextShader { simple, glyph_transform, phantom_data: PhantomData, })
+        Ok(TextShader { simple, glyph_transform })
     }
 
     pub fn get(
@@ -306,6 +328,7 @@ impl<B> TextShader<B> {
     }
 }
 
+#[cfg(feature = "gleam")]
 fn create_prim_shader<B>(
     name: &'static str,
     device: &mut Device<B>,
@@ -357,6 +380,7 @@ fn create_prim_shader<B>(
     program
 }
 
+#[cfg(feature = "gleam")]
 fn create_clip_shader<B>(name: &'static str, device: &mut Device<B>) -> Result<Program, ShaderError> {
     let prefix = format!(
         "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
@@ -387,7 +411,7 @@ fn create_clip_shader<B>(name: &'static str, device: &mut Device<B>) -> Result<P
 }
 
 
-pub struct Shaders<B> {
+pub struct Shaders<B: hal::Backend> {
     // These are "cache shaders". These shaders are used to
     // draw intermediate results to cache targets. The results
     // of these shaders are then used by the primitive shaders.
@@ -423,10 +447,11 @@ pub struct Shaders<B> {
     pub ps_text_run_dual_source: TextShader<B>,
 
     ps_split_composite: LazilyCompiledShader<B>,
-    phantom_data: PhantomData<B>,
 }
 
-impl<B> Shaders<B> {
+impl<B: hal::Backend> Shaders<B> {
+
+    #[cfg(feature = "gleam")]
     pub fn new(
         device: &mut Device<B>,
         gl_type: GlType,
@@ -441,6 +466,28 @@ impl<B> Shaders<B> {
             None
         };
 
+        let shaders = Self::make_shaders(device, options, gl_type);
+
+        if let Some(vao) = dummy_vao {
+            device.delete_custom_vao(vao);
+        }
+
+        shaders
+    }
+
+    #[cfg(not(feature = "gleam"))]
+    pub fn new(
+        device: &mut Device<B>,
+        options: &RendererOptions,
+    ) -> Result<Self, ShaderError> {
+        Self::make_shaders(device, options, ())
+    }
+
+    fn make_shaders(
+        device: &mut Device<B>,
+        options: &RendererOptions,
+        gl_type: GlType,
+    ) -> Result<Self, ShaderError> {
         let brush_solid = BrushShader::new(
             "brush_solid",
             device,
@@ -469,9 +516,9 @@ impl<B> Shaders<B> {
             "brush_radial_gradient",
             device,
             if options.enable_dithering {
-               &[DITHERING_FEATURE]
+                &[DITHERING_FEATURE]
             } else {
-               &[]
+                &[]
             },
             options.precache_shaders,
             false,
@@ -481,9 +528,9 @@ impl<B> Shaders<B> {
             "brush_linear_gradient",
             device,
             if options.enable_dithering {
-               &[DITHERING_FEATURE]
+                &[DITHERING_FEATURE]
             } else {
-               &[]
+                &[]
             },
             options.precache_shaders,
             false,
@@ -537,13 +584,15 @@ impl<B> Shaders<B> {
             options.precache_shaders,
         )?;
 
-        let ps_text_run = TextShader::new("ps_text_run",
+        let ps_text_run = TextShader::new(
+            "ps_text_run",
             device,
             &[],
             options.precache_shaders,
         )?;
 
-        let ps_text_run_dual_source = TextShader::new("ps_text_run",
+        let ps_text_run_dual_source = TextShader::new(
+            "ps_text_run",
             device,
             &["DUAL_SOURCE_BLENDING"],
             options.precache_shaders,
@@ -557,7 +606,10 @@ impl<B> Shaders<B> {
             brush_image.push(None);
         }
         for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
+            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(
+                #[cfg(feature = "gleam")]
+                &gl_type,
+            ) {
                 let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
                 if feature_string != "" {
                     image_features.push(feature_string);
@@ -582,7 +634,10 @@ impl<B> Shaders<B> {
             brush_yuv_image.push(None);
         }
         for image_buffer_kind in &IMAGE_BUFFER_KINDS {
-            if image_buffer_kind.has_platform_support(&gl_type) {
+            if image_buffer_kind.has_platform_support(
+                #[cfg(feature = "gleam")]
+                &gl_type,
+            ) {
                 for format_kind in &YUV_FORMATS {
                     for color_space_kind in &YUV_COLOR_SPACES {
                         let feature_string = image_buffer_kind.get_feature_string();
@@ -620,9 +675,9 @@ impl<B> Shaders<B> {
         let cs_border_segment = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::Border),
             "cs_border_segment",
-             &[],
-             device,
-             options.precache_shaders,
+            &[],
+            device,
+            options.precache_shaders,
         )?;
 
         let ps_split_composite = LazilyCompiledShader::new(
@@ -632,10 +687,6 @@ impl<B> Shaders<B> {
             device,
             options.precache_shaders,
         )?;
-
-        if let Some(vao) = dummy_vao {
-            device.delete_custom_vao(vao);
-        }
 
         Ok(Shaders {
             cs_blur_a8,
@@ -655,7 +706,6 @@ impl<B> Shaders<B> {
             ps_text_run,
             ps_text_run_dual_source,
             ps_split_composite,
-            phantom_data: PhantomData,
         })
     }
 
@@ -696,8 +746,7 @@ impl<B> Shaders<B> {
                         &mut self.brush_linear_gradient
                     }
                     BrushBatchKind::YuvImage(image_buffer_kind, format, color_space) => {
-                        let shader_index =
-                            Self::get_yuv_shader_index(image_buffer_kind, format, color_space);
+                        let shader_index = Self::get_yuv_shader_index(image_buffer_kind, format, color_space);
                         self.brush_yuv_image[shader_index]
                             .as_mut()
                             .expect("Unsupported YUV shader kind")

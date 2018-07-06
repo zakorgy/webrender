@@ -15,10 +15,7 @@ cfg_if! {
         use device::Program;
     } else {
         use api::ColorF;
-        use device::{PipelineRequirements, PrimitiveType, ProgramId as Program, ShaderKind};
-        use ron::de::from_reader;
-        use std::collections::HashMap;
-        use std::fs::File;
+        use device::{PrimitiveType, ProgramId as Program, ShaderKind};
         use vertex_types;
     }
 }
@@ -128,33 +125,18 @@ impl PrimitiveType for DebugFontVertex {
 
 #[cfg(not(feature = "gleam"))]
 fn create_debug_programs<B: hal::Backend>(device: &mut Device<B>)-> (Program, Program) {
-    let file =
-        File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
-    let mut pipeline_requirements: HashMap<String, PipelineRequirements> =
-        from_reader(file).expect("Failed to load shader_bindings.ron");
-
-    let pipeline_requirement =
-        pipeline_requirements
-            .remove("debug_font")
-            .expect("Pipeline requirements not found for debug_font");
-
     let font_program =
         device.create_program(
-            pipeline_requirement,
             "debug_font",
             &ShaderKind::DebugFont,
+            &[],
         );
-
-    let pipeline_requirement_color =
-        pipeline_requirements
-            .remove("debug_color")
-            .expect("Pipeline requirements not found for debug_color");
 
     let color_program = device
         .create_program(
-            pipeline_requirement_color,
             "debug_color",
-            &ShaderKind::DebugColor
+            &ShaderKind::DebugColor,
+            &[],
         );
     (font_program, color_program)
 }
