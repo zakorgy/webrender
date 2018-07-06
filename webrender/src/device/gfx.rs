@@ -1724,6 +1724,7 @@ pub struct Device<B: hal::Backend> {
     frame_fence: SmallVec<[Fence<B>; 1]>,
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
+    pipeline_requirements: HashMap<String, PipelineRequirements>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -2003,6 +2004,10 @@ impl<B: hal::Backend> Device<B> {
         let image_available_semaphore = device.create_semaphore();
         let render_finished_semaphore = device.create_semaphore();
 
+        let file =
+            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open shader_bindings.ron");
+        let pipeline_requirements = from_reader(file).expect("Failed to load shader_bindings.ron");
+
         Device {
             device,
             limits,
@@ -2061,6 +2066,7 @@ impl<B: hal::Backend> Device<B> {
             frame_fence,
             image_available_semaphore,
             render_finished_semaphore,
+            pipeline_requirements,
         }
     }
 
@@ -2111,16 +2117,25 @@ impl<B: hal::Backend> Device<B> {
 
     pub(crate) fn create_program(
         &mut self,
-        pipeline_requirements: PipelineRequirements,
         shader_name: &str,
         shader_kind: &ShaderKind,
+        features: &[&str],
     ) -> ProgramId {
+        let mut name = String::from(shader_name);
+        for feature_names in features {
+            for feature in feature_names.split(',') {
+                if !feature.is_empty() {
+                    name.push_str(&format!("_{}", feature.to_lowercase()));
+                }
+            }
+        }
         let program = Program::create(
-            pipeline_requirements,
+            self.pipeline_requirements.remove(&name)
+                    .expect(&format!("Can't load pipeline data for: {}!", name)),
             &self.device,
             self.device.create_pipeline_layout(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind)), &[]),
             &self.memory_types,
-            shader_name,
+            &name,
             shader_kind.clone(),
             &self.render_pass,
         );
