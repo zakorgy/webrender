@@ -130,14 +130,14 @@ fn create_debug_programs<B: hal::Backend>(device: &mut Device<B>)-> (Program, Pr
             "debug_font",
             &ShaderKind::DebugFont,
             &[],
-        );
+        ).unwrap();
 
     let color_program = device
         .create_program(
             "debug_color",
             &ShaderKind::DebugColor,
             &[],
-        );
+        ).unwrap();
     (font_program, color_program)
 }
 

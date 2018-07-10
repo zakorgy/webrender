@@ -19,7 +19,6 @@ cfg_if! {
     if #[cfg(feature = "gleam")] {
         use gleam::gl::GlType;
         use device::Program;
-        use renderer::{desc, MAX_VERTEX_TEXTURE_WIDTH, TextureSampler};
     } else {
         use device::ProgramId as Program;
         type GlType = ();
@@ -128,46 +127,14 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
 
     fn get(&mut self, device: &mut Device<B>) -> Result<&Program, ShaderError> {
         if self.program.is_none() {
-            #[cfg(feature = "gleam")]
-            let program = match self.kind {
-                ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       VertexArrayKind::Primitive)
-                }
-                ShaderKind::Cache(format) => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       format)
-                }
-                ShaderKind::VectorStencil => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       VertexArrayKind::VectorStencil)
-                }
-                ShaderKind::VectorCover => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features,
-                                       VertexArrayKind::VectorCover)
-                }
-                ShaderKind::ClipCache => {
-                    create_clip_shader(self.name, device)
-                }
-            };
-
-            #[cfg(not(feature = "gleam"))]
-            let program = Ok(device.create_program(
+            let program = device.create_program_with_kind(
                 self.name,
                 &self.kind,
                 match self.kind {
                     ShaderKind::ClipCache  => &["TRANSFORM"],
                     _ => &self.features,
                 },
-            ));
+            );
             self.program = Some(program?);
         }
 
@@ -327,89 +294,6 @@ impl<B: hal::Backend> TextShader<B> {
         self.glyph_transform.deinit(device);
     }
 }
-
-#[cfg(feature = "gleam")]
-fn create_prim_shader<B>(
-    name: &'static str,
-    device: &mut Device<B>,
-    features: &[&'static str],
-    vertex_format: VertexArrayKind,
-) -> Result<Program, ShaderError> {
-    let mut prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    for feature in features {
-        prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
-    }
-
-    debug!("PrimShader {}", name);
-
-    let vertex_descriptor = match vertex_format {
-        VertexArrayKind::Primitive => desc::PRIM_INSTANCES,
-        VertexArrayKind::Blur => desc::BLUR,
-        VertexArrayKind::Clip => desc::CLIP,
-        VertexArrayKind::VectorStencil => desc::VECTOR_STENCIL,
-        VertexArrayKind::VectorCover => desc::VECTOR_COVER,
-        VertexArrayKind::Border => desc::BORDER,
-    };
-
-    let program = device.create_program(name, &prefix, &vertex_descriptor);
-
-    if let Ok(ref program) = program {
-        device.bind_shader_samplers(
-            program,
-            &[
-                ("sColor0", TextureSampler::Color0),
-                ("sColor1", TextureSampler::Color1),
-                ("sColor2", TextureSampler::Color2),
-                ("sDither", TextureSampler::Dither),
-                ("sCacheA8", TextureSampler::CacheA8),
-                ("sCacheRGBA8", TextureSampler::CacheRGBA8),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
-                ("sRenderTasks", TextureSampler::RenderTasks),
-                ("sResourceCache", TextureSampler::ResourceCache),
-                ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-            ],
-        );
-    }
-
-    program
-}
-
-#[cfg(feature = "gleam")]
-fn create_clip_shader<B>(name: &'static str, device: &mut Device<B>) -> Result<Program, ShaderError> {
-    let prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
-        #define WR_FEATURE_TRANSFORM\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    debug!("ClipShader {}", name);
-
-    let program = device.create_program(name, &prefix, &desc::CLIP);
-
-    if let Ok(ref program) = program {
-        device.bind_shader_samplers(
-            program,
-            &[
-                ("sColor0", TextureSampler::Color0),
-                ("sClipScrollNodes", TextureSampler::ClipScrollNodes),
-                ("sRenderTasks", TextureSampler::RenderTasks),
-                ("sResourceCache", TextureSampler::ResourceCache),
-                ("sSharedCacheA8", TextureSampler::SharedCacheA8),
-                ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-            ],
-        );
-    }
-
-    program
-}
-
 
 pub struct Shaders<B: hal::Backend> {
     // These are "cache shaders". These shaders are used to
