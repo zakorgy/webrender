@@ -276,6 +276,57 @@ pub enum ShaderError {
     Link(String, String),        // name, error message
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum TextureSampler {
+    Color0,
+    Color1,
+    Color2,
+    CacheA8,
+    CacheRGBA8,
+    ResourceCache,
+    TransformPalette,
+    RenderTasks,
+    Dither,
+    // A special sampler that is bound to the A8 output of
+    // the *first* pass. Items rendered in this target are
+    // available as inputs to tasks in any subsequent pass.
+    SharedCacheA8,
+    PrimitiveHeadersF,
+    PrimitiveHeadersI,
+}
+
+impl TextureSampler {
+    pub(crate) fn color(n: usize) -> TextureSampler {
+        match n {
+            0 => TextureSampler::Color0,
+            1 => TextureSampler::Color1,
+            2 => TextureSampler::Color2,
+            _ => {
+                panic!("There are only 3 color samplers.");
+            }
+        }
+    }
+}
+
+impl Into<TextureSlot> for TextureSampler {
+    fn into(self) -> TextureSlot {
+        match self {
+            TextureSampler::Color0 => TextureSlot(0),
+            TextureSampler::Color1 => TextureSlot(1),
+            TextureSampler::Color2 => TextureSlot(2),
+            TextureSampler::CacheA8 => TextureSlot(3),
+            TextureSampler::CacheRGBA8 => TextureSlot(4),
+            TextureSampler::ResourceCache => TextureSlot(5),
+            TextureSampler::TransformPalette => TextureSlot(6),
+            TextureSampler::RenderTasks => TextureSlot(7),
+            TextureSampler::Dither => TextureSlot(8),
+            TextureSampler::SharedCacheA8 => TextureSlot(9),
+            TextureSampler::PrimitiveHeadersF => TextureSlot(10),
+            TextureSampler::PrimitiveHeadersI => TextureSlot(11),
+        }
+    }
+}
+
 // Get a shader string by name, from the built in resources or
 // an override path, if supplied.
 fn get_shader_source(shader_name: &str, base_path: &Option<PathBuf>) -> Option<String> {
@@ -375,4 +426,284 @@ pub(crate) fn create_projection(
         return projection.post_scale(1.0, -1.0, 1.0);
     }
     projection
+}
+
+pub(crate) mod desc {
+    #![cfg_attr(not(feature = "gleam"), allow(dead_code))]
+    use device::{VertexAttribute, VertexAttributeKind, VertexDescriptor};
+
+    pub const PRIM_INSTANCES: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aData",
+                count: 4,
+                kind: VertexAttributeKind::I32,
+            },
+        ],
+    };
+
+    pub const BLUR: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aBlurRenderTaskAddress",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aBlurSourceTaskAddress",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aBlurDirection",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+        ],
+    };
+
+    pub const BORDER: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aTaskOrigin",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aRect",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aColor0",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aColor1",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aFlags",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aWidths",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aRadii",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aClipParams1",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aClipParams2",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+    };
+
+    pub const CLIP: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aClipRenderTaskAddress",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aScrollNodeId",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aClipSegment",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aClipDataResourceAddress",
+                count: 4,
+                kind: VertexAttributeKind::U16,
+            },
+        ],
+    };
+
+    pub const BORDER_CORNER_DASH_AND_DOT: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aClipRenderTaskAddress",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aScrollNodeId",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aClipSegment",
+                count: 1,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aClipDataResourceAddress",
+                count: 4,
+                kind: VertexAttributeKind::U16,
+            },
+            VertexAttribute {
+                name: "aDashOrDot0",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aDashOrDot1",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+    };
+
+    pub const GPU_CACHE_UPDATE: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::U16Norm,
+            },
+            VertexAttribute {
+                name: "aValue",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[],
+    };
+
+    pub const VECTOR_STENCIL: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aFromPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aCtrlPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aToPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aFromNormal",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aCtrlNormal",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aToNormal",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aPathID",
+                count: 1,
+                kind: VertexAttributeKind::U16,
+            },
+            VertexAttribute {
+                name: "aPad",
+                count: 1,
+                kind: VertexAttributeKind::U16,
+            },
+        ],
+    };
+
+    pub const VECTOR_COVER: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aTargetRect",
+                count: 4,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aStencilOrigin",
+                count: 2,
+                kind: VertexAttributeKind::I32,
+            },
+            VertexAttribute {
+                name: "aSubpixel",
+                count: 1,
+                kind: VertexAttributeKind::U16,
+            },
+            VertexAttribute {
+                name: "aPad",
+                count: 1,
+                kind: VertexAttributeKind::U16,
+            },
+        ],
+    };
 }

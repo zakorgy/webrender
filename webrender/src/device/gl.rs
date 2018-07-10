@@ -24,12 +24,15 @@ use std::sync::Arc;
 use std::thread;
 #[cfg(feature = "debug_renderer")]
 use super::Capabilities;
-use super::{ExternalTexture, FBOId, FileWatcherHandler, FrameId, IBOId, RBOId};
-use super::{ReadPixelsFormat, ShaderError, Texel, Texture, TextureFilter, TextureSlot, UploadMethod};
-use super::{VBOId, VertexAttribute, VertexAttributeKind, VertexDescriptor, VertexUsageHint};
+use super::desc;
+use super::{ExternalTexture, FBOId, FileWatcherHandler, FrameId, IBOId, RBOId, ReadPixelsFormat};
+use super::{ShaderError, ShaderKind, Texel, Texture, TextureFilter, TextureSampler, TextureSlot, UploadMethod, VBOId};
+use super::{VertexArrayKind, VertexAttribute, VertexAttributeKind, VertexDescriptor, VertexUsageHint};
 
 // In some places we need to temporarily bind a texture to any slot.
 const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
+
+const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
 pub struct RendererInit<B> {
     pub gl: Rc<gl::Gl>,
@@ -1142,6 +1145,119 @@ impl<B> Device<B> {
     pub fn delete_program(&mut self, mut program: Program) {
         self.gl.delete_program(program.id);
         program.id = 0;
+    }
+
+    pub(crate) fn create_program_with_kind(
+        &mut self,
+        base_filename: &'static str,
+        shader_kind: &ShaderKind,
+        features: &[&'static str],
+    ) -> Result<Program, ShaderError> {
+        match shader_kind {
+            ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
+                self.create_prim_shader(base_filename,
+                                        features,
+                                        VertexArrayKind::Primitive)
+            }
+            ShaderKind::Cache(format) => {
+                self.create_prim_shader(base_filename,
+                                        features,
+                                        *format)
+            }
+            ShaderKind::VectorStencil => {
+                self.create_prim_shader(base_filename,
+                                        features,
+                                        VertexArrayKind::VectorStencil)
+            }
+            ShaderKind::VectorCover => {
+                self.create_prim_shader(base_filename,
+                                        features,
+                                        VertexArrayKind::VectorCover)
+            }
+            ShaderKind::ClipCache => {
+                self.create_clip_shader(base_filename)
+            }
+        }
+    }
+
+    fn create_prim_shader(
+        &mut self,
+        name: &'static str,
+        features: &[&'static str],
+        vertex_format: VertexArrayKind,
+    ) -> Result<Program, ShaderError> {
+        let mut prefix = format!(
+            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
+            MAX_VERTEX_TEXTURE_WIDTH
+        );
+
+        for feature in features {
+            prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
+        }
+
+        debug!("PrimShader {}", name);
+
+        let vertex_descriptor = match vertex_format {
+            VertexArrayKind::Primitive => desc::PRIM_INSTANCES,
+            VertexArrayKind::Blur => desc::BLUR,
+            VertexArrayKind::Clip => desc::CLIP,
+            VertexArrayKind::VectorStencil => desc::VECTOR_STENCIL,
+            VertexArrayKind::VectorCover => desc::VECTOR_COVER,
+            VertexArrayKind::Border => desc::BORDER,
+        };
+
+        let program = self.create_program(name, &prefix, &vertex_descriptor);
+
+        if let Ok(ref program) = program {
+            self.bind_shader_samplers(
+                program,
+                &[
+                    ("sColor0", TextureSampler::Color0),
+                    ("sColor1", TextureSampler::Color1),
+                    ("sColor2", TextureSampler::Color2),
+                    ("sDither", TextureSampler::Dither),
+                    ("sCacheA8", TextureSampler::CacheA8),
+                    ("sCacheRGBA8", TextureSampler::CacheRGBA8),
+                    ("sTransformPalette", TextureSampler::TransformPalette),
+                    ("sRenderTasks", TextureSampler::RenderTasks),
+                    ("sResourceCache", TextureSampler::ResourceCache),
+                    ("sSharedCacheA8", TextureSampler::SharedCacheA8),
+                    ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+                    ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
+                ],
+            );
+        }
+
+        program
+    }
+
+    fn create_clip_shader(&mut self, name: &'static str) -> Result<Program, ShaderError> {
+        let prefix = format!(
+            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
+            #define WR_FEATURE_TRANSFORM\n",
+            MAX_VERTEX_TEXTURE_WIDTH
+        );
+
+        debug!("ClipShader {}", name);
+
+        let program = self.create_program(name, &prefix, &desc::CLIP);
+
+        if let Ok(ref program) = program {
+            self.bind_shader_samplers(
+                program,
+                &[
+                    ("sColor0", TextureSampler::Color0),
+                    ("sTransformPalette", TextureSampler::TransformPalette),
+                    ("sRenderTasks", TextureSampler::RenderTasks),
+                    ("sResourceCache", TextureSampler::ResourceCache),
+                    ("sSharedCacheA8", TextureSampler::SharedCacheA8),
+                    ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+                    ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
+                ],
+            );
+        }
+
+        program
     }
 
     pub fn create_program(

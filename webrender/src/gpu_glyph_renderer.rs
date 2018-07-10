@@ -7,13 +7,14 @@
 use api::{DeviceIntPoint, DeviceIntRect, DeviceUintSize, FontRenderMode};
 use api::{ImageFormat, TextureTarget};
 use debug_colors;
-use device::{Device, PrimitiveType, ShaderKind, Texture, TextureFilter, VAO, VertexArrayKind};
+use device::{self, Device, PrimitiveType, ShaderKind, Texture};
+use device::{TextureFilter, TextureSampler, VAO, VertexArrayKind};
 use euclid::{Point2D, Size2D, Transform3D, TypedVector2D, Vector2D};
 use hal;
 use internal_types::RenderTargetInfo;
 use pathfinder_gfx_utils::ShelfBinPacker;
 use profiler::GpuProfileTag;
-use renderer::{self, ImageBufferKind, Renderer, RendererError, RendererStats, TextureSampler};
+use renderer::{self, ImageBufferKind, Renderer, RendererError, RendererStats};
 use shade::LazilyCompiledShader;
 use tiling::GlyphJob;
 #[cfg(not(feature = "gleam"))]
@@ -73,8 +74,8 @@ impl<B: hal::Backend> GpuGlyphRenderer<B> {
                             Some(area_lut_pixels));
 
         let vector_stencil_vao =
-            device.create_vao_with_new_instances(&renderer::desc::VECTOR_STENCIL, prim_vao);
-        let vector_cover_vao = device.create_vao_with_new_instances(&renderer::desc::VECTOR_COVER,
+            device.create_vao_with_new_instances(&device::desc::VECTOR_STENCIL, prim_vao);
+        let vector_cover_vao = device.create_vao_with_new_instances(&device::desc::VECTOR_COVER,
                                                                     prim_vao);
 
         // Load Pathfinder vector graphics shaders.
