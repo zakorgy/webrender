@@ -28,7 +28,7 @@ use std::sync::Arc;
 use super::Capabilities;
 use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
 use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, FileWatcherHandler};
-use super::{Texture, FBOId, RBOId, VertexUsageHint};
+use super::{Texture, FBOId, RBOId, VertexUsageHint, ShaderError};
 use vertex_types::*;
 
 use hal;
@@ -2115,12 +2115,12 @@ impl<B: hal::Backend> Device<B> {
         _program = INVALID_PROGRAM_ID;
     }
 
-    pub(crate) fn create_program(
+    pub fn create_program(
         &mut self,
         shader_name: &str,
         shader_kind: &ShaderKind,
         features: &[&str],
-    ) -> ProgramId {
+    ) -> Result<ProgramId, ShaderError> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
@@ -2142,7 +2142,16 @@ impl<B: hal::Backend> Device<B> {
 
         let id = self.generate_program_id();
         self.programs.insert(id, program);
-        id
+        Ok(id)
+    }
+
+    pub fn create_program_with_kind(
+        &mut self,
+        shader_name: &str,
+        shader_kind: &ShaderKind,
+        features: &[&str],
+    ) -> Result<ProgramId, ShaderError> {
+        self.create_program(shader_name, shader_kind, features)
     }
 
     pub fn bind_program(&mut self, program_id: &ProgramId) {
