@@ -246,7 +246,9 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 }
                 // Change the sampling coordinates of the Dither texture. Basically it's a vertical flip.
                 if line.contains("sDither") {
-                    line = line.replace("pos", "ivec2(pos.x, matrix_mask - pos.y)");
+                    new_data.push_str("\t#ifndef WR_FEATURE_ALPHA_PASS\n");
+                    new_data.push_str("\tpos.y = matrix_mask - pos.y;\n");
+                    new_data.push_str("\t#endif //WR_FEATURE_ALPHA_PASS\n");
                 }
                 new_data.push_str(&line);
                 new_data.push('\n');
