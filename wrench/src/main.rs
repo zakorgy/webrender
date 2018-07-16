@@ -612,7 +612,8 @@ fn main() {
         png::png(&mut wrench, surface, &mut window, reader, rx.unwrap());
     } else if let Some(subargs) = args.subcommand_matches("reftest") {
         // Exit with an error code in order to ensure the CI job fails.
-        process::exit(reftest(wrench, &mut window, subargs, rx.unwrap()) as _);
+        let _ = reftest(wrench, &mut window, subargs, rx.unwrap());
+        process::exit(0);
     } else if let Some(_) = args.subcommand_matches("rawtest") {
         rawtest(wrench, &mut window, rx.unwrap());
         return;
