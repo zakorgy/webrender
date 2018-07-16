@@ -370,7 +370,7 @@ impl<B: hal::Backend> Shaders<B> {
     fn make_shaders(
         device: &mut Device<B>,
         options: &RendererOptions,
-        gl_type: GlType,
+        _gl_type: GlType,
     ) -> Result<Self, ShaderError> {
         let brush_solid = BrushShader::new(
             "brush_solid",
@@ -492,7 +492,7 @@ impl<B: hal::Backend> Shaders<B> {
         for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
             if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(
                 #[cfg(feature = "gleam")]
-                &gl_type,
+                &_gl_type,
             ) {
                 let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
                 if feature_string != "" {
@@ -520,7 +520,7 @@ impl<B: hal::Backend> Shaders<B> {
         for image_buffer_kind in &IMAGE_BUFFER_KINDS {
             if image_buffer_kind.has_platform_support(
                 #[cfg(feature = "gleam")]
-                &gl_type,
+                &_gl_type,
             ) {
                 for format_kind in &YUV_FORMATS {
                     for color_space_kind in &YUV_COLOR_SPACES {

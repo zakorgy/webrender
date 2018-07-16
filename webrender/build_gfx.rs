@@ -587,7 +587,14 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashM
         file_name.push_str(".spv");
         let spirv_file_path = Path::new(&out_dir).join(&file_name);
         #[cfg(any(target_os = "android", target_os = "linux"))]
-        let mut glslang_validator = String::from_utf8(Command::new("find").arg("../").arg("-name").arg("glslang_validator").arg("-print").arg("-quit").output().unwrap().stdout).unwrap();
+        let mut glslang_validator =
+            String::from_utf8(Command::new("find")
+                .arg("../")
+                .arg("-name")
+                .arg("glslang_validator")
+                .arg("-print")
+                .arg("-quit")
+                .output().unwrap().stdout).unwrap();
         #[cfg(any(target_os = "android", target_os = "linux"))]
             glslang_validator.pop(); // remove \n
         #[cfg(any(target_os = "android", target_os = "linux"))]

@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::{canonicalize, read_dir, File};
 use std::io::prelude::*;
-
 use std::path::{Path, PathBuf};
 
 fn write_shaders(glsl_files: Vec<PathBuf>, shader_file_path: &Path) -> HashMap<String, String> {
