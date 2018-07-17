@@ -1290,10 +1290,10 @@ impl<B: hal::Backend> Program<B> {
             &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
         cmd_buffer.bind_vertex_buffers(
             0,
-            hal::pso::VertexBufferSet(vec![
+            vec![
                 (&self.vertex_buffer.buffer, 0),
                 (&self.instance_buffer[next_id].buffer.buffer, 0),
-            ]),
+            ],
         );
 
         if let Some(ref index_buffer) = self.index_buffer {
@@ -3553,7 +3553,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn set_next_frame_id(&mut self) {
         self.current_frame_id = self.swap_chain
-            .acquire_frame(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
+            .acquire_image(FrameSync::Semaphore(&mut self.image_available_semaphore)).unwrap() as _;
     }
 
     pub fn swap_buffers(&mut self) {
