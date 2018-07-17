@@ -3277,10 +3277,10 @@ impl<B: hal::Backend> Device<B> {
             rects.push(
                 hal::pso::ClearRect {
                     rect: hal::pso::Rect {
-                        x: rect.origin.x as u16,
-                        y: rect.origin.y as u16,
-                        w: rect.size.width as u16,
-                        h: rect.size.height as u16,
+                        x: rect.origin.x as i16,
+                        y: rect.origin.y as i16,
+                        w: rect.size.width as i16,
+                        h: rect.size.height as i16,
                     },
                     layers: 0 .. 1,
                 }
@@ -3298,10 +3298,10 @@ impl<B: hal::Backend> Device<B> {
             rects.push(
                 hal::pso::ClearRect {
                     rect: hal::pso::Rect {
-                        x: rect.origin.x as u16,
-                        y: rect.origin.y as u16,
-                        w: rect.size.width as u16,
-                        h: rect.size.height as u16,
+                        x: rect.origin.x as i16,
+                        y: rect.origin.y as i16,
+                        w: rect.size.width as i16,
+                        h: rect.size.height as i16,
                     },
                     layers: 0 .. 1,
                 }

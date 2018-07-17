@@ -10,5 +10,5 @@ gleam = "0.5"
 mozangle = {version = "0.1", features = ["egl"]}
 webrender = {path = "../webrender", features = ["gleam"]}
 winapi = {version = "0.3", features = ["winerror", "d3d11", "dcomp"]}
-winit = "0.15"
+winit = "0.16"
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }

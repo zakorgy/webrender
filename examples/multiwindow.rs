@@ -38,6 +38,7 @@ use std::marker::PhantomData;
 use webrender::api::*;
 #[cfg(feature = "gfx-hal")]
 use webrender::hal::{self, Instance};
+use winit::dpi::LogicalSize;
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -95,7 +96,7 @@ impl Window {
         let window_builder = winit::WindowBuilder::new()
             .with_title(name)
             .with_multitouch()
-            .with_dimensions(800, 600);
+            .with_dimensions(LogicalSize::new(800., 600.));
 
         #[cfg(feature = "gl")]
         let (init, window) = {
@@ -138,18 +139,18 @@ impl Window {
             (window, adapter, surface)
         };
 
-        let (width, height) = window.get_inner_size().unwrap();
+        let LogicalSize { width, height } = window.get_inner_size().unwrap();
 
-        let framebuffer_size = DeviceUintSize::new(width, height);
+        let framebuffer_size = DeviceUintSize::new(width as u32, height as u32);
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
         let (renderer, sender) = {
             #[cfg(feature = "gfx-hal")]
             let init = webrender::RendererInit {
                 adapter: &adapter,
                 surface: &mut surface,
-                window_size: (width, height),
+                window_size: (width as u32, height as u32),
             };
-            let device_pixel_ratio = window.hidpi_factor();
+            let device_pixel_ratio = window.get_hidpi_factor() as f32;
             let opts = webrender::RendererOptions {
                 device_pixel_ratio,
                 clear_color: Some(clear_color),
@@ -229,10 +230,10 @@ impl Window {
         }
 
         let framebuffer_size = {
-            let (width, height) = self.window.get_inner_size().unwrap();
-            DeviceUintSize::new(width, height)
+            let LogicalSize { width, height } = self.window.get_inner_size().unwrap();
+            DeviceUintSize::new(width as u32, height as u32)
         };
-        let device_pixel_ratio = self.window.hidpi_factor();
+        let device_pixel_ratio = self.window.get_hidpi_factor() as f32;
         let layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
         let mut txn = Transaction::new();
         let mut builder = DisplayListBuilder::new(self.pipeline_id, layout_size);

@@ -4,6 +4,7 @@
 
 use glutin::{self, ContextBuilder, CreationError};
 use winit::{EventsLoop, Window, WindowBuilder};
+use winit::dpi::PhysicalSize;
 
 #[cfg(not(windows))]
 pub enum Context {}
@@ -65,7 +66,7 @@ impl glutin::GlContext for Context {
         match *self {}
     }
 
-    fn resize(&self, _: u32, _: u32) {
+    fn resize(&self, _: PhysicalSize) {
         match *self {}
     }
 }
