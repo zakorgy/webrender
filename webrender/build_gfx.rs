@@ -24,6 +24,7 @@ const SHADER_VERSION_VK: &'static str = "#version 450\n";
 const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack : enable\n\
                                      #extension GL_ARB_explicit_attrib_location : enable\n\
                                      #extension GL_ARB_separate_shader_objects : enable\n";
+const GFX_FEATURE: &'static str = "#define WR_GFX\n";
 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
@@ -137,6 +138,7 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
             }
 
             features.push_str(VK_EXTENSIONS);
+            features.push_str(GFX_FEATURE);
 
             let (mut vs_source, mut fs_source) =
                 build_shader_strings(&shader.source_name, &features, shaders);
