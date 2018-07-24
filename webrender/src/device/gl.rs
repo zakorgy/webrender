@@ -34,7 +34,7 @@ const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 
 const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
-pub struct RendererInit<B> {
+pub struct DeviceInit<B> {
     pub gl: Rc<gl::Gl>,
     pub phantom_data: PhantomData<B>
 }
@@ -460,7 +460,7 @@ pub struct Device<B> {
 
 impl<B> Device<B> {
     pub fn new(
-        init: RendererInit<B>,
+        init: DeviceInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _file_changed_handler: Box<FileWatcherHandler>,

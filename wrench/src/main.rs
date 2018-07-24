@@ -27,6 +27,7 @@ extern crate env_logger;
 extern crate euclid;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 extern crate font_loader;
+extern crate gfx_hal;
 extern crate image;
 #[macro_use]
 extern crate lazy_static;
@@ -48,15 +49,12 @@ extern crate yaml_rust;
 cfg_if! {
     if #[cfg(feature = "dx12")] {
         extern crate gfx_backend_dx12 as back;
-        extern crate gfx_hal;
         use gfx_hal::Instance;
     } else if #[cfg(feature = "metal")] {
         extern crate gfx_backend_metal as back;
-        extern crate gfx_hal;
         use gfx_hal::Instance;
     } else if #[cfg(feature = "vulkan")] {
         extern crate gfx_backend_vulkan as back;
-        extern crate gfx_hal;
         use gfx_hal::Instance;
     } else if #[cfg(feature = "gl")] {
         extern crate gfx_backend_empty as back;
@@ -407,7 +405,7 @@ fn make_window(
             let window = winit::WindowBuilder::new()
                 .with_title("WRech")
                 .with_multitouch()
-                .with_min_dimensions(lsize)
+                .with_dimensions(lsize)
                 .build(events_loop).unwrap();
             //assert_eq!(window.get_inner_size().unwrap(), lsize);
             return WindowWrapper::Window(window);
@@ -558,23 +556,27 @@ fn main() {
     };
 
     #[cfg(feature = "gfx")]
-    let (adapter, mut surface) = {
-        let instance = back::Instance::create("gfx-rs instance", 1);
-        let mut adapters = instance.enumerate_adapters();
-        let adapter = adapters.remove(0);
-        let mut surface = instance.create_surface(window.get_window());
-        (adapter, surface)
-    };
+    let instance = back::Instance::create("gfx-rs instance", 1);
+    #[cfg(feature = "gl")]
+    let instance = back::Instance {};
 
     #[cfg(feature = "gfx")]
-    let init = webrender::RendererInit {
-        adapter: &adapter,
-        surface: &mut surface,
+    let adapter = Some(instance.enumerate_adapters().remove(0));
+    #[cfg(feature = "gl")]
+    let adapter = None;
+
+    #[cfg(feature = "gfx")]
+    let surface = instance.create_surface(window.get_window());
+
+    #[cfg(feature = "gfx")]
+    let init = webrender::DeviceInit {
+        adapter: &adapter.as_ref().unwrap(),
+        surface,
         window_size: (dim.width, dim.height),
     };
 
     #[cfg(feature = "gl")]
-    let init = webrender::RendererInit {
+    let init = webrender::DeviceInit {
         gl: window.clone_gl(),
         phantom_data: PhantomData,
     };
@@ -599,7 +601,7 @@ fn main() {
     );
 
     if let Some(subargs) = args.subcommand_matches("show") {
-        render(&mut wrench, &mut window, size, &mut events_loop, subargs);
+        render(&mut wrench, &mut window, size, &mut events_loop, subargs, &adapter, &instance);
     } else if let Some(subargs) = args.subcommand_matches("png") {
         let surface = match subargs.value_of("surface") {
             Some("screen") | None => png::ReadSurface::Screen,
@@ -647,6 +649,8 @@ fn render<'a>(
     size: DeviceUintSize,
     events_loop: &mut Option<winit::EventsLoop>,
     subargs: &clap::ArgMatches<'a>,
+    _adapter: &Option<gfx_hal::Adapter<back::Backend>>,
+    _instance: &back::Instance,
 ) {
     let input_path = subargs.value_of("INPUT").map(PathBuf::from).unwrap();
 
