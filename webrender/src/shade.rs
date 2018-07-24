@@ -146,6 +146,11 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             device.delete_program(program);
         }
     }
+
+    #[cfg(not(feature = "gleam"))]
+    fn reset(&mut self) {
+        self.program = None;
+    }
 }
 
 // A brush shader supports two modes:
@@ -239,6 +244,15 @@ impl<B: hal::Backend> BrushShader<B> {
             dual_source.deinit(device);
         }
     }
+
+    #[cfg(not(feature = "gleam"))]
+    fn reset(&mut self) {
+        self.alpha.reset();
+        self.opaque.reset();
+        if let Some(ref mut dual_source) = self.dual_source {
+            dual_source.reset();
+        }
+    }
 }
 
 pub struct TextShader<B: hal::Backend> {
@@ -292,6 +306,12 @@ impl<B: hal::Backend> TextShader<B> {
     fn deinit(self, device: &mut Device<B>) {
         self.simple.deinit(device);
         self.glyph_transform.deinit(device);
+    }
+
+    #[cfg(not(feature = "gleam"))]
+    fn reset(&mut self) {
+        self.simple.reset();
+        self.glyph_transform.reset();
     }
 }
 
@@ -675,5 +695,34 @@ impl<B: hal::Backend> Shaders<B> {
         }
         self.cs_border_segment.deinit(device);
         self.ps_split_composite.deinit(device);
+    }
+
+    #[cfg(not(feature = "gleam"))]
+    pub fn reset(&mut self) {
+        self.cs_blur_a8.reset();
+        self.cs_blur_rgba8.reset();
+        self.brush_solid.reset();
+        self.brush_blend.reset();
+        self.brush_mix_blend.reset();
+        self.brush_radial_gradient.reset();
+        self.brush_linear_gradient.reset();
+        self.cs_clip_rectangle.reset();
+        self.cs_clip_box_shadow.reset();
+        self.cs_clip_image.reset();
+        self.cs_clip_line.reset();
+        self.ps_text_run.reset();
+        self.ps_text_run_dual_source.reset();
+        for mut shader in &mut self.brush_image {
+            if let Some(ref mut shader) = shader {
+                shader.reset();
+            }
+        }
+        for mut shader in &mut self.brush_yuv_image {
+            if let Some(ref mut shader) = shader {
+                shader.reset();
+            }
+        }
+        self.cs_border_segment.reset();
+        self.ps_split_composite.reset();
     }
 }

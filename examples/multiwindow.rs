@@ -86,7 +86,9 @@ struct Window {
     api: RenderApi,
     font_instance_key: FontInstanceKey,
     #[cfg(feature = "gfx-hal")]
-    surface: Box<hal::Surface<back::Backend>>,
+    adapter: hal::Adapter<back::Backend>,
+    #[cfg(feature = "gfx-hal")]
+    instance: back::Instance,
 }
 
 #[cfg(any(feature = "gfx-hal", feature = "gl"))]
@@ -122,7 +124,7 @@ impl Window {
                 glutin::Api::WebGl => unimplemented!(),
             };
 
-            let init = webrender::RendererInit {
+            let init = webrender::DeviceInit {
                 gl,
                 phantom_data: PhantomData,
             };
@@ -130,13 +132,13 @@ impl Window {
         };
 
         #[cfg(feature = "gfx-hal")]
-        let (window, adapter, mut surface) = {
+        let (window, instance, adapter, surface) = {
             let window = window_builder.build(&events_loop).unwrap();
             let instance = back::Instance::create("gfx-rs instance", 1);
             let mut adapters = instance.enumerate_adapters();
             let adapter = adapters.remove(0);
             let mut surface = instance.create_surface(&window);
-            (window, adapter, surface)
+            (window, instance, adapter, surface)
         };
 
         let LogicalSize { width, height } = window.get_inner_size().unwrap();
@@ -145,9 +147,9 @@ impl Window {
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
         let (renderer, sender) = {
             #[cfg(feature = "gfx-hal")]
-            let init = webrender::RendererInit {
+            let init = webrender::DeviceInit {
                 adapter: &adapter,
-                surface: &mut surface,
+                surface,
                 window_size: (width as u32, height as u32),
             };
             let device_pixel_ratio = window.get_hidpi_factor() as f32;
@@ -185,7 +187,9 @@ impl Window {
             api,
             font_instance_key,
             #[cfg(feature = "gfx-hal")]
-            surface: Box::new(surface),
+            adapter,
+            #[cfg(feature = "gfx-hal")]
+            instance,
         }
     }
 
@@ -197,6 +201,13 @@ impl Window {
         let mut do_exit = false;
         let my_name = &self.name;
         let renderer = &mut self.renderer;
+
+        #[cfg(feature = "gfx-hal")]
+        let adapter = &self.adapter;
+        #[cfg(feature = "gfx-hal")]
+        let instance = &self.instance;
+        #[cfg(feature = "gfx-hal")]
+        let window = &self.window;
 
         self.events_loop.poll_events(|global_event| match global_event {
             winit::Event::WindowEvent { event, .. } => match event {
@@ -220,6 +231,16 @@ impl Window {
                 } => {
                     println!("toggle flags {}", my_name);
                     renderer.toggle_debug_flags(webrender::DebugFlags::PROFILER_DBG);
+                }
+                #[cfg(feature = "gfx-hal")]
+                winit::WindowEvent::Resized(dims) => {
+                    let init = webrender::DeviceInit {
+                        adapter: adapter,
+                        surface: instance.create_surface(window),
+                        window_size: (dims.width as _, dims.height as _),
+                    };
+
+                    renderer.resize(init);
                 }
                 _ => {}
             }

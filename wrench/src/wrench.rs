@@ -185,7 +185,7 @@ impl Wrench {
         zoom_factor: f32,
         chase_primitive: webrender::ChasePrimitive,
         notifier: Option<Box<RenderNotifier>>,
-        init: webrender::RendererInit<back::Backend>,
+        init: webrender::DeviceInit<back::Backend>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
