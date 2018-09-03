@@ -1701,7 +1701,7 @@ pub struct Device<B: hal::Backend> {
     pub framebuffers: Vec<B::Framebuffer>,
     pub framebuffers_depth: Vec<B::Framebuffer>,
     pub frame_images: Vec<ImageCore<B>>,
-    pub frame_depth: Option<DepthBuffer<B>>,
+    pub frame_depths: Vec<DepthBuffer<B>>,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -1801,7 +1801,7 @@ impl<B: hal::Backend> Device<B> {
             render_pass,
             framebuffers,
             framebuffers_depth,
-            frame_depth,
+            frame_depths,
             frame_images,
             viewport
         ) = Device::init_swapchain_resources(
@@ -1891,7 +1891,7 @@ impl<B: hal::Backend> Device<B> {
             framebuffers,
             framebuffers_depth,
             frame_images,
-            frame_depth: Some(frame_depth),
+            frame_depths,
             viewport,
             sampler_linear,
             sampler_nearest,
@@ -1950,7 +1950,9 @@ impl<B: hal::Backend> Device<B> {
             image.deinit(&self.device);
         }
 
-        self.frame_depth.take().unwrap().deinit(&self.device);
+        for depth in self.frame_depths.drain(..) {
+            depth.deinit(&self.device);
+        }
 
         for framebuffer in self.framebuffers.drain(..) {
             self.device.destroy_framebuffer(framebuffer);
@@ -1972,7 +1974,7 @@ impl<B: hal::Backend> Device<B> {
             render_pass,
             framebuffers,
             framebuffers_depth,
-            frame_depth,
+            frame_depths,
             frame_images,
             viewport
         ) = Device::init_swapchain_resources(
@@ -1987,7 +1989,7 @@ impl<B: hal::Backend> Device<B> {
         self.render_pass = Some(render_pass);
         self.framebuffers = framebuffers;
         self.framebuffers_depth = framebuffers_depth;
-        self.frame_depth = Some(frame_depth);
+        self.frame_depths = frame_depths;
         self.frame_images = frame_images;
         self.viewport = viewport;
         self.surface_format = surface_format;
@@ -2008,7 +2010,7 @@ impl<B: hal::Backend> Device<B> {
         RenderPass<B>,
         Vec<B::Framebuffer>,
         Vec<B::Framebuffer>,
-        DepthBuffer<B>,
+        Vec<DepthBuffer<B>>,
         Vec<ImageCore<B>>,
         hal::pso::Viewport,
     ) {
@@ -2119,15 +2121,24 @@ impl<B: hal::Backend> Device<B> {
                     | hal::image::Access::COLOR_ATTACHMENT_WRITE),
             };
 
+            let depth_dependency = hal::pass::SubpassDependency {
+                passes: hal::pass::SubpassRef::External .. hal::pass::SubpassRef::Pass(0),
+                stages: PipelineStage::EARLY_FRAGMENT_TESTS
+                    .. PipelineStage::LATE_FRAGMENT_TESTS,
+                accesses: hal::image::Access::empty()
+                    .. (hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
+                    | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE),
+            };
+
             RenderPass {
                 r8: device.create_render_pass(&[attachment_r8.clone()], &[subpass_r8], &[dependency.clone()]),
-                r8_depth: device.create_render_pass(&[attachment_r8, attachment_depth.clone()], &[subpass_depth_r8], &[dependency.clone()]),
+                r8_depth: device.create_render_pass(&[attachment_r8, attachment_depth.clone()], &[subpass_depth_r8], &[dependency.clone(), depth_dependency.clone()]),
                 bgra8: device.create_render_pass(&[attachment_bgra8.clone()], &[subpass_bgra8], &[dependency.clone()]),
-                bgra8_depth: device.create_render_pass(&[attachment_bgra8, attachment_depth], &[subpass_depth_bgra8], &[dependency]),
+                bgra8_depth: device.create_render_pass(&[attachment_bgra8, attachment_depth], &[subpass_depth_bgra8], &[dependency, depth_dependency]),
             }
         };
 
-        let frame_depth = DepthBuffer::new(device, &memory_types, extent.width, extent.height, depth_format);
+        let mut frame_depths = Vec::new();
 
         // Framebuffer and render target creation
         let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
@@ -2140,6 +2151,7 @@ impl<B: hal::Backend> Device<B> {
                 let cores = images
                     .into_iter()
                     .map(|image| {
+                        frame_depths.push(DepthBuffer::new(device, &memory_types, extent.width, extent.height, depth_format));
                         ImageCore::from_image(device, image, hal::image::ViewKind::D2Array, surface_format, COLOR_RANGE.clone())
                     })
                     .collect::<Vec<_>>();
@@ -2157,11 +2169,12 @@ impl<B: hal::Backend> Device<B> {
                     .collect();
                 let fbos_depth = cores
                     .iter()
-                    .map(|core| {
+                    .zip(frame_depths.iter())
+                    .map(|(core, depth)| {
                         device
                             .create_framebuffer(
                                 &render_pass.bgra8_depth,
-                                vec![&core.view, &frame_depth.core.view],
+                                vec![&core.view, &depth.core.view],
                                 extent,
                             )
                             .unwrap()
@@ -2184,7 +2197,7 @@ impl<B: hal::Backend> Device<B> {
             depth: 0.0 .. 1.0,
         };
         (swap_chain, surface_format, depth_format, render_pass,
-         framebuffers, framebuffers_depth, frame_depth, frame_images, viewport)
+         framebuffers, framebuffers_depth, frame_depths, frame_images, viewport)
     }
 
     pub(crate) fn bound_program(&self) -> ProgramId { self.bound_program }
@@ -2492,7 +2505,7 @@ impl<B: hal::Backend> Device<B> {
                 rbos[&rbo].core.subresource_range.clone(),
             )) {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3488,7 +3501,7 @@ impl<B: hal::Backend> Device<B> {
             };
             (&img.core, fbo.layer_index, dimg)
         } else {
-            (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depth.as_ref().unwrap().core))
+            (&self.frame_images[self.current_frame_id], 0, Some(&self.frame_depths[self.current_frame_id].core))
         };
 
         let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
@@ -3540,7 +3553,7 @@ impl<B: hal::Backend> Device<B> {
                 dimg.subresource_range.clone(),
             ) {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3558,7 +3571,7 @@ impl<B: hal::Backend> Device<B> {
                 dimg.subresource_range.clone(),
             ) {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -3784,6 +3797,9 @@ impl<B: hal::Backend> Device<B> {
         for image in self.frame_images {
             image.deinit(&self.device);
         }
+        for depth in self.frame_depths {
+            depth.deinit(&self.device);
+        }
         for (_, image) in self.images {
             image.deinit(&self.device);
         }
@@ -3799,7 +3815,6 @@ impl<B: hal::Backend> Device<B> {
         for framebuffer_depth in self.framebuffers_depth {
             self.device.destroy_framebuffer(framebuffer_depth);
         }
-        self.frame_depth.unwrap().deinit(&self.device);
         self.device.destroy_sampler(self.sampler_linear);
         self.device.destroy_sampler(self.sampler_nearest);
         for descriptor_pool in self.descriptor_pools {
