@@ -2654,7 +2654,9 @@ impl<B: hal::Backend> Renderer<B>
                 // Note: `framebuffer_target_rect` needs a Y-flip before going to GL
                 // Note: at this point, the target rectangle is not guaranteed to be within the main framebuffer bounds
                 // but `clear_target_rect` is totally fine with negative origin, as long as width & height are positive
-                rect.origin.y = target_size.height as i32 - rect.origin.y - rect.size.height;
+                if cfg!(feature = "gleam") {
+                    rect.origin.y = target_size.height as i32 - rect.origin.y - rect.size.height;
+                }
                 Some(rect)
             };
 
@@ -2720,7 +2722,9 @@ impl<B: hal::Backend> Renderer<B>
                         let mut rect = target_rect
                             .intersection(&framebuffer_target_rect.to_i32())
                             .unwrap_or(DeviceIntRect::zero());
-                        rect.origin.y = cmp::max(target_size.height as i32 - rect.origin.y - rect.size.height, 0);
+                        if cfg!(feature = "gleam") {
+                            rect.origin.y = target_size.height as i32 - rect.origin.y - rect.size.height;
+                        }
                         rect
                     } else {
                         target_rect
@@ -2773,7 +2777,9 @@ impl<B: hal::Backend> Renderer<B>
                     let mut rect = target_rect
                         .intersection(&framebuffer_target_rect.to_i32())
                         .unwrap_or(DeviceIntRect::zero());
-                    rect.origin.y = cmp::max(target_size.height as i32 - rect.origin.y - rect.size.height, 0);
+                    if cfg!(feature = "gleam") {
+                        rect.origin.y = target_size.height as i32 - rect.origin.y - rect.size.height;
+                    }
                     rect
                 } else {
                     target_rect
