@@ -3416,6 +3416,9 @@ impl<B: hal::Backend> Device<B> {
         color: Option<[f32; 4]>,
         depth: Option<f32>,
     ) {
+        if color.is_none() && depth.is_none() {
+            return
+        }
         let mut clears = Vec::new();
         let mut rects = Vec::new();
         if let Some(color) =  color {
