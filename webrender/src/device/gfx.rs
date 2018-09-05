@@ -993,7 +993,6 @@ impl<B: hal::Backend> Program<B> {
         shader_name: &str,
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
-        backend_features: &hal::Features,
     ) -> Program<B> {
         let vs_module = device
             .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
@@ -1045,7 +1044,7 @@ impl<B: hal::Backend> Program<B> {
                         (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
                         (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
                     ];
-                    if backend_features.contains(hal::Features::DUAL_SRC_BLENDING) {
+                    if shader_name.contains("dual_source_blending") {
                         states.push((SUBPIXEL_DUAL_SOURCE, DepthTest::Off));
                         states.push((SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST));
                     }
@@ -2255,7 +2254,6 @@ impl<B: hal::Backend> Device<B> {
             &name,
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
-            &self.features,
         );
 
         let id = self.generate_program_id();
