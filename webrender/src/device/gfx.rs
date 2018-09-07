@@ -546,22 +546,18 @@ impl<B: hal::Backend> Image<B> {
             levels: 0 .. 1,
             layers: layer_index as _ .. (layer_index + 1) as _,
         };
-        let mut barriers = Vec::new();
-        barriers.extend(buffer.transit(hal::buffer::Access::TRANSFER_READ));
-        barriers.extend(
-            self.core.transit(
+        let barriers = buffer.transit(hal::buffer::Access::TRANSFER_READ)
+            .into_iter()
+            .chain(self.core.transit(
                 hal::image::Access::TRANSFER_WRITE,
                 hal::image::Layout::TransferDstOptimal,
-                range.clone(),
-            )
+                range.clone()));
+
+        cmd_buffer.pipeline_barrier(
+            PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
+            hal::memory::Dependencies::empty(),
+            barriers,
         );
-        if !barriers.is_empty() {
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
-                hal::memory::Dependencies::empty(),
-                &barriers,
-            );
-        }
         cmd_buffer.copy_buffer_to_image(
             &buffer.buffer,
             &self.core.image,
@@ -2915,30 +2911,23 @@ impl<B: hal::Backend> Device<B> {
             levels: 0 .. 1,
             layers: dest_layer .. dest_layer + 1,
         };
-        {
-            let mut barriers = Vec::new();
-            barriers.extend(
-                src_img.transit(
-                    hal::image::Access::TRANSFER_READ,
-                    hal::image::Layout::TransferSrcOptimal,
-                    src_range.clone(),
-                )
-            );
-            barriers.extend(
-                dest_img.transit(
-                    hal::image::Access::TRANSFER_WRITE,
-                    hal::image::Layout::TransferDstOptimal,
-                    dest_range.clone(),
-                )
-            );
-            if !barriers.is_empty() {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
-                    hal::memory::Dependencies::empty(),
-                    &barriers,
-                );
-            }
-        }
+
+        let barriers = src_img.transit(
+            hal::image::Access::TRANSFER_READ,
+            hal::image::Layout::TransferSrcOptimal,
+            src_range.clone(),
+        ).into_iter().chain(
+            dest_img.transit(
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::Layout::TransferDstOptimal,
+                dest_range.clone(),
+            )
+        );
+        cmd_buffer.pipeline_barrier(
+            PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
+            hal::memory::Dependencies::empty(),
+            barriers,
+        );
 
         if src_rect.size != dest_rect.size {
             cmd_buffer.blit_image(
@@ -3019,30 +3008,21 @@ impl<B: hal::Backend> Device<B> {
         }
 
         // the blit caller code expects to be able to render to the target
-        {
-            let mut barriers = Vec::new();
-            barriers.extend(
-                src_img.transit(
-                    hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                    hal::image::Layout::ColorAttachmentOptimal,
-                    src_range,
-                )
-            );
-            barriers.extend(
-                dest_img.transit(
-                    hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                    hal::image::Layout::ColorAttachmentOptimal,
-                    dest_range,
-                )
-            );
-            if !barriers.is_empty() {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                    hal::memory::Dependencies::empty(),
-                    &barriers,
-                );
-            }
-        }
+        let barriers = src_img.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::ColorAttachmentOptimal,
+            src_range,
+        ).into_iter().chain(dest_img.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::ColorAttachmentOptimal,
+            dest_range,
+        ));
+
+        cmd_buffer.pipeline_barrier(
+            PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+            hal::memory::Dependencies::empty(),
+            barriers,
+        );
 
         self.upload_queue.push(cmd_buffer.finish());
     }
@@ -3192,27 +3172,23 @@ impl<B: hal::Backend> Device<B> {
 
         let copy_submit = {
             let mut cmd_buffer = command_pool.acquire_command_buffer(false);
-            let mut barriers = Vec::new();
             let range = hal::image::SubresourceRange {
                 aspects: hal::format::Aspects::COLOR,
                 levels: 0 .. 1,
                 layers: layer .. layer + 1,
             };
-            barriers.extend(download_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
-            barriers.extend(
-                image.transit(
+            let barriers = download_buffer.transit(hal::buffer::Access::TRANSFER_WRITE)
+                .into_iter()
+                .chain(image.transit(
                     hal::image::Access::TRANSFER_READ,
                     hal::image::Layout::TransferSrcOptimal,
-                    range.clone(),
-                )
+                    range.clone()));
+
+            cmd_buffer.pipeline_barrier(
+                PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                barriers
             );
-            if !barriers.is_empty() {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
-                    hal::memory::Dependencies::empty(),
-                    &barriers
-                );
-            }
 
             cmd_buffer.copy_image_to_buffer(
                 &image.image,
