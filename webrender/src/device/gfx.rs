@@ -489,6 +489,7 @@ impl<B: hal::Backend> Image<B> {
         image_depth: i32,
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
+        usage: hal::image::Usage,
     ) -> Self {
         let format = match image_format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
@@ -503,6 +504,7 @@ impl<B: hal::Backend> Image<B> {
             image_depth as _,
             1,
         );
+
         let core = ImageCore::create(
             device,
             memory_types,
@@ -510,7 +512,7 @@ impl<B: hal::Backend> Image<B> {
             view_kind,
             mip_levels,
             format,
-            hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED | hal::image::Usage::COLOR_ATTACHMENT,
+            usage,
             hal::image::SubresourceRange {
                 aspects: hal::format::Aspects::COLOR,
                 levels: 0 .. mip_levels,
@@ -2652,10 +2654,11 @@ impl<B: hal::Backend> Device<B> {
         texture.last_frame_used = self.frame_id;
 
         assert_eq!(self.images.contains_key(&texture.id), false);
-        let (view_kind, mip_levels) = match texture.filter {
-            TextureFilter::Nearest => (hal::image::ViewKind::D2, 1),
-            TextureFilter::Linear => (hal::image::ViewKind::D2Array, 1),
-            TextureFilter::Trilinear => (hal::image::ViewKind::D2Array, (width as f32).max(height as f32).log2().floor() as u8 + 1),
+        let usage_base = hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED;
+        let (view_kind, mip_levels, usage) = match texture.filter {
+            TextureFilter::Nearest => (hal::image::ViewKind::D2, 1, usage_base | hal::image::Usage::COLOR_ATTACHMENT),
+            TextureFilter::Linear => (hal::image::ViewKind::D2Array, 1, usage_base | hal::image::Usage::COLOR_ATTACHMENT),
+            TextureFilter::Trilinear => (hal::image::ViewKind::D2Array, (width as f32).max(height as f32).log2().floor() as u8 + 1, usage_base),
         };
         let img = Image::new(
             &self.device,
@@ -2666,6 +2669,7 @@ impl<B: hal::Backend> Device<B> {
             texture.layer_count,
             view_kind,
             mip_levels,
+            usage,
         );
 
         assert_eq!(texture.fbo_ids.len(), 0);
