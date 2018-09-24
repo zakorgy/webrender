@@ -1187,7 +1187,7 @@ impl<B> Device<B> {
         vertex_format: VertexArrayKind,
     ) -> Result<Program, ShaderError> {
         let mut prefix = format!(
-            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n",
+            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
             MAX_VERTEX_TEXTURE_WIDTH
         );
 
@@ -1233,7 +1233,7 @@ impl<B> Device<B> {
 
     fn create_clip_shader(&mut self, name: &'static str) -> Result<Program, ShaderError> {
         let prefix = format!(
-            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}\n
+            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n
             #define WR_FEATURE_TRANSFORM\n",
             MAX_VERTEX_TEXTURE_WIDTH
         );
