@@ -789,21 +789,18 @@ impl<B: hal::Backend> BufferPool<B> {
     }
 }
 
-pub struct InstanceBufferHandler<B: hal::Backend> {
+struct InstancePoolBuffer<B: hal::Backend> {
     buffer: Buffer<B>,
-    data_stride: usize,
-    non_coherent_atom_size: usize,
     pub offset: usize,
-    pub size: usize,
+    pub last_update_size: usize,
 }
 
-impl<B: hal::Backend> InstanceBufferHandler<B> {
-    pub fn new(
+impl<B: hal::Backend> InstancePoolBuffer<B> {
+    fn new(
         device: &B::Device,
-        memory_types: &Vec<hal::MemoryType>,
+        memory_types: &[hal::MemoryType],
         usage: hal::buffer::Usage,
         data_stride: usize,
-        non_coherent_atom_size: usize,
         pitch_alignment_mask: usize,
     ) -> Self {
         let buffer = Buffer::new(
@@ -814,43 +811,129 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
             MAX_INSTANCE_COUNT,
             data_stride,
         );
-        InstanceBufferHandler {
-            offset: 0,
-            size: 0,
-            non_coherent_atom_size,
+        InstancePoolBuffer {
             buffer,
-            data_stride,
+            offset: 0,
+            last_update_size: 0,
         }
     }
 
-    pub fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
-        let buffer_len = data.len() * self.data_stride;
-        assert!(
-            self.offset * self.data_stride + buffer_len < self.buffer.buffer_size,
-            "offset({:?}) * data_stride({:?}) + buffer_len({:?}) < buffer_size({:?})",
-            self.offset, self.data_stride, buffer_len, self.buffer.buffer_size
-        );
+    fn update<T: Copy>(
+        &mut self,
+        device: &B::Device,
+        data: &[T],
+        non_coherent_atom_size: usize,
+    ) {
         self.buffer.update(
             device,
             data,
             self.offset,
-            self.non_coherent_atom_size,
+            non_coherent_atom_size,
         );
-        self.size = data.len();
-        self.offset += self.size;
+        self.last_update_size = data.len();
+        self.offset += self.last_update_size;
     }
 
-    pub fn buffer(&self) -> &Buffer<B> {
-        &self.buffer
-    }
-
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.offset = 0;
-        self.size = 0;
+        self.last_update_size = 0;
     }
 
-    pub fn deinit(self, device: &B::Device) {
+    fn deinit(self, device: &B::Device) {
         self.buffer.deinit(device);
+    }
+}
+
+pub struct InstanceBufferHandler<B: hal::Backend> {
+    buffers: Vec<InstancePoolBuffer<B>>,
+    memory_types: Vec<hal::MemoryType>,
+    data_stride: usize,
+    non_coherent_atom_size: usize,
+    pitch_alignment_mask: usize,
+    current_buffer_index: usize,
+}
+
+impl<B: hal::Backend> InstanceBufferHandler<B> {
+    pub fn new(
+        device: &B::Device,
+        memory_types: &[hal::MemoryType],
+        usage: hal::buffer::Usage,
+        data_stride: usize,
+        non_coherent_atom_size: usize,
+        pitch_alignment_mask: usize,
+    ) -> Self {
+        let buffers = vec![
+            InstancePoolBuffer::new(
+                device,
+                memory_types,
+                usage,
+                data_stride,
+                pitch_alignment_mask,
+            )];
+
+        InstanceBufferHandler {
+            buffers,
+            memory_types: memory_types.to_vec(),
+            non_coherent_atom_size,
+            pitch_alignment_mask,
+            data_stride,
+            current_buffer_index: 0,
+        }
+    }
+
+    pub fn add<T: Copy>(
+        &mut self,
+        device: &B::Device,
+        mut data: &[T],
+    ) {
+        assert_eq!(self.data_stride, mem::size_of::<T>());
+        while !data.is_empty() {
+            if self.current_buffer().buffer.buffer_size == self.current_buffer().offset * self.data_stride {
+                self.current_buffer_index += 1;
+                if self.buffers.len() <= self.current_buffer_index {
+                    self.buffers.push(
+                        InstancePoolBuffer::new(
+                            device,
+                            &self.memory_types,
+                            hal::buffer::Usage::VERTEX,
+                            self.data_stride,
+                            self.pitch_alignment_mask,
+                        )
+                    )
+                }
+            }
+
+            let update_size = if (self.current_buffer().offset + data.len()) * self.data_stride > self.current_buffer().buffer.buffer_size {
+                self.current_buffer().buffer.buffer_size / self.data_stride - self.current_buffer().offset
+            } else {
+                data.len()
+            };
+
+            self.buffers[self.current_buffer_index].update(
+                device,
+                &data[0 .. update_size],
+                self.non_coherent_atom_size,
+            );
+
+            data = &data[update_size .. ]
+        }
+    }
+
+    fn current_buffer(&self) -> &InstancePoolBuffer<B> {
+        &self.buffers[self.current_buffer_index]
+    }
+
+    fn reset(&mut self) {
+        for buffer in &mut self.buffers {
+            buffer.reset();
+        }
+        self.current_buffer_index = 0;
+    }
+
+    fn deinit(self, device: &B::Device) {
+        for buffer in self.buffers {
+            buffer.deinit(device);
+        }
     }
 }
 
@@ -1328,6 +1411,18 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.bind_graphics_pipeline(
             &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
 
+        cmd_buffer.bind_graphics_descriptor_sets(
+            &self.pipeline_layout,
+            0,
+            Some(desc_pools.get(&self.shader_kind)),
+            &[],
+        );
+        desc_pools.next(&self.shader_kind);
+
+        if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
+            cmd_buffer.set_blend_constants(blend_color.to_array());
+        }
+
 
         if let Some(ref index_buffer) = self.index_buffer {
             cmd_buffer.bind_vertex_buffers(
@@ -1343,49 +1438,47 @@ impl<B: hal::Backend> Program<B> {
                     index_type: hal::IndexType::U32,
                 }
             );
-        } else {
-            cmd_buffer.bind_vertex_buffers(
-                0,
-                vec![
-                    (&vertex_buffer.buffer().buffer, 0),
-                    (&instance_buffer.buffer().buffer, 0),
-                ],
-            );
-        }
 
-        cmd_buffer.bind_graphics_descriptor_sets(
-            &self.pipeline_layout,
-            0,
-            Some(desc_pools.get(&self.shader_kind)),
-            &[],
-        );
-        desc_pools.next(&self.shader_kind);
+            {
+                let mut encoder = cmd_buffer.begin_render_pass_inline(
+                    render_pass,
+                    frame_buffer,
+                    viewport.rect,
+                    clear_values,
+                );
 
-        if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
-            cmd_buffer.set_blend_constants(blend_color.to_array());
-        }
-
-        {
-            let mut encoder = cmd_buffer.begin_render_pass_inline(
-                render_pass,
-                frame_buffer,
-                viewport.rect,
-                clear_values,
-            );
-
-            if let Some(ref index_buffer) = self.index_buffer {
                 encoder.draw_indexed(
                     0 .. index_buffer[next_id].buffer().buffer_len as u32,
                     0,
                     0 .. 1,
                 );
-            } else {
-                let offset = instance_buffer.offset as u32;
-                let size = instance_buffer.size as u32;
-                encoder.draw(
-                    0 .. vertex_buffer.buffer_len as _,
-                    (offset - size) .. offset,
+            }
+
+        } else {
+            for i in 0 ..= instance_buffer.current_buffer_index {
+                cmd_buffer.bind_vertex_buffers(
+                    0,
+                    vec![
+                        (&vertex_buffer.buffer().buffer, 0),
+                        (&instance_buffer.buffers[i].buffer.buffer, 0),
+                    ],
                 );
+
+                {
+                    let mut encoder = cmd_buffer.begin_render_pass_inline(
+                        render_pass,
+                        frame_buffer,
+                        viewport.rect,
+                        clear_values,
+                    );
+                    let offset = instance_buffer.buffers[i].offset;
+                    let size = instance_buffer.buffers[i].last_update_size;
+                    encoder.draw(
+                        0 .. vertex_buffer.buffer_len as _,
+                        (offset - size) as u32 .. offset as u32,
+                    );
+
+                }
             }
         }
 
