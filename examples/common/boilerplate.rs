@@ -192,6 +192,8 @@ pub fn main_wrapper<E: Example>(
         adapter,
         surface,
         window_size: (width as u32, height as u32),
+        frame_count: None,
+        descriptor_count: None,
     };
 
     println!("Shader resource path: {:?}", res_path);

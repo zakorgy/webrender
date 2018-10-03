@@ -3482,7 +3482,7 @@ impl<B: hal::Backend> Renderer<B>
                 //TODO: fix this, our init_texture is handling this case incorrectly.
                 #[cfg(not(feature = "gleam"))]
                 {
-                    if texture.still_in_flight(frame_id) {
+                    if texture.still_in_flight(frame_id, self.device.frame_count) {
                         return false;
                     }
                 }

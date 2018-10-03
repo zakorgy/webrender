@@ -50,7 +50,15 @@ pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
-pub const MAX_FRAME_COUNT: usize = 2;
+const MAX_FRAME_COUNT: usize = 2;
+const DESCRIPTOR_COUNT: usize = 40;
+const DEBUG_DESCRIPTOR_COUNT: usize = 5;
+// The maximum number of sampled textures in a cache clip shader.
+const CACHE_CLIP_SAMPLERS: usize = 7;
+// The maximum number of sampled textures in a debug shader.
+const DEBUG_SAMPLERS: usize = 4;
+// The maximum number of sampled textures in a shader which is not debug/cache clip.
+const DEFAULT_SAMPLERS: usize = 12;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -69,6 +77,8 @@ pub struct DeviceInit<B: hal::Backend> {
     pub adapter: hal::Adapter<B>,
     pub surface: B::Surface,
     pub window_size: (u32, u32),
+    pub frame_count: Option<usize>,
+    pub descriptor_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -132,8 +142,8 @@ pub trait PrimitiveType {
 }
 
 impl Texture {
-    pub fn still_in_flight(&self, frame_id: FrameId) -> bool {
-        for i in 0..MAX_FRAME_COUNT {
+    pub fn still_in_flight(&self, frame_id: FrameId, frame_count: usize) -> bool {
+        for i in 0..frame_count {
             if self.bound_in_frame.get() == FrameId(frame_id.0 - i) {
                 return true
             }
@@ -1093,6 +1103,7 @@ impl<B: hal::Backend> Program<B> {
         shader_name: &str,
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
+        frame_count: usize,
     ) -> Program<B> {
         let vs_module = device
             .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
@@ -1255,7 +1266,7 @@ impl<B: hal::Backend> Program<B> {
         } else {
             None
         };
-        for _ in 0..MAX_FRAME_COUNT {
+        for _ in 0..frame_count {
             vertex_buffer.push(
                 VertexBufferHandler::new(
                     device,
@@ -1675,7 +1686,9 @@ impl<B: hal::Backend> DescPool<B> {
 
     pub fn next(&mut self) {
         self.current_descriptor_set_id += 1;
-        assert!(self.current_descriptor_set_id < self.max_descriptor_set_size);
+        assert!(self.current_descriptor_set_id < self.max_descriptor_set_size,
+                "Maximum descriptor set size({}) exceeded!",
+                self.max_descriptor_set_size);
         if self.current_descriptor_set_id == self.descriptor_set.len() {
             self.allocate();
         }
@@ -1707,6 +1720,7 @@ pub struct DescriptorPools<B: hal::Backend> {
 impl<B: hal::Backend> DescriptorPools<B> {
     pub fn new(
         device: &B::Device,
+        descriptor_count: usize,
         debug_layout: Vec<DescriptorSetLayoutBinding>,
         cache_clip_layout: Vec<DescriptorSetLayoutBinding>,
         default_layout: Vec<DescriptorSetLayoutBinding>,
@@ -1714,52 +1728,52 @@ impl<B: hal::Backend> DescriptorPools<B> {
         let debug_range = vec![
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 20,
+                count: DEBUG_DESCRIPTOR_COUNT * DEBUG_SAMPLERS,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 20,
+                count: DEBUG_DESCRIPTOR_COUNT * DEBUG_SAMPLERS,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 5,
+                count: DEBUG_DESCRIPTOR_COUNT,
             }
         ];
 
         let cache_clip_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 400,
+                count: descriptor_count * CACHE_CLIP_SAMPLERS,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 400,
+                count: descriptor_count * CACHE_CLIP_SAMPLERS,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: descriptor_count,
             }
         ];
 
         let default_range = vec![
             hal::pso::DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::SampledImage,
-                count: 400,
+                count: descriptor_count * DEFAULT_SAMPLERS,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::Sampler,
-                count: 400,
+                count: descriptor_count * DEFAULT_SAMPLERS,
             },
             DescriptorRangeDesc {
                 ty: hal::pso::DescriptorType::UniformBuffer,
-                count: 40,
+                count: descriptor_count,
             }
         ];
 
         DescriptorPools {
             debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, 40, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, 40, default_range, default_layout),
+            cache_clip_pool: DescPool::new(device, descriptor_count, cache_clip_range, cache_clip_layout),
+            default_pool: DescPool::new(device, descriptor_count, default_range, default_layout),
         }
     }
 
@@ -1819,6 +1833,7 @@ pub struct Device<B: hal::Backend> {
     pub framebuffers_depth: Vec<B::Framebuffer>,
     pub frame_images: Vec<ImageCore<B>>,
     pub frame_depths: Vec<DepthBuffer<B>>,
+    pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -1883,7 +1898,7 @@ impl<B: hal::Backend> Device<B> {
         _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
     ) -> Self {
-        let (adapter, mut surface, window_size) = (init.adapter, init.surface, init.window_size);
+        let DeviceInit { adapter, mut surface, window_size, frame_count, descriptor_count } = init;
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
 
@@ -1950,10 +1965,12 @@ impl<B: hal::Backend> Device<B> {
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
-        for _ in 0..MAX_FRAME_COUNT {
+        let frame_count = frame_count.unwrap_or(MAX_FRAME_COUNT);
+        for _ in 0..frame_count {
             descriptor_pools.push(
                 DescriptorPools::new(
                     &device,
+                    descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
                     pipeline_requirements.get("debug_color").expect("debug_color missing").descriptor_set_layouts.clone(),
                     pipeline_requirements.get("cs_clip_rectangle").expect("cs_clip_rectangle missing").descriptor_set_layouts.clone(),
                     pipeline_requirements.get("brush_solid").expect("brush_solid missing").descriptor_set_layouts.clone(),
@@ -2010,6 +2027,7 @@ impl<B: hal::Backend> Device<B> {
             framebuffers_depth,
             frame_images,
             frame_depths,
+            frame_count,
             viewport,
             sampler_linear,
             sampler_nearest,
@@ -2385,6 +2403,7 @@ impl<B: hal::Backend> Device<B> {
             &name,
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
+            self.frame_count,
         );
 
         let id = self.generate_program_id();
@@ -3168,7 +3187,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn free_image(&mut self, texture: &mut Texture) {
         // Note: this is a very rare case, but if it becomes a problem
         // we need to handle this in renderer.rs
-        if texture.still_in_flight(self.frame_id) {
+        if texture.still_in_flight(self.frame_id, self.frame_count) {
             self.wait_for_resources();
             let fence = self.device.create_fence(false);
             self.device.reset_fence(&fence);
@@ -3855,7 +3874,7 @@ impl<B: hal::Backend> Device<B> {
                     self.current_frame_id as _,
                     Some(&self.render_finished_semaphore)).is_err()
         };
-        self.next_id = (self.next_id + 1) % MAX_FRAME_COUNT;
+        self.next_id = (self.next_id + 1) % self.frame_count;
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
             self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0);
