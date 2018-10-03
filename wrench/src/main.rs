@@ -561,6 +561,8 @@ fn main() {
         adapter: instance.enumerate_adapters().remove(0),
         surface: instance.create_surface(window.get_window()),
         window_size: (dim.width, dim.height),
+        frame_count: args.value_of("frame_count").map(|f| f.parse::<usize>().unwrap()),
+        descriptor_count: args.value_of("descriptor_count").map(|d| d.parse::<usize>().unwrap()),
     };
 
     #[cfg(feature = "gl")]
