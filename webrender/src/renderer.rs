@@ -67,7 +67,6 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::f32;
-use std::marker::PhantomData;
 use std::mem;
 use std::os::raw::c_void;
 use std::path::PathBuf;
@@ -83,6 +82,9 @@ use tiling::{Frame, RenderTarget, RenderTargetKind, TextureCacheRenderTarget};
 #[cfg(not(feature = "pathfinder"))]
 use tiling::GlyphJob;
 use time::precise_time_ns;
+use back;
+use hal::Instance;
+use std::os::raw;
 
 cfg_if! {
     if #[cfg(feature = "debugger")] {
@@ -378,14 +380,12 @@ impl CpuProfile {
 }
 
 #[cfg(not(feature = "pathfinder"))]
-pub struct GpuGlyphRenderer<B: hal::Backend> {
-    phantom_data: PhantomData<B>,
-}
+pub struct GpuGlyphRenderer { }
 
 #[cfg(not(feature = "pathfinder"))]
-impl<B: hal::Backend> GpuGlyphRenderer<B> {
-    fn new(_: &mut Device<B>, _: &VAO, _: bool) -> Result<GpuGlyphRenderer<B>, RendererError> {
-        Ok(GpuGlyphRenderer { phantom_data: PhantomData })
+impl GpuGlyphRenderer {
+    fn new(_: &mut Device<back::Backend>, _: &VAO, _: bool) -> Result<GpuGlyphRenderer, RendererError> {
+        Ok(GpuGlyphRenderer { })
     }
 }
 
@@ -398,7 +398,7 @@ struct ActiveTexture {
     is_shared: bool,
 }
 
-struct SourceTextureResolver<B: hal::Backend> {
+struct SourceTextureResolver {
     /// A vector for fast resolves of texture cache IDs to
     /// native texture IDs. This maps to a free-list managed
     /// by the backend thread / texture cache. We free the
@@ -430,12 +430,10 @@ struct SourceTextureResolver<B: hal::Backend> {
 
     /// General pool of render targets.
     render_target_pool: Vec<Texture>,
-
-    phantom_data: PhantomData<B>,
 }
 
-impl<B: hal::Backend> SourceTextureResolver<B> {
-    fn new(device: &mut Device<B>) -> SourceTextureResolver<B> {
+impl SourceTextureResolver {
+    fn new(device: &mut Device<back::Backend>) -> SourceTextureResolver {
         let mut dummy_cache_texture = device
             .create_texture(TextureTarget::Array, ImageFormat::BGRA8);
         device.init_texture::<u8>(
@@ -457,11 +455,10 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
             shared_alpha_texture: None,
             saved_textures: Vec::default(),
             render_target_pool: Vec::new(),
-            phantom_data: PhantomData,
         }
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit(self, device: &mut Device<back::Backend>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for texture in self.cache_texture_map {
@@ -479,7 +476,7 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
         assert!(self.saved_textures.is_empty());
     }
 
-    fn end_frame(&mut self, device: &mut Device<B>, frame_id: FrameId) {
+    fn end_frame(&mut self, device: &mut Device<back::Backend>, frame_id: FrameId) {
         // return the cached targets to the pool
         self.end_pass(None, None);
         // return the global alpha texture
@@ -500,7 +497,7 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
     }
 
     /// Drops all targets from the render target pool that do not satisfy the predicate.
-    pub fn retain_targets<F: Fn(&Texture) -> bool>(&mut self, device: &mut Device<B>, f: F) {
+    pub fn retain_targets<F: Fn(&Texture) -> bool>(&mut self, device: &mut Device<back::Backend>, f: F) {
         // We can't just use retain() because `Texture` requires manual cleanup.
         let mut tmp = SmallVec::<[Texture; 8]>::new();
         for target in self.render_target_pool.drain(..) {
@@ -551,7 +548,7 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<B>) {
+    fn bind(&self, texture_id: &SourceTexture, sampler: TextureSampler, device: &mut Device<back::Backend>) {
         match *texture_id {
             SourceTexture::Invalid => {
                 device.bind_texture(sampler, &self.dummy_cache_texture);
@@ -690,14 +687,13 @@ enum CacheBus {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct CacheTexture<B: hal::Backend> {
+struct CacheTexture {
     texture: Texture,
     bus: CacheBus,
-    phantom_data: PhantomData<B>,
 }
 
-impl<B: hal::Backend> CacheTexture<B> {
-    fn new(device: &mut Device<B>, _use_scatter: bool) -> Result<Self, RendererError> {
+impl CacheTexture {
+    fn new(device: &mut Device<back::Backend>, _use_scatter: bool) -> Result<Self, RendererError> {
         let texture = device.create_texture(TextureTarget::Default, ImageFormat::RGBAF32);
 
         #[cfg(feature = "gleam")]
@@ -731,7 +727,6 @@ impl<B: hal::Backend> CacheTexture<B> {
             Ok(CacheTexture {
                 texture,
                 bus,
-                phantom_data: PhantomData,
             })
         }
 
@@ -746,12 +741,11 @@ impl<B: hal::Backend> CacheTexture<B> {
             Ok(CacheTexture {
                 texture,
                 bus,
-                phantom_data: PhantomData,
             })
         }
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit(self, device: &mut Device<back::Backend>) {
         device.delete_texture(self.texture);
         match self.bus {
             CacheBus::PixelBuffer { buffer, ..} => {
@@ -773,7 +767,7 @@ impl<B: hal::Backend> CacheTexture<B> {
 
     fn prepare_for_updates(
         &mut self,
-        device: &mut Device<B>,
+        device: &mut Device<back::Backend>,
         _total_block_count: usize,
         max_height: u32,
     ) {
@@ -838,7 +832,7 @@ impl<B: hal::Backend> CacheTexture<B> {
         }
     }
 
-    fn update(&mut self, _device: &mut Device<B>, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, _device: &mut Device<back::Backend>, updates: &GpuCacheUpdateList) {
         match self.bus {
             CacheBus::PixelBuffer { ref mut rows, ref mut cpu_blocks, .. } => {
                 for update in &updates.updates {
@@ -910,7 +904,7 @@ impl<B: hal::Backend> CacheTexture<B> {
         }
     }
 
-    fn flush(&mut self, device: &mut Device<B>) -> usize {
+    fn flush(&mut self, device: &mut Device<back::Backend>) -> usize {
         match self.bus {
             CacheBus::PixelBuffer { ref buffer, ref mut rows, ref cpu_blocks } => {
                 let rows_dirty = rows
@@ -964,17 +958,16 @@ impl<B: hal::Backend> CacheTexture<B> {
     }
 }
 
-struct VertexDataTexture<B: hal::Backend> {
+struct VertexDataTexture {
     texture: Texture,
     pbo: PBO,
-    phantom_data: PhantomData<B>,
 }
 
-impl<B: hal::Backend> VertexDataTexture<B> {
+impl VertexDataTexture {
     fn new(
-        device: &mut Device<B>,
+        device: &mut Device<back::Backend>,
         format: ImageFormat,
-    ) -> VertexDataTexture<B> {
+    ) -> VertexDataTexture {
         let texture = device.create_texture(
             TextureTarget::Default,
             format,
@@ -984,11 +977,10 @@ impl<B: hal::Backend> VertexDataTexture<B> {
         VertexDataTexture {
             texture,
             pbo,
-            phantom_data: PhantomData
         }
     }
 
-    fn update<T>(&mut self, device: &mut Device<B>, data: &mut Vec<T>) {
+    fn update<T>(&mut self, device: &mut Device<back::Backend>, data: &mut Vec<T>) {
         if data.is_empty() {
             return;
         }
@@ -1036,7 +1028,7 @@ impl<B: hal::Backend> VertexDataTexture<B> {
             .upload(rect, 0, None, data);
     }
 
-    fn deinit(self, device: &mut Device<B>) {
+    fn deinit(self, device: &mut Device<back::Backend>) {
         device.delete_pbo(self.pbo);
         device.delete_texture(self.texture);
     }
@@ -1067,23 +1059,21 @@ struct TargetSelector {
 }
 
 #[cfg(feature = "debug_renderer")]
-struct LazyInitializedDebugRenderer<B: hal::Backend> {
+struct LazyInitializedDebugRenderer {
     debug_renderer: Option<DebugRenderer>,
     failed: bool,
-    phantom_data: PhantomData<B>,
 }
 
 #[cfg(feature = "debug_renderer")]
-impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
+impl LazyInitializedDebugRenderer {
     pub fn new() -> Self {
         Self {
             debug_renderer: None,
             failed: false,
-            phantom_data: PhantomData,
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self, device: &mut Device<B>) -> Option<&'a mut DebugRenderer> {
+    pub fn get_mut<'a>(&'a mut self, device: &mut Device<back::Backend>) -> Option<&'a mut DebugRenderer> {
         if self.failed {
             return None;
         }
@@ -1105,7 +1095,7 @@ impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
         self.debug_renderer.as_mut()
     }
 
-    pub fn deinit(self, device: &mut Device<B>) {
+    pub fn deinit(self, device: &mut Device<back::Backend>) {
         if let Some(debug_renderer) = self.debug_renderer {
             debug_renderer.deinit(device);
         }
@@ -1124,19 +1114,20 @@ pub struct RendererVAOs {
 
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
-pub struct Renderer<B: hal::Backend>
+pub struct Renderer
 {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
-    pub device: Device<B>,
+    _instance: back::Instance,
+    pub device: Device<back::Backend>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
     active_documents: Vec<(DocumentId, RenderedDocument)>,
 
-    shaders: Shaders<B>,
+    shaders: Shaders,
 
-    pub gpu_glyph_renderer: GpuGlyphRenderer<B>,
+    pub gpu_glyph_renderer: GpuGlyphRenderer,
 
     max_texture_size: u32,
     max_recorded_profiles: usize,
@@ -1144,7 +1135,7 @@ pub struct Renderer<B: hal::Backend>
     clear_color: Option<ColorF>,
     enable_clear_scissor: bool,
     #[cfg(feature = "debug_renderer")]
-    debug: LazyInitializedDebugRenderer<B>,
+    debug: LazyInitializedDebugRenderer,
     debug_flags: DebugFlags,
     backend_profile_counters: BackendProfileCounters,
     profile_counters: RendererProfileCounters,
@@ -1160,11 +1151,11 @@ pub struct Renderer<B: hal::Backend>
     pub gpu_profile: GpuProfiler<GpuProfileTag>,
     vaos: RendererVAOs,
 
-    prim_header_f_texture: VertexDataTexture<B>,
-    prim_header_i_texture: VertexDataTexture<B>,
-    transforms_texture: VertexDataTexture<B>,
-    render_task_texture: VertexDataTexture<B>,
-    gpu_cache_texture: CacheTexture<B>,
+    prim_header_f_texture: VertexDataTexture,
+    prim_header_i_texture: VertexDataTexture,
+    transforms_texture: VertexDataTexture,
+    render_task_texture: VertexDataTexture,
+    gpu_cache_texture: CacheTexture,
     #[cfg(feature = "debug_renderer")]
     gpu_cache_debug_chunks: Vec<GpuDebugChunk>,
 
@@ -1174,7 +1165,7 @@ pub struct Renderer<B: hal::Backend>
     pipeline_info: PipelineInfo,
 
     // Manages and resolves source textures IDs to real texture IDs.
-    texture_resolver: SourceTextureResolver<B>,
+    texture_resolver: SourceTextureResolver,
 
     // A PBO used to do asynchronous texture cache uploads.
     texture_cache_upload_pbo: PBO,
@@ -1210,7 +1201,6 @@ pub struct Renderer<B: hal::Backend>
     read_fbo: FBOId,
     #[cfg(feature = "replay")]
     owned_external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
-    phantom_data: PhantomData<B>,
 }
 
 #[derive(Debug)]
@@ -1239,7 +1229,7 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
-impl<B: hal::Backend> Renderer<B>
+impl Renderer
 {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
     ///
@@ -1258,8 +1248,100 @@ impl<B: hal::Backend> Renderer<B>
     /// let (renderer, sender) = Renderer::new(opts);
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
+
+    #[cfg(not(feature = "gecko"))]
     pub fn new(
-        init: DeviceInit<B>,
+        init: DeviceInit<back::Backend>,
+        instance: back::Instance,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        Self::init(init, instance, notifier, options)
+    }
+
+    #[cfg(all(feature = "gecko", feature = "vulkan", unix, not(target_os = "macos")))]
+    pub fn new(
+        display: *mut raw::c_void,
+        window: raw::c_ulong,
+        width: u32,
+        height: u32,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        let (adapter, surface, instance) = {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface_from_xlib(display as _, window as _);
+            ( adapter, surface, instance)
+        };
+
+        let init = DeviceInit {
+            adapter: adapter,
+            surface: surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+        };
+        Self::init(init, instance, notifier, options)
+    }
+
+    #[cfg(all(feature = "gecko", feature = "metal", target_os = "macos"))]
+    pub fn new(
+        nsview: *mut raw::c_void,
+        width: u32,
+        height: u32,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        let (adapter, surface, instance) = {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface_from_nsview(nsview as _);
+            ( adapter, surface, instance)
+        };
+
+        let init = DeviceInit {
+            adapter: adapter,
+            surface: surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+        };
+        Self::init(init, instance, notifier, options)
+    }
+
+    #[cfg(all(feature = "gecko", any(feature = "dx12", feature = "vulkan"), windows))]
+    pub fn new(
+        hinstance: *mut c_void,
+        hwnd: *mut raw::c_void,
+        width: u32,
+        height: u32,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        let (adapter, surface, instance) = {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface_from_hwnd(hinstance,hwnd as _);
+            ( adapter, surface, instance)
+        };
+
+        let init = DeviceInit {
+            adapter: adapter,
+            surface: surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+        };
+        Self::init(init, instance, notifier, options)
+    }
+
+    fn init(
+        init: DeviceInit<back::Backend>,
+        _instance: back::Instance,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
     ) -> Result<(Self, RenderApiSender), RendererError> {
@@ -1603,6 +1685,7 @@ impl<B: hal::Backend> Renderer<B>
         let mut renderer = Renderer {
             result_rx,
             debug_server,
+            _instance,
             device,
             active_documents: Vec::new(),
             pending_texture_updates: Vec::new(),
@@ -1659,7 +1742,6 @@ impl<B: hal::Backend> Renderer<B>
             #[cfg(feature = "replay")]
             owned_external_images: FastHashMap::default(),
             notifications: Vec::new(),
-            phantom_data: PhantomData,
         };
 
         renderer.set_debug_flags(options.debug_flags);
@@ -4375,11 +4457,11 @@ pub struct PipelineInfo {
     pub removed_pipelines: Vec<PipelineId>,
 }
 
-impl<B: hal::Backend> Renderer<B>
+impl Renderer
 {
     #[cfg(feature = "capture")]
     fn save_texture(
-        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device<B>
+        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device<back::Backend>
     ) -> PlainTexture {
         use std::fs;
         use std::io::Write;
@@ -4437,7 +4519,7 @@ impl<B: hal::Backend> Renderer<B>
     }
 
     #[cfg(feature = "replay")]
-    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device<B>) -> Vec<u8> {
+    fn load_texture(texture: &mut Texture, plain: &PlainTexture, root: &PathBuf, device: &mut Device<back::Backend>) -> Vec<u8> {
         use std::fs::File;
         use std::io::Read;
 
@@ -4695,10 +4777,10 @@ impl<B: hal::Backend> Renderer<B>
 }
 
 #[cfg(feature = "pathfinder")]
-fn get_vao<'a, B: hal::Backend>(
+fn get_vao<'a>(
     vertex_array_kind: VertexArrayKind,
     vaos: &'a RendererVAOs,
-    gpu_glyph_renderer: &'a GpuGlyphRenderer<B>,
+    gpu_glyph_renderer: &'a GpuGlyphRenderer,
 ) -> &'a VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,
@@ -4712,10 +4794,10 @@ fn get_vao<'a, B: hal::Backend>(
 }
 
 #[cfg(not(feature = "pathfinder"))]
-fn get_vao<'a, B: hal::Backend>(
+fn get_vao<'a>(
     vertex_array_kind: VertexArrayKind,
     vaos: &'a RendererVAOs,
-    _: &'a GpuGlyphRenderer<B>
+    _: &'a GpuGlyphRenderer,
 ) -> &'a VAO {
     match vertex_array_kind {
         VertexArrayKind::Primitive => &vaos.prim_vao,

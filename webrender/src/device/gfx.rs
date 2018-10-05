@@ -259,6 +259,12 @@ impl ShaderKind {
 
 pub struct ProgramCache;
 
+impl ProgramCache {
+    pub fn new() -> Rc<Self> {
+        Rc::new(ProgramCache {})
+    }
+}
+
 const ALPHA: BlendState = BlendState::On {
     color: BlendOp::Add {
         src: Factor::SrcAlpha,
