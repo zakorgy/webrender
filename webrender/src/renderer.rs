@@ -496,7 +496,18 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
         // flush all the WebRender caches in that case [1].
         //
         // [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1494099
-        self.retain_targets(device, |texture| texture.used_recently(frame_id, 30));
+        #[cfg(not(feature = "gleam"))]
+        let frame_count = device.frame_count;
+        self.retain_targets(device, |texture| {
+            // We ignore the textures which are still used by the GPU
+            #[cfg(not(feature = "gleam"))]
+            {
+                if texture.still_in_flight(frame_id, frame_count) {
+                    return true;
+                }
+            }
+            texture.used_recently(frame_id, 30)
+        });
     }
 
     /// Drops all targets from the render target pool that do not satisfy the predicate.
@@ -3486,7 +3497,7 @@ impl<B: hal::Backend> Renderer<B>
         let mut index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
-                //TODO: fix this, our init_texture is handling this case incorrectly.
+                // We ignore the textures which are still used by the GPU
                 #[cfg(not(feature = "gleam"))]
                 {
                     if texture.still_in_flight(frame_id, self.device.frame_count) {
@@ -3506,7 +3517,16 @@ impl<B: hal::Backend> Renderer<B>
             counters.targets_changed.inc();
             index = self.texture_resolver.render_target_pool
                 .iter()
-                .position(|texture| texture.get_format() == list.format && !texture.used_in_frame(frame_id));
+                .position(|texture| {
+                    // We ignore the textures which are still used by the GPU
+                    #[cfg(not(feature = "gleam"))]
+                    {
+                        if texture.still_in_flight(frame_id, self.device.frame_count) {
+                            return false;
+                        }
+                    }
+                    texture.get_format() == list.format && !texture.used_in_frame(frame_id)
+                });
         }
 
         let mut texture = match index {
