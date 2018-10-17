@@ -582,10 +582,15 @@ impl<B: hal::Backend> SourceTextureResolver<B> {
                 device.bind_texture(sampler, texture);
             }
             SourceTexture::External(external_image) => {
-                let texture = self.external_images
-                    .get(&(external_image.id, external_image.channel_index))
-                    .expect(&format!("BUG: External image should be resolved by now"));
-                device.bind_external_texture(sampler, texture);
+                if cfg!(feature = "gleam") {
+                    let texture = self.external_images
+                        .get(&(external_image.id, external_image.channel_index))
+                        .expect(&format!("BUG: External image should be resolved by now"));
+                    device.bind_external_texture(sampler, texture);
+                } else {
+                    warn!("External textures are not supported");
+                    device.bind_texture(sampler, &self.dummy_cache_texture);
+                }
             }
             SourceTexture::TextureCache(index) => {
                 let texture = &self.cache_texture_map[index.0];
