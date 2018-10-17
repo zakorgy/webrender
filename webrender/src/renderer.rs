@@ -1245,6 +1245,17 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
+#[derive(Debug)]
+#[repr(u32)]
+pub enum SurfaceHandles {
+    // Display and Window
+    LinuxVulkan(*mut raw::c_void, raw::c_ulong),
+    // NSView
+    MacosMetal(*mut raw::c_void),
+    // Hinstance and HWND (DX12 and Vulkan)
+    Windows(*mut raw::c_void, *mut raw::c_void),
+}
+
 impl Renderer
 {
     /// Initializes webrender and creates a `Renderer` and `RenderApiSender`.
@@ -1275,10 +1286,9 @@ impl Renderer
         Self::init(init, instance, notifier, options)
     }
 
-    #[cfg(all(feature = "gecko", feature = "vulkan", unix, not(target_os = "macos")))]
+    #[cfg(all(feature = "gecko", not(feature = "gleam")))]
     pub fn new(
-        display: *mut raw::c_void,
-        window: raw::c_ulong,
+        handles: SurfaceHandles,
         width: u32,
         height: u32,
         notifier: Box<RenderNotifier>,
@@ -1288,63 +1298,17 @@ impl Renderer
             let instance = back::Instance::create("gfx-rs instance", 1);
             let mut adapters = instance.enumerate_adapters();
             let adapter = adapters.remove(0);
-            let mut surface = instance.create_surface_from_xlib(display as _, window as _);
-            ( adapter, surface, instance)
-        };
-
-        let init = DeviceInit {
-            adapter: adapter,
-            surface: surface,
-            window_size: (width as u32, height as u32),
-            frame_count: None,
-            descriptor_count: None,
-        };
-        Self::init(init, instance, notifier, options)
-    }
-
-    #[cfg(all(feature = "gecko", feature = "metal", target_os = "macos"))]
-    pub fn new(
-        nsview: *mut raw::c_void,
-        width: u32,
-        height: u32,
-        notifier: Box<RenderNotifier>,
-        options: RendererOptions,
-    ) -> Result<(Self, RenderApiSender), RendererError> {
-        let (adapter, surface, instance) = {
-            let instance = back::Instance::create("gfx-rs instance", 1);
-            let mut adapters = instance.enumerate_adapters();
-            let adapter = adapters.remove(0);
-            let mut surface = instance.create_surface_from_nsview(nsview as _);
-            ( adapter, surface, instance)
-        };
-
-        let init = DeviceInit {
-            adapter: adapter,
-            surface: surface,
-            window_size: (width as u32, height as u32),
-            frame_count: None,
-            descriptor_count: None,
-        };
-        Self::init(init, instance, notifier, options)
-    }
-
-    #[cfg(all(feature = "gecko", any(feature = "dx12", feature = "vulkan"), windows))]
-    pub fn new(
-        _hinstance: *mut raw::c_void,
-        hwnd: *mut raw::c_void,
-        width: u32,
-        height: u32,
-        notifier: Box<RenderNotifier>,
-        options: RendererOptions,
-    ) -> Result<(Self, RenderApiSender), RendererError> {
-        let (adapter, surface, instance) = {
-            let instance = back::Instance::create("gfx-rs instance", 1);
-            let mut adapters = instance.enumerate_adapters();
-            let adapter = adapters.remove(0);
-            #[cfg(feature="vulkan")]
-            let surface = instance.create_surface_from_hwnd(_hinstance,hwnd as _);
-            #[cfg(feature="dx12")]
-            let surface = instance.create_surface_from_hwnd(hwnd as _);
+            let surface = match handles {
+                #[cfg(all(feature = "vulkan", unix, not(target_os = "macos")))]
+                SurfaceHandles::LinuxVulkan(display, window) => instance.create_surface_from_xlib(display as _, window as _),
+                #[cfg(all(feature = "metal", target_os = "macos"))]
+                SurfaceHandles::MacosMetal(nsview) => instance.create_surface_from_nsview(nsview as _),
+                #[cfg(all(feature = "vulkan", windows))]
+                SurfaceHandles::Windows(hinstance, hwnd) => instance.create_surface_from_hwnd(hinstance as _,hwnd as _),
+                #[cfg(all(feature = "dx12", windows))]
+                SurfaceHandles::Windows(_, hwnd) => instance.create_surface_from_hwnd(hwnd as _),
+                h => panic!("Wrong handle variant: {:?}", h),
+            };
             ( adapter, surface, instance)
         };
 
