@@ -10,10 +10,9 @@ use api::ImageDescriptor;
 use euclid::Transform3D;
 use gleam::gl;
 use gpu_types;
-use internal_types::{FastHashMap, RenderTargetInfo};
+use internal_types::RenderTargetInfo;
 use log::Level;
 use smallvec::SmallVec;
-use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::mem;
 use std::path::PathBuf;
@@ -25,7 +24,7 @@ use std::thread;
 #[cfg(feature = "debug_renderer")]
 use super::Capabilities;
 use super::desc;
-use super::{ExternalTexture, FBOId, FileWatcherHandler, FrameId, IBOId, RBOId, ReadPixelsFormat};
+use super::{ExternalTexture, FBOId, FileWatcherHandler, FrameId, IBOId, RBOId, ProgramCache, ReadPixelsFormat};
 use super::{ShaderError, ShaderKind, Texel, Texture, TextureFilter, TextureSampler, TextureSlot, UploadMethod, VBOId};
 use super::{VertexArrayKind, VertexAttribute, VertexAttributeKind, VertexDescriptor, VertexUsageHint};
 
@@ -363,7 +362,7 @@ pub struct ProgramBinary {
     binary: Vec<u8>,
     format: gl::GLenum,
     #[cfg(feature = "serialize_program")]
-    sources: ProgramSources,
+    pub sources: ProgramSources,
 }
 
 impl ProgramBinary {
@@ -377,38 +376,6 @@ impl ProgramBinary {
             #[cfg(feature = "serialize_program")]
             sources: sources.clone(),
         }
-    }
-}
-
-/// The interfaces that an application can implement to handle ProgramCache update
-pub trait ProgramCacheObserver {
-    fn notify_binary_added(&self, program_binary: &Arc<ProgramBinary>);
-    fn notify_program_binary_failed(&self, program_binary: &Arc<ProgramBinary>);
-}
-
-pub struct ProgramCache {
-    binaries: RefCell<FastHashMap<ProgramSources, Arc<ProgramBinary>>>,
-
-    /// Optional trait object that allows the client
-    /// application to handle ProgramCache updating
-    program_cache_handler: Option<Box<ProgramCacheObserver>>,
-}
-
-impl ProgramCache {
-    pub fn new(program_cache_observer: Option<Box<ProgramCacheObserver>>) -> Rc<Self> {
-        Rc::new(
-            ProgramCache {
-                binaries: RefCell::new(FastHashMap::default()),
-                program_cache_handler: program_cache_observer,
-            }
-        )
-    }
-    /// Load ProgramBinary to ProgramCache.
-    /// The function is typically used to load ProgramBinary from disk.
-    #[cfg(feature = "serialize_program")]
-    pub fn load_program_binary(&self, program_binary: Arc<ProgramBinary>) {
-        let sources = program_binary.sources.clone();
-        self.binaries.borrow_mut().insert(sources, program_binary);
     }
 }
 

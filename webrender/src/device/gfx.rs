@@ -22,12 +22,11 @@ use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::slice;
-use std::sync::Arc;
 #[cfg(feature = "debug_renderer")]
 use super::Capabilities;
 use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
 use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, FileWatcherHandler};
-use super::{Texture, FBOId, RBOId, VertexUsageHint, ShaderError};
+use super::{Texture, FBOId, RBOId, VertexUsageHint, ShaderError, ProgramCache};
 use vertex_types::*;
 
 use hal;
@@ -240,11 +239,9 @@ pub struct VAO;
 pub struct ProgramSources;
 
 #[cfg_attr(feature = "serialize_program", derive(Deserialize, Serialize))]
-pub struct ProgramBinary;
-
-pub trait ProgramCacheObserver {
-    fn notify_binary_added(&self, program_binary: &Arc<ProgramBinary>);
-    fn notify_program_binary_failed(&self, program_binary: &Arc<ProgramBinary>);
+pub struct ProgramBinary {
+    #[cfg(feature = "serialize_program")]
+    pub sources: ProgramSources,
 }
 
 impl ShaderKind {
@@ -256,8 +253,6 @@ impl ShaderKind {
         }
     }
 }
-
-pub struct ProgramCache;
 
 const ALPHA: BlendState = BlendState::On {
     color: BlendOp::Add {

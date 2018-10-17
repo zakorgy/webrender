@@ -7,13 +7,16 @@ use api::{DeviceUintSize, ImageFormat, TextureTarget};
 use euclid::Transform3D;
 #[cfg(feature = "gleam")]
 use gleam::gl::GLuint;
-use internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, RenderTargetInfo};
+use internal_types::{FastHashMap, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, RenderTargetInfo};
 #[cfg(not(feature = "gleam"))]
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::io::Read;
 use std::fs::File;
 use std::ops::Add;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::thread;
 
 cfg_if! {
@@ -80,6 +83,40 @@ pub enum VertexArrayKind {
     VectorCover,
     Border,
     Scale,
+}
+
+/// The interfaces that an application can implement to handle ProgramCache update
+pub trait ProgramCacheObserver {
+    fn notify_binary_added(&self, program_binary: &Arc<ProgramBinary>);
+    fn notify_program_binary_failed(&self, program_binary: &Arc<ProgramBinary>);
+}
+
+pub struct ProgramCache {
+    #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
+    binaries: RefCell<FastHashMap<ProgramSources, Arc<ProgramBinary>>>,
+
+    /// Optional trait object that allows the client
+    /// application to handle ProgramCache updating
+    #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
+    program_cache_handler: Option<Box<ProgramCacheObserver>>,
+}
+
+impl ProgramCache {
+    pub fn new(program_cache_observer: Option<Box<ProgramCacheObserver>>) -> Rc<Self> {
+        Rc::new(
+            ProgramCache {
+                binaries: RefCell::new(FastHashMap::default()),
+                program_cache_handler: program_cache_observer,
+            }
+        )
+    }
+    /// Load ProgramBinary to ProgramCache.
+    /// The function is typically used to load ProgramBinary from disk.
+    #[cfg(feature = "serialize_program")]
+    pub fn load_program_binary(&self, program_binary: Arc<ProgramBinary>) {
+        let sources = program_binary.sources.clone();
+        self.binaries.borrow_mut().insert(sources, program_binary);
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
