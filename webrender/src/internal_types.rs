@@ -4,6 +4,8 @@
 
 use api::{DebugCommand, DeviceUintRect, DocumentId, ExternalImageData, ExternalImageId};
 use api::{ImageFormat, NotificationRequest};
+#[cfg(not(feature = "gleam"))]
+use api::DeviceUintSize;
 use device::TextureFilter;
 use renderer::PipelineInfo;
 use gpu_cache::GpuCacheUpdateList;
@@ -165,6 +167,8 @@ pub enum ResultMsg {
         BackendProfileCounters,
     ),
     AppendNotificationRequests(Vec<NotificationRequest>),
+    #[cfg(not(feature = "gleam"))]
+    UpdateWindowSize(DeviceUintSize),
 }
 
 #[derive(Clone, Debug)]

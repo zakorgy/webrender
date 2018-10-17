@@ -2338,6 +2338,10 @@ impl<B: hal::Backend> Device<B> {
 
     pub(crate) fn bound_program(&self) -> ProgramId { self.bound_program }
 
+    pub(crate) fn viewport_size(&self) -> DeviceUintSize {
+        DeviceUintSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _)
+    }
+
     pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
         self.device_pixel_ratio = ratio;
     }

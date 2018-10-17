@@ -206,9 +206,7 @@ impl Window {
         let mut do_exit = false;
         let my_name = &self.name;
         let renderer = &mut self.renderer;
-        #[cfg(feature = "gfx-hal")]
         let api = &self.api;
-        #[cfg(feature = "gfx-hal")]
         let document_id = self.document_id;
         let window = &self.window;
 
@@ -246,20 +244,16 @@ impl Window {
                     println!("toggle flags {}", my_name);
                     renderer.toggle_debug_flags(webrender::DebugFlags::PROFILER_DBG);
                 }
-                #[cfg(feature = "gfx-hal")]
                 winit::WindowEvent::Resized(dims) => {
                     let new_size = DeviceUintSize::new((dims.width as f32 * device_pixel_ratio) as u32, (dims.height as f32 * device_pixel_ratio) as u32);
-                    if framebuffer_size != new_size {
-                        let real_size = renderer.resize(Some((new_size.width as u32, new_size.height as u32)));
-                        framebuffer_size = real_size;
-                        layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
-                        api.set_window_parameters(
-                            document_id,
-                            framebuffer_size,
-                            DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
-                            device_pixel_ratio,
-                        );
-                    }
+                    framebuffer_size = new_size;
+                    layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
+                    api.set_window_parameters(
+                        document_id,
+                        framebuffer_size,
+                        DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
+                        device_pixel_ratio,
+                    );
                 }
                 _ => {}
             }

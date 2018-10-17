@@ -1711,6 +1711,13 @@ impl<B: hal::Backend> Renderer<B>
         // Pull any pending results and return the most recent.
         while let Ok(msg) = self.result_rx.try_recv() {
             match msg {
+                #[cfg(not(feature = "gleam"))]
+                ResultMsg::UpdateWindowSize(window_size) => {
+                    if window_size != self.device.viewport_size() {
+                        info!("Resize from {:?} to {:?}", self.device.viewport_size(), window_size);
+                        self.resize(Some((window_size.width, window_size.height)));
+                    }
+                }
                 ResultMsg::PublishPipelineInfo(mut pipeline_info) => {
                     for (pipeline_id, epoch) in pipeline_info.epochs {
                         self.pipeline_info.epochs.insert(pipeline_id, epoch);
