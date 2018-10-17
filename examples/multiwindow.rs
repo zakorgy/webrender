@@ -85,8 +85,6 @@ struct Window {
     epoch: Epoch,
     api: RenderApi,
     font_instance_key: FontInstanceKey,
-    #[cfg(feature = "gfx-hal")]
-    instance: back::Instance,
 }
 
 #[cfg(any(feature = "gfx-hal", feature = "gl"))]
@@ -99,7 +97,7 @@ impl Window {
             .with_dimensions(LogicalSize::new(800., 600.));
 
         #[cfg(feature = "gl")]
-        let (init, window) = {
+        let (init, window, instance) = {
             let context_builder = glutin::ContextBuilder::new()
                 .with_gl(glutin::GlRequest::GlThenGles {
                     opengl_version: (3, 2),
@@ -126,7 +124,7 @@ impl Window {
                 gl,
                 phantom_data: PhantomData,
             };
-            (init, window)
+            (init, window, Instance { })
         };
 
         #[cfg(feature = "gfx-hal")]
@@ -165,7 +163,7 @@ impl Window {
                 clear_color: Some(clear_color),
                 ..webrender::RendererOptions::default()
             };
-            webrender::Renderer::new(init, notifier, opts).unwrap()
+            webrender::Renderer::new(init, instance, notifier, opts).unwrap()
         };
         let api = sender.create_api();
         let document_id = api.add_document(framebuffer_size, 0);
@@ -193,8 +191,6 @@ impl Window {
             document_id,
             api,
             font_instance_key,
-            #[cfg(feature = "gfx-hal")]
-            instance,
         }
     }
 
