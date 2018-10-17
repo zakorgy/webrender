@@ -20,6 +20,7 @@ serialize_program = []
 dx12 = [ "gfx-backend-dx12" ]
 metal = [ "gfx-backend-metal" ]
 vulkan = [ "gfx-backend-vulkan" ]
+gecko = []
 
 [dependencies]
 app_units = "0.7"

@@ -1265,7 +1265,100 @@ impl Renderer
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
 
+    #[cfg(not(feature = "gecko"))]
     pub fn new(
+        init: DeviceInit<back::Backend>,
+        instance: back::Instance,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        Self::init(init, instance, notifier, options)
+    }
+
+    #[cfg(all(feature = "gecko", feature = "vulkan", unix, not(target_os = "macos")))]
+    pub fn new(
+        display: *mut raw::c_void,
+        window: raw::c_ulong,
+        width: u32,
+        height: u32,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        let (adapter, surface, instance) = {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface_from_xlib(display as _, window as _);
+            ( adapter, surface, instance)
+        };
+
+        let init = DeviceInit {
+            adapter: adapter,
+            surface: surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+        };
+        Self::init(init, instance, notifier, options)
+    }
+
+    #[cfg(all(feature = "gecko", feature = "metal", target_os = "macos"))]
+    pub fn new(
+        nsview: *mut raw::c_void,
+        width: u32,
+        height: u32,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        let (adapter, surface, instance) = {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            let mut surface = instance.create_surface_from_nsview(nsview as _);
+            ( adapter, surface, instance)
+        };
+
+        let init = DeviceInit {
+            adapter: adapter,
+            surface: surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+        };
+        Self::init(init, instance, notifier, options)
+    }
+
+    #[cfg(all(feature = "gecko", any(feature = "dx12", feature = "vulkan"), windows))]
+    pub fn new(
+        _hinstance: *mut raw::c_void,
+        hwnd: *mut raw::c_void,
+        width: u32,
+        height: u32,
+        notifier: Box<RenderNotifier>,
+        options: RendererOptions,
+    ) -> Result<(Self, RenderApiSender), RendererError> {
+        let (adapter, surface, instance) = {
+            let instance = back::Instance::create("gfx-rs instance", 1);
+            let mut adapters = instance.enumerate_adapters();
+            let adapter = adapters.remove(0);
+            #[cfg(feature="vulkan")]
+            let surface = instance.create_surface_from_hwnd(_hinstance,hwnd as _);
+            #[cfg(feature="dx12")]
+            let surface = instance.create_surface_from_hwnd(hwnd as _);
+            ( adapter, surface, instance)
+        };
+
+        let init = DeviceInit {
+            adapter: adapter,
+            surface: surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+        };
+        Self::init(init, instance, notifier, options)
+    }
+
+    fn init(
         init: DeviceInit<back::Backend>,
         _instance: back::Instance,
         notifier: Box<RenderNotifier>,
