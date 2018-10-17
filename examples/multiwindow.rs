@@ -157,6 +157,8 @@ impl Window {
                 adapter,
                 surface,
                 window_size: (width as u32, height as u32),
+                frame_count: None,
+                descriptor_count: None,
             };
             let opts = webrender::RendererOptions {
                 device_pixel_ratio,
