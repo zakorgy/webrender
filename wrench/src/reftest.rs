@@ -470,11 +470,8 @@ impl<'a> ReftestHarness<'a> {
         let file = BufReader::new(File::open(filename).unwrap());
         let img_raw = load_piston_image(file, format).unwrap();
 
-        #[cfg(feature = "gl")]
         let img = img_raw.flipv().to_rgba();
 
-        #[cfg(not(feature = "gl"))]
-        let img = img_raw.to_rgba();
         let size = img.dimensions();
         ReftestImage {
             data: img.into_raw(),
