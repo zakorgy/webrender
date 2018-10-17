@@ -2342,7 +2342,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn update_program_cache(&mut self, _cached_programs: Rc<ProgramCache>) {
-        unimplemented!();
+        warn!("Program cache is not supported!");
     }
 
     pub fn max_texture_size(&self) -> u32 {
