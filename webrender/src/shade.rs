@@ -679,6 +679,15 @@ impl<B: hal::Backend> Shaders<B> {
         format: YuvFormat,
         color_space: YuvColorSpace,
     ) -> usize {
+        #[cfg(not(feature = "gleam"))]
+        let mut buffer_kind = buffer_kind;
+        #[cfg(not(feature = "gleam"))]
+        {
+            if !buffer_kind.has_platform_support() {
+                //TODO: support more ImageBufferKind with gfx backend
+                buffer_kind = ImageBufferKind::Texture2DArray;
+            }
+        }
         ((buffer_kind as usize) * YUV_FORMATS.len() + (format as usize)) * YUV_COLOR_SPACES.len() +
             (color_space as usize)
     }
@@ -694,6 +703,15 @@ impl<B: hal::Backend> Shaders<B> {
                         &mut self.brush_solid
                     }
                     BrushBatchKind::Image(image_buffer_kind) => {
+                        #[cfg(not(feature = "gleam"))]
+                        let mut image_buffer_kind = image_buffer_kind;
+                        #[cfg(not(feature = "gleam"))]
+                        {
+                            if !image_buffer_kind.has_platform_support() {
+                                //TODO: support more ImageBufferKind with gfx backend
+                                image_buffer_kind = ImageBufferKind::Texture2DArray;
+                            }
+                        }
                         self.brush_image[image_buffer_kind as usize]
                             .as_mut()
                             .expect("Unsupported image shader kind")
