@@ -175,6 +175,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let mut descriptor_set_layouts: Vec<DescriptorSetLayoutBinding> = Vec::new();
     let mut vertex_offset = 0;
     let mut instance_offset = 0;
+    let mut color_texture_kind = "texture2DArray";
     // Since the .vert and .frag files for the same shader use the same layout qualifiers
     // we extract layout datas from .vert files only.
     let write_ron = file_name.ends_with(".vert");
@@ -191,6 +192,14 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
         let mut l = line.unwrap();
         let trimmed = l.trim_left();
 
+        if trimmed.contains("#define WR_FEATURE_TEXTURE_2D") {
+            color_texture_kind = "texture2D";
+        }
+
+        if trimmed.contains("#define WR_FEATURE_TEXTURE_RECT") {
+            color_texture_kind = "texture2DRect";
+        }
+
         // Replace uniforms in shader:
         //      Sampler uniforms are splitted to texture + sampler.
         //      Other types occur in a group. These are replaced with a static string for now.
@@ -205,6 +214,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                     &mut new_data,
                     &mut sampler_mapping,
                     write_ron,
+                    color_texture_kind,
                 );
 
                 // Replace non-sampler uniforms with a structure.
@@ -287,38 +297,30 @@ fn replace_sampler_definition_with_texture_and_sampler(
     new_data: &mut String,
     sampler_mapping: &mut HashMap<String, (String, i8)>,
     write_ron: bool,
+    color_texture_kind: &str,
 ) {
     // Get the name of the sampler.
     let (sampler_name, code) = code.split_last().unwrap();
 
     // Get the exact type of the sampler.
     let (sampler_type, code) = code.split_last().unwrap();
+    let mut sampler_type = String::from(*sampler_type);
     let mut code_str = String::new();
     for i in 0 .. code.len() {
         code_str.push_str(code[i]);
         code_str.push(' ');
     }
 
-    let texture_type = sampler_type.replace("sampler", "texture");
+    let mut texture_type = sampler_type.replace("sampler", "texture");
     let texture_name = sampler_name.replacen('s', "t", 1);
 
-    // If the sampler is redefined we use the same binding index, but the sampler type gets updated.
-    // Note: This should be handled by parsing the defines and use them to determine which definition is correct.
-    //       Since only sColor samplers are involved in this case, the last definition for these samplers
-    //       which uses sampler/texture2DArray is good for us to go with.
+    // If the sampler is in the map we only update the shader code.
     if let Some(&(_, binding)) = sampler_mapping.get(*sampler_name) {
         let mut layout_str = format!(
             "layout(set = 0, binding = {}) {}{} {};\n",
             binding, code_str, texture_type, texture_name
         );
         new_data.push_str(&layout_str);
-        sampler_mapping.insert(
-            String::from(*sampler_name),
-            (
-                format!("{}({}, {})", sampler_type, texture_name, sampler_name),
-                binding,
-            ),
-        );
 
         layout_str = format!(
             "layout(set = 0, binding = {}) {}sampler {};\n",
@@ -330,6 +332,10 @@ fn replace_sampler_definition_with_texture_and_sampler(
 
         // Replace sampler definition with a texture and a sampler.
     } else {
+        if texture_name.contains("tColor") {
+            texture_type = String::from(color_texture_kind);
+            sampler_type = color_texture_kind.replace("texture", "sampler");
+        }
         let mut layout_str = format!(
             "layout(set = 0, binding = {}) {}{} {};\n",
             binding, code_str, texture_type, texture_name

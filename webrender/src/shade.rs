@@ -49,8 +49,10 @@ impl ImageBufferKind {
     #[cfg(not(feature = "gleam"))]
     fn has_platform_support(&self) -> bool {
         match *self {
+            ImageBufferKind::Texture2D => true,
             ImageBufferKind::Texture2DArray => true,
-            _ => false,
+            ImageBufferKind::TextureRect => true,
+            ImageBufferKind::TextureExternal => false,
         }
     }
 }
