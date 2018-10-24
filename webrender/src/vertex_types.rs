@@ -60,6 +60,16 @@ pub struct DebugFontVertex {
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
+pub struct LineDecorationInstance {
+    pub aTaskRect: [f32; 4],
+    pub aLocalSize: [f32; 2],
+    pub aStyle: i32,
+    pub aOrientation: i32,
+    pub aWavyLineThickness: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
 pub struct PrimitiveInstanceData {
     pub aData: [i32; 4],
 }

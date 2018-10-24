@@ -235,7 +235,7 @@ impl ExternalTexture {
 /// reachable from this struct, manual destruction via `Device` is required.
 /// Our `Drop` implementation asserts that this has happened.
 pub struct Texture {
-    id: IdType,
+    pub id: IdType,
     #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
     target: IdType,
     layer_count: i32,
@@ -265,6 +265,9 @@ pub struct Texture {
     /// configurations). But that would complicate a lot of logic in this module,
     /// and FBOs are cheap enough to create.
     fbos_with_depth: Vec<FBOId>,
+    // TODO: Remove this after the depth logic is changed on the gfx side!
+    #[cfg(not(feature = "gleam"))]
+    depth_rb: Option<RBOId>,
     last_frame_used: FrameId,
     #[cfg(not(feature = "gleam"))]
     bound_in_frame: Cell<FrameId>,

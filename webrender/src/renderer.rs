@@ -737,6 +737,7 @@ impl GpuCacheBus {
     /// Returns true if this bus uses a render target for a texture.
     fn uses_render_target(&self) -> bool {
         match *self {
+            #[cfg(feature = "gleam")]
             GpuCacheBus::Scatter { .. } => true,
             GpuCacheBus::PixelBuffer { .. } => false,
         }
@@ -810,35 +811,48 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         if use_scatter && cfg!(not(feature = "gleam")) {
             warn!("GpuCacheBus::Scatter is not supported with gfx backend");
         }
-        let bus = if use_scatter && cfg!(feature = "gleam") {
-            let program = device.create_program_linked(
-                "gpu_cache_update",
-                "",
-                &desc::GPU_CACHE_UPDATE,
-            )?;
-            let buf_position = device.create_vbo();
-            let buf_value = device.create_vbo();
-            //Note: the vertex attributes have to be supplied in the same order
-            // as for program creation, but each assigned to a different stream.
-            let vao = device.create_custom_vao(&[
-                buf_position.stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[0..1]),
-                buf_value   .stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[1..2]),
-            ]);
-            GpuCacheBus::Scatter {
-                program,
-                vao,
-                buf_position,
-                buf_value,
-                count: 0,
-            }
-        } else {
+        let bus;
+        #[cfg(feature = "gleam")]
+        {
+            if use_scatter {
+                let program = device.create_program_linked(
+                    "gpu_cache_update",
+                    "",
+                    &desc::GPU_CACHE_UPDATE,
+                )?;
+                let buf_position = device.create_vbo();
+                let buf_value = device.create_vbo();
+                //Note: the vertex attributes have to be supplied in the same order
+                // as for program creation, but each assigned to a different stream.
+                let vao = device.create_custom_vao(&[
+                    buf_position.stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[0..1]),
+                    buf_value   .stream_with(&desc::GPU_CACHE_UPDATE.vertex_attributes[1..2]),
+                ]);
+                bus = GpuCacheBus::Scatter {
+                    program,
+                    vao,
+                    buf_position,
+                    buf_value,
+                    count: 0,
+                };
+            } else {
+                let buffer = device.create_pbo();
+                bus = GpuCacheBus::PixelBuffer {
+                    buffer,
+                    rows: Vec::new(),
+                    cpu_blocks: Vec::new(),
+                };
+            };
+        }
+        #[cfg(not(feature = "gleam"))]
+        {
             let buffer = device.create_pbo();
-            GpuCacheBus::PixelBuffer {
+            bus = GpuCacheBus::PixelBuffer {
                 buffer,
                 rows: Vec::new(),
                 cpu_blocks: Vec::new(),
-            }
-        };
+            };
+        }
 
         Ok(GpuCacheTexture {
             texture: None,
@@ -1392,6 +1406,8 @@ impl<B: hal::Backend> Renderer<B>
                 &mut device,
                 #[cfg(feature = "gleam")]
                 gl_type,
+                #[cfg(not(feature = "gleam"))]
+                (),
                 &options)?)),
         };
 
@@ -1899,7 +1915,7 @@ impl<B: hal::Backend> Renderer<B>
 
     #[cfg(not(feature = "gleam"))]
     pub fn resize(&mut self, window_size: Option<(u32, u32)>) -> DeviceUintSize {
-        self.shaders.reset();
+        self.shaders.borrow_mut().reset();
         let size = self.device.recreate_swapchain(window_size);
         size
     }
@@ -3564,6 +3580,8 @@ impl<B: hal::Backend> Renderer<B>
         &mut self,
         list: &mut RenderTargetList<T>,
         counters: &mut FrameProfileCounters,
+        // TODO: check if we still need this with gfx
+        _frame_id: FrameId,
     ) -> Option<ActiveTexture> {
         debug_assert_ne!(list.max_size, DeviceUintSize::zero());
         if list.targets.is_empty() {
@@ -3585,7 +3603,7 @@ impl<B: hal::Backend> Renderer<B>
                 // We ignore the textures which are still used by the GPU
                 #[cfg(not(feature = "gleam"))]
                 {
-                    if texture.still_in_flight(frame_id, self.device.frame_count) {
+                    if texture.still_in_flight(_frame_id, self.device.frame_count) {
                         return false;
                     }
                 }
@@ -3732,8 +3750,8 @@ impl<B: hal::Backend> Renderer<B>
                     (None, None)
                 }
                 RenderPassKind::OffScreen { ref mut alpha, ref mut color, ref mut texture_cache } => {
-                    let alpha_tex = self.allocate_target_texture(alpha, &mut frame.profile_counters);
-                    let color_tex = self.allocate_target_texture(color, &mut frame.profile_counters);
+                    let alpha_tex = self.allocate_target_texture(alpha, &mut frame.profile_counters, frame_id);
+                    let color_tex = self.allocate_target_texture(color, &mut frame.profile_counters, frame_id);
 
                     // If this frame has already been drawn, then any texture
                     // cache targets have already been updated and can be
@@ -4130,9 +4148,15 @@ impl<B: hal::Backend> Renderer<B>
     pub fn report_memory(&self) -> MemoryReport {
         let mut report = MemoryReport::default();
 
-        // GPU cache CPU memory.
-        if let GpuCacheBus::PixelBuffer{ref cpu_blocks, ..} = self.gpu_cache_texture.bus {
+        // GPU cache CPU memory.]
+        /*if let GpuCacheBus::PixelBuffer{ref cpu_blocks, ..} = self.gpu_cache_texture.bus {
             report.gpu_cache_cpu_mirror += self.size_of(cpu_blocks.as_ptr());
+        }*/
+        match self.gpu_cache_texture.bus {
+            GpuCacheBus::PixelBuffer{ref cpu_blocks, ..} => {
+                report.gpu_cache_cpu_mirror += self.size_of(cpu_blocks.as_ptr());
+            }
+            _ => {}
         }
 
         // GPU cache GPU memory.

@@ -2,8 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorF, ImageFormat};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
+use api::{ColorF, ImageFormat, MemoryReport};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintRect, DeviceUintSize};
+#[cfg(any(feature = "debug_renderer", feature = "capture"))]
+use api::DeviceUintPoint;
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
@@ -25,8 +27,9 @@ use std::slice;
 #[cfg(feature = "debug_renderer")]
 use super::Capabilities;
 use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
-use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, FileWatcherHandler};
-use super::{Texture, FBOId, RBOId, VertexUsageHint, ShaderError, ProgramCache};
+use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat};
+use super::{Texture, TextureDrawTarget, TextureReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, ProgramCache};
+use tiling::LineDecorationJob;
 use vertex_types::*;
 
 use hal;
@@ -226,6 +229,20 @@ impl PrimitiveType for gpu_types::ScalingInstance {
             aScaleSourceTaskAddress: self.src_task_address.0 as i32,
         }
     }
+}
+
+impl PrimitiveType for LineDecorationJob {
+    type Primitive = LineDecorationInstance;
+    fn to_primitive_type(&self) -> LineDecorationInstance {
+        LineDecorationInstance {
+            aTaskRect: [self.task_rect.origin.x, self.task_rect.origin.y, self.task_rect.size.width, self.task_rect.size.height],
+            aLocalSize: [self.local_size.width, self.local_size.height],
+            aStyle: self.style,
+            aOrientation: self.orientation,
+            aWavyLineThickness: self.wavy_line_thickness,
+        }
+    }
+
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
@@ -1890,7 +1907,6 @@ impl<B: hal::Backend> Device<B> {
         init: DeviceInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
-        _file_changed_handler: Box<FileWatcherHandler>,
         _cached_programs: Option<Rc<ProgramCache>>,
     ) -> Self {
         let DeviceInit { adapter, mut surface, window_size, frame_count, descriptor_count } = init;
@@ -2378,6 +2394,27 @@ impl<B: hal::Backend> Device<B> {
         _program = INVALID_PROGRAM_ID;
     }
 
+    pub fn create_program_linked(
+        &mut self,
+        base_filename: &str,
+        features: &str,
+        descriptor: &VertexDescriptor,
+        shader_kind: &ShaderKind,
+    ) -> Result<ProgramId, ShaderError> {
+        let program = self.create_program(base_filename, shader_kind, &[features])?;
+        self.link_program(program, descriptor)?;
+        Ok(program)
+    }
+
+    pub fn link_program(
+        &mut self,
+        program: ProgramId,
+        descriptor: &VertexDescriptor,
+    ) -> Result<(), ShaderError> {
+        warn!("link_program is not implemented with gfx backend");
+        Ok(())
+    }
+
     pub fn create_program(
         &mut self,
         shader_name: &str,
@@ -2415,6 +2452,7 @@ impl<B: hal::Backend> Device<B> {
         shader_name: &str,
         shader_kind: &ShaderKind,
         features: &[&str],
+        precache_flags: ShaderPrecacheFlags,
     ) -> Result<ProgramId, ShaderError> {
         self.create_program(shader_name, shader_kind, features)
     }
@@ -2430,19 +2468,18 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        const SAMPLERS: [(usize, &'static str); 12] = [
+        const SAMPLERS: [(usize, &'static str); 11] = [
             (0, "Color0"),
             (1, "Color1"),
             (2, "Color2"),
-            (3, "CacheA8"),
-            (4, "CacheRGBA8"),
-            (5, "ResourceCache"),
+            (3, "PrevPassAlpha"),
+            (4, "PrevPassColor"),
+            (5, "GpuCache"),
             (6, "TransformPalette"),
             (7, "RenderTasks"),
             (8, "Dither"),
-            (9, "SharedCacheA8"),
-            (10, "PrimitiveHeadersF"),
-            (11, "PrimitiveHeadersI"),
+            (9, "PrimitiveHeadersF"),
+            (10, "PrimitiveHeadersI"),
         ];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
         let desc_set = self.descriptor_pools[self.next_id].get(&program.shader_kind);
@@ -2586,9 +2623,9 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn bind_read_target(&mut self, texture_and_layer: Option<(&Texture, i32)>) {
-        let fbo_id = texture_and_layer.map_or(DEFAULT_READ_FBO, |texture_and_layer| {
-            texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
+    pub fn bind_read_target(&mut self, read_target: Option<TextureReadTarget>) {
+        let fbo_id = read_target.map_or(DEFAULT_READ_FBO, |read_target| {
+            read_target.texture.fbos[read_target.layer]
         });
 
         self.bind_read_target_impl(fbo_id)
@@ -2609,14 +2646,15 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_draw_target(
         &mut self,
-        texture_and_layer: Option<(&Texture, i32)>,
+        draw_target: Option<TextureDrawTarget>,
         dimensions: Option<DeviceUintSize>,
     ) {
-        let fbo_id = texture_and_layer.map_or(DEFAULT_DRAW_FBO, |texture_and_layer| {
-            texture_and_layer.0.fbo_ids[texture_and_layer.1 as usize]
+        let fbo_id = draw_target.map_or(DEFAULT_DRAW_FBO, |draw_target| {
+            draw_target.texture.fbos[draw_target.layer as usize]
         });
 
-        if let Some((texture, layer_index)) = texture_and_layer {
+        // TODO: use depth param of draw_target
+        if let Some(TextureDrawTarget {texture, layer, with_depth}) = draw_target {
             let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
             let rbos = &self.rbos;
             if let Some(barrier) = self.images[&texture.id].core.transit(
@@ -2625,7 +2663,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::SubresourceRange {
                     aspects: hal::format::Aspects::COLOR,
                     levels: 0 .. 1,
-                    layers: layer_index as _ .. (layer_index + 1) as _,
+                    layers: layer as _.. (layer + 1) as _,
                 },
             ) {
                 cmd_buffer.pipeline_barrier(
@@ -2719,7 +2757,7 @@ impl<B: hal::Backend> Device<B> {
         rbo_id
     }
 
-    pub fn create_texture(
+    /*pub fn create_texture(
         &mut self,
         target: TextureTarget,
         format: ImageFormat,
@@ -2738,6 +2776,162 @@ impl<B: hal::Backend> Device<B> {
             last_frame_used: self.frame_id,
             bound_in_frame: Cell::new(FrameId(0)),
         }
+    }*/
+
+    pub fn create_texture(
+        &mut self,
+        target: TextureTarget,
+        format: ImageFormat,
+        mut width: u32,
+        mut height: u32,
+        filter: TextureFilter,
+        render_target: Option<RenderTargetInfo>,
+        layer_count: i32,
+    ) -> Texture {
+        debug_assert!(self.inside_frame);
+        assert!(!(width == 0 || height == 0 || layer_count == 0));
+
+        if width > self.max_texture_size || height > self.max_texture_size {
+            error!("Attempting to allocate a texture of size {}x{} above the limit, trimming", width, height);
+            width = width.min(self.max_texture_size);
+            height = height.min(self.max_texture_size);
+        }
+
+        // Set up the texture book-keeping.
+        let mut texture = Texture {
+            id: self.generate_texture_id(),
+            target: target as _,
+            width,
+            height,
+            layer_count,
+            format,
+            filter,
+            fbos: vec![],
+            fbos_with_depth: vec![],
+            depth_rb: None,
+            last_frame_used: self.frame_id,
+            bound_in_frame: Cell::new(FrameId(0)),
+        };
+
+        assert!(!self.images.contains_key(&texture.id));
+        let usage_base = hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED;
+        let (view_kind, mip_levels, usage) = match texture.filter {
+            TextureFilter::Nearest => (hal::image::ViewKind::D2, 1, usage_base | hal::image::Usage::COLOR_ATTACHMENT),
+            TextureFilter::Linear => (hal::image::ViewKind::D2Array, 1, usage_base | hal::image::Usage::COLOR_ATTACHMENT),
+            TextureFilter::Trilinear => (hal::image::ViewKind::D2Array, (width as f32).max(height as f32).log2().floor() as u8 + 1, usage_base),
+        };
+        let img = Image::new(
+            &self.device,
+            &self.memory_types,
+            texture.format,
+            texture.width,
+            texture.height,
+            texture.layer_count,
+            view_kind,
+            mip_levels,
+            usage,
+        );
+
+        {
+            let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
+
+            if let Some(barrier) = img.core.transit(
+                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                hal::image::Layout::ColorAttachmentOptimal,
+                img.core.subresource_range.clone(),
+            ) {
+                cmd_buffer.pipeline_barrier(
+                    PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+
+            self.upload_queue.push(cmd_buffer.finish());
+        }
+
+        // TODO: Implement init_fbos function
+        // Set up FBOs, if required.
+        /*if let Some(rt_info) = render_target {
+            self.init_fbos(&mut texture, false);
+            if rt_info.has_depth {
+                self.init_fbos(&mut texture, true);
+            }
+        }*/
+
+        /*if let Some(rt_info) = render_target {
+            let (depth_rb, allocate_depth) = match texture.depth_rb {
+                Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
+                None if rt_info.has_depth => {
+                    let depth_rb = self.generate_rbo_id();
+                    texture.depth_rb = Some(depth_rb);
+                    (depth_rb, true)
+                },
+                None => (RBOId(0), false),
+            };
+
+            if allocate_depth {
+                if self.rbos.contains_key(&depth_rb) {
+                    let old_rbo = self.rbos.remove(&depth_rb).unwrap();
+                    old_rbo.deinit(&self.device);
+                }
+                if rt_info.has_depth {
+                    let rbo = DepthBuffer::new(
+                        &self.device,
+                        &self.memory_types,
+                        texture.width,
+                        texture.height,
+                        self.depth_format
+                    );
+                    self.rbos.insert(depth_rb, rbo);
+                } else {
+                    texture.depth_rb = None;
+                }
+            }
+
+            let new_fbos = self.generate_fbo_ids(texture.layer_count);
+
+            for i in 0..texture.layer_count as u16 {
+                let (rbo_id, depth) = match texture.depth_rb {
+                    Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
+                    None => (RBOId(0), None)
+                };
+                let fbo = Framebuffer::new(&self.device, &texture, &img, i, self.render_pass.as_ref().unwrap(), rbo_id.clone(), depth);
+                self.fbos.insert(new_fbos[i as usize], fbo);
+                texture.fbos.push(new_fbos[i as usize]);
+            }
+        }*/
+
+        self.images.insert(texture.id, img);
+
+
+        /*if let Some(data) = pixels {
+            let len = data.len() / layer_count as usize;
+            for i in 0..layer_count {
+                let start = len * i as usize;
+                self.upload_queue
+                    .push(
+                        self.images
+                            .get_mut(&texture.id)
+                            .expect("Texture not found.")
+                            .update(
+                                &mut self.device,
+                                &mut self.command_pool[self.next_id],
+                                &mut self.staging_buffer_pool[self.next_id],
+                                DeviceUintRect::new(
+                                    DeviceUintPoint::new(0, 0),
+                                    DeviceUintSize::new(texture.width, texture.height),
+                                ),
+                                i,
+                                texels_to_u8_slice(&data[start .. (start + len)]),
+                            )
+                    );
+            }
+            if texture.filter == TextureFilter::Trilinear {
+                self.generate_mipmaps(texture);
+            }
+        }*/
+        texture
     }
 
     /// Resizes a texture with enabled render target views,
@@ -2750,7 +2944,7 @@ impl<B: hal::Backend> Device<B> {
         unimplemented!();
     }
 
-    pub fn init_texture<T: Texel>(
+    /*pub fn init_texture<T: Texel>(
         &mut self,
         texture: &mut Texture,
         mut width: u32,
@@ -2806,7 +3000,7 @@ impl<B: hal::Backend> Device<B> {
             usage,
         );
 
-        assert_eq!(texture.fbo_ids.len(), 0);
+        assert_eq!(texture.fbos.len(), 0);
 
         {
             let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
@@ -2865,7 +3059,7 @@ impl<B: hal::Backend> Device<B> {
                 };
                 let fbo = Framebuffer::new(&self.device, &texture, &img, i, self.render_pass.as_ref().unwrap(), rbo_id.clone(), depth);
                 self.fbos.insert(new_fbos[i as usize], fbo);
-                texture.fbo_ids.push(new_fbos[i as usize]);
+                texture.fbos.push(new_fbos[i as usize]);
             }
         }
 
@@ -2898,7 +3092,7 @@ impl<B: hal::Backend> Device<B> {
                 self.generate_mipmaps(texture);
             }
         }
-    }
+    }*/
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
         let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
@@ -3169,7 +3363,36 @@ impl<B: hal::Backend> Device<B> {
         self.upload_queue.push(cmd_buffer.finish());
     }
 
-    pub fn free_texture_storage(&mut self, texture: &mut Texture) {
+    /// Copies the contents from one renderable texture to another.
+    pub fn blit_renderable_texture(
+        &mut self,
+        dst: &mut Texture,
+        src: &Texture,
+    ) {
+        unimplemented!("blit_renderable_texture not yet implemented!");
+    }
+
+    /// Notifies the device that the contents of a render target are no longer
+    /// needed.
+    ///
+    /// FIXME(bholley): We could/should invalidate the depth targets earlier
+    /// than the color targets, i.e. immediately after each pass.
+    pub fn invalidate_render_target(&mut self, texture: &Texture) {
+        unimplemented!("invalidate_render_target not yet implemented!");
+    }
+
+    /// Notifies the device that a render target is about to be reused.
+    ///
+    /// This method adds or removes a depth target as necessary.
+    pub fn reuse_render_target<T: Texel>(
+        &mut self,
+        texture: &mut Texture,
+        rt_info: RenderTargetInfo,
+    ) {
+        unimplemented!("reuse_render_target not yet implemented!");
+    }
+
+    /*pub fn free_texture_storage(&mut self, texture: &mut Texture) {
         debug_assert!(self.inside_frame);
         if texture.width + texture.height == 0 {
             return;
@@ -3181,7 +3404,7 @@ impl<B: hal::Backend> Device<B> {
         texture.height = 0;
         texture.layer_count = 0;
         texture.id = 0;
-    }
+    }*/
 
     pub fn free_image(&mut self, texture: &mut Texture) {
         // Note: this is a very rare case, but if it becomes a problem
@@ -3199,13 +3422,14 @@ impl<B: hal::Backend> Device<B> {
             self.device.destroy_fence(fence);
             self.reset_command_pools();
         }
+
         if let Some(depth_rb) = texture.depth_rb.take() {
             let old_rbo = self.rbos.remove(&depth_rb).unwrap();
             old_rbo.deinit(&self.device);
         }
 
-        if !texture.fbo_ids.is_empty() {
-            for old in texture.fbo_ids.drain(..) {
+        if !texture.fbos.is_empty() {
+            for old in texture.fbos.drain(..) {
                 let old_fbo = self.fbos.remove(&old).unwrap();
                 old_fbo.deinit(&self.device);
             }
@@ -3216,7 +3440,17 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn delete_texture(&mut self, mut texture: Texture) {
-        self.free_texture_storage(&mut texture);
+        debug_assert!(self.inside_frame);
+        if texture.width + texture.height == 0 {
+            return;
+        }
+
+        self.free_image(&mut texture);
+
+        texture.width = 0;
+        texture.height = 0;
+        texture.layer_count = 0;
+        texture.id = 0;
     }
 
     #[cfg(feature = "replay")]
@@ -3256,6 +3490,15 @@ impl<B: hal::Backend> Device<B> {
         }
 
     }
+
+    pub fn upload_texture_immediate<T: Texel>(
+        &mut self,
+        texture: &Texture,
+        pixels: &[T]
+    ) {
+        unimplemented!("upload_texture_immediate not yet implemented!");
+    }
+
 
     #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
@@ -3912,6 +4155,19 @@ impl<B: hal::Backend> Device<B> {
         for command_pool in &mut self.command_pool {
             command_pool.reset();
         }
+    }
+
+    /// Generates a memory report for the resources managed by the device layer.
+    pub fn report_memory(&self) -> MemoryReport {
+        // TODO: Fix this after the depth logic is changed on the gfx side!
+        let /*mut*/report = MemoryReport::default();
+        /*for dim in self.depth_targets.keys() {
+            // DEPTH24 textures generally reserve 3 bytes for depth and 1 byte
+            // for stencil, so we measure them as 32 bytes.
+            let pixels: u32 = dim.width * dim.height;
+            report.depth_target_textures += (pixels as usize) * 4;
+        }*/
+        report
     }
 
     pub fn deinit(self) {

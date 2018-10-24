@@ -513,7 +513,6 @@ pub struct Shaders<B: hal::Backend> {
 
 impl<B: hal::Backend> Shaders<B> {
 
-    #[cfg(feature = "gleam")]
     pub fn new(
         device: &mut Device<B>,
         _gl_type: GlType,
