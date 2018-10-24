@@ -122,8 +122,8 @@
         ],
     ),// [13]
     (
-        name: "cs_clip_line",
-        source_name: "cs_clip_line",
+        name: "cs_line_decoration",
+        source_name: "cs_line_decoration",
         features: [
             "",// [0]
         ],

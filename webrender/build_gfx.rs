@@ -210,7 +210,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 // Replace non-sampler uniforms with a structure.
                 // We just place a predifened structure to the position of the last non-uniform
                 // variable (uDevicePixelRatio), since all shader uses the same variables.
-            } else if trimmed.starts_with("uniform float uDevicePixelRatio") {
+            } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
                 if write_ron {
                     add_locals_to_descriptor_set_layout(&mut descriptor_set_layouts, &mut bindings_map);
@@ -379,7 +379,6 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
         "\tlayout(set = 0, binding = 0) uniform Locals {\n\
          \t\tuniform mat4 uTransform;       // Orthographic projection\n\
-         \t\tuniform float uDevicePixelRatio;\n\
          \t\t// A generic uniform that shaders can optionally use to configure\n\
          \t\t// an operation mode for this batch.\n\
          \t\tuniform int uMode;\n\
@@ -462,12 +461,13 @@ fn add_attribute_descriptors(
     let def = split_code(line);
     let var_name = def[2].trim_right_matches(';');
     let (format, offset) = match def[1] {
+        "float" => (Format::Rg32Float, 4),
         "int" => (Format::R32Int, 4),
         "ivec4" => (Format::Rgba32Int, 16),
         "vec2" => (Format::Rg32Float, 8),
         "vec3" => (Format::Rgb32Float, 12),
         "vec4" => (Format::Rgba32Float, 16),
-        _ => unimplemented!(),
+        x => unimplemented!("Case: {} is missing!", x),
     };
     match var_name {
         "aColor" | "aColorTexCoord" | "aPosition" => {
