@@ -87,7 +87,6 @@ pub struct DeviceInit<B: hal::Backend> {
 #[allow(non_snake_case)]
 pub struct Locals {
     uTransform: [[f32; 4]; 4],
-    uDevicePixelRatio: f32,
     uMode: i32,
 }
 
@@ -1357,14 +1356,12 @@ impl<B: hal::Backend> Program<B> {
         device: &B::Device,
         set: &B::DescriptorSet,
         projection: &Transform3D<f32>,
-        device_pixel_ratio: f32,
         u_mode: i32,
         buffer_id: usize,
     ) {
         let locals_data = vec![
             Locals {
                 uTransform: projection.to_row_arrays(),
-                uDevicePixelRatio: device_pixel_ratio,
                 uMode: u_mode,
             },
         ];
@@ -2537,7 +2534,7 @@ impl<B: hal::Backend> Device<B> {
         assert_eq!(*program, self.bound_program);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
         let desc_set = &self.descriptor_pools[self.next_id].get(&program.shader_kind);
-        program.bind_locals(&self.device, desc_set, transform, self.device_pixel_ratio, self.program_mode_id, self.next_id);
+        program.bind_locals(&self.device, desc_set, transform, self.program_mode_id, self.next_id);
     }
 
     fn update_instances<T: Copy>(
