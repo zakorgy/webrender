@@ -3406,22 +3406,13 @@ impl<B: hal::Backend> Device<B> {
         self.upload_queue.push(cmd_buffer.finish());
     }
 
-    /// Copies the contents from one renderable texture to another.
-    pub fn blit_renderable_texture(
-        &mut self,
-        dst: &mut Texture,
-        src: &Texture,
-    ) {
-        unimplemented!("blit_renderable_texture not yet implemented!");
-    }
-
     /// Notifies the device that the contents of a render target are no longer
     /// needed.
     ///
     /// FIXME(bholley): We could/should invalidate the depth targets earlier
     /// than the color targets, i.e. immediately after each pass.
     pub fn invalidate_render_target(&mut self, texture: &Texture) {
-        unimplemented!("invalidate_render_target not yet implemented!");
+        warn!("invalidate_render_target not implemented!");
     }
 
     /// Notifies the device that a render target is about to be reused.
