@@ -3,9 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, ImageFormat, MemoryReport};
-use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintRect, DeviceUintSize};
-#[cfg(any(feature = "debug_renderer", feature = "capture"))]
-use api::DeviceUintPoint;
+use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
@@ -2979,7 +2977,6 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-
     /// Resizes a texture with enabled render target views,
     /// preserves the data by blitting the old texture contents over.
     pub fn resize_renderable_texture(
@@ -3542,9 +3539,31 @@ impl<B: hal::Backend> Device<B> {
         texture: &Texture,
         pixels: &[T]
     ) {
-        unimplemented!("upload_texture_immediate not yet implemented!");
+        let len = pixels.len() / texture.layer_count as usize;
+        for i in 0..texture.layer_count {
+            let start = len * i as usize;
+            self.upload_queue
+                .push(
+                    self.images
+                        .get_mut(&texture.id)
+                        .expect("Texture not found.")
+                        .update(
+                            &mut self.device,
+                            &mut self.command_pool[self.next_id],
+                            &mut self.staging_buffer_pool[self.next_id],
+                            DeviceUintRect::new(
+                                DeviceUintPoint::new(0, 0),
+                                DeviceUintSize::new(texture.width, texture.height),
+                            ),
+                            i,
+                            texels_to_u8_slice(&pixels[start .. (start + len)]),
+                        )
+                );
+        }
+        if texture.filter == TextureFilter::Trilinear {
+            self.generate_mipmaps(texture);
+        }
     }
-
 
     #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
