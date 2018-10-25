@@ -1154,7 +1154,8 @@ impl<B: hal::Backend> Program<B> {
                     ]
                 },
                 ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
-                ShaderKind::Cache(VertexArrayKind::Border) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
+                ShaderKind::Cache(VertexArrayKind::Border) |
+                ShaderKind::Cache(VertexArrayKind::LineDecoration) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
                 ShaderKind::ClipCache => vec![(BlendState::MULTIPLY, DepthTest::Off)],
                 ShaderKind::Text => {
                     let mut states = vec![
@@ -1266,6 +1267,7 @@ impl<B: hal::Backend> Program<B> {
             ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<BlurInstance>(),
             ShaderKind::Cache(VertexArrayKind::Border) => mem::size_of::<BorderInstance>(),
             ShaderKind::Cache(VertexArrayKind::Scale) => mem::size_of::<ScalingInstance>(),
+            ShaderKind::Cache(VertexArrayKind::LineDecoration) => mem::size_of::<LineDecorationInstance>(),
             sk if sk.is_debug() => 1,
             _ => unreachable!()
         };
