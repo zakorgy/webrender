@@ -2849,14 +2849,22 @@ impl<B: hal::Backend> Device<B> {
             self.upload_queue.push(cmd_buffer.finish());
         }
 
-        // TODO: Implement init_fbos function
+        self.images.insert(texture.id, img);
+
+        // TODO: Change this after the depth logic is changed on the gfx side!
         // Set up FBOs, if required.
-        /*if let Some(rt_info) = render_target {
-            self.init_fbos(&mut texture, false);
-            if rt_info.has_depth {
-                self.init_fbos(&mut texture, true);
-            }
-        }*/
+        if let Some(rt_info) = render_target {
+            let allocate_depth = match texture.depth_rb {
+                Some(rbo) => rt_info.has_depth,
+                None if rt_info.has_depth => {
+                    let depth_rb = self.generate_rbo_id();
+                    texture.depth_rb = Some(depth_rb);
+                    true
+                },
+                None => false,
+            };
+            self.init_fbos(&mut texture, allocate_depth);
+        }
 
         /*if let Some(rt_info) = render_target {
             let (depth_rb, allocate_depth) = match texture.depth_rb {
@@ -2901,8 +2909,6 @@ impl<B: hal::Backend> Device<B> {
             }
         }*/
 
-        self.images.insert(texture.id, img);
-
 
         /*if let Some(data) = pixels {
             let len = data.len() / layer_count as usize;
@@ -2932,6 +2938,47 @@ impl<B: hal::Backend> Device<B> {
         }*/
         texture
     }
+
+    fn init_fbos(&mut self, texture: &mut Texture, with_depth: bool) {
+        if with_depth {
+            let ref rbo_id = texture.depth_rb.unwrap_or(RBOId(0));
+            if self.rbos.contains_key(rbo_id) {
+                let old_rbo = self.rbos.remove(rbo_id).unwrap();
+                old_rbo.deinit(&self.device);
+                let rbo = DepthBuffer::new(
+                    &self.device,
+                    &self.memory_types,
+                    texture.width,
+                    texture.height,
+                    self.depth_format
+                );
+                self.rbos.insert(*rbo_id, rbo);
+            }
+        } else {
+            texture.depth_rb = None;
+        }
+
+
+        let new_fbos = self.generate_fbo_ids(texture.layer_count);
+
+        for i in 0..texture.layer_count as u16 {
+            let (rbo_id, depth) = match texture.depth_rb {
+                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
+                None => (RBOId(0), None)
+            };
+            let fbo = Framebuffer::new(
+                &self.device,
+                &texture,
+                &self.images.get(&texture.id).unwrap(),
+                i,
+                self.render_pass.as_ref().unwrap(),
+                rbo_id.clone(),
+                depth);
+            self.fbos.insert(new_fbos[i as usize], fbo);
+            texture.fbos.push(new_fbos[i as usize]);
+        }
+    }
+
 
     /// Resizes a texture with enabled render target views,
     /// preserves the data by blitting the old texture contents over.
