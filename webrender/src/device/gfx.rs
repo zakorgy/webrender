@@ -2977,14 +2977,99 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    /// Resizes a texture with enabled render target views,
-    /// preserves the data by blitting the old texture contents over.
-    pub fn resize_renderable_texture(
+    /// Copies the contents from one renderable texture to another.
+    pub fn blit_renderable_texture(
         &mut self,
-        _texture: &mut Texture,
-        _new_size: DeviceUintSize,
+        dst: &mut Texture,
+        src: &Texture,
     ) {
-        unimplemented!();
+        debug_assert!(self.inside_frame);
+        debug_assert!(dst.width >= src.width);
+        debug_assert!(dst.height >= src.height);
+        assert!(dst.layer_count >= src.layer_count);
+
+        let rect = DeviceIntRect::new(DeviceIntPoint::zero(), src.get_dimensions().to_i32());
+        let (src_img, layers) = (&self.images[&src.id].core, src.layer_count);
+        let dst_img = &self.images[&dst.id].core;
+        let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
+        let range = hal::image::SubresourceRange {
+            aspects: hal::format::Aspects::COLOR,
+            levels: 0 .. 1,
+            layers: 0 .. layers as _,
+        };
+
+        let barriers = src_img.transit(
+            hal::image::Access::TRANSFER_READ,
+            hal::image::Layout::TransferSrcOptimal,
+            range.clone(),
+        ).into_iter().chain(
+            dst_img.transit(
+                hal::image::Access::TRANSFER_WRITE,
+                hal::image::Layout::TransferDstOptimal,
+                range.clone(),
+            )
+        );
+
+        cmd_buffer.pipeline_barrier(
+            PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
+            hal::memory::Dependencies::empty(),
+            barriers,
+        );
+
+        cmd_buffer.copy_image(
+            &src_img.image,
+            hal::image::Layout::TransferSrcOptimal,
+            &dst_img.image,
+            hal::image::Layout::TransferDstOptimal,
+            &[
+                hal::command::ImageCopy {
+                    src_subresource: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: 0 .. layers as _,
+                    },
+                    src_offset: hal::image::Offset {
+                        x: rect.origin.x as i32,
+                        y: rect.origin.y as i32,
+                        z: 0,
+                    },
+                    dst_subresource: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: 0 .. layers as _,
+                    },
+                    dst_offset: hal::image::Offset {
+                        x: rect.origin.x as i32,
+                        y: rect.origin.y as i32,
+                        z: 0,
+                    },
+                    extent: hal::image::Extent {
+                        width: rect.size.width as u32,
+                        height: rect.size.height as u32,
+                        depth: 1,
+                    },
+                }
+            ],
+        );
+
+        // the blit caller code expects to be able to render to the target
+        let barriers = src_img.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::ColorAttachmentOptimal,
+            range.clone(),
+        ).into_iter().chain(dst_img.transit(
+            hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::ColorAttachmentOptimal,
+            range,
+        ));
+
+        cmd_buffer.pipeline_barrier(
+            PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+            hal::memory::Dependencies::empty(),
+            barriers,
+        );
+
+        self.upload_queue.push(cmd_buffer.finish());
     }
 
     /*pub fn init_texture<T: Texel>(
