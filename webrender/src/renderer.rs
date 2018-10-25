@@ -3597,13 +3597,16 @@ impl<B: hal::Backend> Renderer<B>
             num_layers: list.targets.len(),
             format: list.format,
         };
+        let rt_info = RenderTargetInfo { has_depth: list.needs_depth() };
         let index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
                 // We ignore the textures which are still used by the GPU
                 #[cfg(not(feature = "gleam"))]
                 {
-                    if texture.still_in_flight(_frame_id, self.device.frame_count) {
+                    if texture.still_in_flight(_frame_id, self.device.frame_count) ||
+                    //TODO: Remove this after the depth part is fixed in gfx device
+                    (rt_info.has_depth != texture.supports_depth()) {
                         return false;
                     }
                 }
@@ -3615,7 +3618,6 @@ impl<B: hal::Backend> Renderer<B>
                 }
             });
 
-        let rt_info = RenderTargetInfo { has_depth: list.needs_depth() };
         let texture = if let Some(idx) = index {
             let mut t = self.texture_resolver.render_target_pool.swap_remove(idx);
             self.device.reuse_render_target::<u8>(&mut t, rt_info);

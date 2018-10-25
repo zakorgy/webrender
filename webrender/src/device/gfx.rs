@@ -2650,7 +2650,6 @@ impl<B: hal::Backend> Device<B> {
             draw_target.texture.fbos[draw_target.layer as usize]
         });
 
-        // TODO: use depth param of draw_target
         if let Some(TextureDrawTarget {texture, layer, with_depth}) = draw_target {
             let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
             let rbos = &self.rbos;
@@ -2670,16 +2669,18 @@ impl<B: hal::Backend> Device<B> {
                 );
             }
 
-            if let Some(barrier) = texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
-                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                hal::image::Layout::DepthStencilAttachmentOptimal,
-                rbos[&rbo].core.subresource_range.clone(),
-            )) {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
+            if with_depth {
+                if let Some(barrier) = texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
+                    hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                    hal::image::Layout::DepthStencilAttachmentOptimal,
+                    rbos[&rbo].core.subresource_range.clone(),
+                )) {
+                    cmd_buffer.pipeline_barrier(
+                        PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                }
             }
 
             self.upload_queue.push(cmd_buffer.finish())
@@ -2853,7 +2854,7 @@ impl<B: hal::Backend> Device<B> {
         // Set up FBOs, if required.
         if let Some(rt_info) = render_target {
             let allocate_depth = match texture.depth_rb {
-                Some(rbo) => rt_info.has_depth,
+                Some(_rbo) => rt_info.has_depth,
                 None if rt_info.has_depth => {
                     let depth_rb = self.generate_rbo_id();
                     texture.depth_rb = Some(depth_rb);
@@ -2943,15 +2944,15 @@ impl<B: hal::Backend> Device<B> {
             if self.rbos.contains_key(rbo_id) {
                 let old_rbo = self.rbos.remove(rbo_id).unwrap();
                 old_rbo.deinit(&self.device);
-                let rbo = DepthBuffer::new(
-                    &self.device,
-                    &self.memory_types,
-                    texture.width,
-                    texture.height,
-                    self.depth_format
-                );
-                self.rbos.insert(*rbo_id, rbo);
             }
+            let rbo = DepthBuffer::new(
+                &self.device,
+                &self.memory_types,
+                texture.width,
+                texture.height,
+                self.depth_format
+            );
+            self.rbos.insert(*rbo_id, rbo);
         } else {
             texture.depth_rb = None;
         }
@@ -3512,6 +3513,8 @@ impl<B: hal::Backend> Device<B> {
 
         // Add depth support if needed.
         if rt_info.has_depth && !texture.supports_depth() {
+            let depth_rb = self.generate_rbo_id();
+            texture.depth_rb = Some(depth_rb);
             self.init_fbos(texture, true);
         }
 

@@ -291,8 +291,14 @@ impl Texture {
         self.filter
     }
 
+    #[cfg(feature = "gleam")]
     pub fn supports_depth(&self) -> bool {
         !self.fbos_with_depth.is_empty()
+    }
+
+    #[cfg(not(feature = "gleam"))]
+    pub fn supports_depth(&self) -> bool {
+        self.depth_rb.is_some()
     }
 
     pub fn used_in_frame(&self, frame_id: FrameId) -> bool {
