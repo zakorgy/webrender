@@ -2405,8 +2405,8 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn link_program(
         &mut self,
-        program: ProgramId,
-        descriptor: &VertexDescriptor,
+        _program: ProgramId,
+        _descriptor: &VertexDescriptor,
     ) -> Result<(), ShaderError> {
         warn!("link_program is not implemented with gfx backend");
         Ok(())
@@ -2449,7 +2449,7 @@ impl<B: hal::Backend> Device<B> {
         shader_name: &str,
         shader_kind: &ShaderKind,
         features: &[&str],
-        precache_flags: ShaderPrecacheFlags,
+        _precache_flags: ShaderPrecacheFlags,
     ) -> Result<ProgramId, ShaderError> {
         self.create_program(shader_name, shader_kind, features)
     }
@@ -2755,27 +2755,6 @@ impl<B: hal::Backend> Device<B> {
         rbo_id
     }
 
-    /*pub fn create_texture(
-        &mut self,
-        target: TextureTarget,
-        format: ImageFormat,
-    ) -> Texture {
-        Texture {
-            id: 0,
-            target: target as _,
-            width: 0,
-            height: 0,
-            layer_count: 0,
-            format,
-            filter: TextureFilter::Nearest,
-            render_target: None,
-            fbo_ids: vec![],
-            depth_rb: None,
-            last_frame_used: self.frame_id,
-            bound_in_frame: Cell::new(FrameId(0)),
-        }
-    }*/
-
     pub fn create_texture(
         &mut self,
         target: TextureTarget,
@@ -2865,76 +2844,6 @@ impl<B: hal::Backend> Device<B> {
             self.init_fbos(&mut texture, allocate_depth);
         }
 
-        /*if let Some(rt_info) = render_target {
-            let (depth_rb, allocate_depth) = match texture.depth_rb {
-                Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
-                None if rt_info.has_depth => {
-                    let depth_rb = self.generate_rbo_id();
-                    texture.depth_rb = Some(depth_rb);
-                    (depth_rb, true)
-                },
-                None => (RBOId(0), false),
-            };
-
-            if allocate_depth {
-                if self.rbos.contains_key(&depth_rb) {
-                    let old_rbo = self.rbos.remove(&depth_rb).unwrap();
-                    old_rbo.deinit(&self.device);
-                }
-                if rt_info.has_depth {
-                    let rbo = DepthBuffer::new(
-                        &self.device,
-                        &self.memory_types,
-                        texture.width,
-                        texture.height,
-                        self.depth_format
-                    );
-                    self.rbos.insert(depth_rb, rbo);
-                } else {
-                    texture.depth_rb = None;
-                }
-            }
-
-            let new_fbos = self.generate_fbo_ids(texture.layer_count);
-
-            for i in 0..texture.layer_count as u16 {
-                let (rbo_id, depth) = match texture.depth_rb {
-                    Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
-                    None => (RBOId(0), None)
-                };
-                let fbo = Framebuffer::new(&self.device, &texture, &img, i, self.render_pass.as_ref().unwrap(), rbo_id.clone(), depth);
-                self.fbos.insert(new_fbos[i as usize], fbo);
-                texture.fbos.push(new_fbos[i as usize]);
-            }
-        }*/
-
-
-        /*if let Some(data) = pixels {
-            let len = data.len() / layer_count as usize;
-            for i in 0..layer_count {
-                let start = len * i as usize;
-                self.upload_queue
-                    .push(
-                        self.images
-                            .get_mut(&texture.id)
-                            .expect("Texture not found.")
-                            .update(
-                                &mut self.device,
-                                &mut self.command_pool[self.next_id],
-                                &mut self.staging_buffer_pool[self.next_id],
-                                DeviceUintRect::new(
-                                    DeviceUintPoint::new(0, 0),
-                                    DeviceUintSize::new(texture.width, texture.height),
-                                ),
-                                i,
-                                texels_to_u8_slice(&data[start .. (start + len)]),
-                            )
-                    );
-            }
-            if texture.filter == TextureFilter::Trilinear {
-                self.generate_mipmaps(texture);
-            }
-        }*/
         texture
     }
 
@@ -3072,156 +2981,6 @@ impl<B: hal::Backend> Device<B> {
 
         self.upload_queue.push(cmd_buffer.finish());
     }
-
-    /*pub fn init_texture<T: Texel>(
-        &mut self,
-        texture: &mut Texture,
-        mut width: u32,
-        mut height: u32,
-        filter: TextureFilter,
-        render_target: Option<RenderTargetInfo>,
-        layer_count: i32,
-        pixels: Option<&[T]>,
-    ) {
-        debug_assert!(self.inside_frame);
-        if width == 0 || height == 0 || layer_count == 0 {
-            return;
-        }
-
-        if width > self.max_texture_size || height > self.max_texture_size {
-            error!("Attempting to allocate a texture of size {}x{} above the limit, trimming", width, height);
-            width = width.min(self.max_texture_size);
-            height = height.min(self.max_texture_size);
-        }
-
-        let is_resized = texture.width != width || texture.height != height;
-
-        if texture.id == 0 {
-            let id = self.generate_texture_id();
-            texture.id = id;
-        } else {
-            self.free_image(texture);
-        }
-
-        texture.width = width;
-        texture.height = height;
-        texture.filter = filter;
-        texture.layer_count = layer_count;
-        texture.render_target = render_target;
-        texture.last_frame_used = self.frame_id;
-
-        assert_eq!(self.images.contains_key(&texture.id), false);
-        let usage_base = hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::SAMPLED;
-        let (view_kind, mip_levels, usage) = match texture.filter {
-            TextureFilter::Nearest => (hal::image::ViewKind::D2, 1, usage_base | hal::image::Usage::COLOR_ATTACHMENT),
-            TextureFilter::Linear => (hal::image::ViewKind::D2Array, 1, usage_base | hal::image::Usage::COLOR_ATTACHMENT),
-            TextureFilter::Trilinear => (hal::image::ViewKind::D2Array, (width as f32).max(height as f32).log2().floor() as u8 + 1, usage_base),
-        };
-        let img = Image::new(
-            &self.device,
-            &self.memory_types,
-            texture.format,
-            texture.width,
-            texture.height,
-            texture.layer_count,
-            view_kind,
-            mip_levels,
-            usage,
-        );
-
-        assert_eq!(texture.fbos.len(), 0);
-
-        {
-            let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
-
-            if let Some(barrier) = img.core.transit(
-                hal::image::Access::COLOR_ATTACHMENT_READ | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                hal::image::Layout::ColorAttachmentOptimal,
-                img.core.subresource_range.clone(),
-            ) {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
-
-            self.upload_queue.push(cmd_buffer.finish());
-        }
-
-        if let Some(rt_info) = render_target {
-            let (depth_rb, allocate_depth) = match texture.depth_rb {
-                Some(rbo) => (rbo, is_resized || !rt_info.has_depth),
-                None if rt_info.has_depth => {
-                    let depth_rb = self.generate_rbo_id();
-                    texture.depth_rb = Some(depth_rb);
-                    (depth_rb, true)
-                },
-                None => (RBOId(0), false),
-            };
-
-            if allocate_depth {
-                if self.rbos.contains_key(&depth_rb) {
-                    let old_rbo = self.rbos.remove(&depth_rb).unwrap();
-                    old_rbo.deinit(&self.device);
-                }
-                if rt_info.has_depth {
-                    let rbo = DepthBuffer::new(
-                        &self.device,
-                        &self.memory_types,
-                        texture.width,
-                        texture.height,
-                        self.depth_format
-                    );
-                    self.rbos.insert(depth_rb, rbo);
-                } else {
-                    texture.depth_rb = None;
-                }
-            }
-
-            let new_fbos = self.generate_fbo_ids(texture.layer_count);
-
-            for i in 0..texture.layer_count as u16 {
-                let (rbo_id, depth) = match texture.depth_rb {
-                    Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
-                    None => (RBOId(0), None)
-                };
-                let fbo = Framebuffer::new(&self.device, &texture, &img, i, self.render_pass.as_ref().unwrap(), rbo_id.clone(), depth);
-                self.fbos.insert(new_fbos[i as usize], fbo);
-                texture.fbos.push(new_fbos[i as usize]);
-            }
-        }
-
-        self.images.insert(texture.id, img);
-
-
-        if let Some(data) = pixels {
-            let len = data.len() / layer_count as usize;
-            for i in 0..layer_count {
-                let start = len * i as usize;
-                self.upload_queue
-                    .push(
-                        self.images
-                            .get_mut(&texture.id)
-                            .expect("Texture not found.")
-                            .update(
-                                &mut self.device,
-                                &mut self.command_pool[self.next_id],
-                                &mut self.staging_buffer_pool[self.next_id],
-                                DeviceUintRect::new(
-                                    DeviceUintPoint::new(0, 0),
-                                    DeviceUintSize::new(texture.width, texture.height),
-                                ),
-                                i,
-                                texels_to_u8_slice(&data[start .. (start + len)]),
-                            )
-                    );
-            }
-            if texture.filter == TextureFilter::Trilinear {
-                self.generate_mipmaps(texture);
-            }
-        }
-    }*/
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
         let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
@@ -3497,7 +3256,7 @@ impl<B: hal::Backend> Device<B> {
     ///
     /// FIXME(bholley): We could/should invalidate the depth targets earlier
     /// than the color targets, i.e. immediately after each pass.
-    pub fn invalidate_render_target(&mut self, texture: &Texture) {
+    pub fn invalidate_render_target(&mut self, _texture: &Texture) {
         warn!("invalidate_render_target not implemented!");
     }
 
@@ -3519,20 +3278,6 @@ impl<B: hal::Backend> Device<B> {
         }
 
     }
-
-    /*pub fn free_texture_storage(&mut self, texture: &mut Texture) {
-        debug_assert!(self.inside_frame);
-        if texture.width + texture.height == 0 {
-            return;
-        }
-
-        self.free_image(texture);
-
-        texture.width = 0;
-        texture.height = 0;
-        texture.layer_count = 0;
-        texture.id = 0;
-    }*/
 
     pub fn free_image(&mut self, texture: &mut Texture) {
         // Note: this is a very rare case, but if it becomes a problem

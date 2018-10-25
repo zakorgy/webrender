@@ -4151,13 +4151,11 @@ impl<B: hal::Backend> Renderer<B>
         let mut report = MemoryReport::default();
 
         // GPU cache CPU memory.]
-        /*if let GpuCacheBus::PixelBuffer{ref cpu_blocks, ..} = self.gpu_cache_texture.bus {
-            report.gpu_cache_cpu_mirror += self.size_of(cpu_blocks.as_ptr());
-        }*/
         match self.gpu_cache_texture.bus {
             GpuCacheBus::PixelBuffer{ref cpu_blocks, ..} => {
                 report.gpu_cache_cpu_mirror += self.size_of(cpu_blocks.as_ptr());
             }
+            #[cfg(features = "gleam")]
             _ => {}
         }
 

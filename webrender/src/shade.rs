@@ -139,93 +139,7 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             );
             self.program = Some(program?);
         }
-        /*if self.program.is_none() {
-            let program = match self.kind {
-                ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features)
-                }
-                ShaderKind::Cache(..) => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features)
-                }
-                ShaderKind::VectorStencil => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features)
-                }
-                ShaderKind::VectorCover => {
-                    create_prim_shader(self.name,
-                                       device,
-                                       &self.features)
-                }
-                ShaderKind::ClipCache => {
-                    create_clip_shader(self.name, device)
-                }
-            };*/
-
         let program = self.program.as_mut().unwrap();
-
-        /*if precache_flags.contains(ShaderPrecacheFlags::FULL_COMPILE) && !program.is_initialized() {
-            let vertex_format = match self.kind {
-                ShaderKind::Primitive |
-                ShaderKind::Brush |
-                ShaderKind::Text => VertexArrayKind::Primitive,
-                ShaderKind::Cache(format) => format,
-                ShaderKind::VectorStencil => VertexArrayKind::VectorStencil,
-                ShaderKind::VectorCover => VertexArrayKind::VectorCover,
-                ShaderKind::ClipCache => VertexArrayKind::Clip,
-            };
-
-            let vertex_descriptor = match vertex_format {
-                VertexArrayKind::Primitive => &desc::PRIM_INSTANCES,
-                VertexArrayKind::LineDecoration => &desc::LINE,
-                VertexArrayKind::Blur => &desc::BLUR,
-                VertexArrayKind::Clip => &desc::CLIP,
-                VertexArrayKind::VectorStencil => &desc::VECTOR_STENCIL,
-                VertexArrayKind::VectorCover => &desc::VECTOR_COVER,
-                VertexArrayKind::Border => &desc::BORDER,
-                VertexArrayKind::Scale => &desc::SCALE,
-            };
-
-            device.link_program(program, vertex_descriptor)?;
-            device.bind_program(program);
-            match self.kind {
-                ShaderKind::ClipCache => {
-                    device.bind_shader_samplers(
-                        &program,
-                        &[
-                            ("sColor0", TextureSampler::Color0),
-                            ("sTransformPalette", TextureSampler::TransformPalette),
-                            ("sRenderTasks", TextureSampler::RenderTasks),
-                            ("sGpuCache", TextureSampler::GpuCache),
-                            ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                            ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-                        ],
-                    );
-                }
-                _ => {
-                    device.bind_shader_samplers(
-                        &program,
-                        &[
-                            ("sColor0", TextureSampler::Color0),
-                            ("sColor1", TextureSampler::Color1),
-                            ("sColor2", TextureSampler::Color2),
-                            ("sDither", TextureSampler::Dither),
-                            ("sPrevPassAlpha", TextureSampler::PrevPassAlpha),
-                            ("sPrevPassColor", TextureSampler::PrevPassColor),
-                            ("sTransformPalette", TextureSampler::TransformPalette),
-                            ("sRenderTasks", TextureSampler::RenderTasks),
-                            ("sGpuCache", TextureSampler::GpuCache),
-                            ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                            ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-                        ],
-                    );
-                }
-            }
-        }*/
         Ok(program)
     }
 
@@ -429,36 +343,6 @@ impl<B: hal::Backend> TextShader<B> {
         self.glyph_transform.deinit(device);
         self.debug_overdraw.deinit(device);
     }
-
-    /*fn create_prim_shader(
-        name: &'static str,
-        device: &mut Device,
-        features: &[&'static str],
-    ) -> Result<Program, ShaderError> {
-        let mut prefix = format!(
-            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
-            MAX_VERTEX_TEXTURE_WIDTH
-        );
-
-        for feature in features {
-            prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
-        }
-
-        debug!("PrimShader {}", name);
-
-        device.create_program(name, &prefix)
-    }
-
-    fn create_clip_shader(name: &'static str, device: &mut Device) -> Result<Program, ShaderError> {
-        let prefix = format!(
-            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
-            MAX_VERTEX_TEXTURE_WIDTH
-        );
-
-        debug!("ClipShader {}", name);
-
-        device.create_program(name, &prefix)
-    */
 
     #[cfg(not(feature = "gleam"))]
     fn reset(&mut self) {
