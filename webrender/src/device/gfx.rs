@@ -3432,7 +3432,13 @@ impl<B: hal::Backend> Device<B> {
         texture: &mut Texture,
         rt_info: RenderTargetInfo,
     ) {
-        unimplemented!("reuse_render_target not yet implemented!");
+        texture.last_frame_used = self.frame_id;
+
+        // Add depth support if needed.
+        if rt_info.has_depth && !texture.supports_depth() {
+            self.init_fbos(texture, true);
+        }
+
     }
 
     /*pub fn free_texture_storage(&mut self, texture: &mut Texture) {
