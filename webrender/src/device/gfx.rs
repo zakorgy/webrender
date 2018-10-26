@@ -3188,16 +3188,6 @@ impl<B: hal::Backend> Device<B> {
         // we need to handle this in renderer.rs
         if texture.still_in_flight(self.frame_id, self.frame_count) {
             self.wait_for_resources();
-            let fence = self.device.create_fence(false);
-            self.device.reset_fence(&fence);
-            {
-                let submission = Submission::new()
-                    .submit(self.upload_queue.drain(..));
-                self.queue_group.queues[0].submit(submission, Some(&fence));
-            }
-            self.device.wait_for_fence(&fence, !0);
-            self.device.destroy_fence(fence);
-            self.reset_command_pools();
         }
         if let Some(depth_rb) = texture.depth_rb.take() {
             let old_rbo = self.rbos.remove(&depth_rb).unwrap();
