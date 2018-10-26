@@ -3604,9 +3604,7 @@ impl<B: hal::Backend> Renderer<B>
                 // We ignore the textures which are still used by the GPU
                 #[cfg(not(feature = "gleam"))]
                 {
-                    if texture.still_in_flight(_frame_id, self.device.frame_count) ||
-                    //TODO: Remove this after the depth part is fixed in gfx device
-                    (rt_info.has_depth != texture.supports_depth()) {
+                    if texture.still_in_flight(_frame_id, self.device.frame_count) {
                         return false;
                     }
                 }

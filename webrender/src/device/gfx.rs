@@ -16,6 +16,7 @@ use smallvec::SmallVec;
 use std::cell::Cell;
 #[cfg(feature = "debug_renderer")]
 use std::convert::Into;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fs::File;
 use std::mem;
@@ -26,7 +27,7 @@ use std::slice;
 use super::Capabilities;
 use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
 use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat};
-use super::{Texture, TextureDrawTarget, TextureReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, ProgramCache};
+use super::{Texture, TextureDrawTarget, TextureReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, SharedDepthTarget, ProgramCache};
 use tiling::LineDecorationJob;
 use vertex_types::*;
 
@@ -1876,6 +1877,12 @@ pub struct Device<B: hal::Backend> {
     #[cfg(feature = "debug_renderer")]
     capabilities: Capabilities,
 
+    /// Map from texture dimensions to shared depth buffers for render targets.
+    ///
+    /// Render targets often have the same width/height, so we can save memory
+    /// by sharing these across targets.
+    depth_targets: FastHashMap<DeviceUintSize, SharedDepthTarget>,
+
     // debug
     inside_frame: bool,
 
@@ -2055,6 +2062,7 @@ impl<B: hal::Backend> Device<B> {
             capabilities: Capabilities {
                 supports_multisampling: false, //TODO
             },
+            depth_targets: FastHashMap::default(),
 
             programs: FastHashMap::default(),
             images: FastHashMap::default(),
@@ -2643,14 +2651,18 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_draw_target(
         &mut self,
-        draw_target: Option<TextureDrawTarget>,
+        texture_target: Option<TextureDrawTarget>,
         dimensions: Option<DeviceUintSize>,
     ) {
-        let fbo_id = draw_target.map_or(DEFAULT_DRAW_FBO, |draw_target| {
-            draw_target.texture.fbos[draw_target.layer as usize]
+        let fbo_id = texture_target.map_or(DEFAULT_DRAW_FBO, |target| {
+            if target.with_depth {
+                target.texture.fbos_with_depth[target.layer]
+            } else {
+                target.texture.fbos[target.layer]
+            }
         });
 
-        if let Some(TextureDrawTarget {texture, layer, with_depth}) = draw_target {
+        if let Some(TextureDrawTarget {texture, layer, with_depth}) = texture_target {
             let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer(false);
             let rbos = &self.rbos;
             if let Some(barrier) = self.images[&texture.id].core.transit(
@@ -2670,11 +2682,12 @@ impl<B: hal::Backend> Device<B> {
             }
 
             if with_depth {
-                if let Some(barrier) = texture.depth_rb.and_then(|rbo| rbos[&rbo].core.transit(
+                let rbo_id = self.fbos[&fbo_id].rbo;
+                if let Some(barrier) = rbos[&rbo_id].core.transit(
                     hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
                     hal::image::Layout::DepthStencilAttachmentOptimal,
-                    rbos[&rbo].core.subresource_range.clone(),
-                )) {
+                    rbos[&rbo_id].core.subresource_range.clone(),
+                ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
                         hal::memory::Dependencies::empty(),
@@ -2785,7 +2798,6 @@ impl<B: hal::Backend> Device<B> {
             filter,
             fbos: vec![],
             fbos_with_depth: vec![],
-            depth_rb: None,
             last_frame_used: self.frame_id,
             bound_in_frame: Cell::new(FrameId(0)),
         };
@@ -2829,51 +2841,27 @@ impl<B: hal::Backend> Device<B> {
 
         self.images.insert(texture.id, img);
 
-        // TODO: Change this after the depth logic is changed on the gfx side!
         // Set up FBOs, if required.
         if let Some(rt_info) = render_target {
-            let allocate_depth = match texture.depth_rb {
-                Some(_rbo) => rt_info.has_depth,
-                None if rt_info.has_depth => {
-                    let depth_rb = self.generate_rbo_id();
-                    texture.depth_rb = Some(depth_rb);
-                    true
-                },
-                None => false,
-            };
-            self.init_fbos(&mut texture, allocate_depth);
+            self.init_fbos(&mut texture, false);
+            if rt_info.has_depth {
+                self.init_fbos(&mut texture, true);
+            }
         }
 
         texture
     }
 
     fn init_fbos(&mut self, texture: &mut Texture, with_depth: bool) {
-        if with_depth {
-            let ref rbo_id = texture.depth_rb.unwrap_or(RBOId(0));
-            if self.rbos.contains_key(rbo_id) {
-                let old_rbo = self.rbos.remove(rbo_id).unwrap();
-                old_rbo.deinit(&self.device);
-            }
-            let rbo = DepthBuffer::new(
-                &self.device,
-                &self.memory_types,
-                texture.width,
-                texture.height,
-                self.depth_format
-            );
-            self.rbos.insert(*rbo_id, rbo);
-        } else {
-            texture.depth_rb = None;
-        }
-
-
         let new_fbos = self.generate_fbo_ids(texture.layer_count);
+        let (rbo_id, depth) = if with_depth {
+            let rbo_id =self.acquire_depth_target(texture.get_dimensions());
+            (rbo_id, Some(&self.rbos[&rbo_id].core.view))
+        } else {
+            (RBOId(0), None)
+        };
 
         for i in 0..texture.layer_count as u16 {
-            let (rbo_id, depth) = match texture.depth_rb {
-                Some(rbo_id) => (rbo_id.clone(), Some(&self.rbos[&rbo_id].core.view)),
-                None => (RBOId(0), None)
-            };
             let fbo = Framebuffer::new(
                 &self.device,
                 &texture,
@@ -2883,7 +2871,12 @@ impl<B: hal::Backend> Device<B> {
                 rbo_id.clone(),
                 depth);
             self.fbos.insert(new_fbos[i as usize], fbo);
-            texture.fbos.push(new_fbos[i as usize]);
+
+            if with_depth {
+                texture.fbos_with_depth.push(new_fbos[i as usize])
+            } else {
+                texture.fbos.push(new_fbos[i as usize])
+            }
         }
     }
 
@@ -3102,6 +3095,44 @@ impl<B: hal::Backend> Device<B> {
         self.upload_queue.push(cmd_buffer.finish());
     }
 
+    fn acquire_depth_target(&mut self, dimensions: DeviceUintSize) -> RBOId {
+        if self.depth_targets.contains_key(&dimensions) {
+            let target = self.depth_targets.get_mut(&dimensions).unwrap();
+            target.refcount += 1;
+            target.rbo_id
+        } else {
+            let rbo_id = self.generate_rbo_id();
+            let rbo = DepthBuffer::new(
+                &self.device,
+                &self.memory_types,
+                dimensions.width as _,
+                dimensions.height as _,
+                self.depth_format
+            );
+            self.rbos.insert(rbo_id, rbo);
+            let target = SharedDepthTarget {
+                rbo_id,
+                refcount: 1,
+            };
+            self.depth_targets.insert(dimensions, target);
+            rbo_id
+        }
+    }
+
+    fn release_depth_target(&mut self, dimensions: DeviceUintSize) {
+        let mut entry = match self.depth_targets.entry(dimensions) {
+            Entry::Occupied(x) => x,
+            Entry::Vacant(..) => panic!("Releasing unknown depth target"),
+        };
+        debug_assert!(entry.get().refcount != 0);
+        entry.get_mut().refcount -= 1;
+        if entry.get().refcount == 0 {
+            let t = entry.remove();
+            let old_rbo = self.rbos.remove(&t.rbo_id).unwrap();
+            old_rbo.deinit(&self.device);
+        }
+    }
+
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
         debug_assert!(self.inside_frame);
 
@@ -3272,8 +3303,6 @@ impl<B: hal::Backend> Device<B> {
 
         // Add depth support if needed.
         if rt_info.has_depth && !texture.supports_depth() {
-            let depth_rb = self.generate_rbo_id();
-            texture.depth_rb = Some(depth_rb);
             self.init_fbos(texture, true);
         }
 
@@ -3296,9 +3325,11 @@ impl<B: hal::Backend> Device<B> {
             self.reset_command_pools();
         }
 
-        if let Some(depth_rb) = texture.depth_rb.take() {
-            let old_rbo = self.rbos.remove(&depth_rb).unwrap();
-            old_rbo.deinit(&self.device);
+        if !texture.fbos_with_depth.is_empty() {
+            for old in texture.fbos_with_depth.drain(..) {
+                let old_fbo = self.fbos.remove(&old).unwrap();
+                old_fbo.deinit(&self.device);
+            }
         }
 
         if !texture.fbos.is_empty() {
@@ -3314,8 +3345,13 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn delete_texture(&mut self, mut texture: Texture) {
         debug_assert!(self.inside_frame);
+        let had_depth = texture.supports_depth();
         if texture.width + texture.height == 0 {
             return;
+        }
+
+        if had_depth {
+            self.release_depth_target(texture.get_dimensions());
         }
 
         self.free_image(&mut texture);
@@ -4054,14 +4090,13 @@ impl<B: hal::Backend> Device<B> {
 
     /// Generates a memory report for the resources managed by the device layer.
     pub fn report_memory(&self) -> MemoryReport {
-        // TODO: Fix this after the depth logic is changed on the gfx side!
-        let /*mut*/report = MemoryReport::default();
-        /*for dim in self.depth_targets.keys() {
+        let mut report = MemoryReport::default();
+        for dim in self.depth_targets.keys() {
             // DEPTH24 textures generally reserve 3 bytes for depth and 1 byte
             // for stencil, so we measure them as 32 bytes.
             let pixels: u32 = dim.width * dim.height;
             report.depth_target_textures += (pixels as usize) * 4;
-        }*/
+        }
         report
     }
 

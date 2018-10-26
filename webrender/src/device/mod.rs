@@ -229,6 +229,22 @@ impl ExternalTexture {
     }
 }
 
+/// A refcounted depth target, which may be shared by multiple textures across
+/// the device.
+struct SharedDepthTarget {
+    /// The Render Buffer Object representing the depth target.
+    rbo_id: RBOId,
+    /// Reference count. When this drops to zero, the RBO is deleted.
+    refcount: usize,
+}
+
+#[cfg(feature = "debug")]
+impl Drop for SharedDepthTarget {
+    fn drop(&mut self) {
+        debug_assert!(thread::panicking() || self.refcount == 0);
+    }
+}
+
 /// WebRender interface to an OpenGL texture.
 ///
 /// Because freeing a texture requires various device handles that are not
@@ -265,9 +281,6 @@ pub struct Texture {
     /// configurations). But that would complicate a lot of logic in this module,
     /// and FBOs are cheap enough to create.
     fbos_with_depth: Vec<FBOId>,
-    // TODO: Remove this after the depth logic is changed on the gfx side!
-    #[cfg(not(feature = "gleam"))]
-    depth_rb: Option<RBOId>,
     last_frame_used: FrameId,
     #[cfg(not(feature = "gleam"))]
     bound_in_frame: Cell<FrameId>,
@@ -291,14 +304,8 @@ impl Texture {
         self.filter
     }
 
-    #[cfg(feature = "gleam")]
     pub fn supports_depth(&self) -> bool {
         !self.fbos_with_depth.is_empty()
-    }
-
-    #[cfg(not(feature = "gleam"))]
-    pub fn supports_depth(&self) -> bool {
-        self.depth_rb.is_some()
     }
 
     pub fn used_in_frame(&self, frame_id: FrameId) -> bool {

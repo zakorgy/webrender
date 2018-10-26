@@ -29,7 +29,7 @@ use tiling::LineDecorationJob;
 use super::Capabilities;
 use super::desc;
 use super::{ExternalTexture, FBOId, FrameId, IBOId, RBOId, ProgramCache, ReadPixelsFormat};
-use super::{ShaderError, ShaderKind, ShaderPrecacheFlags, Texel, Texture, TextureDrawTarget, TextureFilter, TextureReadTarget, TextureSampler, TextureSlot, UploadMethod, VBOId};
+use super::{ShaderError, ShaderKind, ShaderPrecacheFlags, SharedDepthTarget, Texel, Texture, TextureDrawTarget, TextureFilter, TextureReadTarget, TextureSampler, TextureSlot, UploadMethod, VBOId};
 use super::{VertexArrayKind, VertexAttribute, VertexAttributeKind, VertexDescriptor, VertexUsageHint};
 
 // In some places we need to temporarily bind a texture to any slot.
@@ -396,22 +396,6 @@ pub struct UniformLocation(gl::GLint);
 
 impl UniformLocation {
     pub const INVALID: Self = UniformLocation(-1);
-}
-
-/// A refcounted depth target, which may be shared by multiple textures across
-/// the device.
-struct SharedDepthTarget {
-    /// The Render Buffer Object representing the depth target.
-    rbo_id: RBOId,
-    /// Reference count. When this drops to zero, the RBO is deleted.
-    refcount: usize,
-}
-
-#[cfg(feature = "debug")]
-impl Drop for SharedDepthTarget {
-    fn drop(&mut self) {
-        debug_assert!(thread::panicking() || self.refcount == 0);
-    }
 }
 
 pub struct Device<B> {
