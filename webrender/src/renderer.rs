@@ -4153,7 +4153,7 @@ impl<B: hal::Backend> Renderer<B>
             GpuCacheBus::PixelBuffer{ref cpu_blocks, ..} => {
                 report.gpu_cache_cpu_mirror += self.size_of(cpu_blocks.as_ptr());
             }
-            #[cfg(features = "gleam")]
+            #[cfg(feature = "gleam")]
             _ => {}
         }
 

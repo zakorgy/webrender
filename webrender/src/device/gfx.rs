@@ -1555,7 +1555,7 @@ impl<B: hal::Backend> Framebuffer<B> {
         let format = match texture.format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
             ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
-            _ => unimplemented!("TODO image format missing"),
+            f => unimplemented!("TODO image format missing {:?}", f),
         };
         let image_view = device
             .create_image_view(

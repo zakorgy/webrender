@@ -658,7 +658,15 @@ fn render<'a>(
         #[cfg(feature = "gfx")]
         {
             let dims = window.get_window().get_inner_size().unwrap();
-            let _ = wrench.renderer.resize(Some((dims.width as _, dims.height as _)));
+            let framebuffer_size = DeviceUintSize::new(
+        (dims.width as f32 * wrench.device_pixel_ratio) as u32,
+        (dims.height as f32 * wrench.device_pixel_ratio) as u32);
+            wrench.api.set_window_parameters(
+                captured.document_id,
+                framebuffer_size,
+                DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
+                wrench.device_pixel_ratio,
+            );
         }
 
         wrench.document_id = captured.document_id;

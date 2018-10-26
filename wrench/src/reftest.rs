@@ -8,9 +8,6 @@ use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
 use parse_function::parse_function;
-#[cfg(feature = "gfx")]
-use png::{save, SaveSettings};
-#[cfg(feature = "gl")]
 use png::save_flipped;
 use std::cmp;
 use std::fmt::{Display, Error, Formatter};
@@ -516,13 +513,6 @@ impl<'a> ReftestHarness<'a> {
         let write_debug_images = false;
         if write_debug_images {
             let debug_path = filename.with_extension("yaml.png");
-            #[cfg(feature = "gfx")]
-            save(debug_path, pixels.clone(), size,
-                 SaveSettings {
-                     flip_vertical: false,
-                     try_crop: true,
-                 });
-            #[cfg(feature = "gl")]
             save_flipped(debug_path, pixels.clone(), size);
         }
 
