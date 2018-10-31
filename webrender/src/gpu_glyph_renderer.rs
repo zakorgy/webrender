@@ -19,6 +19,7 @@ use shade::LazilyCompiledShader;
 use tiling::GlyphJob;
 #[cfg(not(feature = "gleam"))]
 use vertex_types::{VectorStencilInstance, VectorCoverInstance};
+use back;
 
 // The area lookup table in uncompressed grayscale TGA format (TGA image format 3).
 static AREA_LUT_TGA_BYTES: &'static [u8] = include_bytes!("../res/area-lut.tga");
@@ -34,26 +35,26 @@ const GPU_TAG_GLYPH_COVER: GpuProfileTag = GpuProfileTag {
     color: debug_colors::LIGHTSTEELBLUE,
 };
 
-pub struct GpuGlyphRenderer<B: hal::Backend> {
+pub struct GpuGlyphRenderer {
     pub area_lut_texture: Texture,
     pub vector_stencil_vao: VAO,
     pub vector_cover_vao: VAO,
 
     // These are Pathfinder shaders, used for rendering vector graphics.
-    vector_stencil: LazilyCompiledShader<B>,
-    vector_cover: LazilyCompiledShader<B>,
+    vector_stencil: LazilyCompiledShader,
+    vector_cover: LazilyCompiledShader,
 }
 
-zimpl<B: hal::Backend> GpuGlyphRenderer<B> {
+impl GpuGlyphRenderer {
     #[cfg(not(feature = "gleam"))]
-    pub fn new(_device: &mut Device<B>, _prim_vao: &VAO, _precache_flags: ShaderPrecacheFlags)
-               -> Result<GpuGlyphRenderer<B>, RendererError> {
+    pub fn new(_device: &mut Device<back::Backend>, _prim_vao: &VAO, _precache_flags: ShaderPrecacheFlags)
+               -> Result<GpuGlyphRenderer, RendererError> {
         unimplemented!();
     }
 
     #[cfg(feature = "gleam")]
-    pub fn new(device: &mut Device<B>, prim_vao: &VAO, precache_flags: ShaderPrecacheFlags)
-               -> Result<GpuGlyphRenderer<B>, RendererError> {
+    pub fn new(device: &mut Device<back::Backend>, prim_vao: &VAO, precache_flags: ShaderPrecacheFlags)
+               -> Result<GpuGlyphRenderer, RendererError> {
         // Make sure the area LUT is uncompressed grayscale TGA, 8bpp.
         debug_assert!(AREA_LUT_TGA_BYTES[2] == 3);
         debug_assert!(AREA_LUT_TGA_BYTES[16] == 8);
@@ -106,7 +107,7 @@ zimpl<B: hal::Backend> GpuGlyphRenderer<B> {
     }
 }
 
-impl<B: hal::Backend> Renderer<B> {
+impl Renderer<B> {
     /// Renders glyphs using the vector graphics shaders (Pathfinder).
     pub fn stencil_glyphs(&mut self,
                           glyphs: &[GlyphJob],

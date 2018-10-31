@@ -151,7 +151,7 @@ pub struct Wrench {
     pub device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer<back::Backend>,
+    pub renderer: webrender::Renderer,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
@@ -186,6 +186,7 @@ impl Wrench {
         chase_primitive: webrender::ChasePrimitive,
         notifier: Option<Box<RenderNotifier>>,
         init: webrender::DeviceInit<back::Backend>,
+        instance: back::Instance,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
@@ -239,7 +240,7 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(init, notifier, opts, None).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(init, instance, notifier, opts, None).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 

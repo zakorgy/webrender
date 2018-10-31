@@ -27,7 +27,7 @@ extern crate env_logger;
 extern crate euclid;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 extern crate font_loader;
-extern crate gfx_hal;
+//extern crate gfx_hal;
 extern crate image;
 #[macro_use]
 extern crate lazy_static;
@@ -47,15 +47,9 @@ extern crate winit;
 extern crate yaml_rust;
 
 cfg_if! {
-    if #[cfg(feature = "dx12")] {
-        extern crate gfx_backend_dx12 as back;
-        use gfx_hal::Instance;
-    } else if #[cfg(feature = "metal")] {
-        extern crate gfx_backend_metal as back;
-        use gfx_hal::Instance;
-    } else if #[cfg(feature = "vulkan")] {
-        extern crate gfx_backend_vulkan as back;
-        use gfx_hal::Instance;
+    if #[cfg(feature = "gfx")] {
+        use webrender::back;
+        use webrender::hal::Instance;
     } else if #[cfg(feature = "gl")] {
         extern crate gfx_backend_empty as back;
         extern crate gleam;
@@ -553,6 +547,9 @@ fn main() {
         (None, None)
     };
 
+    #[cfg(feature = "gl")]
+    let instance = back::Instance { };
+
     #[cfg(feature = "gfx")]
     let instance = back::Instance::create("gfx-rs instance", 1);
 
@@ -588,6 +585,7 @@ fn main() {
         chase_primitive,
         notifier,
         init,
+        instance,
     );
 
     if let Some(window_title) = wrench.take_title() {
