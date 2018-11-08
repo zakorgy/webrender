@@ -11,14 +11,13 @@ use euclid::Transform3D;
 use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
-use ron::de::from_reader;
+use ron::de::from_str;
 use smallvec::SmallVec;
 use std::cell::Cell;
 #[cfg(feature = "debug_renderer")]
 use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::fs::File;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -28,6 +27,7 @@ use super::Capabilities;
 use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
 use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat};
 use super::{Texture, TextureDrawTarget, TextureReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, SharedDepthTarget, ProgramCache};
+use super::super::shader_source;
 use tiling::LineDecorationJob;
 use vertex_types::*;
 
@@ -119,15 +119,6 @@ const QUAD: [Vertex; 6] = [
         aPosition: [1.0, 1.0, 0.0],
     },
 ];
-
-fn get_shader_source(filename: &str, extension: &str) -> Vec<u8> {
-    use std::io::Read;
-    let path_str = format!("{}/{}{}", env!("OUT_DIR"), filename, extension);
-    let mut file = File::open(path_str).expect(&format!("Unable to open shader file: {}", filename));
-    let mut shader = Vec::new();
-    file.read_to_end(&mut shader).unwrap();
-    shader
-}
 
 #[repr(u32)]
 pub enum DepthFunction {
@@ -1115,12 +1106,15 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &RenderPass<B>,
         frame_count: usize,
     ) -> Program<B> {
+        let vs_file = format!("{}.vert.spv", shader_name);
         let vs_module = device
-            .create_shader_module(get_shader_source(shader_name, ".vert.spv").as_slice())
-            .unwrap();
+            .create_shader_module(shader_source::SPIRV_BINARIES.get(vs_file.as_str()).unwrap())
+            .expect(&format!("Failed to create vs module for: {}!", vs_file));
+
+        let fs_file = format!("{}.frag.spv", shader_name);
         let fs_module = device
-            .create_shader_module(get_shader_source(shader_name, ".frag.spv").as_slice())
-            .unwrap();
+            .create_shader_module(shader_source::SPIRV_BINARIES.get(fs_file.as_str()).unwrap())
+            .expect(&format!("Failed to create vs module for: {}!", fs_file));
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -1971,10 +1965,8 @@ impl<B: hal::Backend> Device<B> {
             hal::image::WrapMode::Clamp,
         ));
 
-        let file =
-            File::open(concat!(env!("OUT_DIR"), "/shader_bindings.ron")).expect("Unable to open the file");
         let pipeline_requirements: HashMap<String, PipelineRequirements> =
-            from_reader(file).expect("Failed to load shader_bindings.ron");
+            from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
         let mut descriptor_pools = SmallVec::new();
         let mut frame_fence = SmallVec::new();

@@ -8,7 +8,7 @@ use gfx_hal::format::Format;
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::BufReader;
 use std::io::prelude::*;
 use std::mem;
@@ -591,7 +591,15 @@ fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
     descriptors
 }
 
-fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashMap<String, PipelineRequirements> {
+fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str, shader_file_path: &Path) ->  HashMap<String, PipelineRequirements> {
+    let mut shader_file = OpenOptions::new().append(true).open(shader_file_path).unwrap();
+    write!(shader_file, "\nlazy_static! {{\n").unwrap();
+    write!(
+        shader_file,
+        "  pub static ref SPIRV_BINARIES: HashMap<&'static str, &'static [u8]> = {{\n"
+    ).unwrap();
+    write!(shader_file, "    let mut h = HashMap::new();\n").unwrap();
+
     let mut requirements = HashMap::new();
     for mut file_name in file_name_vector {
         let file_path = Path::new(&out_dir).join(&file_name);
@@ -640,11 +648,23 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str) ->  HashM
                 println!("Error while validating spirv shader: {:?}", file_name);
                 process::exit(1)
             }
+
+        let spirv_file_path = spirv_file_path.to_str().unwrap().replace("\\\\?\\", "");
+        let spirv_file_path = spirv_file_path.replace("\\", "/");
+        write!(
+            shader_file,
+            "    h.insert(\"{}\", &include_bytes!(\"{}\")[0..]);\n",
+            file_name,
+            spirv_file_path,
+        ).unwrap();
     }
+    write!(shader_file, "    h\n").unwrap();
+    write!(shader_file, "  }};\n").unwrap();
+    write!(shader_file, "}}\n").unwrap();
     requirements
 }
 
-fn write_ron_to_file(requriements: HashMap<String, PipelineRequirements>, out_dir: &str) {
+fn write_ron_to_file(requriements: HashMap<String, PipelineRequirements>, out_dir: &str, shader_file_path: &Path) {
     let ron_file_path = Path::new(&out_dir).join("shader_bindings.ron");
     let mut ron_file = File::create(&ron_file_path).unwrap();
     let pretty = PrettyConfig {
@@ -658,11 +678,22 @@ fn write_ron_to_file(requriements: HashMap<String, PipelineRequirements>, out_di
                 .as_bytes(),
         )
         .unwrap();
+
+    let mut shader_file = OpenOptions::new().append(true).open(shader_file_path).unwrap();
+    let ron_file_path = ron_file_path.to_str().unwrap().replace("\\\\?\\", "");
+    let ron_file_path = ron_file_path.replace("\\", "/");
+    write!(shader_file, "\nlazy_static! {{\n").unwrap();
+    write!(
+        shader_file,
+        "  pub static ref PIPELINES: &'static str = include_str!(\"{}\");\n",
+        ron_file_path,
+    ).unwrap();
+    write!(shader_file, "}}\n").unwrap();
 }
 
-pub fn gfx_main(out_dir: &str, shader_map: HashMap<String, String>) {
+pub fn gfx_main(out_dir: &str, shader_map: HashMap<String, String>, shader_file_path: &Path) {
     println!("cargo:rerun-if-changed=shaders.ron");
     let shaders = create_shaders(&out_dir, &shader_map);
-    let requirements = compile_glsl_to_spirv(shaders, &out_dir);
-    write_ron_to_file(requirements, &out_dir);
+    let requirements = compile_glsl_to_spirv(shaders, &out_dir, shader_file_path);
+    write_ron_to_file(requirements, &out_dir, shader_file_path);
 }

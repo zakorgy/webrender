@@ -81,5 +81,5 @@ fn main() {
 
     let _shaders = write_shaders(glsl_files, &shaders_file);
     #[cfg(not(feature = "gleam"))]
-    gfx_main(&out_dir, _shaders);
+    gfx_main(&out_dir, _shaders, &shaders_file);
 }
