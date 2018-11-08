@@ -44,7 +44,7 @@ pub struct GpuGlyphRenderer<B: hal::Backend> {
     vector_cover: LazilyCompiledShader<B>,
 }
 
-zimpl<B: hal::Backend> GpuGlyphRenderer<B> {
+impl<B: hal::Backend> GpuGlyphRenderer<B> {
     #[cfg(not(feature = "gleam"))]
     pub fn new(_device: &mut Device<B>, _prim_vao: &VAO, _precache_flags: ShaderPrecacheFlags)
                -> Result<GpuGlyphRenderer<B>, RendererError> {
