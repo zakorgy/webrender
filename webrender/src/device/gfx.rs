@@ -420,7 +420,7 @@ impl<B: hal::Backend> ImageCore<B> {
             format,
             hal::format::Swizzle::NO,
             subresource_range.clone(),
-        ).unwrap();
+        ).expect("create_image_view failed");
         ImageCore {
             image,
             memory: None,
@@ -442,7 +442,7 @@ impl<B: hal::Backend> ImageCore<B> {
     ) -> Self {
         let image_unbound = device
             .create_image(kind, mip_levels, format, hal::image::Tiling::Optimal, usage, hal::image::ViewCapabilities::empty())
-            .unwrap();
+            .expect("create_image failed");
         let requirements = device.get_image_requirements(&image_unbound);
 
         let mem_type = memory_types
@@ -651,7 +651,7 @@ impl<B: hal::Backend> Buffer<B> {
         stride: usize,
     ) -> Self {
         let buffer_size = (data_len * stride + pitch_alignment_mask) & !pitch_alignment_mask;
-        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).unwrap();
+        let unbound_buffer = device.create_buffer(buffer_size as u64, usage).expect("create_buffer failed");
         let requirements = device.get_buffer_requirements(&unbound_buffer);
         let memory_type = memory_types
             .iter()
@@ -687,7 +687,7 @@ impl<B: hal::Backend> Buffer<B> {
             )
             .unwrap();
         upload_data[0..data.len()].copy_from_slice(&data);
-        device.release_mapping_writer(upload_data);
+        device.release_mapping_writer(upload_data).expect("release_mapping_writer failed");
     }
 
     pub fn update<T: Copy>(&self, device: &B::Device, data: &[T], offset: usize, alignment_mask: usize) -> usize {
@@ -699,7 +699,7 @@ impl<B: hal::Backend> Buffer<B> {
             )
             .unwrap();
         upload_data[0..data.len()].copy_from_slice(&data);
-        device.release_mapping_writer(upload_data);
+        device.release_mapping_writer(upload_data).expect("release_mapping_writer failed");
         size_aligned
     }
 
@@ -1108,12 +1108,12 @@ impl<B: hal::Backend> Program<B> {
     ) -> Program<B> {
         let vs_file = format!("{}.vert.spv", shader_name);
         let vs_module = device
-            .create_shader_module(shader_source::SPIRV_BINARIES.get(vs_file.as_str()).unwrap())
+            .create_shader_module(shader_source::SPIRV_BINARIES.get(vs_file.as_str()).expect("create_shader_module failed"))
             .expect(&format!("Failed to create vs module for: {}!", vs_file));
 
         let fs_file = format!("{}.frag.spv", shader_name);
         let fs_module = device
-            .create_shader_module(shader_source::SPIRV_BINARIES.get(fs_file.as_str()).unwrap())
+            .create_shader_module(shader_source::SPIRV_BINARIES.get(fs_file.as_str()).expect("create_shader_module failed"))
             .expect(&format!("Failed to create vs module for: {}!", fs_file));
 
         let pipelines = {
@@ -1563,15 +1563,15 @@ impl<B: hal::Backend> Framebuffer<B> {
                     layers: layer_index .. layer_index+1,
                 },
             )
-            .unwrap();
+            .expect("create_image_view failed");
         let fbo = if rbo != RBOId(0) {
             device
                 .create_framebuffer(render_pass.get_render_pass(texture.format, true), vec![&image_view, depth.unwrap()], extent)
-                .unwrap()
+                .expect("create_framebuffer failed")
         } else {
             device
                 .create_framebuffer(render_pass.get_render_pass(texture.format, false), Some(&image_view), extent)
-                .unwrap()
+                .expect("create_framebuffer failed")
         };
 
         Framebuffer {
@@ -1667,8 +1667,8 @@ impl<B: hal::Backend> DescPool<B> {
             device.create_descriptor_pool(
                 max_size,
                 descriptor_range_descriptors.as_slice(),
-            );
-        let descriptor_set_layout = device.create_descriptor_set_layout(&descriptor_set_layout, &[]);
+            ).expect("create_descriptor_pool failed");
+        let descriptor_set_layout = device.create_descriptor_set_layout(&descriptor_set_layout, &[]).expect("create_descriptor_set_layout failed");
         let mut dp = DescPool {
             descriptor_pool,
             descriptor_set: vec!(),
@@ -1958,12 +1958,12 @@ impl<B: hal::Backend> Device<B> {
         let sampler_linear = device.create_sampler(hal::image::SamplerInfo::new(
             hal::image::Filter::Linear,
             hal::image::WrapMode::Clamp,
-        ));
+        )).expect("sampler_linear failed");
 
         let sampler_nearest = device.create_sampler(hal::image::SamplerInfo::new(
             hal::image::Filter::Nearest,
             hal::image::WrapMode::Clamp,
-        ));
+        )).expect("sampler_linear failed");
 
         let pipeline_requirements: HashMap<String, PipelineRequirements> =
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
@@ -1984,7 +1984,7 @@ impl<B: hal::Backend> Device<B> {
                 )
             );
 
-            let fence = device.create_fence(false);
+            let fence = device.create_fence(false).expect("create_fence failed");
             frame_fence.push(
                 Fence {
                     inner: fence,
@@ -1996,7 +1996,7 @@ impl<B: hal::Backend> Device<B> {
                 &queue_group,
                 hal::pool::CommandPoolCreateFlags::empty(),
                 64,
-            );
+            ).expect("create_command_pool_typed failed");
             cp.reset();
             command_pool.push(
                 cp
@@ -2014,8 +2014,8 @@ impl<B: hal::Backend> Device<B> {
             );
         }
 
-        let image_available_semaphore = device.create_semaphore();
-        let render_finished_semaphore = device.create_semaphore();
+        let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
+        let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
         Device {
             device,
@@ -2187,7 +2187,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
             );
 
-        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config, None);
+        let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config, None).expect("create_swapchain failed");
         println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Float; //maybe d24s8?
         let render_pass = {
@@ -2275,10 +2275,10 @@ impl<B: hal::Backend> Device<B> {
             };
 
             RenderPass {
-                r8: device.create_render_pass(&[attachment_r8.clone()], &[subpass_r8], &[dependency.clone()]),
-                r8_depth: device.create_render_pass(&[attachment_r8, attachment_depth.clone()], &[subpass_depth_r8], &[dependency.clone(), depth_dependency.clone()]),
-                bgra8: device.create_render_pass(&[attachment_bgra8.clone()], &[subpass_bgra8], &[dependency.clone()]),
-                bgra8_depth: device.create_render_pass(&[attachment_bgra8, attachment_depth], &[subpass_depth_bgra8], &[dependency, depth_dependency]),
+                r8: device.create_render_pass(&[attachment_r8.clone()], &[subpass_r8], &[dependency.clone()]).expect("create_render_pass failed"),
+                r8_depth: device.create_render_pass(&[attachment_r8, attachment_depth.clone()], &[subpass_depth_r8], &[dependency.clone(), depth_dependency.clone()]).expect("create_render_pass failed"),
+                bgra8: device.create_render_pass(&[attachment_bgra8.clone()], &[subpass_bgra8], &[dependency.clone()]).expect("create_render_pass failed"),
+                bgra8_depth: device.create_render_pass(&[attachment_bgra8, attachment_depth], &[subpass_depth_bgra8], &[dependency, depth_dependency]).expect("create_render_pass failed"),
             }
         };
 
@@ -2308,7 +2308,7 @@ impl<B: hal::Backend> Device<B> {
                                 Some(&core.view),
                                 extent,
                             )
-                            .unwrap()
+                            .expect("create_framebuffer failed")
                     })
                     .collect();
                 let fbos_depth = cores
@@ -2321,7 +2321,7 @@ impl<B: hal::Backend> Device<B> {
                                 vec![&core.view, &depth.core.view],
                                 extent,
                             )
-                            .unwrap()
+                            .expect("create_framebuffer failed")
                     })
                     .collect();
                 (cores, fbos, fbos_depth)
@@ -2430,7 +2430,7 @@ impl<B: hal::Backend> Device<B> {
             self.pipeline_requirements.get(&name)
                     .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
             &self.device,
-            self.device.create_pipeline_layout(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind)), &[]),
+            self.device.create_pipeline_layout(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind)), &[]).expect("create_pipeline_layout failed"),
             &self.memory_types,
             &self.limits,
             &name,
@@ -3465,7 +3465,7 @@ impl<B: hal::Backend> Device<B> {
             &self.queue_group,
             hal::pool::CommandPoolCreateFlags::empty(),
             4,
-        );
+        ).expect("create_command_pool_typed failed");
         command_pool.reset();
 
         let copy_submit = {
@@ -3526,12 +3526,12 @@ impl<B: hal::Backend> Device<B> {
             cmd_buffer.finish()
         };
 
-        let copy_fence = self.device.create_fence(false);
-        self.device.reset_fence(&copy_fence);
+        let copy_fence = self.device.create_fence(false).expect("create_fence failed");
+        self.device.reset_fence(&copy_fence).expect("reset_fence failed");
         let submission = hal::queue::Submission::new()
             .submit(Some(copy_submit));
         self.queue_group.queues[0].submit(submission, Some(&copy_fence));
-        self.device.wait_for_fence(&copy_fence, !0);
+        self.device.wait_for_fence(&copy_fence, !0).expect("wait_for_fence failed");
         self.device.destroy_fence(copy_fence);
 
         let mut data = vec![0; download_buffer.buffer_size];
@@ -4038,8 +4038,8 @@ impl<B: hal::Backend> Device<B> {
         self.next_id = (self.next_id + 1) % self.frame_count;
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
-            self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0);
-            self.device.reset_fence(&self.frame_fence[self.next_id].inner);
+            self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0).expect("wait_for_fence failed");
+            self.device.reset_fence(&self.frame_fence[self.next_id].inner).expect("reset_fence failed");
             self.frame_fence[self.next_id].is_submitted = false;
         }
         self.command_pool[self.next_id].reset();
@@ -4057,8 +4057,8 @@ impl<B: hal::Backend> Device<B> {
     fn wait_for_resources(&mut self) {
         for fence in &mut self.frame_fence {
             if fence.is_submitted {
-                self.device.wait_for_fence(&fence.inner, !0);
-                self.device.reset_fence(&fence.inner);
+                self.device.wait_for_fence(&fence.inner, !0).expect("wait_for_fence failed");
+                self.device.reset_fence(&fence.inner).expect("reset_fence failed");
                 fence.is_submitted = false;
             }
         }

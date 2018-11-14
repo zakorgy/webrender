@@ -14,8 +14,8 @@ panic = "abort"
 
 [replace]
 "https://github.com/rust-lang/crates.io-index#serde_derive:1.0.66" = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums8", feature = "deserialize_in_place" }
-"https://github.com/gfx-rs/gfx.git#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="2e4a9081453883e566471bdaddee457045502b44" }
-"https://github.com/gfx-rs/gfx.git#gfx-backend-vulkan:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="2e4a9081453883e566471bdaddee457045502b44" }
-"https://github.com/gfx-rs/gfx.git#gfx-backend-dx12:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="2e4a9081453883e566471bdaddee457045502b44" }
-"https://github.com/gfx-rs/gfx.git#gfx-backend-metal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="2e4a9081453883e566471bdaddee457045502b44" }
-"https://github.com/gfx-rs/gfx.git#gfx-backend-empty:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="2e4a9081453883e566471bdaddee457045502b44" }
+"https://github.com/gfx-rs/gfx.git#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="11c4f740f642d1565e76842f9d873fac82273303" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-vulkan:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="11c4f740f642d1565e76842f9d873fac82273303" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-dx12:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="11c4f740f642d1565e76842f9d873fac82273303" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-metal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="11c4f740f642d1565e76842f9d873fac82273303" }
+"https://github.com/gfx-rs/gfx.git#gfx-backend-empty:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="11c4f740f642d1565e76842f9d873fac82273303" }
