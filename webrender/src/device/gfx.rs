@@ -2172,20 +2172,21 @@ impl<B: hal::Backend> Device<B> {
                 },
             );
 
-        let mut extent = caps.current_extent.unwrap_or(
+        let extent = caps.current_extent.unwrap_or(
             hal::window::Extent2D {
                 width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
                 height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
             }
         );
 
-        if extent.width == 0 { extent.width = 1; }
-        if extent.height == 0 { extent.height = 1; }
-
-        let swap_config = SwapchainConfig::from_caps(&caps, surface_format)
-            .with_image_usage(
-                hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
-            );
+        let swap_config = SwapchainConfig::new(
+            if extent.width == 0 {1} else {extent.width},
+            if extent.height == 0 {1} else {extent.height},
+            surface_format,
+            caps.image_count.start
+        ).with_image_usage(
+            hal::image::Usage::TRANSFER_SRC | hal::image::Usage::TRANSFER_DST | hal::image::Usage::COLOR_ATTACHMENT
+        );
 
         let (swap_chain, backbuffer) = device.create_swapchain(surface, swap_config, None).expect("create_swapchain failed");
         println!("backbuffer={:?}", backbuffer);
