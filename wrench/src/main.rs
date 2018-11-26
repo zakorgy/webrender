@@ -556,6 +556,9 @@ fn main() {
     #[cfg(feature = "gfx")]
     let instance = back::Instance::create("gfx-rs instance", 1);
 
+    #[cfg(not(feature = "gfx"))]
+    let instance = back::Instance{};
+
     #[cfg(feature = "gfx")]
     let init = webrender::DeviceInit {
         adapter: instance.enumerate_adapters().remove(0),
@@ -588,6 +591,7 @@ fn main() {
         chase_primitive,
         notifier,
         init,
+        instance,
     );
 
     if let Some(window_title) = wrench.take_title() {

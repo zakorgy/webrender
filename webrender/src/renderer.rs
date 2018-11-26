@@ -1217,6 +1217,7 @@ pub struct Renderer<B: hal::Backend> {
     result_rx: Receiver<ResultMsg>,
     debug_server: DebugServer,
     pub device: Device<B>,
+    _instance: Box<hal::Instance<Backend=B>>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_shader_updates: Vec<PathBuf>,
@@ -1348,6 +1349,7 @@ impl<B: hal::Backend> Renderer<B>
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
         init: DeviceInit<B>,
+        _instance: Box<hal::Instance<Backend=B>>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
         shaders: Option<&mut WrShaders<B>>
@@ -1689,6 +1691,7 @@ impl<B: hal::Backend> Renderer<B>
         let mut renderer = Renderer {
             result_rx,
             debug_server,
+            _instance,
             device,
             active_documents: Vec::new(),
             pending_texture_updates: Vec::new(),

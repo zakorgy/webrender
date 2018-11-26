@@ -144,7 +144,7 @@ pub fn main_wrapper<E: Example>(
         .with_dimensions(winit::dpi::LogicalSize::new(E::WIDTH as f64, E::HEIGHT as f64));
 
     #[cfg(feature = "gl")]
-    let (gl, mut init, window) = {
+    let (gl, mut init, instance, window) = {
         let context_builder = glutin::ContextBuilder::new()
             .with_gl(glutin::GlRequest::GlThenGles {
                 opengl_version: (3, 2),
@@ -172,7 +172,7 @@ pub fn main_wrapper<E: Example>(
             gl: gl.clone(),
             phantom_data: PhantomData,
         };
-        (gl, init, window)
+        (gl, init, back::Instance{}, window)
     };
 
     #[cfg(feature = "gfx-hal")]
@@ -220,7 +220,7 @@ pub fn main_wrapper<E: Example>(
         DeviceUintSize::new(size.width as u32, size.height as u32)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(init, notifier, opts, None).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(init, Box::new(instance), notifier, opts, None).unwrap();
 
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);

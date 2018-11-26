@@ -113,6 +113,7 @@ impl Rectangle {
                 gl: composition.gleam.clone(),
                 phantom_data: PhantomData,
             },
+            Box::new(back::Instance {}),
             notifier.clone(),
             webrender::RendererOptions {
                 clear_color: Some(api::ColorF::new(0., 0., 0., 0.)),
