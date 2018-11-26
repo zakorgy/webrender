@@ -1357,6 +1357,8 @@ impl<B: hal::Backend> Renderer<B>
         let (result_tx, result_rx) = channel();
         #[cfg(feature = "gleam")]
         let gl_type = init.gl.get_type();
+        #[cfg(not(feature = "gleam"))]
+        let gl_type = ();
 
         let debug_server = DebugServer::new(api_tx.clone());
 
@@ -1404,7 +1406,6 @@ impl<B: hal::Backend> Renderer<B>
             Some(shaders) => Rc::clone(&shaders.shaders),
             None => Rc::new(RefCell::new(Shaders::new(
                 &mut device,
-                #[cfg(feature = "gleam")]
                 gl_type,
                 &options)?)),
         };
