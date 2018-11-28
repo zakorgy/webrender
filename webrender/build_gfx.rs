@@ -28,6 +28,13 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
+const DESCRIPTOR_SET_PER_DRAW: usize = 0;
+const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
+const DESCRIPTOR_SET_SAMPLER: usize = 2;
+const DESCRIPTOR_SET_COUNT: usize = 3;
+
+const DRAW_UNIFORM_COUNT: usize = 6;
+
 #[derive(Deserialize)]
 struct Shader {
     name: String,
@@ -38,9 +45,9 @@ struct Shader {
 #[derive(Serialize)]
 struct PipelineRequirements {
     attribute_descriptors: Vec<AttributeDesc>,
-    bindings_map: HashMap<String, usize>,
-    descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
-    descriptor_set_layouts: Vec<DescriptorSetLayoutBinding>,
+    bindings_map: HashMap<String, u32>,
+    descriptor_range_descriptors: Vec<Vec<DescriptorRangeDesc>>,
+    descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>>,
     vertex_buffer_descriptors: Vec<VertexBufferDesc>,
 }
 
@@ -166,13 +173,14 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
 
 fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineRequirements> {
     let mut new_data = String::new();
-    let mut binding = 1; // 0 is reserved for Locals
+    let mut binding = [0; DESCRIPTOR_SET_COUNT];
+    binding[0] = 1; // set=0, binding=0 is reserved for Locals
+    let mut bindings_map: HashMap<String, u32> = HashMap::new();
+    let mut descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>> = vec![Vec::new(); DESCRIPTOR_SET_COUNT];
     let mut in_location = 0;
     let mut out_location = 0;
     let mut varying_location = 0;
     let mut attribute_descriptors: Vec<AttributeDesc> = Vec::new();
-    let mut bindings_map: HashMap<String, usize> = HashMap::new();
-    let mut descriptor_set_layouts: Vec<DescriptorSetLayoutBinding> = Vec::new();
     let mut vertex_offset = 0;
     let mut instance_offset = 0;
     let mut color_texture_kind = "texture2DArray";
@@ -182,9 +190,9 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
 
     // Mapping from glsl sampler variable name to a tuple,
     // in which the first item is the corresponding expression used in vulkan glsl files,
-    // the second is the layout binding index.
-    // e.g.: sColor0 -> ("sampler2DArray(tColor0, sColor0)", 0)
-    let mut sampler_mapping: HashMap<String, (String, i8)> = HashMap::new();
+    // the second is the layout set, the third is the binding index.
+    // e.g.: sColor0 -> ("sampler2DArray(tColor0, sColor0)", 1, 7)
+    let mut sampler_mapping: HashMap<String, (String, usize, usize)> = HashMap::new();
 
     let file = File::open(file_path).unwrap();
     let reader = BufReader::new(file);
@@ -206,10 +214,12 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
         if trimmed.starts_with("uniform") {
             if trimmed.contains("sampler") {
                 let code = split_code(trimmed);
+                let set = get_set_from_line(&code) as usize;
                 replace_sampler_definition_with_texture_and_sampler(
-                    &mut binding,
+                    set,
+                    &mut binding[set],
                     code,
-                    &mut descriptor_set_layouts,
+                    &mut descriptor_set_layout_bindings,
                     &mut bindings_map,
                     &mut new_data,
                     &mut sampler_mapping,
@@ -218,16 +228,16 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 );
 
                 // Replace non-sampler uniforms with a structure.
-                // We just place a predifened structure to the position of the last non-uniform
+                // We just place a predefined structure to the position of the last non-uniform
                 // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
                 if write_ron {
-                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layouts, &mut bindings_map);
+                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW], &mut bindings_map);
                 }
             }
 
-            // Adding location info for non-uniform variables.
+        // Adding location info for non-uniform variables.
         } else if trimmed.contains(';') && // If the line contains a semicolon we assume it is a variable declaration.
             (trimmed.starts_with("varying ") || trimmed.starts_with("flat varying ")
                 || trimmed.starts_with("in ") || trimmed.starts_with("out "))
@@ -243,8 +253,8 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                     &mut vertex_offset,
                     write_ron,
                 );
-                // Replacing sampler variables with the corresponding expression from sampler_mapping.
-            } else if l.contains("TEX_SAMPLE(") || l.contains("TEXEL_FETCH(") || l.contains("TEX_SIZE(")
+        // Replacing sampler variables with the corresponding expression from sampler_mapping.
+        } else if l.contains("TEX_SAMPLE(") || l.contains("TEXEL_FETCH(") || l.contains("TEX_SIZE(")
             || l.contains("texelFetch(") || l.contains("texture(")
             || l.contains("textureLod(") || l.contains("textureSize(")
             {
@@ -268,16 +278,19 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let mut file = File::create(file_path).unwrap();
     file.write(new_data.as_bytes()).unwrap();
     if write_ron {
-        let descriptor_range_descriptors = create_desciptor_range_descriptors(sampler_mapping.len());
         let vertex_buffer_descriptors = create_vertex_buffer_descriptors(file_name);
-        let pipeline_requirmenets = PipelineRequirements {
+        let pipeline_requirements = PipelineRequirements {
             attribute_descriptors,
             bindings_map,
-            descriptor_set_layouts,
-            descriptor_range_descriptors,
+            descriptor_range_descriptors: vec![
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage,true),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_INSTANCE].len(), DescriptorType::SampledImage, false),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler, false),
+            ],
+            descriptor_set_layout_bindings,
             vertex_buffer_descriptors,
         };
-        return Some(pipeline_requirmenets);
+        return Some(pipeline_requirements);
     }
     None
 }
@@ -290,12 +303,13 @@ fn split_code(line: &str) -> Vec<&str> {
 }
 
 fn replace_sampler_definition_with_texture_and_sampler(
+    set: usize,
     binding: &mut usize,
     code: Vec<&str>,
-    descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
-    bindings_map: &mut HashMap<String, usize>,
+    descriptor_set_layouts: &mut Vec<Vec<DescriptorSetLayoutBinding>>,
+    bindings_map: &mut HashMap<String, u32>,
     new_data: &mut String,
-    sampler_mapping: &mut HashMap<String, (String, i8)>,
+    sampler_mapping: &mut HashMap<String, (String, usize, usize)>,
     write_ron: bool,
     color_texture_kind: &str,
 ) {
@@ -315,33 +329,31 @@ fn replace_sampler_definition_with_texture_and_sampler(
     let texture_name = sampler_name.replacen('s', "t", 1);
 
     // If the sampler is in the map we only update the shader code.
-    if let Some(&(_, binding)) = sampler_mapping.get(*sampler_name) {
+    if let Some(&(_, set, binding)) = sampler_mapping.get(*sampler_name) {
         let mut layout_str = format!(
-            "layout(set = 0, binding = {}) {}{} {};\n",
-            binding, code_str, texture_type, texture_name
+            "layout(set = {}, binding = {}) {}{} {};\n",
+            set, binding, code_str, texture_type, texture_name
         );
         new_data.push_str(&layout_str);
 
         layout_str = format!(
-            "layout(set = 0, binding = {}) {}sampler {};\n",
-            binding + 1,
-            code_str,
-            sampler_name
+            "layout(set = {}, binding = {}) {}sampler {};\n",
+            DESCRIPTOR_SET_SAMPLER, (set * DRAW_UNIFORM_COUNT) + binding, code_str, sampler_name
         );
         new_data.push_str(&layout_str);
 
-        // Replace sampler definition with a texture and a sampler.
+    // Replace sampler definition with a texture and a sampler.
     } else {
         if texture_name.contains("tColor") {
             texture_type = String::from(color_texture_kind);
             sampler_type = color_texture_kind.replace("texture", "sampler");
         }
         let mut layout_str = format!(
-            "layout(set = 0, binding = {}) {}{} {};\n",
-            binding, code_str, texture_type, texture_name
+            "layout(set = {}, binding = {}) {}{} {};\n",
+            set, binding, code_str, texture_type, texture_name
         );
         if write_ron {
-            descriptor_set_layouts.push(
+            descriptor_set_layouts[set].push(
                 DescriptorSetLayoutBinding {
                     binding: *binding as u32,
                     ty: DescriptorType::SampledImage,
@@ -349,32 +361,32 @@ fn replace_sampler_definition_with_texture_and_sampler(
                     stage_flags: ShaderStageFlags::ALL,
                     immutable_samplers: false,
                 });
-            bindings_map.insert(texture_name.clone(), *binding);
+            bindings_map.insert(texture_name.clone(), *binding as u32);
         }
         new_data.push_str(&layout_str);
         sampler_mapping.insert(
             String::from(*sampler_name),
             (
                 format!("{}({}, {})", sampler_type, texture_name, sampler_name),
-                *binding as i8,
+                set,
+                *binding,
             ),
         );
-        *binding += 1;
 
         layout_str = format!(
-            "layout(set = 0, binding = {}) {}sampler {};\n",
-            binding, code_str, sampler_name
+            "layout(set = {}, binding = {}) {}sampler {};\n",
+            DESCRIPTOR_SET_SAMPLER, (set * DRAW_UNIFORM_COUNT) + *binding, code_str, sampler_name
         );
         if write_ron {
-            descriptor_set_layouts.push(
+            descriptor_set_layouts[DESCRIPTOR_SET_SAMPLER].push(
                 DescriptorSetLayoutBinding {
-                    binding: *binding as u32,
+                    binding: ((set * DRAW_UNIFORM_COUNT) + *binding) as u32,
                     ty: DescriptorType::Sampler,
                     count: 1,
                     stage_flags: ShaderStageFlags::ALL,
                     immutable_samplers: false,
                 });
-            bindings_map.insert(String::from(*sampler_name), *binding);
+            bindings_map.insert(String::from(*sampler_name), ((set * DRAW_UNIFORM_COUNT) + *binding) as u32);
         }
         new_data.push_str(&layout_str);
         *binding += 1;
@@ -392,9 +404,27 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
     );
 }
 
+fn get_set_from_line(code: &Vec<&str>) -> usize {
+    let (sampler_name, _) = code.split_last().unwrap();
+    match sampler_name.as_ref() {
+        "sColor0" |
+        "sColor1" |
+        "sColor2" |
+        "sPrevPassAlpha" |
+        "sPrevPassColor"  => return DESCRIPTOR_SET_PER_DRAW,
+        "sDither" |
+        "sRenderTasks" |
+        "sGpuCache" |
+        "sTransformPalette" |
+        "sPrimitiveHeadersF" |
+        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_INSTANCE,
+        x => unreachable!("Sampler not found: {:?}", x),
+    }
+}
+
 fn add_locals_to_descriptor_set_layout(
     descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
-    bindings_map: &mut HashMap<String, usize>,
+    bindings_map: &mut HashMap<String, u32>,
 ) {
     descriptor_set_layouts.push(
         DescriptorSetLayoutBinding {
@@ -505,21 +535,24 @@ fn add_attribute_descriptors(
     };
 }
 
-fn create_desciptor_range_descriptors(count: usize) -> Vec<DescriptorRangeDesc> {
-    vec![
+fn create_descriptor_range_descriptors(count: usize, ty: DescriptorType, add_uniform_buffer: bool) -> Vec<DescriptorRangeDesc> {
+    let mut range = vec![
         DescriptorRangeDesc {
-            ty: DescriptorType::SampledImage,
+            ty,
             count,
         },
-        DescriptorRangeDesc {
-            ty: DescriptorType::Sampler,
-            count,
-        },
-        DescriptorRangeDesc {
-            ty: DescriptorType::UniformBuffer,
-            count: 1,
-        },
-    ]
+    ];
+
+    if add_uniform_buffer {
+        range[0].count -= 1;
+        range.push(
+            DescriptorRangeDesc {
+                ty: DescriptorType::UniformBuffer,
+                count: 1,
+            }
+        );
+    }
+    range
 }
 
 fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {

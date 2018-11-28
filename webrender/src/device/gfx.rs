@@ -51,15 +51,6 @@ pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
-const MAX_FRAME_COUNT: usize = 2;
-const DESCRIPTOR_COUNT: usize = 40;
-const DEBUG_DESCRIPTOR_COUNT: usize = 5;
-// The maximum number of sampled textures in a cache clip shader.
-const CACHE_CLIP_SAMPLERS: usize = 7;
-// The maximum number of sampled textures in a debug shader.
-const DEBUG_SAMPLERS: usize = 4;
-// The maximum number of sampled textures in a shader which is not debug/cache clip.
-const DEFAULT_SAMPLERS: usize = 12;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -89,12 +80,33 @@ pub struct Locals {
     uMode: i32,
 }
 
+const MAX_FRAME_COUNT: usize = 2;
+const DESCRIPTOR_COUNT: usize = 400;
+const DEBUG_DESCRIPTOR_COUNT: usize = 5;
+const DESCRIPTOR_SET_PER_DRAW: usize = 0;
+const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
+const DESCRIPTOR_SET_SAMPLER: usize = 2;
+
+const SAMPLERS: [(usize, &'static str); 11] = [
+    (0, "Color0"),
+    (1, "Color1"),
+    (2, "Color2"),
+    (3, "PrevPassAlpha"),
+    (4, "PrevPassColor"),
+    (5, "GpuCache"),
+    (6, "TransformPalette"),
+    (7, "RenderTasks"),
+    (8, "Dither"),
+    (9, "PrimitiveHeadersF"),
+    (10, "PrimitiveHeadersI"),
+];
+
 #[derive(Clone, Deserialize)]
 pub struct PipelineRequirements {
     pub attribute_descriptors: Vec<AttributeDesc>,
     pub bindings_map: HashMap<String, u32>,
-    pub descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
-    pub descriptor_set_layouts: Vec<DescriptorSetLayoutBinding>,
+    pub descriptor_range_descriptors: Vec<Vec<DescriptorRangeDesc>>,
+    pub descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>>,
     pub vertex_buffer_descriptors: Vec<VertexBufferDesc>,
 }
 
@@ -1092,6 +1104,7 @@ pub(crate) struct Program<B: hal::Backend> {
     pub locals_buffer: SmallVec<[UniformBufferHandler<B>; 1]>,
     shader_name: String,
     shader_kind: ShaderKind,
+    bound_textures: [u32; 16],
 }
 
 impl<B: hal::Backend> Program<B> {
@@ -1327,6 +1340,7 @@ impl<B: hal::Backend> Program<B> {
             locals_buffer,
             shader_name: String::from(shader_name),
             shader_kind,
+            bound_textures: [0; 16],
         }
     }
 
@@ -1374,20 +1388,27 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    fn bind_texture(&mut self, device: &B::Device, set: &B::DescriptorSet, image: &ImageCore<B>, sampler: &B::Sampler, binding: &'static str) {
-        if self.bindings_map.contains_key(&("t".to_owned() + binding)) {
+    fn bind_texture(&mut self, device: &B::Device, set: &B::DescriptorSet, image: &ImageCore<B>, binding: &'static str) {
+        if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             device.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set,
-                    binding: self.bindings_map[&("t".to_owned() + binding)],
+                    binding: *binding,
                     array_offset: 0,
                     descriptors: Some(
                         hal::pso::Descriptor::Image(&image.view, image.state.get().1)
-                    ),
+                    )
                 },
+            ]);
+        }
+    }
+
+    fn bind_sampler(&mut self, device: &B::Device, set: &B::DescriptorSet, sampler: &B::Sampler, binding: &'static str) {
+        if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
+            device.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set,
-                    binding: self.bindings_map[&("s".to_owned() + binding)],
+                    binding: *binding,
                     array_offset: 0,
                     descriptors: Some(
                         hal::pso::Descriptor::Sampler(sampler)
@@ -1404,6 +1425,8 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         desc_pools: &mut DescriptorPools<B>,
+        desc_pools_global: &mut DescriptorPools<B>,
+        desc_pools_sampler: &mut DescriptorPools<B>,
         clear_values: &[hal::command::ClearValue],
         blend_state: BlendState,
         blend_color: ColorF,
@@ -1429,7 +1452,7 @@ impl<B: hal::Backend> Program<B> {
         cmd_buffer.bind_graphics_descriptor_sets(
             &self.pipeline_layout,
             0,
-            Some(desc_pools.get(&self.shader_kind)),
+            vec![desc_pools.get(&self.shader_kind), desc_pools_global.get(&self.shader_kind), desc_pools_sampler.get(&self.shader_kind)],
             &[],
         );
         desc_pools.next(&self.shader_kind);
@@ -1725,59 +1748,34 @@ impl<B: hal::Backend> DescriptorPools<B> {
     pub fn new(
         device: &B::Device,
         descriptor_count: usize,
-        debug_layout: Vec<DescriptorSetLayoutBinding>,
-        cache_clip_layout: Vec<DescriptorSetLayoutBinding>,
-        default_layout: Vec<DescriptorSetLayoutBinding>,
+        pipeline_requirements: &HashMap<String, PipelineRequirements>,
+        set: usize,
     ) -> Self {
-        let debug_range = vec![
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: DEBUG_DESCRIPTOR_COUNT * DEBUG_SAMPLERS,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::Sampler,
-                count: DEBUG_DESCRIPTOR_COUNT * DEBUG_SAMPLERS,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::UniformBuffer,
-                count: DEBUG_DESCRIPTOR_COUNT,
+        fn increase_range_count(range: &mut Vec<DescriptorRangeDesc>, count: usize) {
+            for r in range {
+                r.count *= count;
             }
-        ];
+        }
+        fn get_layout_and_range(pipeline: &PipelineRequirements, set: usize) -> (Vec<DescriptorSetLayoutBinding>, Vec<DescriptorRangeDesc>) {
+            (
+                pipeline.descriptor_set_layout_bindings[set].clone(),
+                pipeline.descriptor_range_descriptors[set].clone(),
+            )
+        }
 
-        let cache_clip_range = vec![
-            hal::pso::DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: descriptor_count * CACHE_CLIP_SAMPLERS,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::Sampler,
-                count: descriptor_count * CACHE_CLIP_SAMPLERS,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::UniformBuffer,
-                count: descriptor_count,
-            }
-        ];
+        let (debug_layout, mut debug_layout_range) = get_layout_and_range(pipeline_requirements.get("debug_color").expect("debug_color missing"), set);
+        increase_range_count(&mut debug_layout_range, DEBUG_DESCRIPTOR_COUNT);
 
-        let default_range = vec![
-            hal::pso::DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::SampledImage,
-                count: descriptor_count * DEFAULT_SAMPLERS,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::Sampler,
-                count: descriptor_count * DEFAULT_SAMPLERS,
-            },
-            DescriptorRangeDesc {
-                ty: hal::pso::DescriptorType::UniformBuffer,
-                count: descriptor_count,
-            }
-        ];
+        let (cache_clip_layout, mut cache_clip_layout_range) = get_layout_and_range(pipeline_requirements.get("cs_clip_rectangle").expect("cs_clip_rectangle missing"), set);
+        increase_range_count(&mut cache_clip_layout_range, descriptor_count);
+
+        let (default_layout, mut default_layout_range) = get_layout_and_range(pipeline_requirements.get("brush_solid").expect("brush_solid missing"), set);
+        increase_range_count(&mut default_layout_range, descriptor_count);
 
         DescriptorPools {
-            debug_pool: DescPool::new(device, 5, debug_range, debug_layout),
-            cache_clip_pool: DescPool::new(device, descriptor_count, cache_clip_range, cache_clip_layout),
-            default_pool: DescPool::new(device, descriptor_count, default_range, default_layout),
+            debug_pool: DescPool::new(device, DEBUG_DESCRIPTOR_COUNT, debug_layout_range, debug_layout),
+            cache_clip_pool: DescPool::new(device, descriptor_count, cache_clip_layout_range, cache_clip_layout),
+            default_pool: DescPool::new(device, descriptor_count, default_layout_range, default_layout),
         }
     }
 
@@ -1852,6 +1850,8 @@ pub struct Device<B: hal::Backend> {
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
+    descriptor_pools_global: DescriptorPools<B>,
+    descriptor_pools_sampler: DescriptorPools<B>,
     // device state
     bound_textures: [u32; 16],
     bound_program: ProgramId,
@@ -1978,9 +1978,8 @@ impl<B: hal::Backend> Device<B> {
                 DescriptorPools::new(
                     &device,
                     descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                    pipeline_requirements.get("debug_color").expect("debug_color missing").descriptor_set_layouts.clone(),
-                    pipeline_requirements.get("cs_clip_rectangle").expect("cs_clip_rectangle missing").descriptor_set_layouts.clone(),
-                    pipeline_requirements.get("brush_solid").expect("brush_solid missing").descriptor_set_layouts.clone(),
+                    &pipeline_requirements,
+                    DESCRIPTOR_SET_PER_DRAW,
                 )
             );
 
@@ -2013,6 +2012,20 @@ impl<B: hal::Backend> Device<B> {
                 )
             );
         }
+        let descriptor_pools_global =
+            DescriptorPools::new(
+                &device,
+                1,
+                &pipeline_requirements,
+                DESCRIPTOR_SET_PER_INSTANCE,
+            );
+        let descriptor_pools_sampler =
+            DescriptorPools::new(
+                &device,
+                1,
+                &pipeline_requirements,
+                DESCRIPTOR_SET_SAMPLER,
+            );
 
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
@@ -2061,6 +2074,8 @@ impl<B: hal::Backend> Device<B> {
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
             descriptor_pools,
+            descriptor_pools_global,
+            descriptor_pools_sampler,
             bound_textures: [0; 16],
             bound_program: INVALID_PROGRAM_ID,
             bound_sampler: [TextureFilter::Linear; 16],
@@ -2106,6 +2121,9 @@ impl<B: hal::Backend> Device<B> {
         }
 
         self.render_pass.take().unwrap().deinit(&self.device);
+
+        self.descriptor_pools_global.reset();
+        self.descriptor_pools_sampler.reset();
 
         self.device.destroy_swapchain(self.swap_chain.take().unwrap());
 
@@ -2430,11 +2448,18 @@ impl<B: hal::Backend> Device<B> {
                 }
             }
         }
-        let program = Program::create(
+        let mut program = Program::create(
             self.pipeline_requirements.get(&name)
                     .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
             &self.device,
-            self.device.create_pipeline_layout(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind)), &[]).expect("create_pipeline_layout failed"),
+            self.device.create_pipeline_layout(
+                vec![
+                    self.descriptor_pools[self.next_id].get_layout(shader_kind),
+                    self.descriptor_pools_global.get_layout(shader_kind),
+                    self.descriptor_pools_sampler.get_layout(shader_kind),
+                ],
+                &[]
+            ).expect("create_pipeline_layout failed"),
             &self.memory_types,
             &self.limits,
             &name,
@@ -2442,6 +2467,7 @@ impl<B: hal::Backend> Device<B> {
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
         );
+        self.bind_samplers(&mut program);
 
         let id = self.generate_program_id();
         self.programs.insert(id, program);
@@ -2469,29 +2495,28 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        const SAMPLERS: [(usize, &'static str); 11] = [
-            (0, "Color0"),
-            (1, "Color1"),
-            (2, "Color2"),
-            (3, "PrevPassAlpha"),
-            (4, "PrevPassColor"),
-            (5, "GpuCache"),
-            (6, "TransformPalette"),
-            (7, "RenderTasks"),
-            (8, "Dither"),
-            (9, "PrimitiveHeadersF"),
-            (10, "PrimitiveHeadersI"),
-        ];
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
         let desc_set = self.descriptor_pools[self.next_id].get(&program.shader_kind);
-        for &(index, sampler_name) in SAMPLERS.iter() {
-            if self.bound_textures[index] != 0 {
-                let sampler = match self.bound_sampler[index] {
-                    TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
-                    TextureFilter::Nearest => &self.sampler_nearest,
-                };
-                program.bind_texture(&self.device, desc_set, &self.images[&self.bound_textures[index]].core, &sampler, sampler_name);
+        for &(index, sampler_name) in SAMPLERS[0..5].iter() {
+            program.bind_texture(&self.device, desc_set, &self.images[&self.bound_textures[index]].core, sampler_name);
+        }
+        let desc_set = self.descriptor_pools_global.get(&program.shader_kind);
+        for &(index, sampler_name) in SAMPLERS[5..11].iter() {
+            if self.bound_textures[index] != program.bound_textures[index] {
+                program.bind_texture(&self.device, desc_set, &self.images[&self.bound_textures[index]].core, sampler_name);
+                program.bound_textures[index] = self.bound_textures[index];
             }
+        }
+    }
+
+    fn bind_samplers(&mut self, program: &mut Program<B>) {
+        let desc_set = self.descriptor_pools_sampler.get(&program.shader_kind);
+        for &(index, sampler_name) in SAMPLERS.iter() {
+            let sampler = match self.bound_sampler[index] {
+                TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
+                TextureFilter::Nearest => &self.sampler_nearest,
+            };
+            program.bind_sampler(&self.device, desc_set, &sampler, sampler_name);
         }
     }
 
@@ -2567,6 +2592,8 @@ impl<B: hal::Backend> Device<B> {
                 rp,
                 &fb,
                 &mut self.descriptor_pools[self.next_id],
+                &mut self.descriptor_pools_global,
+                &mut self.descriptor_pools_sampler,
                 &vec![],
                 self.current_blend_state,
                 self.blend_color,
@@ -4119,6 +4146,8 @@ impl<B: hal::Backend> Device<B> {
         for descriptor_pool in self.descriptor_pools {
             descriptor_pool.deinit(&self.device);
         }
+        self.descriptor_pools_global.deinit(&self.device);
+        self.descriptor_pools_sampler.deinit(&self.device);
         for (_, program) in self.programs {
             program.deinit(&self.device)
         }
