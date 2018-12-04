@@ -2172,16 +2172,19 @@ impl<B: hal::Backend> Device<B> {
                 },
             );
 
-        let extent = caps.current_extent.unwrap_or(
+        let mut extent = caps.current_extent.unwrap_or(
             hal::window::Extent2D {
                 width: window_size.0.max(caps.extents.start.width).min(caps.extents.end.width),
                 height: window_size.1.max(caps.extents.start.height).min(caps.extents.end.height),
             }
         );
 
+        if extent.width == 0 { extent.width = 1; }
+        if extent.height == 0 { extent.height = 1; }
+
         let swap_config = SwapchainConfig::new(
-            if extent.width == 0 {1} else {extent.width},
-            if extent.height == 0 {1} else {extent.height},
+            extent.width,
+            extent.height,
             surface_format,
             caps.image_count.start
         ).with_image_usage(
