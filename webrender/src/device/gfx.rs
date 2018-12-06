@@ -18,6 +18,8 @@ use std::cell::Cell;
 use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::prelude::*;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -71,6 +73,8 @@ pub struct DeviceInit<B: hal::Backend> {
     pub window_size: (u32, u32),
     pub frame_count: Option<usize>,
     pub descriptor_count: Option<usize>,
+    pub cache_path: Option<PathBuf>,
+    pub save_cache: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1144,6 +1148,7 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &RenderPass<B>,
         frame_count: usize,
         shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
+        pipeline_cache: Option<&B::PipelineCache>,
     ) -> Program<B> {
         if !shader_modules.contains_key(shader_name) {
             let vs_file = format!("{}.vert.spv", shader_name);
@@ -1301,7 +1306,7 @@ impl<B: hal::Backend> Program<B> {
                 .collect::<Vec<_>>();
 
             let pipelines =
-                unsafe { device.create_graphics_pipelines(pipelines_descriptors.as_slice(), None) }
+                unsafe { device.create_graphics_pipelines(pipelines_descriptors.as_slice(), pipeline_cache) }
                     .into_iter();
 
             pipeline_states
@@ -2027,6 +2032,9 @@ pub struct Device<B: hal::Backend> {
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: HashMap<String, PipelineRequirements>,
     pipeline_layouts: FastHashMap<ShaderKind, B::PipelineLayout>,
+    pipeline_cache: Option<B::PipelineCache>,
+    cache_path: Option<PathBuf>,
+    save_cache: bool,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -2042,6 +2050,8 @@ impl<B: hal::Backend> Device<B> {
             window_size,
             frame_count,
             descriptor_count,
+            cache_path,
+            save_cache,
         } = init;
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
@@ -2145,6 +2155,16 @@ impl<B: hal::Backend> Device<B> {
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
+        let pipeline_cache = if let Some(ref path) = cache_path {
+            Self::load_pipeline_cache(
+                &device,
+                &path,
+                &adapter.physical_device,
+            )
+        } else {
+            None
+        };
+
         Device {
             device,
             limits,
@@ -2212,6 +2232,36 @@ impl<B: hal::Backend> Device<B> {
             render_finished_semaphore,
             pipeline_requirements,
             pipeline_layouts: FastHashMap::default(),
+            pipeline_cache,
+            cache_path,
+            save_cache,
+        }
+    }
+
+    fn load_pipeline_cache(device: &B::Device, path: &PathBuf, physical_device: &B::PhysicalDevice) -> Option<B::PipelineCache> {
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(_) => {
+                warn!("File not found: {:?}", path);
+                return None;
+            }
+        };
+        let mut bytes = Vec::new();
+        match file.read_to_end(&mut bytes) {
+            Err(_) => {
+                warn!("Failed to read file: {:?}", path);
+                return None;
+            }
+            _ => {}
+        };
+
+        if physical_device.is_valid_cache(&bytes) {
+            let cache = unsafe {
+                device.create_pipeline_cache(Some(&bytes))
+            }.expect(&format!("Failed to create pipeline cache from file: {:?}", path));
+            Some(cache)
+        } else {
+            None
         }
     }
 
@@ -2276,6 +2326,16 @@ impl<B: hal::Backend> Device<B> {
         self.viewport = viewport;
         self.surface_format = surface_format;
         self.depth_format = depth_format;
+
+        let pipeline_cache = unsafe { self.device.create_pipeline_cache(None) }.expect("Failed to create pipeline cache");
+        if let Some(ref cache) = self.pipeline_cache {
+            unsafe {
+                self.device.merge_pipeline_caches(&cache, Some(&pipeline_cache)).expect("merge_pipeline_caches failed");;
+                self.device.destroy_pipeline_cache(pipeline_cache);
+            }
+        } else {
+            self.pipeline_cache = Some(pipeline_cache);
+        }
         DeviceUintSize::new(self.viewport.rect.w as u32, self.viewport.rect.h as u32)
     }
 
@@ -2656,6 +2716,7 @@ impl<B: hal::Backend> Device<B> {
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
             &mut self.shader_modules,
+            self.pipeline_cache.as_ref(),
         );
         self.bind_samplers(&program);
 
@@ -4473,6 +4534,33 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn deinit(self) {
         unsafe {
+            if self.save_cache && self.cache_path.is_some() {
+                let pipeline_cache = self.device.create_pipeline_cache(None).expect("Failed to create pipeline cache");
+                let data;
+                if let Some(cache) = self.pipeline_cache {
+                    self.device.merge_pipeline_caches(&cache, Some(&pipeline_cache)).expect("merge_pipeline_caches failed");
+                    data = self.device.get_pipeline_cache_data(&cache).expect("get_pipeline_cache_data failed");
+                    self.device.destroy_pipeline_cache(cache);
+                } else {
+                    data = self.device.get_pipeline_cache_data(&pipeline_cache).expect("get_pipeline_cache_data failed");
+                };
+                self.device.destroy_pipeline_cache(pipeline_cache);
+
+                if data.len() > 0 {
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(&self.cache_path.as_ref().unwrap())
+                        .expect("File open/creation failed");
+
+                    file.write(&data).expect("File write failed");
+                }
+            } else {
+                if let Some(cache) = self.pipeline_cache {
+                    self.device.destroy_pipeline_cache(cache);
+                }
+            }
+
             for command_pool in self.command_pool {
                 self.device.destroy_command_pool(command_pool.into_raw());
             }

@@ -189,12 +189,20 @@ pub fn main_wrapper<E: Example>(
     let winit::dpi::LogicalSize { width, height } = window.get_inner_size().unwrap();
 
     #[cfg(feature = "gfx-hal")]
-    let init = webrender::DeviceInit {
-        adapter,
-        surface,
-        window_size: (width as u32, height as u32),
-        frame_count: None,
-        descriptor_count: None,
+    let init = {
+        use std::env;
+        let out_dir = env::current_dir().expect("current directory not found");
+        let cache_path = Some(PathBuf::from(&out_dir).join("pipeline_cache.bin"));
+
+        webrender::DeviceInit {
+            adapter,
+            surface,
+            window_size: (width as u32, height as u32),
+            frame_count: None,
+            descriptor_count: None,
+            cache_path,
+            save_cache: true,
+        }
     };
 
     println!("Shader resource path: {:?}", res_path);
