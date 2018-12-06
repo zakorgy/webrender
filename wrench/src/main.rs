@@ -578,12 +578,19 @@ fn main() {
     let instance = back::Instance{};
 
     #[cfg(feature = "gfx")]
-    let init = webrender::DeviceInit {
-        adapter: instance.enumerate_adapters().remove(0),
-        surface: instance.create_surface(window.get_window()),
-        window_size: (dim.width, dim.height),
-        frame_count: args.value_of("frame_count").map(|f| f.parse::<usize>().unwrap()),
-        descriptor_count: args.value_of("descriptor_count").map(|d| d.parse::<usize>().unwrap()),
+    let init = {
+        use std::env;
+        let out_dir = env::current_dir().expect("current directory not found");
+        let cache_path = Some(PathBuf::from(&out_dir).join("pipeline_cache.bin"));
+        webrender::DeviceInit {
+            adapter: instance.enumerate_adapters().remove(0),
+            surface: instance.create_surface(window.get_window()),
+            window_size: (dim.width, dim.height),
+            frame_count: args.value_of("frame_count").map(|f| f.parse::<usize>().unwrap()),
+            descriptor_count: args.value_of("descriptor_count").map(|d| d.parse::<usize>().unwrap()),
+            cache_path,
+            save_cache: true,
+        }
     };
 
     #[cfg(feature = "gl")]
