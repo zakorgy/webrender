@@ -564,8 +564,8 @@ impl<B: hal::Backend> Image<B> {
     }
 
     pub fn update(
-        &mut self,
-        device: &mut B::Device,
+        &self,
+        device: &B::Device,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         staging_buffer_pool: &mut BufferPool<B>,
         rect: DeviceUintRect,
@@ -1388,7 +1388,7 @@ impl<B: hal::Backend> Program<B> {
         ]);
     }
 
-    fn bind_texture(&mut self, device: &B::Device, set: &B::DescriptorSet, image: &ImageCore<B>, binding: &'static str) {
+    fn bind_texture(&self, device: &B::Device, set: &B::DescriptorSet, image: &ImageCore<B>, binding: &'static str) {
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             device.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
@@ -1403,7 +1403,7 @@ impl<B: hal::Backend> Program<B> {
         }
     }
 
-    fn bind_sampler(&mut self, device: &B::Device, set: &B::DescriptorSet, sampler: &B::Sampler, binding: &'static str) {
+    fn bind_sampler(&self, device: &B::Device, set: &B::DescriptorSet, sampler: &B::Sampler, binding: &'static str) {
         if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
             device.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
@@ -1419,14 +1419,14 @@ impl<B: hal::Backend> Program<B> {
     }
 
     pub fn submit(
-        &mut self,
+        &self,
         cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         desc_pools: &mut DescriptorPools<B>,
-        desc_pools_global: &mut DescriptorPools<B>,
-        desc_pools_sampler: &mut DescriptorPools<B>,
+        desc_pools_global: &DescriptorPools<B>,
+        desc_pools_sampler: &DescriptorPools<B>,
         clear_values: &[hal::command::ClearValue],
         blend_state: BlendState,
         blend_color: ColorF,
@@ -1703,11 +1703,11 @@ impl<B: hal::Backend> DescPool<B> {
         dp
     }
 
-    pub fn descriptor_set(&mut self) -> &B::DescriptorSet {
+    pub fn descriptor_set(&self) -> &B::DescriptorSet {
         &self.descriptor_set[self.current_descriptor_set_id]
     }
 
-    pub fn descriptor_set_layout(&mut self) -> &B::DescriptorSetLayout {
+    pub fn descriptor_set_layout(&self) -> &B::DescriptorSetLayout {
         &self.descriptor_set_layout
     }
 
@@ -1779,7 +1779,16 @@ impl<B: hal::Backend> DescriptorPools<B> {
         }
     }
 
-    fn get_pool(&mut self, shader_kind: &ShaderKind) -> &mut DescPool<B> {
+    fn get_pool(&self, shader_kind: &ShaderKind) -> &DescPool<B> {
+        match *shader_kind {
+            #[cfg(feature = "debug_renderer")]
+            ShaderKind::DebugColor | ShaderKind::DebugFont => &self.debug_pool,
+            ShaderKind::ClipCache => &self.cache_clip_pool,
+            _ => &self.default_pool,
+        }
+    }
+
+    fn get_pool_mut(&mut self, shader_kind: &ShaderKind) -> &mut DescPool<B> {
         match *shader_kind {
             #[cfg(feature = "debug_renderer")]
             ShaderKind::DebugColor | ShaderKind::DebugFont => &mut self.debug_pool,
@@ -1788,16 +1797,16 @@ impl<B: hal::Backend> DescriptorPools<B> {
         }
     }
 
-    pub fn get(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
+    pub fn get(&self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
         self.get_pool(shader_kind).descriptor_set()
     }
 
-    pub fn get_layout(&mut self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
+    pub fn get_layout(&self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
         self.get_pool(shader_kind).descriptor_set_layout()
     }
 
     pub fn next(&mut self, shader_kind: &ShaderKind) {
-        self.get_pool(shader_kind).next()
+        self.get_pool_mut(shader_kind).next()
     }
 
     pub fn reset(&mut self) {
@@ -2448,7 +2457,7 @@ impl<B: hal::Backend> Device<B> {
                 }
             }
         }
-        let mut program = Program::create(
+        let program = Program::create(
             self.pipeline_requirements.get(&name)
                     .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
             &self.device,
@@ -2467,7 +2476,7 @@ impl<B: hal::Backend> Device<B> {
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
         );
-        self.bind_samplers(&mut program);
+        self.bind_samplers(&program);
 
         let id = self.generate_program_id();
         self.programs.insert(id, program);
@@ -2509,7 +2518,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_samplers(&mut self, program: &mut Program<B>) {
+    fn bind_samplers(&self, program: &Program<B>) {
         let desc_set = self.descriptor_pools_sampler.get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS.iter() {
             let sampler = match self.bound_sampler[index] {
@@ -2592,8 +2601,8 @@ impl<B: hal::Backend> Device<B> {
                 rp,
                 &fb,
                 &mut self.descriptor_pools[self.next_id],
-                &mut self.descriptor_pools_global,
-                &mut self.descriptor_pools_sampler,
+                &self.descriptor_pools_global,
+                &self.descriptor_pools_sampler,
                 &vec![],
                 self.current_blend_state,
                 self.blend_color,
@@ -2751,7 +2760,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn generate_texture_id(&mut self) -> TextureId {
+    fn generate_texture_id(&self) -> TextureId {
         let mut rng = rand::thread_rng();
         let mut texture_id = INVALID_TEXTURE_ID + 1;
         while self.images.contains_key(&texture_id) {
@@ -2760,7 +2769,7 @@ impl<B: hal::Backend> Device<B> {
         texture_id
     }
 
-    fn generate_program_id(&mut self) -> ProgramId {
+    fn generate_program_id(&self) -> ProgramId {
         let mut rng = rand::thread_rng();
         let mut program_id = ProgramId(INVALID_PROGRAM_ID.0 + 1);
         while self.programs.contains_key(&program_id) {
@@ -3427,7 +3436,7 @@ impl<B: hal::Backend> Device<B> {
                         .get_mut(&texture.id)
                         .expect("Texture not found.")
                         .update(
-                            &mut self.device,
+                            &self.device,
                             &mut self.command_pool[self.next_id],
                             &mut self.staging_buffer_pool[self.next_id],
                             DeviceUintRect::new(
@@ -4228,7 +4237,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
                     .get_mut(&self.texture.id)
                     .expect("Texture not found.")
                     .update(
-                        &mut self.device.device,
+                        &self.device.device,
                         &mut self.device.command_pool[self.device.next_id],
                         &mut self.device.staging_buffer_pool[self.device.next_id],
                         rect,
