@@ -28,6 +28,9 @@ use texture_allocator::GuillotineAllocator;
 #[cfg(feature = "pathfinder")]
 use webrender_api::{DevicePixel, FontRenderMode};
 
+use device::DeviceMessage;
+use std::sync::mpsc::Sender;
+
 const MIN_TARGET_SIZE: u32 = 2048;
 const STYLE_SOLID: i32 = ((BorderStyle::Solid as i32) << 8) | ((BorderStyle::Solid as i32) << 16);
 const STYLE_MASK: i32 = 0x00FF_FF00;
@@ -124,6 +127,7 @@ pub trait RenderTarget {
         _deferred_resolves: &mut Vec<DeferredResolve>,
         _prim_headers: &mut PrimitiveHeaders,
         _transforms: &mut TransformPalette,
+        _device_tx: &Sender<DeviceMessage>,
     ) {
     }
 
@@ -145,6 +149,7 @@ pub trait RenderTarget {
         clip_store: &ClipStore,
         transforms: &mut TransformPalette,
         deferred_resolves: &mut Vec<DeferredResolve>,
+        device_tx: &Sender<DeviceMessage>,
     );
     fn used_rect(&self) -> DeviceIntRect;
     fn needs_depth(&self) -> bool;
@@ -217,6 +222,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         saved_index: Option<SavedTargetIndex>,
         prim_headers: &mut PrimitiveHeaders,
         transforms: &mut TransformPalette,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         debug_assert_eq!(None, self.saved_index);
         self.saved_index = saved_index;
@@ -229,6 +235,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 deferred_resolves,
                 prim_headers,
                 transforms,
+                device_tx,
             );
         }
     }
@@ -242,6 +249,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         clip_store: &ClipStore,
         transforms: &mut TransformPalette,
         deferred_resolves: &mut Vec<DeferredResolve>,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         self.targets.last_mut().unwrap().add_task(
             task_id,
@@ -251,6 +259,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
             clip_store,
             transforms,
             deferred_resolves,
+            device_tx,
         );
     }
 
@@ -399,6 +408,7 @@ impl RenderTarget for ColorRenderTarget {
         deferred_resolves: &mut Vec<DeferredResolve>,
         prim_headers: &mut PrimitiveHeaders,
         transforms: &mut TransformPalette,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         let mut merged_batches = AlphaBatchContainer::new(None);
 
@@ -439,6 +449,10 @@ impl RenderTarget for ColorRenderTarget {
             }
         }
 
+        for batch in merged_batches.opaque_batches.iter().chain(merged_batches.alpha_batches.iter()) {
+            //println!("@@@@ CRT: batch kind {:?}", batch.key.kind);
+            device_tx.send(DeviceMessage::RequestProgram(batch.key.shader_name()));
+        }
         self.alpha_batch_containers.push(merged_batches);
     }
 
@@ -451,9 +465,14 @@ impl RenderTarget for ColorRenderTarget {
         _: &ClipStore,
         _: &mut TransformPalette,
         deferred_resolves: &mut Vec<DeferredResolve>,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         let task = &render_tasks[task_id];
 
+        //println!("@@@@ CRT: task kind {:?}", task.kind);
+        if let Some(name) = task.kind.shader_name() {
+            device_tx.send(DeviceMessage::RequestProgram(name));
+        }
         match task.kind {
             RenderTaskKind::VerticalBlur(ref info) => {
                 info.add_instances(
@@ -607,8 +626,14 @@ impl RenderTarget for AlphaRenderTarget {
         clip_store: &ClipStore,
         transforms: &mut TransformPalette,
         _: &mut Vec<DeferredResolve>,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         let task = &render_tasks[task_id];
+
+        //println!("@@@@@ ART: task kind {:?}", task.kind);
+        if let Some(name) = task.kind.shader_name() {
+            device_tx.send(DeviceMessage::RequestProgram(name));
+        }
 
         match task.clear_mode {
             ClearMode::Zero => {
@@ -716,6 +741,7 @@ impl TextureCacheRenderTarget {
         &mut self,
         task_id: RenderTaskId,
         render_tasks: &mut RenderTaskTree,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         let task_address = render_tasks.get_task_address(task_id);
         let src_task_address = render_tasks[task_id].children.get(0).map(|src_task_id| {
@@ -723,8 +749,11 @@ impl TextureCacheRenderTarget {
         });
 
         let task = &mut render_tasks[task_id];
+        //println!("@@@@ TCRT: task kind {:?}", task.kind);
+        if let Some(name) = task.kind.shader_name() {
+            device_tx.send(DeviceMessage::RequestProgram(name));
+        }
         let target_rect = task.get_target_rect();
-
         match task.kind {
             RenderTaskKind::LineDecoration(ref info) => {
                 self.clears.push(target_rect.0);
@@ -895,6 +924,7 @@ impl RenderPass {
         clip_store: &ClipStore,
         transforms: &mut TransformPalette,
         prim_headers: &mut PrimitiveHeaders,
+        device_tx: &Sender<DeviceMessage>,
     ) {
         profile_scope!("RenderPass::build");
 
@@ -910,6 +940,7 @@ impl RenderPass {
                         clip_store,
                         transforms,
                         deferred_resolves,
+                        device_tx,
                     );
                 }
                 target.build(
@@ -919,6 +950,7 @@ impl RenderPass {
                     deferred_resolves,
                     prim_headers,
                     transforms,
+                    device_tx,
                 );
             }
             RenderPassKind::OffScreen { ref mut color, ref mut alpha, ref mut texture_cache } => {
@@ -988,7 +1020,7 @@ impl RenderPass {
                                 .or_insert(
                                     TextureCacheRenderTarget::new(target_kind)
                                 );
-                            texture.add_task(task_id, render_tasks);
+                            texture.add_task(task_id, render_tasks, device_tx);
                         }
                         None => {
                             match target_kind {
@@ -1000,6 +1032,7 @@ impl RenderPass {
                                     clip_store,
                                     transforms,
                                     deferred_resolves,
+                                    device_tx,
                                 ),
                                 RenderTargetKind::Alpha => alpha.add_task(
                                     task_id,
@@ -1009,6 +1042,7 @@ impl RenderPass {
                                     clip_store,
                                     transforms,
                                     deferred_resolves,
+                                    device_tx,
                                 ),
                             }
                         }
@@ -1023,6 +1057,7 @@ impl RenderPass {
                     saved_color,
                     prim_headers,
                     transforms,
+                    device_tx,
                 );
                 alpha.build(
                     ctx,
@@ -1032,6 +1067,7 @@ impl RenderPass {
                     saved_alpha,
                     prim_headers,
                     transforms,
+                    device_tx,
                 );
             }
         }

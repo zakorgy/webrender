@@ -339,6 +339,24 @@ pub enum RenderTaskKind {
     LineDecoration(LineDecorationTask),
 }
 
+impl RenderTaskKind {
+    pub fn shader_name(&self) -> Option<String> {
+        match self {
+            //RenderTaskKind::Picture(_) => String::from(""),
+            RenderTaskKind::CacheMask(_) => Some(String::from("cs_clip")),
+            RenderTaskKind::ClipRegion(_) => Some(String::from("cs_clip_rectangle")),
+            RenderTaskKind::VerticalBlur(_) | RenderTaskKind::HorizontalBlur(_) => Some(String::from("cs_blur")),
+            //RenderTaskKind::Glyph(_) => String::from(""),
+            //RenderTaskKind::Readback(_) => String::from(""),
+            RenderTaskKind::Scaling(_) => Some(String::from("cs_scale")),
+            //RenderTaskKind::Blit(_) => String::from(""),
+            RenderTaskKind::Border(_) => Some(String::from("cs_border")),
+            RenderTaskKind::LineDecoration(_) => Some(String::from("cs_line_decoration")),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]

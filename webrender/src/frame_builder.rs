@@ -7,6 +7,7 @@ use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, DocumentLayer, FontRe
 use api::{LayoutPoint, LayoutRect, LayoutSize, PipelineId, RasterSpace, WorldPoint, WorldRect, WorldPixel};
 use clip::{ClipDataStore, ClipStore};
 use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
+use device::DeviceMessage;
 use display_list_flattener::{DisplayListFlattener};
 use gpu_cache::GpuCache;
 use gpu_types::{PrimitiveHeaders, TransformPalette, UvRectKind};
@@ -23,6 +24,7 @@ use segment::SegmentBuilder;
 use spatial_node::SpatialNode;
 use std::f32;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use tiling::{Frame, RenderPass, RenderPassKind, RenderTargetContext};
 use tiling::{SpecialRenderPasses};
 
@@ -297,6 +299,7 @@ impl FrameBuilder {
         gpu_cache_profile: &mut GpuCacheProfileCounters,
         scene_properties: &SceneProperties,
         resources: &mut FrameResources,
+        device_tx: &Sender<DeviceMessage>,
     ) -> Frame {
         profile_scope!("build");
         debug_assert!(
@@ -372,6 +375,7 @@ impl FrameBuilder {
         let use_dual_source_blending = self.config.dual_source_blending_is_enabled &&
                                        self.config.dual_source_blending_is_supported;
 
+        //Send message here
         for pass in &mut passes {
             let mut ctx = RenderTargetContext {
                 device_pixel_scale,
@@ -390,6 +394,7 @@ impl FrameBuilder {
                 &self.clip_store,
                 &mut transform_palette,
                 &mut prim_headers,
+                &device_tx,
             );
 
             if let RenderPassKind::OffScreen { ref texture_cache, .. } = pass.kind {

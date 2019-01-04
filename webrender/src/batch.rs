@@ -118,6 +118,33 @@ impl BatchKey {
             textures_compatible(self.textures.colors[1], other.textures.colors[1]) &&
             textures_compatible(self.textures.colors[2], other.textures.colors[2])
     }
+
+    pub fn shader_name(&self) -> String {
+        match self.kind {
+            BatchKind::SplitComposite => "ps_split_composite".to_owned(),
+            BatchKind::TextRun(glyph_format) => {
+                match self.blend_mode {
+                    BlendMode::SubpixelDualSource if glyph_format == GlyphFormat::TransformedAlpha
+                        || glyph_format == GlyphFormat::TransformedSubpixel => "ps_text_run_dual_source_glyph_transform".to_owned(),
+                    BlendMode::SubpixelDualSource => "ps_text_run_dual_source".to_owned(),
+                    bm if glyph_format == GlyphFormat::TransformedAlpha
+                        || glyph_format == GlyphFormat::TransformedSubpixel => "ps_text_run_glyph_transform".to_owned(),
+                    _ => "ps_text_run".to_owned(),
+                }
+            },
+            BatchKind::Brush(brush_kind) => {
+                match brush_kind {
+                    BrushBatchKind::Solid => "brush_solid".to_owned(),
+                    BrushBatchKind::Image(image_buffer_kind) => "brush_image".to_owned(),
+                    BrushBatchKind::Blend => "brush_blend".to_owned(),
+                    BrushBatchKind::MixBlend { .. } => "brush_mix_blend".to_owned(),
+                    BrushBatchKind::RadialGradient => "brush_radial_gradient".to_owned(),
+                    BrushBatchKind::LinearGradient => "brush_linear_gradient".to_owned(),
+                    BrushBatchKind::YuvImage(image_buffer_kind, format, _color_depth, color_space) => "brush_yuv_image".to_owned(),
+                }
+            }
+        }
+    }
 }
 
 #[inline]

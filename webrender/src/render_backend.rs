@@ -26,6 +26,7 @@ use clip::ClipDataStore;
 use clip_scroll_tree::{SpatialNodeIndex, ClipScrollTree};
 #[cfg(feature = "debugger")]
 use debug_server;
+use device::DeviceMessage;
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use gpu_cache::GpuCache;
 use hit_test::{HitTest, HitTester};
@@ -294,6 +295,7 @@ impl Document {
         gpu_cache: &mut GpuCache,
         resource_profile: &mut ResourceProfileCounters,
         is_new_scene: bool,
+        device_tx: &Sender<DeviceMessage>,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
@@ -313,6 +315,7 @@ impl Document {
                 &mut resource_profile.gpu_cache,
                 &self.dynamic_properties,
                 &mut self.resources,
+                &device_tx,
             );
             self.hit_tester = Some(frame_builder.create_hit_tester(
                 &self.clip_scroll_tree,
@@ -436,6 +439,7 @@ pub struct RenderBackend {
     payload_rx: Receiver<Payload>,
     result_tx: Sender<ResultMsg>,
     scene_tx: Sender<SceneBuilderRequest>,
+    device_tx: Sender<DeviceMessage>,
     low_priority_scene_tx: Sender<SceneBuilderRequest>,
     scene_rx: Receiver<SceneBuilderResult>,
 
@@ -464,6 +468,7 @@ impl RenderBackend {
         payload_rx: Receiver<Payload>,
         result_tx: Sender<ResultMsg>,
         scene_tx: Sender<SceneBuilderRequest>,
+        device_tx: Sender<DeviceMessage>,
         low_priority_scene_tx: Sender<SceneBuilderRequest>,
         scene_rx: Receiver<SceneBuilderResult>,
         default_device_pixel_ratio: f32,
@@ -480,6 +485,7 @@ impl RenderBackend {
             payload_rx,
             result_tx,
             scene_tx,
+            device_tx,
             low_priority_scene_tx,
             scene_rx,
             payload_buffer: Vec::new(),
@@ -1110,6 +1116,7 @@ impl RenderBackend {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     has_built_scene,
+                    &self.device_tx,
                 );
 
                 debug!("generated frame for document {:?} with {} passes",
@@ -1371,6 +1378,7 @@ impl RenderBackend {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     true,
+                    &self.device_tx,
                 );
                 //TODO: write down doc's pipeline info?
                 // it has `pipeline_epoch_map`,

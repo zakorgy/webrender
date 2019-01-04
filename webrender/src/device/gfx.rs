@@ -11,6 +11,7 @@ use euclid::Transform3D;
 use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
+use rayon::prelude::*;
 use ron::de::from_str;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -1120,27 +1121,51 @@ struct ProgramLoader<B: hal::Backend> {
 impl<B: hal::Backend> ProgramLoader<B> {
     fn run(&mut self) {
         use std::sync::mpsc::TryRecvError;
-        for (shader, reqs) in self.pipeline_requirements.iter().filter(|(k, _)| !k.contains("yuv")) {
+        /*for (shader, reqs) in self.pipeline_requirements.iter().filter(|(k, _)| !k.contains("yuv")) {
             match self.device_rx.try_recv() {
                 Ok(DeviceMessage::Abort) | Err(TryRecvError::Disconnected) => break,
+                Ok(DeviceMessage::RequestProgram(rtk)) => {
+                    println!("#### RTK message received: {}", rtk);
+                }
                 Ok(DeviceMessage::Skip(shader)) => {
                     let _ = self.skip_list.insert(shader);
                 }
                 _ => {},
             };
-            if self.skip_list.contains(shader) {
+            /*if self.skip_list.contains(shader) {
                 println!("#### Skipping {}", shader);
                 continue;
-            }
+            }*/
             if (shader.contains("dual_source_blending") && self.disable_dual_source_blending)
-                /*|| self.skip_list.contains(shader)*/ {
+                || self.skip_list.contains(shader) {
                 continue;
             }
             let program = self.create_program(shader, reqs);
             self.program_tx.send(LoaderMessage::Program(program)).expect("Message send failed");
             println!("Program sent {}", shader);
         }
-        self.program_tx.send(LoaderMessage::Finished).expect("Message send failed");
+        self.program_tx.send(LoaderMessage::Finished).expect("Message send failed");*/
+        'load: loop {
+            match self.device_rx.try_recv() {
+                Ok(DeviceMessage::Abort) | Err(TryRecvError::Disconnected) => break,
+                Ok(DeviceMessage::RequestProgram(p)) => {
+                    for (shader, reqs) in self.pipeline_requirements.iter().filter(|(k, _)| k.starts_with(&p)) {
+                        if (shader.contains("dual_source_blending") && self.disable_dual_source_blending)
+                            || self.skip_list.contains(shader) {
+                            continue;
+                        }
+                        let program = self.create_program(shader, reqs);
+                        self.program_tx.send(LoaderMessage::Program(program)).expect("Message send failed");
+                        //println!("Program sent {}", shader);
+                        self.skip_list.insert(shader.clone());
+                    }
+                }
+                Ok(DeviceMessage::Skip(shader)) => {
+                    let _ = self.skip_list.insert(shader);
+                }
+                _ => {},
+            };
+        }
     }
 
     fn create_program(&self, shader: &str, pipeline_requirements: &PipelineRequirements) -> Program<B> {
@@ -1220,8 +1245,10 @@ enum LoaderMessage<B: hal::Backend> {
     Finished,
 }
 
-enum DeviceMessage {
+pub enum DeviceMessage {
     Abort,
+    RequestProgram(String),
+    //BatchKind(BatchKind),
     Skip(String),
 }
 
@@ -1344,7 +1371,7 @@ impl<B: hal::Backend> Program<B> {
                 _ => ImageFormat::BGRA8,
             };
 
-            let pipelines_descriptors = pipeline_states.iter().map(|&(blend_state, depth_test)| {
+            let pipelines_descriptors = pipeline_states.par_iter().map(|&(blend_state, depth_test)| {
                 let subpass = Subpass {
                     index: 0,
                     main_pass: render_pass.get_render_pass(format, depth_test != DepthTest::Off),
@@ -1377,9 +1404,9 @@ impl<B: hal::Backend> Program<B> {
 
             let pipelines = device
                 .create_graphics_pipelines(pipelines_descriptors.as_slice(), None)
-                .into_iter();
+                .into_par_iter();
 
-            pipeline_states.iter()
+            pipeline_states.par_iter()
                 .cloned()
                 .zip(pipelines.map(|pipeline| pipeline.expect(&format!("Failed to create pipeline for {}", shader_name))))
                 .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
@@ -2043,7 +2070,7 @@ pub struct Device<B: hal::Backend> {
 
     next_id_shared: Arc<AtomicUsize>,
     program_rx: Receiver<LoaderMessage<B>>,
-    device_tx: Sender<DeviceMessage>,
+    pub device_tx: Sender<DeviceMessage>,
     loader: Option<std::thread::JoinHandle<()>>,
     loaded_programs: FastHashMap<String, ProgramId>,
 }
@@ -2635,6 +2662,17 @@ impl<B: hal::Backend> Device<B> {
         Ok(())
     }
 
+    fn add_program(
+        &mut self,
+        program: Program<B>,
+    ) -> ProgramId {
+        self.bind_samplers(&program);
+        let id = self.generate_program_id();
+        self.loaded_programs.insert(program.shader_name.clone(), id);
+        self.programs.insert(id, program);
+        id
+    }
+
     pub fn create_program(
         &mut self,
         shader_name: &str,
@@ -2649,16 +2687,42 @@ impl<B: hal::Backend> Device<B> {
                 }
             }
         }
-        if let Some(id) = self.loaded_programs.get(&name) {
-            println!("Early loading {}!!", name);
+        /*if let Some(id) = self.loaded_programs.get(&name) {
+            println!("#### Early loading {}!!", name);
             return Ok(*id)
+        } else {
+            println!("##### Shader not yet loaded {}!!", name);
+        }*/
+
+        //println!("#### Shader name {}", name);
+
+        while self.loaded_programs.get(&name).is_none() {
+            println!("Waiting for: {}", name);
+            let mut programs = Vec::new();
+
+            for message in self.program_rx.try_iter() {
+                match message {
+                    LoaderMessage::Program(program) => {
+                        let name = program.shader_name.clone();
+                        programs.push(program);
+                        println!("Program inserted {}", name);
+                    },
+                    _ => {},
+                }
+            }
+
+            for p in programs {
+                self.add_program(p);
+            }
         }
 
-        self.device_tx.send(DeviceMessage::Skip(name.clone())).unwrap();
+        return Ok(*self.loaded_programs.get(&name).unwrap());
+
+        /*self.device_tx.send(DeviceMessage::Skip(name.clone())).unwrap();
 
         let program = Program::create(
             &self.pipeline_requirements.get(&name)
-                    .expect(&format!("Can't load pipeline data for: {}!", name)),
+                .expect(&format!("Can't load pipeline data for: {}!", name)),
             self.device.as_ref(),
             self.device.create_pipeline_layout(
                 vec![
@@ -2676,18 +2740,7 @@ impl<B: hal::Backend> Device<B> {
             self.frame_count,
         );
         let id = self.add_program(program);
-        Ok(id)
-    }
-
-    fn add_program(
-        &mut self,
-        program: Program<B>,
-    ) -> ProgramId {
-        self.bind_samplers(&program);
-        let id = self.generate_program_id();
-        self.loaded_programs.insert(program.shader_name.clone(), id);
-        self.programs.insert(id, program);
-        id
+        Ok(id)*/
     }
 
     pub fn create_program_with_kind(
@@ -2840,13 +2893,13 @@ impl<B: hal::Backend> Device<B> {
                 LoaderMessage::Finished => {
                     if let Some(loader) = self.loader.take() {
                         loader.join().expect("Couldn't join on the loader thread");
-                        println!("Finished");
+                        //println!("Finished");
                     }
                 }
                 LoaderMessage::Program(program) => {
                     let name = program.shader_name.clone();
                     programs.push(program);
-                    println!("Program inserted {}", name);
+                    //println!("Program inserted {}", name);
                 },
             }
         }

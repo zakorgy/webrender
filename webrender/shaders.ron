@@ -47,9 +47,9 @@
             "TEXTURE_2D",// [3]
             "TEXTURE_2D,ALPHA_PASS",// [4]
             "TEXTURE_2D,ALPHA_PASS,DUAL_SOURCE_BLENDING",// [5]
-            "TEXTURE_RECT",// [6]
-            "TEXTURE_RECT,ALPHA_PASS",// [7]
-            "TEXTURE_RECT,ALPHA_PASS,DUAL_SOURCE_BLENDING",// [8]
+            //"TEXTURE_RECT",// [6]
+            //"TEXTURE_RECT,ALPHA_PASS",// [7]
+            //"TEXTURE_RECT,ALPHA_PASS,DUAL_SOURCE_BLENDING",// [8]
         ],
     ),// [5]
     (

@@ -1371,6 +1371,8 @@ impl<B: hal::Backend> Renderer<B>
             options.cached_programs.take(),
         );
 
+        let device_tx = device.device_tx.clone();
+
         #[cfg(feature = "gleam")]
         let ext_dual_source_blending = !options.disable_dual_source_blending &&
             device.supports_extension("GL_ARB_blend_func_extended") &&
@@ -1662,6 +1664,7 @@ impl<B: hal::Backend> Renderer<B>
                 payload_rx_for_backend,
                 result_tx,
                 scene_tx,
+                device_tx,
                 low_priority_scene_tx,
                 scene_rx,
                 device_pixel_ratio,
