@@ -17,11 +17,15 @@ use std::cell::Cell;
 #[cfg(feature = "debug_renderer")]
 use std::convert::Into;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::slice;
+use std::sync::{Arc, RwLock, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 #[cfg(feature = "debug_renderer")]
 use super::Capabilities;
 use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, TextureFilter};
@@ -1094,6 +1098,133 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
     }
 }
 
+struct ProgramLoader<B: hal::Backend> {
+    pipeline_requirements: HashMap<String, PipelineRequirements>,
+    skip_list: HashSet<String>,
+    device: Weak<B::Device>,
+    descriptor_pools: Weak<RwLock<SmallVec<[DescriptorPools<B>; 1]>>>,
+    descriptor_pools_global: Weak<DescriptorPools<B>>,
+    descriptor_pools_sampler: Weak<DescriptorPools<B>>,
+    render_pass: Weak<RenderPass<B>>,
+
+    memory_types: Vec<hal::MemoryType>,
+    limits: hal::Limits,
+    frame_count: usize,
+    next_id: Arc<AtomicUsize>,
+    disable_dual_source_blending: bool,
+
+    program_tx: Sender<LoaderMessage<B>>,
+    device_rx: Receiver<DeviceMessage>,
+}
+
+impl<B: hal::Backend> ProgramLoader<B> {
+    fn run(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+        for (shader, reqs) in self.pipeline_requirements.iter().filter(|(k, _)| !k.contains("yuv")) {
+            match self.device_rx.try_recv() {
+                Ok(DeviceMessage::Abort) | Err(TryRecvError::Disconnected) => break,
+                Ok(DeviceMessage::Skip(shader)) => {
+                    let _ = self.skip_list.insert(shader);
+                }
+                _ => {},
+            };
+            if self.skip_list.contains(shader) {
+                println!("#### Skipping {}", shader);
+                continue;
+            }
+            if (shader.contains("dual_source_blending") && self.disable_dual_source_blending)
+                /*|| self.skip_list.contains(shader)*/ {
+                continue;
+            }
+            let program = self.create_program(shader, reqs);
+            self.program_tx.send(LoaderMessage::Program(program)).expect("Message send failed");
+            println!("Program sent {}", shader);
+        }
+        self.program_tx.send(LoaderMessage::Finished).expect("Message send failed");
+    }
+
+    fn create_program(&self, shader: &str, pipeline_requirements: &PipelineRequirements) -> Program<B> {
+        let shader_kind = Self::shader_kind(&shader);
+        let ref device = self.device.upgrade().unwrap();
+        let ref descriptor_pools = self.descriptor_pools.upgrade().unwrap();
+        let program = Program::create(
+            &pipeline_requirements,
+            device.as_ref(),
+            device.create_pipeline_layout(
+                vec![
+                    descriptor_pools.read().expect("Read lock failed")[self.next_id.load(Ordering::SeqCst)].get_layout(&shader_kind),
+                    self.descriptor_pools_global.upgrade().unwrap().get_layout(&shader_kind),
+                    self.descriptor_pools_sampler.upgrade().unwrap().get_layout(&shader_kind),
+                ],
+                &[]
+            ).expect("create_pipeline_layout failed"),
+            &self.memory_types,
+            &self.limits,
+            &shader,
+            shader_kind,
+            self.render_pass.upgrade().unwrap().as_ref(),
+            self.frame_count,
+        );
+        program
+    }
+
+    fn shader_kind(shader: &str) -> ShaderKind {
+        if shader.starts_with("brush") {
+            return ShaderKind::Brush;
+        }
+        if shader.starts_with("cs_blur") {
+            return ShaderKind::Cache(VertexArrayKind::Blur);
+        }
+
+        if shader.starts_with("cs_border") {
+            return ShaderKind::Cache(VertexArrayKind::Border);
+        }
+
+        if shader.starts_with("cs_line") {
+            return ShaderKind::Cache(VertexArrayKind::LineDecoration);;
+        }
+
+        if shader.starts_with("cs_scale") {
+            return ShaderKind::Cache(VertexArrayKind::Scale);;
+        }
+
+        if shader.starts_with("cs_clip") {
+            return ShaderKind::ClipCache;
+        }
+
+        if shader.starts_with("ps_split") {
+            return ShaderKind::Primitive;
+        }
+
+        if shader.starts_with("ps_text") {
+            return ShaderKind::Text;
+        }
+
+        #[cfg(feature = "debug_renderer")]
+        {
+            if shader == "debug_color" {
+                return ShaderKind::DebugColor;
+            }
+
+            if shader == "debug_font" {
+                return ShaderKind::DebugFont;
+            }
+        }
+
+        panic!("No shader kind for {}", shader);
+    }
+}
+
+enum LoaderMessage<B: hal::Backend> {
+    Program(Program<B>),
+    Finished,
+}
+
+enum DeviceMessage {
+    Abort,
+    Skip(String),
+}
+
 pub(crate) struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, u32>,
     pub pipeline_layout: B::PipelineLayout,
@@ -1107,9 +1238,11 @@ pub(crate) struct Program<B: hal::Backend> {
     bound_textures: [u32; 16],
 }
 
+unsafe impl<B: hal::Backend> Send for Program<B> {}
+
 impl<B: hal::Backend> Program<B> {
     pub fn create(
-        pipeline_requirements: PipelineRequirements,
+        pipeline_requirements: &PipelineRequirements,
         device: &B::Device,
         pipeline_layout: B::PipelineLayout,
         memory_types: &Vec<hal::MemoryType>,
@@ -1248,7 +1381,7 @@ impl<B: hal::Backend> Program<B> {
 
             pipeline_states.iter()
                 .cloned()
-                .zip(pipelines.map(|pipeline| pipeline.unwrap()))
+                .zip(pipelines.map(|pipeline| pipeline.expect(&format!("Failed to create pipeline for {}", shader_name))))
                 .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
         };
 
@@ -1328,7 +1461,7 @@ impl<B: hal::Backend> Program<B> {
             }
         }
 
-        let bindings_map = pipeline_requirements.bindings_map;
+        let bindings_map = pipeline_requirements.bindings_map.clone();
 
         Program {
             bindings_map,
@@ -1675,7 +1808,7 @@ pub struct DescPool<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
     descriptor_set: Vec<B::DescriptorSet>,
     descriptor_set_layout: B::DescriptorSetLayout,
-    current_descriptor_set_id: usize,
+    current_descriptor_set_id: AtomicUsize,
     max_descriptor_set_size: usize,
 }
 
@@ -1696,7 +1829,7 @@ impl<B: hal::Backend> DescPool<B> {
             descriptor_pool,
             descriptor_set: vec!(),
             descriptor_set_layout,
-            current_descriptor_set_id: 0,
+            current_descriptor_set_id: AtomicUsize::new(0),
             max_descriptor_set_size: max_size,
         };
         dp.allocate();
@@ -1704,7 +1837,7 @@ impl<B: hal::Backend> DescPool<B> {
     }
 
     pub fn descriptor_set(&self) -> &B::DescriptorSet {
-        &self.descriptor_set[self.current_descriptor_set_id]
+        &self.descriptor_set[self.current_descriptor_set_id.load(Ordering::SeqCst)]
     }
 
     pub fn descriptor_set_layout(&self) -> &B::DescriptorSetLayout {
@@ -1712,11 +1845,11 @@ impl<B: hal::Backend> DescPool<B> {
     }
 
     pub fn next(&mut self) {
-        self.current_descriptor_set_id += 1;
-        assert!(self.current_descriptor_set_id < self.max_descriptor_set_size,
+        self.current_descriptor_set_id.fetch_add(1, Ordering::SeqCst);
+        assert!(self.current_descriptor_set_id.load(Ordering::SeqCst) < self.max_descriptor_set_size,
                 "Maximum descriptor set size({}) exceeded!",
                 self.max_descriptor_set_size);
-        if self.current_descriptor_set_id == self.descriptor_set.len() {
+        if self.current_descriptor_set_id.load(Ordering::SeqCst) == self.descriptor_set.len() {
             self.allocate();
         }
     }
@@ -1728,8 +1861,8 @@ impl<B: hal::Backend> DescPool<B> {
         self.descriptor_set.push(desc_set);
     }
 
-    pub fn reset(&mut self) {
-        self.current_descriptor_set_id = 0;
+    pub fn reset(&self) {
+        self.current_descriptor_set_id.store(0, Ordering::SeqCst);
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -1809,7 +1942,7 @@ impl<B: hal::Backend> DescriptorPools<B> {
         self.get_pool_mut(shader_kind).next()
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&self) {
         self.debug_pool.reset();
         self.cache_clip_pool.reset();
         self.default_pool.reset();
@@ -1828,7 +1961,7 @@ struct Fence<B: hal::Backend> {
 }
 
 pub struct Device<B: hal::Backend> {
-    pub device: B::Device,
+    pub device: Arc<B::Device>,
     pub memory_types: Vec<hal::MemoryType>,
     pub limits: hal::Limits,
     adapter: hal::Adapter<B>,
@@ -1839,7 +1972,7 @@ pub struct Device<B: hal::Backend> {
     pub command_pool: SmallVec<[hal::CommandPool<B, hal::Graphics>; 1]>,
     pub staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
-    pub render_pass: Option<RenderPass<B>>,
+    pub render_pass: Option<Arc<RenderPass<B>>>,
     pub framebuffers: Vec<B::Framebuffer>,
     pub framebuffers_depth: Vec<B::Framebuffer>,
     pub frame_images: Vec<ImageCore<B>>,
@@ -1858,9 +1991,9 @@ pub struct Device<B: hal::Backend> {
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
-    descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
-    descriptor_pools_global: DescriptorPools<B>,
-    descriptor_pools_sampler: DescriptorPools<B>,
+    descriptor_pools: Arc<RwLock<SmallVec<[DescriptorPools<B>; 1]>>>,
+    descriptor_pools_global: Arc<DescriptorPools<B>>,
+    descriptor_pools_sampler: Arc<DescriptorPools<B>>,
     // device state
     bound_textures: [u32; 16],
     bound_program: ProgramId,
@@ -1907,6 +2040,12 @@ pub struct Device<B: hal::Backend> {
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: HashMap<String, PipelineRequirements>,
+
+    next_id_shared: Arc<AtomicUsize>,
+    program_rx: Receiver<LoaderMessage<B>>,
+    device_tx: Sender<DeviceMessage>,
+    loader: Option<std::thread::JoinHandle<()>>,
+    loaded_programs: FastHashMap<String, ProgramId>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -2021,23 +2160,61 @@ impl<B: hal::Backend> Device<B> {
                 )
             );
         }
+        let descriptor_pools = Arc::new(RwLock::new(descriptor_pools));
+
         let descriptor_pools_global =
-            DescriptorPools::new(
+            Arc::new(DescriptorPools::new(
                 &device,
                 1,
                 &pipeline_requirements,
                 DESCRIPTOR_SET_PER_INSTANCE,
-            );
+            ));
+
         let descriptor_pools_sampler =
-            DescriptorPools::new(
+            Arc::new(DescriptorPools::new(
                 &device,
                 1,
                 &pipeline_requirements,
                 DESCRIPTOR_SET_SAMPLER,
-            );
+            ));
 
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
+        let device = Arc::new(device);
+        let render_pass = Arc::new(render_pass);
+        let next_id_shared = Arc::new(AtomicUsize::new(0));
+
+        let device_weak = Arc::downgrade(&device);
+        let rp_weak = Arc::downgrade(&render_pass);
+        let p_reqs = pipeline_requirements.clone();
+        let mem_types = memory_types.clone();
+        let lim = limits.clone();
+        let descriptor_pools_loader = Arc::downgrade(&descriptor_pools);
+        let descriptor_pools_global_loader = Arc::downgrade(&descriptor_pools_global);
+        let descriptor_pools_sampler_loader = Arc::downgrade(&descriptor_pools_sampler);
+        let (program_tx, program_rx) = channel();
+        let (device_tx, device_rx) = channel();
+        let next_id_shared_clone = Arc::clone(&next_id_shared);
+
+        let loader = thread::Builder::new().name("ProgramLoader thread".to_owned()).spawn(move || {
+            let mut loader = ProgramLoader {
+                pipeline_requirements: p_reqs,
+                skip_list: HashSet::new(),
+                device: device_weak,
+                descriptor_pools: descriptor_pools_loader,
+                descriptor_pools_global: descriptor_pools_global_loader,
+                descriptor_pools_sampler: descriptor_pools_sampler_loader,
+                memory_types: mem_types,
+                limits: lim,
+                render_pass: rp_weak,
+                frame_count,
+                next_id: next_id_shared_clone,
+                disable_dual_source_blending: !features.contains(hal::Features::DUAL_SRC_BLENDING),
+                program_tx,
+                device_rx,
+            };
+            loader.run();
+        }).unwrap();
 
         Device {
             device,
@@ -2100,19 +2277,31 @@ impl<B: hal::Backend> Device<B> {
             features,
 
             next_id: 0,
+            next_id_shared,
             frame_fence,
             image_available_semaphore,
             render_finished_semaphore,
             pipeline_requirements,
+            program_rx,
+            device_tx,
+            loader: Some(loader),
+            loaded_programs: FastHashMap::default(),
         }
     }
 
     pub(crate) fn recreate_swapchain(&mut self, window_size: Option<(u32, u32)>) -> DeviceUintSize {
+        if let Some(loader) = self.loader.take() {
+            self.device_tx.send(DeviceMessage::Abort).unwrap();
+            loader.join().expect("Couldn't join on the loader thread");
+        }
+
         self.device.wait_idle().unwrap();
 
         for (_id, program) in self.programs.drain() {
             program.deinit(&self.device);
         }
+
+        self.loaded_programs.clear();
 
         for image in self.frame_images.drain(..) {
             image.deinit(&self.device);
@@ -2129,7 +2318,10 @@ impl<B: hal::Backend> Device<B> {
             self.device.destroy_framebuffer(framebuffer_depth);
         }
 
-        self.render_pass.take().unwrap().deinit(&self.device);
+        match Arc::try_unwrap(self.render_pass.take().unwrap()) {
+            Ok(rp) => rp.deinit(&self.device),
+            _ => unreachable!(),
+        };
 
         self.descriptor_pools_global.reset();
         self.descriptor_pools_sampler.reset();
@@ -2149,7 +2341,7 @@ impl<B: hal::Backend> Device<B> {
             frame_images,
             viewport
         ) = Device::init_swapchain_resources(
-            &self.device,
+            self.device.as_ref(),
             &self.memory_types,
             &self.adapter,
             &mut self.surface,
@@ -2157,7 +2349,7 @@ impl<B: hal::Backend> Device<B> {
         );
 
         self.swap_chain = Some(swap_chain);
-        self.render_pass = Some(render_pass);
+        self.render_pass = Some(Arc::new(render_pass));
         self.framebuffers = framebuffers;
         self.framebuffers_depth = framebuffers_depth;
         self.frame_depths = frame_depths;
@@ -2457,13 +2649,20 @@ impl<B: hal::Backend> Device<B> {
                 }
             }
         }
+        if let Some(id) = self.loaded_programs.get(&name) {
+            println!("Early loading {}!!", name);
+            return Ok(*id)
+        }
+
+        self.device_tx.send(DeviceMessage::Skip(name.clone())).unwrap();
+
         let program = Program::create(
-            self.pipeline_requirements.get(&name)
-                    .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
-            &self.device,
+            &self.pipeline_requirements.get(&name)
+                    .expect(&format!("Can't load pipeline data for: {}!", name)),
+            self.device.as_ref(),
             self.device.create_pipeline_layout(
                 vec![
-                    self.descriptor_pools[self.next_id].get_layout(shader_kind),
+                    self.descriptor_pools.read().expect("Read lock failed")[self.next_id].get_layout(shader_kind),
                     self.descriptor_pools_global.get_layout(shader_kind),
                     self.descriptor_pools_sampler.get_layout(shader_kind),
                 ],
@@ -2476,11 +2675,19 @@ impl<B: hal::Backend> Device<B> {
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
         );
-        self.bind_samplers(&program);
-
-        let id = self.generate_program_id();
-        self.programs.insert(id, program);
+        let id = self.add_program(program);
         Ok(id)
+    }
+
+    fn add_program(
+        &mut self,
+        program: Program<B>,
+    ) -> ProgramId {
+        self.bind_samplers(&program);
+        let id = self.generate_program_id();
+        self.loaded_programs.insert(program.shader_name.clone(), id);
+        self.programs.insert(id, program);
+        id
     }
 
     pub fn create_program_with_kind(
@@ -2505,7 +2712,8 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        let desc_set = self.descriptor_pools[self.next_id].get(&program.shader_kind);
+        let desc_pools_lock = self.descriptor_pools.read().expect("Read lock failed.");
+        let desc_set = desc_pools_lock[self.next_id].get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS[0..5].iter() {
             program.bind_texture(&self.device, desc_set, &self.images[&self.bound_textures[index]].core, sampler_name);
         }
@@ -2569,7 +2777,8 @@ impl<B: hal::Backend> Device<B> {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         assert_eq!(*program, self.bound_program);
         let program = self.programs.get_mut(&self.bound_program).expect("Program not found.");
-        let desc_set = &self.descriptor_pools[self.next_id].get(&program.shader_kind);
+        let desc_pools_lock = self.descriptor_pools.read().expect("Read lock failed.");
+        let desc_set = desc_pools_lock[self.next_id].get(&program.shader_kind);
         program.bind_locals(&self.device, desc_set, transform, self.program_mode_id, self.next_id);
     }
 
@@ -2600,7 +2809,7 @@ impl<B: hal::Backend> Device<B> {
                 self.viewport.clone(),
                 rp,
                 &fb,
-                &mut self.descriptor_pools[self.next_id],
+                &mut self.descriptor_pools.write().unwrap()[self.next_id],
                 &self.descriptor_pools_global,
                 &self.descriptor_pools_sampler,
                 &vec![],
@@ -2624,6 +2833,27 @@ impl<B: hal::Backend> Device<B> {
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
         self.program_mode_id = 0;
+
+        let mut programs = Vec::new();
+        for message in self.program_rx.try_iter() {
+            match message {
+                LoaderMessage::Finished => {
+                    if let Some(loader) = self.loader.take() {
+                        loader.join().expect("Couldn't join on the loader thread");
+                        println!("Finished");
+                    }
+                }
+                LoaderMessage::Program(program) => {
+                    let name = program.shader_name.clone();
+                    programs.push(program);
+                    println!("Program inserted {}", name);
+                },
+            }
+        }
+
+        for p in programs {
+            self.add_program(p);
+        }
 
         self.frame_id
     }
@@ -2842,7 +3072,7 @@ impl<B: hal::Backend> Device<B> {
             TextureFilter::Trilinear => (hal::image::ViewKind::D2Array, (width as f32).max(height as f32).log2().floor() as u8 + 1, usage_base),
         };
         let img = Image::new(
-            &self.device,
+            self.device.as_ref(),
             &self.memory_types,
             texture.format,
             texture.width,
@@ -2895,7 +3125,7 @@ impl<B: hal::Backend> Device<B> {
 
         for i in 0..texture.layer_count as u16 {
             let fbo = Framebuffer::new(
-                &self.device,
+                self.device.as_ref(),
                 &texture,
                 &self.images.get(&texture.id).unwrap(),
                 i,
@@ -3135,7 +3365,7 @@ impl<B: hal::Backend> Device<B> {
         } else {
             let rbo_id = self.generate_rbo_id();
             let rbo = DepthBuffer::new(
-                &self.device,
+                self.device.as_ref(),
                 &self.memory_types,
                 dimensions.width as _,
                 dimensions.height as _,
@@ -3493,7 +3723,7 @@ impl<B: hal::Backend> Device<B> {
             (&self.frame_images[self.current_frame_id], 0)
         };
         let download_buffer: Buffer<B> = Buffer::new(
-            &self.device,
+            self.device.as_ref(),
             &self.memory_types,
             hal::buffer::Usage::TRANSFER_DST,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
@@ -4076,6 +4306,7 @@ impl<B: hal::Backend> Device<B> {
                     Some(&self.render_finished_semaphore)).is_err()
         };
         self.next_id = (self.next_id + 1) % self.frame_count;
+        self.next_id_shared.store(self.next_id, Ordering::SeqCst);
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
             self.device.wait_for_fence(&self.frame_fence[self.next_id].inner, !0).expect("wait_for_fence failed");
@@ -4084,7 +4315,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.command_pool[self.next_id].reset();
         self.staging_buffer_pool[self.next_id].reset();
-        self.descriptor_pools[self.next_id].reset();
+        self.descriptor_pools.read().expect("Read lock failed")[self.next_id].reset();
         self.reset_program_buffer_offsets();
         return !present_error;
     }
@@ -4123,6 +4354,11 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn deinit(self) {
+        if let Some(loader) = self.loader {
+            self.device_tx.send(DeviceMessage::Abort).unwrap();
+            loader.join().expect("Couldn't join on the loader thread");
+        }
+
         for command_pool in self.command_pool {
             self.device.destroy_command_pool(command_pool.into_raw());
         }
@@ -4152,15 +4388,35 @@ impl<B: hal::Backend> Device<B> {
         }
         self.device.destroy_sampler(self.sampler_linear);
         self.device.destroy_sampler(self.sampler_nearest);
-        for descriptor_pool in self.descriptor_pools {
-            descriptor_pool.deinit(&self.device);
-        }
-        self.descriptor_pools_global.deinit(&self.device);
-        self.descriptor_pools_sampler.deinit(&self.device);
+
+        match Arc::try_unwrap(self.descriptor_pools) {
+            Ok(pools) => {
+                for pool in pools.into_inner().unwrap() {
+                    pool.deinit(&self.device);
+                }
+            },
+            _ => unimplemented!(),
+        };
+
+        match Arc::try_unwrap(self.descriptor_pools_global) {
+            Ok(dpg) => dpg.deinit(&self.device),
+            _ => unimplemented!(),
+        };
+
+        match Arc::try_unwrap(self.descriptor_pools_sampler) {
+            Ok(dps) => dps.deinit(&self.device),
+            _ => unimplemented!(),
+        };
+
         for (_, program) in self.programs {
             program.deinit(&self.device)
         }
-        self.render_pass.unwrap().deinit(&self.device);
+
+        match Arc::try_unwrap(self.render_pass.unwrap()) {
+            Ok(rp) => rp.deinit(&self.device),
+            _ => unimplemented!(),
+        };
+
         for fence in self.frame_fence {
             self.device.destroy_fence(fence.inner);
         }
