@@ -1115,6 +1115,7 @@ impl<B: hal::Backend> Program<B> {
         memory_types: &Vec<hal::MemoryType>,
         limits: &hal::Limits,
         shader_name: &str,
+        features: &[&str],
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
         frame_count: usize,
@@ -1135,17 +1136,47 @@ impl<B: hal::Backend> Program<B> {
 
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
+        let mut specialization_constants = Vec::new();
+        for i in 0 .. 5 {
+            specialization_constants.push(
+                hal::pso::SpecializationConstant {
+                    id: i,
+                    range: (4 * i) as _ ..  (4 * (i + 1)) as _,
+                },
+            );
+        }
+        let data = {
+            let alpha_pass = if features.contains(&"ALPHA_PASS") {1} else {0};
+            let color_target = if features.contains(&"COLOR_TARGET") {1} else {0};
+            let glyph_transform = if features.contains(&"GLYPH_TRANSFORM") {1} else {0};
+            let yuv_color: u32 = if features.contains(&"YUV_NV12") { 1 } else if features.contains(&"YUV_INTERLEAVED") { 2 } else { 0 };
+            let yuv_color_space: u32 = if features.contains(&"YUV_REC709") { 1 } else { 0 };
+            let mut data = Vec::new();
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(alpha_pass as u32) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(color_target as u32) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(glyph_transform as u32) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color_space) });
+            data
+        };
+
         let pipelines = {
             let (vs_entry, fs_entry) = (
                 hal::pso::EntryPoint::<B> {
                     entry: ENTRY_NAME,
                     module: &vs_module,
-                    specialization: hal::pso::Specialization::default(),
+                    specialization: hal::pso::Specialization {
+                        constants: &specialization_constants,
+                        data: &data,
+                    },
                 },
                 hal::pso::EntryPoint::<B> {
                     entry: ENTRY_NAME,
                     module: &fs_module,
-                    specialization: hal::pso::Specialization::default(),
+                    specialization: hal::pso::Specialization {
+                        constants: &specialization_constants,
+                        data: &data,
+                    },
                 },
             );
 
@@ -1212,8 +1243,8 @@ impl<B: hal::Backend> Program<B> {
             };
             let format = match shader_kind {
                 ShaderKind::ClipCache => ImageFormat::R8,
-                ShaderKind::Cache(VertexArrayKind::Blur) if shader_name.contains("_alpha_target") => ImageFormat::R8,
-                ShaderKind::Cache(VertexArrayKind::Scale) if shader_name.contains("_alpha_target") => ImageFormat::R8,
+                ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => ImageFormat::R8,
+                ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => ImageFormat::R8,
                 _ => ImageFormat::BGRA8,
             };
 
@@ -2448,7 +2479,8 @@ impl<B: hal::Backend> Device<B> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
-                if !feature.is_empty() {
+                if feature == "DUAL_SOURCE_BLENDING" || feature == "DITHERING"
+                    || feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
                     name.push_str(&format!("_{}", feature.to_lowercase()));
                 }
             }
@@ -2468,6 +2500,7 @@ impl<B: hal::Backend> Device<B> {
             &self.memory_types,
             &self.limits,
             &name,
+            features,
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
