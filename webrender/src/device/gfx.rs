@@ -1151,12 +1151,14 @@ impl<B: hal::Backend> Program<B> {
             let glyph_transform = if features.contains(&"GLYPH_TRANSFORM") {1} else {0};
             let yuv_color: u32 = if features.contains(&"YUV_NV12") { 1 } else if features.contains(&"YUV_INTERLEAVED") { 2 } else { 0 };
             let yuv_color_space: u32 = if features.contains(&"YUV_REC709") { 1 } else { 0 };
+            let dithering: u32 = if features.contains(&"DITHERING") {1} else {0};
             let mut data = Vec::new();
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(alpha_pass as u32) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(color_target as u32) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(glyph_transform as u32) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color_space) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(dithering) });
             data
         };
 
@@ -2479,8 +2481,7 @@ impl<B: hal::Backend> Device<B> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
-                if feature == "DUAL_SOURCE_BLENDING" || feature == "DITHERING"
-                    || feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
+                if feature == "DUAL_SOURCE_BLENDING" || feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
                     name.push_str(&format!("_{}", feature.to_lowercase()));
                 }
             }

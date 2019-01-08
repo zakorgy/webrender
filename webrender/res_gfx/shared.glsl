@@ -136,9 +136,9 @@ uniform sampler2DArray sColor1;
 uniform sampler2DArray sColor2;
 #endif
 
-#ifdef WR_FEATURE_DITHERING
+//#ifdef WR_FEATURE_DITHERING
 uniform sampler2D sDither;
-#endif
+//#endif
 
 //======================================================================================
 // Interpolator definitions
