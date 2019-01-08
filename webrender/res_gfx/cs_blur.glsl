@@ -45,11 +45,15 @@ void main(void) {
     RectWithSize src_rect = src_task.task_rect;
     RectWithSize target_rect = blur_task.common_data.task_rect;
 
-#if defined WR_FEATURE_COLOR_TARGET
-    vec2 texture_size = vec2(textureSize(sPrevPassColor, 0).xy);
-#else
-    vec2 texture_size = vec2(textureSize(sPrevPassAlpha, 0).xy);
-#endif
+    vec2 texture_size = vec2(0.0);
+//#if defined WR_FEATURE_COLOR_TARGET
+if (color_target!= 0) {
+    texture_size = vec2(textureSize(sPrevPassColor, 0).xy);
+//#else
+} else {
+    texture_size = vec2(textureSize(sPrevPassAlpha, 0).xy);
+//#endif
+}
     vUv.z = src_task.texture_layer_index;
     vSigma = blur_task.blur_radius;
 
@@ -87,13 +91,13 @@ void main(void) {
 
 #ifdef WR_FRAGMENT_SHADER
 
-#if defined WR_FEATURE_COLOR_TARGET
+/*#if defined WR_FEATURE_COLOR_TARGET
 #define SAMPLE_TYPE vec4
 #define SAMPLE_TEXTURE(uv)  texture(sPrevPassColor, uv)
 #else
 #define SAMPLE_TYPE float
 #define SAMPLE_TEXTURE(uv)  texture(sPrevPassAlpha, uv).r
-#endif
+#endif*/
 
 // TODO(gw): Write a fast path blur that handles smaller blur radii
 //           with a offset / weight uniform table and a constant
@@ -103,7 +107,7 @@ void main(void) {
 //           the number of texture fetches needed for a gaussian blur.
 
 void main(void) {
-    SAMPLE_TYPE original_color = SAMPLE_TEXTURE(vUv);
+    /*SAMPLE_TYPE original_color = SAMPLE_TEXTURE(vUv);
 
     // TODO(gw): The gauss function gets NaNs when blur radius
     //           is zero. In the future, detect this earlier
@@ -137,6 +141,63 @@ void main(void) {
         gauss_coefficient.xy *= gauss_coefficient.yz;
     }
 
-    oFragColor = vec4(avg_color) / gauss_coefficient_sum;
+    oFragColor = vec4(avg_color) / gauss_coefficient_sum;*/
+    if (color_target!= 0) {
+        vec4 original_color = texture(sPrevPassColor, vUv);
+         // TODO(gw): The gauss function gets NaNs when blur radius
+        //           is zero. In the future, detect this earlier
+        //           and skip the blur passes completely.
+        if (vSupport == 0) {
+            oFragColor = vec4(original_color);
+            return;
+        }
+         // Incremental Gaussian Coefficent Calculation (See GPU Gems 3 pp. 877 - 889)
+        vec3 gauss_coefficient;
+        gauss_coefficient.x = 1.0 / (sqrt(2.0 * 3.14159265) * vSigma);
+        gauss_coefficient.y = exp(-0.5 / (vSigma * vSigma));
+        gauss_coefficient.z = gauss_coefficient.y * gauss_coefficient.y;
+         float gauss_coefficient_sum = 0.0;
+        vec4 avg_color = original_color * gauss_coefficient.x;
+        gauss_coefficient_sum += gauss_coefficient.x;
+        gauss_coefficient.xy *= gauss_coefficient.yz;
+         for (int i=1 ; i <= vSupport ; ++i) {
+            vec2 offset = vOffsetScale * float(i);
+             vec2 st0 = clamp(vUv.xy - offset, vUvRect.xy, vUvRect.zw);
+            avg_color += texture(sPrevPassColor, vec3(st0, vUv.z)) * gauss_coefficient.x;
+             vec2 st1 = clamp(vUv.xy + offset, vUvRect.xy, vUvRect.zw);
+            avg_color += texture(sPrevPassColor, vec3(st1, vUv.z)) * gauss_coefficient.x;
+             gauss_coefficient_sum += 2.0 * gauss_coefficient.x;
+            gauss_coefficient.xy *= gauss_coefficient.yz;
+        }
+        oFragColor = vec4(avg_color) / gauss_coefficient_sum;
+    } else {
+        float original_color = texture(sPrevPassAlpha, vUv).r;
+         // TODO(gw): The gauss function gets NaNs when blur radius
+        //           is zero. In the future, detect this earlier
+        //           and skip the blur passes completely.
+        if (vSupport == 0) {
+            oFragColor = vec4(original_color);
+            return;
+        }
+         // Incremental Gaussian Coefficent Calculation (See GPU Gems 3 pp. 877 - 889)
+        vec3 gauss_coefficient;
+        gauss_coefficient.x = 1.0 / (sqrt(2.0 * 3.14159265) * vSigma);
+        gauss_coefficient.y = exp(-0.5 / (vSigma * vSigma));
+        gauss_coefficient.z = gauss_coefficient.y * gauss_coefficient.y;
+         float gauss_coefficient_sum = 0.0;
+        float avg_color = original_color * gauss_coefficient.x;
+        gauss_coefficient_sum += gauss_coefficient.x;
+        gauss_coefficient.xy *= gauss_coefficient.yz;
+         for (int i=1 ; i <= vSupport ; ++i) {
+            vec2 offset = vOffsetScale * float(i);
+             vec2 st0 = clamp(vUv.xy - offset, vUvRect.xy, vUvRect.zw);
+            avg_color += texture(sPrevPassAlpha, vec3(st0, vUv.z)).r * gauss_coefficient.x;
+             vec2 st1 = clamp(vUv.xy + offset, vUvRect.xy, vUvRect.zw);
+            avg_color += texture(sPrevPassAlpha, vec3(st1, vUv.z)).r * gauss_coefficient.x;
+             gauss_coefficient_sum += 2.0 * gauss_coefficient.x;
+            gauss_coefficient.xy *= gauss_coefficient.yz;
+        }
+        oFragColor = vec4(avg_color) / gauss_coefficient_sum;
+    }
 }
 #endif

@@ -9,9 +9,9 @@ varying vec3 vUv;
 flat varying vec4 vUvBorder;
 flat varying vec2 vMaskSwizzle;
 
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
+//#ifdef WR_FEATURE_GLYPH_TRANSFORM
 varying vec4 vUvClip;
-#endif
+//#endif
 
 #ifdef WR_VERTEX_SHADER
 
@@ -73,11 +73,16 @@ VertexInfo write_text_vertex(RectWithSize local_clip_rect,
     vec2 snap_offset = vec2(0.0);
     mat2 local_transform;
 
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
-    bool remove_subpx_offset = true;
-#else
-    bool remove_subpx_offset = transform.is_axis_aligned;
-#endif
+    bool remove_subpx_offset = false;
+//#if defined(WR_FEATURE_GLYPH_TRANSFORM)
+if (glyph_transform_f!= 0) {
+    remove_subpx_offset = true;
+//#else
+} else {
+    remove_subpx_offset = transform.is_axis_aligned;
+}
+//#endif
+
     // Compute the snapping offset only if the scroll node transform is axis-aligned.
     if (remove_subpx_offset) {
         // Transform from local space to device space.
@@ -97,22 +102,26 @@ VertexInfo write_text_vertex(RectWithSize local_clip_rect,
         // Transform from device space back to local space.
         local_transform = inverse(device_transform);
 
-#ifndef WR_FEATURE_GLYPH_TRANSFORM
+//#ifndef WR_FEATURE_GLYPH_TRANSFORM
+if (glyph_transform_f == 0) {
         // If not using transformed subpixels, the glyph rect is actually in local space.
         // So convert the snap offset back to local space.
         snap_offset = local_transform * snap_offset;
-#endif
+//#endif
+}
     }
 
     // Actually translate the glyph rect to a device pixel using the snap offset.
     glyph_rect.p0 += snap_offset;
 
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
+vec2 local_pos = vec2(0.0);
+//#ifdef WR_FEATURE_GLYPH_TRANSFORM
+if (glyph_transform_f!= 0) {
     // The glyph rect is in device space, so transform it back to local space.
     RectWithSize local_rect = transform_rect(glyph_rect, local_transform);
 
     // Select the corner of the glyph's local space rect that we are processing.
-    vec2 local_pos = local_rect.p0 + local_rect.size * aPosition.xy;
+    local_pos = local_rect.p0 + local_rect.size * aPosition.xy;
 
     // If the glyph's local rect would fit inside the local clip rect, then select a corner from
     // the device space glyph rect to reduce overdraw of clipped pixels in the fragment shader.
@@ -120,10 +129,12 @@ VertexInfo write_text_vertex(RectWithSize local_clip_rect,
     if (rect_inside_rect(local_rect, local_clip_rect)) {
         local_pos = local_transform * (glyph_rect.p0 + glyph_rect.size * aPosition.xy);
     }
-#else
+//#else
+} else {
     // Select the corner of the glyph rect that we are processing.
-    vec2 local_pos = glyph_rect.p0 + glyph_rect.size * aPosition.xy;
-#endif
+    local_pos = glyph_rect.p0 + glyph_rect.size * aPosition.xy;
+//#endif
+}
 
     // Clamp to the local clip rect.
     local_pos = clamp_rect(local_pos, local_clip_rect);
@@ -168,22 +179,28 @@ void main(void) {
     Glyph glyph = fetch_glyph(ph.specific_prim_address, glyph_index);
     GlyphResource res = fetch_glyph_resource(resource_address);
 
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
+vec2 local_pos = vec2(0.0);
+mat2 glyph_transform = mat2(0.0);
+RectWithSize glyph_rect = RectWithSize(vec2(0.0), vec2(0.0));
+//#ifdef WR_FEATURE_GLYPH_TRANSFORM
+if (glyph_transform_f!= 0) {
     // Transform from local space to glyph space.
-    mat2 glyph_transform = mat2(transform.m) * task.common_data.device_pixel_scale;
+    glyph_transform = mat2(transform.m) * task.common_data.device_pixel_scale;
 
     // Compute the glyph rect in glyph space.
-    RectWithSize glyph_rect = RectWithSize(res.offset + glyph_transform * (text.offset + glyph.offset),
+    glyph_rect = RectWithSize(res.offset + glyph_transform * (text.offset + glyph.offset),
                                            res.uv_rect.zw - res.uv_rect.xy);
 
-#else
+//#else
+} else {
     // Scale from glyph space to local space.
     float scale = res.scale / task.common_data.device_pixel_scale;
 
     // Compute the glyph rect in local space.
-    RectWithSize glyph_rect = RectWithSize(scale * res.offset + text.offset + glyph.offset,
+    glyph_rect = RectWithSize(scale * res.offset + text.offset + glyph.offset,
                                            scale * (res.uv_rect.zw - res.uv_rect.xy));
-#endif
+//#endif
+}
 
     vec2 snap_bias;
     // In subpixel mode, the subpixel offset has already been
@@ -220,28 +237,45 @@ void main(void) {
                                       snap_bias);
     glyph_rect.p0 += vi.snap_offset;
 
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
-    vec2 f = (glyph_transform * vi.local_pos - glyph_rect.p0) / glyph_rect.size;
+vec2 f = vec2(0.0);
+//#ifdef WR_FEATURE_GLYPH_TRANSFORM
+if (glyph_transform_f!= 0) {
+    f = (glyph_transform * vi.local_pos - glyph_rect.p0) / glyph_rect.size;
     vUvClip = vec4(f, 1.0 - f);
-#else
-    vec2 f = (vi.local_pos - glyph_rect.p0) / glyph_rect.size;
-#endif
+//#else
+} else {
+    f = (vi.local_pos - glyph_rect.p0) / glyph_rect.size;
+    vUvClip = vec4(0.0);
+//#endif
+}
 
     write_clip(vi.world_pos, vi.snap_offset, clip_area);
 
     switch (color_mode) {
         case COLOR_MODE_ALPHA:
+            vMaskSwizzle = vec2(0.0, 1.0);
+            vColor = text.color;
+            break;
         case COLOR_MODE_BITMAP:
             vMaskSwizzle = vec2(0.0, 1.0);
             vColor = text.color;
             break;
         case COLOR_MODE_SUBPX_BG_PASS2:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = text.color;
+            break;
         case COLOR_MODE_SUBPX_DUAL_SOURCE:
             vMaskSwizzle = vec2(1.0, 0.0);
             vColor = text.color;
             break;
         case COLOR_MODE_SUBPX_CONST_COLOR:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = vec4(text.color.a);
+            break;
         case COLOR_MODE_SUBPX_BG_PASS0:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = vec4(text.color.a);
+            break;
         case COLOR_MODE_COLOR_BITMAP:
             vMaskSwizzle = vec2(1.0, 0.0);
             vColor = vec4(text.color.a);
@@ -271,9 +305,11 @@ void main(void) {
     mask.rgb = mask.rgb * vMaskSwizzle.x + mask.aaa * vMaskSwizzle.y;
 
     float alpha = do_clip();
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
+//#ifdef WR_FEATURE_GLYPH_TRANSFORM
+if (glyph_transform_f!= 0) {
     alpha *= float(all(greaterThanEqual(vUvClip, vec4(0.0))));
-#endif
+//#endif
+}
 
 #if defined(WR_FEATURE_DEBUG_OVERDRAW)
     oFragColor = WR_DEBUG_OVERDRAW_COLOR;

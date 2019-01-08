@@ -16,10 +16,10 @@ flat varying float vEndRadius;
 varying vec2 vPos;
 flat varying vec2 vRepeatedSize;
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
 varying vec2 vLocalPos;
 flat varying vec2 vTileRepeat;
-#endif
+//#endif
 
 #ifdef WR_VERTEX_SHADER
 
@@ -77,22 +77,30 @@ void brush_vs(
     // Whether to repeat the gradient instead of clamping.
     vGradientRepeat = float(gradient.extend_mode != EXTEND_MODE_CLAMP);
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass!= 0) {
     vTileRepeat = tile_repeat.xy;
     vLocalPos = vi.local_pos;
-#endif
+//#endif
+} else {
+    vTileRepeat = vec2(0.0);
+    vLocalPos = vec2(0.0);
+}
+
 }
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
 Fragment brush_fs() {
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
+vec2 pos = vec2(0.0);
+if (alpha_pass!= 0) {
     // Handle top and left inflated edges (see brush_image).
     vec2 local_pos = max(vPos, vec2(0.0));
 
     // Apply potential horizontal and vertical repetitions.
-    vec2 pos = mod(local_pos, vRepeatedSize);
+    pos = mod(local_pos, vRepeatedSize);
 
     vec2 prim_size = vRepeatedSize * vTileRepeat;
     // Handle bottom and right inflated edges (see brush_image).
@@ -102,10 +110,12 @@ Fragment brush_fs() {
     if (local_pos.y >= prim_size.y) {
         pos.y = vRepeatedSize.y;
     }
-#else
+//#else
+} else {
     // Apply potential horizontal and vertical repetitions.
-    vec2 pos = mod(vPos, vRepeatedSize);
-#endif
+    pos = mod(vPos, vRepeatedSize);
+//#endif
+}
 
     vec2 pd = pos - vCenter;
     float rd = vEndRadius - vStartRadius;
@@ -149,9 +159,11 @@ Fragment brush_fs() {
                                  offset,
                                  vGradientRepeat);
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass!= 0) {
     color *= init_transform_fs(vLocalPos);
-#endif
+//#endif
+}
 
     return Fragment(color);
 }

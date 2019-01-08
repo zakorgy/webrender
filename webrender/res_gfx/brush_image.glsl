@@ -6,9 +6,9 @@
 
 #include shared,prim_shared,brush
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
 varying vec2 vLocalPos;
-#endif
+//#endif
 
 // Interpolated uv coordinates in xy, and layer in z.
 varying vec3 vUv;
@@ -18,11 +18,11 @@ flat varying vec4 vUvBounds;
 // sampling artifacts.
 flat varying vec4 vUvSampleBounds;
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
 flat varying vec4 vColor;
 flat varying vec2 vMaskSwizzle;
 flat varying vec2 vTileRepeat;
-#endif
+//#endif
 
 #ifdef WR_VERTEX_SHADER
 
@@ -104,8 +104,10 @@ void brush_vs(
 
     vec2 f = (vi.local_pos - local_rect.p0) / local_rect.size;
 
-#ifdef WR_FEATURE_ALPHA_PASS
-    int color_mode = user_data.x;
+int color_mode;
+//#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass!= 0) {
+    color_mode = user_data.x;
     int raster_space = user_data.y;
 
     if (color_mode == COLOR_MODE_FROM_PASS) {
@@ -129,7 +131,8 @@ void brush_vs(
         default:
             break;
     }
-#endif
+//#endif
+}
 
     // Offset and scale vUv here to avoid doing it in the fragment shader.
     vec2 repeat = local_rect.size / stretch_size;
@@ -143,23 +146,39 @@ void brush_vs(
     vUvBounds = vec4(min_uv, max_uv) / texture_size.xyxy;
 #endif
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass!= 0) {
     vTileRepeat = repeat.xy;
 
     switch (color_mode) {
         case COLOR_MODE_ALPHA:
+            vMaskSwizzle = vec2(0.0, 1.0);
+            vColor = image_data.color;
+            break;
         case COLOR_MODE_BITMAP:
             vMaskSwizzle = vec2(0.0, 1.0);
             vColor = image_data.color;
             break;
         case COLOR_MODE_SUBPX_BG_PASS2:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = image_data.color;
+            break;
         case COLOR_MODE_SUBPX_DUAL_SOURCE:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = image_data.color;
+            break;
         case COLOR_MODE_IMAGE:
             vMaskSwizzle = vec2(1.0, 0.0);
             vColor = image_data.color;
             break;
         case COLOR_MODE_SUBPX_CONST_COLOR:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = vec4(image_data.color.a);
+            break;
         case COLOR_MODE_SUBPX_BG_PASS0:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = vec4(image_data.color.a);
+            break;
         case COLOR_MODE_COLOR_BITMAP:
             vMaskSwizzle = vec2(1.0, 0.0);
             vColor = vec4(image_data.color.a);
@@ -174,7 +193,8 @@ void brush_vs(
     }
 
     vLocalPos = vi.local_pos;
-#endif
+}
+//#endif
 }
 #endif
 
@@ -183,14 +203,16 @@ void brush_vs(
 Fragment brush_fs() {
     vec2 uv_size = vUvBounds.zw - vUvBounds.xy;
 
-#ifdef WR_FEATURE_ALPHA_PASS
+    vec2 repeated_uv = vec2(0.0);
+//#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass!= 0) {
     // This prevents the uv on the top and left parts of the primitive that was inflated
     // for anti-aliasing purposes from going beyound the range covered by the regular
     // (non-inflated) primitive.
     vec2 local_uv = max(vUv.xy, vec2(0.0));
 
     // Handle horizontal and vertical repetitions.
-    vec2 repeated_uv = mod(local_uv, uv_size) + vUvBounds.xy;
+    repeated_uv = mod(local_uv, uv_size) + vUvBounds.xy;
 
     // This takes care of the bottom and right inflated parts.
     // We do it after the modulo because the latter wraps around the values exactly on
@@ -201,10 +223,12 @@ Fragment brush_fs() {
     if (local_uv.y >= vTileRepeat.y * uv_size.y) {
         repeated_uv.y = vUvBounds.w;
     }
-#else
+//#else
+} else {
     // Handle horizontal and vertical repetitions.
-    vec2 repeated_uv = mod(vUv.xy, uv_size) + vUvBounds.xy;
-#endif
+    repeated_uv = mod(vUv.xy, uv_size) + vUvBounds.xy;
+//#endif
+}
 
     // Clamp the uvs to avoid sampling artifacts.
     vec2 uv = clamp(repeated_uv, vUvSampleBounds.xy, vUvSampleBounds.zw);
@@ -213,7 +237,8 @@ Fragment brush_fs() {
 
     Fragment frag;
 
-#ifdef WR_FEATURE_ALPHA_PASS
+//#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass!= 0) {
     float alpha = init_transform_fs(vLocalPos);
     texel.rgb = texel.rgb * vMaskSwizzle.x + texel.aaa * vMaskSwizzle.y;
 
@@ -223,9 +248,11 @@ Fragment brush_fs() {
     #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
         frag.blend = alpha_mask * vColor.a;
     #endif
-#else
+//#else
+} else {
     frag.color = texel;
-#endif
+//#endif
+}
 
     return frag;
 }
