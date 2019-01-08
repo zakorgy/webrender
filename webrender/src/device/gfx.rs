@@ -1118,16 +1118,22 @@ impl<B: hal::Backend> Program<B> {
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
         frame_count: usize,
+        shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     ) -> Program<B> {
-        let vs_file = format!("{}.vert.spv", shader_name);
-        let vs_module = device
-            .create_shader_module(shader_source::SPIRV_BINARIES.get(vs_file.as_str()).expect("create_shader_module failed"))
-            .expect(&format!("Failed to create vs module for: {}!", vs_file));
+        if !shader_modules.contains_key(shader_name) {
+            let vs_file = format!("{}.vert.spv", shader_name);
+            let vs_module = device
+                .create_shader_module(shader_source::SPIRV_BINARIES.get(vs_file.as_str()).expect("create_shader_module failed"))
+                .expect(&format!("Failed to create vs module for: {}!", vs_file));
 
-        let fs_file = format!("{}.frag.spv", shader_name);
-        let fs_module = device
-            .create_shader_module(shader_source::SPIRV_BINARIES.get(fs_file.as_str()).expect("create_shader_module failed"))
-            .expect(&format!("Failed to create vs module for: {}!", fs_file));
+            let fs_file = format!("{}.frag.spv", shader_name);
+            let fs_module = device
+                .create_shader_module(shader_source::SPIRV_BINARIES.get(fs_file.as_str()).expect("create_shader_module failed"))
+                .expect(&format!("Failed to create vs module for: {}!", fs_file));
+            shader_modules.insert(String::from(shader_name), (vs_module, fs_module));
+        }
+
+        let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -1251,9 +1257,6 @@ impl<B: hal::Backend> Program<B> {
                 .zip(pipelines.map(|pipeline| pipeline.unwrap()))
                 .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
         };
-
-        device.destroy_shader_module(vs_module);
-        device.destroy_shader_module(fs_module);
 
         let vertex_buffer_stride = match shader_kind {
             #[cfg(feature = "debug_renderer")]
@@ -1855,6 +1858,7 @@ pub struct Device<B: hal::Backend> {
     current_depth_test: DepthTest,
     // device state
     programs: FastHashMap<ProgramId, Program<B>>,
+    shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
@@ -2079,6 +2083,7 @@ impl<B: hal::Backend> Device<B> {
             depth_targets: FastHashMap::default(),
 
             programs: FastHashMap::default(),
+            shader_modules: FastHashMap::default(),
             images: FastHashMap::default(),
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
@@ -2475,6 +2480,7 @@ impl<B: hal::Backend> Device<B> {
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
+            &mut self.shader_modules,
         );
         self.bind_samplers(&program);
 
@@ -4159,6 +4165,10 @@ impl<B: hal::Backend> Device<B> {
         self.descriptor_pools_sampler.deinit(&self.device);
         for (_, program) in self.programs {
             program.deinit(&self.device)
+        }
+        for (_, (vs_module, fs_module)) in self.shader_modules {
+            self.device.destroy_shader_module(vs_module);
+            self.device.destroy_shader_module(fs_module);
         }
         self.render_pass.unwrap().deinit(&self.device);
         for fence in self.frame_fence {
