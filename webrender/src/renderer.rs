@@ -3361,7 +3361,6 @@ impl<B: hal::Backend> Renderer<B>
         self.device.disable_depth_write();
         self.set_blend(false, FramebufferKind::Other);
 
-        #[cfg(feature = "gleam")]
         for rect in &target.clears {
             self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, Some(*rect));
         }
