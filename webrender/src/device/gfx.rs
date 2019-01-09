@@ -1164,7 +1164,12 @@ impl<B: hal::Backend> Program<B> {
                         (BlendState::MULTIPLY, DepthTest::Off),
                     ]
                 },
-                ShaderKind::Cache(VertexArrayKind::Blur) => vec![(BlendState::Off, DepthTest::Off)],
+                ShaderKind::Cache(VertexArrayKind::Blur) => {
+                    vec![
+                        (BlendState::Off, DepthTest::Off),
+                        (BlendState::Off, LESS_EQUAL_TEST),
+                    ]
+                },
                 ShaderKind::Cache(VertexArrayKind::Border) |
                 ShaderKind::Cache(VertexArrayKind::LineDecoration) => vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)],
                 ShaderKind::ClipCache => vec![(BlendState::MULTIPLY, DepthTest::Off)],
