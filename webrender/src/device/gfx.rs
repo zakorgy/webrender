@@ -1152,6 +1152,7 @@ impl<B: hal::Backend> Program<B> {
             let yuv_color: u32 = if features.contains(&"YUV_NV12") { 1 } else if features.contains(&"YUV_INTERLEAVED") { 2 } else { 0 };
             let yuv_color_space: u32 = if features.contains(&"YUV_REC709") { 1 } else { 0 };
             let dithering: u32 = if features.contains(&"DITHERING") {1} else {0};
+            let dual_src_blending: u32 = if features.contains(&"DUAL_SOURCE_BLENDING") {1} else {0};
             let mut data = Vec::new();
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(alpha_pass as u32) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(color_target as u32) });
@@ -1159,6 +1160,7 @@ impl<B: hal::Backend> Program<B> {
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color_space) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(dithering) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(dual_src_blending) });
             data
         };
 
@@ -1218,7 +1220,7 @@ impl<B: hal::Backend> Program<B> {
                         (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
                         (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
                     ];
-                    if shader_name.contains("dual_source_blending") {
+                    if features.contains(&"DUAL_SOURCE_BLENDING") {
                         states.push((SUBPIXEL_DUAL_SOURCE, DepthTest::Off));
                         states.push((SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST));
                     }
@@ -2481,7 +2483,7 @@ impl<B: hal::Backend> Device<B> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
-                if feature == "DUAL_SOURCE_BLENDING" || feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
+                if feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
                     name.push_str(&format!("_{}", feature.to_lowercase()));
                 }
             }

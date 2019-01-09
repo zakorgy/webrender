@@ -8,7 +8,7 @@ layout(constant_id = 2) const uint glyph_transform_f = 0;
 layout(constant_id = 3) const uint yuv_format = 0; // 0: planar, 1: nv12, 2: interleaved
 layout(constant_id = 4) const uint yuv_color_space = 0; // 0: rec601, 1: rec709
 layout(constant_id = 6) const uint dithering = 0;
-//layout(constant_id = 7) const bool dual_source_blending = false;
+layout(constant_id = 7) const uint dual_source_blending = 0;
 
 #if defined(GL_ES)
     #if GL_ES == 1

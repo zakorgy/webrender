@@ -121,9 +121,9 @@ if (alpha_pass!= 0) {
 
 struct Fragment {
     vec4 color;
-#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+//#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
     vec4 blend;
-#endif
+//#endif
 };
 
 Fragment brush_fs();
@@ -142,9 +142,12 @@ if (alpha_pass!= 0) {
 
     frag.color *= clip_alpha;
 
-    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+    /*#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
         oFragBlend = frag.blend * clip_alpha;
-    #endif
+    #endif*/
+    if (dual_source_blending != 0) {
+        oFragBlend = frag.blend * clip_alpha;
+    }
 //#endif
 }
 

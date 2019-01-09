@@ -127,6 +127,6 @@ if (alpha_pass!= 0) {
 //#endif
 }
 
-    return Fragment(color);
+    return Fragment(color, vec4(0.0));
 }
 #endif

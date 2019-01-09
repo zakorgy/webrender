@@ -311,7 +311,7 @@ if (glyph_transform_f!= 0) {
 //#endif
 }
 
-#if defined(WR_FEATURE_DEBUG_OVERDRAW)
+/*#if defined(WR_FEATURE_DEBUG_OVERDRAW)
     oFragColor = WR_DEBUG_OVERDRAW_COLOR;
 #elif defined(WR_FEATURE_DUAL_SOURCE_BLENDING)
     vec4 alpha_mask = mask * alpha;
@@ -319,6 +319,17 @@ if (glyph_transform_f!= 0) {
     oFragBlend = alpha_mask * vColor.a;
 #else
     oFragColor = vColor * mask * alpha;
+#endif*/
+#if defined(WR_FEATURE_DEBUG_OVERDRAW)
+    oFragColor = WR_DEBUG_OVERDRAW_COLOR;
+#else
+    if (dual_source_blending == 0) {
+        oFragColor = vColor * mask * alpha;
+    } else {
+        vec4 alpha_mask = mask * alpha;
+        oFragColor = vColor * alpha_mask;
+        oFragBlend = alpha_mask * vColor.a;
+    }
 #endif
 }
 #endif

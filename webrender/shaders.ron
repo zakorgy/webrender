@@ -39,11 +39,8 @@
         source_name: "brush_image",
         features: [
             "",// [0]
-            "DUAL_SOURCE_BLENDING",// [1]
-            "TEXTURE_2D",// [2]
-            "TEXTURE_2D,DUAL_SOURCE_BLENDING",// [3]
-            "TEXTURE_RECT",// [4]
-            "TEXTURE_RECT,DUAL_SOURCE_BLENDING",// [5]
+            "TEXTURE_2D",// [1]
+            "TEXTURE_RECT",// [2]
         ],
     ),// [5]
     (
@@ -116,7 +113,6 @@
         source_name: "ps_text_run",
         features: [
             "",// [0]
-            "DUAL_SOURCE_BLENDING",// [1]
         ],
     ),// [15]
     (
