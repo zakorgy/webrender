@@ -90,6 +90,19 @@ const DEBUG_DESCRIPTOR_COUNT: usize = 5;
 const DESCRIPTOR_SET_PER_DRAW: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
+// The number of specialization constants in each shader.
+const SPECIALIZATION_CONSTANT_COUNT: usize = 7;
+// Size of a specialization constant variable in bytes.
+const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
+const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
+    &["ALPHA_PASS"],
+    &["COLOR_TARGET"],
+    &["GLYPH_TRANSFORM"],
+    &["YUV_NV12", "YUV_INTERLEAVED"],
+    &["YUV_REC709"],
+    &["DITHERING"],
+    &["DUAL_SOURCE_BLENDING"],
+];
 
 const SAMPLERS: [(usize, &'static str); 11] = [
     (0, "Color0"),
@@ -1144,6 +1157,7 @@ impl<B: hal::Backend> Program<B> {
         memory_types: &Vec<hal::MemoryType>,
         limits: &hal::Limits,
         shader_name: &str,
+        features: &[&str],
         shader_kind: ShaderKind,
         render_pass: &RenderPass<B>,
         frame_count: usize,
@@ -1175,17 +1189,37 @@ impl<B: hal::Backend> Program<B> {
 
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
+        let mut constants = Vec::with_capacity(SPECIALIZATION_CONSTANT_COUNT);
+        let mut specialization_data = vec![0; SPECIALIZATION_CONSTANT_COUNT * SPECIALIZATION_CONSTANT_SIZE];
+        for i in 0 .. SPECIALIZATION_CONSTANT_COUNT {
+            constants.push(hal::pso::SpecializationConstant {
+                id: i as _,
+                range: (SPECIALIZATION_CONSTANT_SIZE * i) as _ .. (SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
+            });
+            for (index, feature) in SPECIALIZATION_FEATURES[i].iter().enumerate() {
+                if features.contains(feature) {
+                    specialization_data[SPECIALIZATION_CONSTANT_SIZE * i] = (index + 1) as u8;
+                }
+            }
+        }
+
         let pipelines = {
             let (vs_entry, fs_entry) = (
                 hal::pso::EntryPoint::<B> {
                     entry: ENTRY_NAME,
                     module: &vs_module,
-                    specialization: hal::pso::Specialization::default(),
+                    specialization: hal::pso::Specialization {
+                        constants: &constants,
+                        data: &specialization_data.as_slice(),
+                    },
                 },
                 hal::pso::EntryPoint::<B> {
                     entry: ENTRY_NAME,
                     module: &fs_module,
-                    specialization: hal::pso::Specialization::default(),
+                    specialization: hal::pso::Specialization {
+                        constants: &constants,
+                        data: &specialization_data.as_slice(),
+                    },
                 },
             );
 
@@ -1228,7 +1262,7 @@ impl<B: hal::Backend> Program<B> {
                         (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
                         (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
                     ];
-                    if shader_name.contains("dual_source_blending") {
+                    if features.contains(&"DUAL_SOURCE_BLENDING") {
                         states.push((SUBPIXEL_DUAL_SOURCE, DepthTest::Off));
                         states.push((SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST));
                     }
@@ -1255,14 +1289,10 @@ impl<B: hal::Backend> Program<B> {
             };
             let format = match shader_kind {
                 ShaderKind::ClipCache => ImageFormat::R8,
-                ShaderKind::Cache(VertexArrayKind::Blur)
-                    if shader_name.contains("_alpha_target") =>
-                {
+                ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => {
                     ImageFormat::R8
                 }
-                ShaderKind::Cache(VertexArrayKind::Scale)
-                    if shader_name.contains("_alpha_target") =>
-                {
+                ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => {
                     ImageFormat::R8
                 }
                 _ => ImageFormat::BGRA8,
@@ -2682,7 +2712,7 @@ impl<B: hal::Backend> Device<B> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
-                if !feature.is_empty() {
+                if feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
                     name.push_str(&format!("_{}", feature.to_lowercase()));
                 }
             }
@@ -2712,6 +2742,7 @@ impl<B: hal::Backend> Device<B> {
             &self.memory_types,
             &self.limits,
             &name,
+            features,
             shader_kind.clone(),
             self.render_pass.as_ref().unwrap(),
             self.frame_count,

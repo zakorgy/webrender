@@ -3,16 +3,14 @@
         name: "cs_scale",
         source_name: "cs_scale",
         features: [
-            "ALPHA_TARGET",// [0]
-            "COLOR_TARGET",// [1]
+            "",// [0]
         ],
     ),// [0]
     (
         name: "cs_blur",
         source_name: "cs_blur",
         features: [
-            "ALPHA_TARGET",// [0]
-            "COLOR_TARGET",// [1]
+            "",// [0]
         ],
     ),// [1]
     (
@@ -34,7 +32,6 @@
         source_name: "brush_solid",
         features: [
             "",// [0]
-            "ALPHA_PASS",// [1]
         ],
     ),// [4]
     (
@@ -42,14 +39,8 @@
         source_name: "brush_image",
         features: [
             "",// [0]
-            "ALPHA_PASS",// [1]
-            "ALPHA_PASS,DUAL_SOURCE_BLENDING",// [2]
-            "TEXTURE_2D",// [3]
-            "TEXTURE_2D,ALPHA_PASS",// [4]
-            "TEXTURE_2D,ALPHA_PASS,DUAL_SOURCE_BLENDING",// [5]
-            "TEXTURE_RECT",// [6]
-            "TEXTURE_RECT,ALPHA_PASS",// [7]
-            "TEXTURE_RECT,ALPHA_PASS,DUAL_SOURCE_BLENDING",// [8]
+            "TEXTURE_2D",// [1]
+            "TEXTURE_RECT",// [2]
         ],
     ),// [5]
     (
@@ -57,7 +48,6 @@
         source_name: "brush_blend",
         features: [
             "",// [0]
-            "ALPHA_PASS",// [1]
         ],
     ),// [6]
     (
@@ -65,49 +55,15 @@
         source_name: "brush_mix_blend",
         features: [
             "",// [0]
-            "ALPHA_PASS",// [1]
         ],
     ),// [7]
     (
         name: "brush_yuv_image",
         source_name: "brush_yuv_image",
         features: [
-            "YUV_NV12,YUV_REC601",// [0]
-            "YUV_NV12,YUV_REC709",// [1]
-            "YUV_PLANAR,YUV_REC601",// [2]
-            "YUV_PLANAR,YUV_REC709",// [3]
-            "YUV_INTERLEAVED,YUV_REC601",// [4]
-            "YUV_INTERLEAVED,YUV_REC709",// [5]
-            "YUV_NV12,YUV_REC601,ALPHA_PASS",// [6]
-            "YUV_NV12,YUV_REC709,ALPHA_PASS",// [7]
-            "YUV_PLANAR,YUV_REC601,ALPHA_PASS",// [8]
-            "YUV_PLANAR,YUV_REC709,ALPHA_PASS",// [9]
-            "YUV_INTERLEAVED,YUV_REC601,ALPHA_PASS",// [10]
-            "YUV_INTERLEAVED,YUV_REC709,ALPHA_PASS",// [11]
-            "TEXTURE_2D,YUV_NV12,YUV_REC601", // [12]
-            "TEXTURE_2D,YUV_NV12,YUV_REC709", // [13]
-            "TEXTURE_2D,YUV_PLANAR,YUV_REC601", // [14]
-            "TEXTURE_2D,YUV_PLANAR,YUV_REC709", // [15]
-            "TEXTURE_2D,YUV_INTERLEAVED,YUV_REC601", // [16]
-            "TEXTURE_2D,YUV_INTERLEAVED,YUV_REC709", // [17]
-            "TEXTURE_2D,YUV_NV12,YUV_REC601,ALPHA_PASS", // [18]
-            "TEXTURE_2D,YUV_NV12,YUV_REC709,ALPHA_PASS", // [19]
-            "TEXTURE_2D,YUV_PLANAR,YUV_REC601,ALPHA_PASS", // [20]
-            "TEXTURE_2D,YUV_PLANAR,YUV_REC709,ALPHA_PASS", // [21]
-            "TEXTURE_2D,YUV_INTERLEAVED,YUV_REC601,ALPHA_PASS", // [22]
-            "TEXTURE_2D,YUV_INTERLEAVED,YUV_REC709,ALPHA_PASS", // [23]
-            "TEXTURE_RECT,YUV_NV12,YUV_REC601", // [24]
-            "TEXTURE_RECT,YUV_NV12,YUV_REC709", // [25]
-            "TEXTURE_RECT,YUV_PLANAR,YUV_REC601", // [26]
-            "TEXTURE_RECT,YUV_PLANAR,YUV_REC709", // [27]
-            "TEXTURE_RECT,YUV_INTERLEAVED,YUV_REC601", // [28]
-            "TEXTURE_RECT,YUV_INTERLEAVED,YUV_REC709", // [29]
-            "TEXTURE_RECT,YUV_NV12,YUV_REC601,ALPHA_PASS", // [30]
-            "TEXTURE_RECT,YUV_NV12,YUV_REC709,ALPHA_PASS", // [31]
-            "TEXTURE_RECT,YUV_PLANAR,YUV_REC601,ALPHA_PASS", // [32]
-            "TEXTURE_RECT,YUV_PLANAR,YUV_REC709,ALPHA_PASS", // [33]
-            "TEXTURE_RECT,YUV_INTERLEAVED,YUV_REC601,ALPHA_PASS", // [34]
-            "TEXTURE_RECT,YUV_INTERLEAVED,YUV_REC709,ALPHA_PASS", // [35]
+            "",// [0]
+            "TEXTURE_2D",// [1]
+            "TEXTURE_RECT",// [2]
         ],
     ),// [8]
     (
@@ -115,9 +71,6 @@
         source_name: "brush_radial_gradient",
         features: [
             "",// [0]
-            "ALPHA_PASS",// [1]
-            "DITHERING",// [2]
-            "DITHERING,ALPHA_PASS",// [3]
         ],
     ),// [9]
     (
@@ -125,9 +78,6 @@
         source_name: "brush_linear_gradient",
         features: [
             "",// [0]
-            "ALPHA_PASS",// [1]
-            "DITHERING",// [2]
-            "DITHERING,ALPHA_PASS",// [3]
         ],
     ),// [10]
     (
@@ -163,9 +113,6 @@
         source_name: "ps_text_run",
         features: [
             "",// [0]
-            "GLYPH_TRANSFORM",// [1]
-            "DUAL_SOURCE_BLENDING",// [2]
-            "DUAL_SOURCE_BLENDING,GLYPH_TRANSFORM",// [3]
         ],
     ),// [15]
     (
