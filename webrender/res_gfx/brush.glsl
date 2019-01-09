@@ -67,9 +67,10 @@ void main(void) {
         //           items. For now, just ensure it has no
         //           effect. We can tidy this up as we move
         //           more items to be brush shaders.
-#ifdef WR_FEATURE_ALPHA_PASS
-        init_transform_vs(vec4(vec2(-1.0e16), vec2(1.0e16)));
-#endif
+
+        if (alpha_pass) {
+                init_transform_vs(vec4(vec2(-1.0e16), vec2(1.0e16)));
+        }
     } else {
         bvec4 edge_mask = notEqual(edge_flags & ivec4(1, 2, 4, 8), ivec4(0));
 
@@ -90,13 +91,14 @@ void main(void) {
     //           shaders that don't clip in the future,
     //           but it's reasonable to assume that one
     //           implies the other, for now.
-#ifdef WR_FEATURE_ALPHA_PASS
-    write_clip(
-        vi.world_pos,
-        vi.snap_offset,
-        clip_area
-    );
-#endif
+
+    if (alpha_pass) {
+        write_clip(
+            vi.world_pos,
+            vi.snap_offset,
+            clip_area
+        );
+    }
 
     // Run the specific brush VS code to write interpolators.
     brush_vs(
@@ -117,9 +119,7 @@ void main(void) {
 
 struct Fragment {
     vec4 color;
-#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
     vec4 blend;
-#endif
 };
 
 Fragment brush_fs();
@@ -131,16 +131,16 @@ void main(void) {
     // Run the specific brush FS code to output the color.
     Fragment frag = brush_fs();
 
-#ifdef WR_FEATURE_ALPHA_PASS
+if (alpha_pass) {
     // Apply the clip mask
     float clip_alpha = do_clip();
 
     frag.color *= clip_alpha;
 
-    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+    if (dual_source_blending) {
         oFragBlend = frag.blend * clip_alpha;
-    #endif
-#endif
+    }
+}
 
     // TODO(gw): Handle pre-multiply common code here as required.
     oFragColor = frag.color;

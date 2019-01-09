@@ -8,9 +8,7 @@
 #extension GL_OES_EGL_image_external_essl3 : require
 #endif
 
-#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
 #extension GL_ARB_explicit_attrib_location : require
-#endif
 
 #include base
 
@@ -49,12 +47,8 @@
     // Uniform inputs
 
     // Fragment shader outputs
-    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
-        layout(location = 0, index = 0) out vec4 oFragColor;
-        layout(location = 0, index = 1) out vec4 oFragBlend;
-    #else
-        out vec4 oFragColor;
-    #endif
+    layout(location = 0, index = 0) out vec4 oFragColor;
+    layout(location = 0, index = 1) out vec4 oFragBlend;
 
     #define EPSILON                     0.0001
 
@@ -136,9 +130,7 @@ uniform sampler2DArray sColor1;
 uniform sampler2DArray sColor2;
 #endif
 
-#ifdef WR_FEATURE_DITHERING
 uniform sampler2D sDither;
-#endif
 
 //======================================================================================
 // Interpolator definitions
