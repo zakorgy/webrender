@@ -1137,7 +1137,7 @@ impl<B: hal::Backend> Program<B> {
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
         let mut specialization_constants = Vec::new();
-        for i in 0 .. 5 {
+        for i in 0 .. 7 {
             specialization_constants.push(
                 hal::pso::SpecializationConstant {
                     id: i,
@@ -1145,11 +1145,12 @@ impl<B: hal::Backend> Program<B> {
                 },
             );
         }
+
         let data = {
             let alpha_pass = if features.contains(&"ALPHA_PASS") {1} else {0};
             let color_target = if features.contains(&"COLOR_TARGET") {1} else {0};
             let glyph_transform = if features.contains(&"GLYPH_TRANSFORM") {1} else {0};
-            let yuv_color: u32 = if features.contains(&"YUV_NV12") { 1 } else if features.contains(&"YUV_INTERLEAVED") { 2 } else { 0 };
+            let yuv_format: u32 = if features.contains(&"YUV_NV12") { 1 } else if features.contains(&"YUV_INTERLEAVED") { 2 } else { 0 };
             let yuv_color_space: u32 = if features.contains(&"YUV_REC709") { 1 } else { 0 };
             let dithering: u32 = if features.contains(&"DITHERING") {1} else {0};
             let dual_src_blending: u32 = if features.contains(&"DUAL_SOURCE_BLENDING") {1} else {0};
@@ -1157,7 +1158,7 @@ impl<B: hal::Backend> Program<B> {
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(alpha_pass as u32) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(color_target as u32) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(glyph_transform as u32) });
-            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color) });
+            data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_format) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(yuv_color_space) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(dithering) });
             data.extend_from_slice(&unsafe { mem::transmute::<_, [u8; 4]>(dual_src_blending) });
