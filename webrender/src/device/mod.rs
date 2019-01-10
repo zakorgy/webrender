@@ -55,7 +55,7 @@ pub struct Capabilities {
     pub supports_multisampling: bool,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Eq, PartialEq, Hash, Debug, Copy, Clone)]
 pub enum ShaderKind {
     Primitive,
     Cache(VertexArrayKind),
@@ -72,7 +72,7 @@ pub enum ShaderKind {
     DebugFont,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Eq, PartialEq, Hash, Debug, Copy, Clone)]
 pub enum VertexArrayKind {
     Primitive,
     Blur,
