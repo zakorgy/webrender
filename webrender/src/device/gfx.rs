@@ -1096,7 +1096,6 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
 
 pub(crate) struct Program<B: hal::Backend> {
     pub bindings_map: HashMap<String, u32>,
-    pub pipeline_layout: B::PipelineLayout,
     pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
     pub vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
     pub index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
@@ -1111,7 +1110,7 @@ impl<B: hal::Backend> Program<B> {
     pub fn create(
         pipeline_requirements: PipelineRequirements,
         device: &B::Device,
-        pipeline_layout: B::PipelineLayout,
+        pipeline_layout: &B::PipelineLayout,
         memory_types: &Vec<hal::MemoryType>,
         limits: &hal::Limits,
         shader_name: &str,
@@ -1340,7 +1339,6 @@ impl<B: hal::Backend> Program<B> {
 
         Program {
             bindings_map,
-            pipeline_layout,
             pipelines,
             vertex_buffer,
             index_buffer,
@@ -1441,6 +1439,7 @@ impl<B: hal::Backend> Program<B> {
         depth_test: DepthTest,
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
+        pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
     ) -> hal::command::Submit<B, hal::Graphics, hal::command::OneShot, hal::command::Primary> {
         let mut cmd_buffer = cmd_pool.acquire_command_buffer(false);
         let vertex_buffer = &self.vertex_buffer[next_id];
@@ -1458,7 +1457,7 @@ impl<B: hal::Backend> Program<B> {
             &self.pipelines.get(&(blend_state, depth_test)).expect(&format!("The blend state {:?} with depth test {:?} not found for {} program!", blend_state, depth_test, self.shader_name)));
 
         cmd_buffer.bind_graphics_descriptor_sets(
-            &self.pipeline_layout,
+            &pipeline_layouts[&self.shader_kind],
             0,
             vec![desc_pools.get(&self.shader_kind), desc_pools_global.get(&self.shader_kind), desc_pools_sampler.get(&self.shader_kind)],
             &[],
@@ -1546,7 +1545,6 @@ impl<B: hal::Backend> Program<B> {
         for mut locals_buffer in self.locals_buffer {
             locals_buffer.deinit(device);
         }
-        device.destroy_pipeline_layout(self.pipeline_layout);
         for pipeline in self.pipelines.drain() {
             device.destroy_graphics_pipeline(pipeline.1);
         }
@@ -1916,6 +1914,7 @@ pub struct Device<B: hal::Backend> {
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: HashMap<String, PipelineRequirements>,
+    pipeline_layouts: FastHashMap<ShaderKind, B::PipelineLayout>
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -2114,6 +2113,7 @@ impl<B: hal::Backend> Device<B> {
             image_available_semaphore,
             render_finished_semaphore,
             pipeline_requirements,
+            pipeline_layouts: FastHashMap::default(),
         }
     }
 
@@ -2467,18 +2467,23 @@ impl<B: hal::Backend> Device<B> {
                 }
             }
         }
-        let program = Program::create(
-            self.pipeline_requirements.get(&name)
-                    .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
-            &self.device,
-            self.device.create_pipeline_layout(
+
+        if !self.pipeline_layouts.contains_key(shader_kind) {
+            let layout = self.device.create_pipeline_layout(
                 vec![
                     self.descriptor_pools[self.next_id].get_layout(shader_kind),
                     self.descriptor_pools_global.get_layout(shader_kind),
                     self.descriptor_pools_sampler.get_layout(shader_kind),
                 ],
                 &[]
-            ).expect("create_pipeline_layout failed"),
+            ).expect("create_pipeline_layout failed");
+            self.pipeline_layouts.insert(shader_kind.clone(), layout);
+        };
+        let program = Program::create(
+            self.pipeline_requirements.get(&name)
+                    .expect(&format!("Can't load pipeline data for: {}!", name)).clone(),
+            &self.device,
+            &self.pipeline_layouts[shader_kind],
             &self.memory_types,
             &self.limits,
             &name,
@@ -2620,6 +2625,7 @@ impl<B: hal::Backend> Device<B> {
                 self.current_depth_test,
                 self.scissor_rect,
                 self.next_id,
+                &self.pipeline_layouts,
             )
         };
 
@@ -4174,6 +4180,9 @@ impl<B: hal::Backend> Device<B> {
         for (_, (vs_module, fs_module)) in self.shader_modules {
             self.device.destroy_shader_module(vs_module);
             self.device.destroy_shader_module(fs_module);
+        }
+        for (_, layout) in self.pipeline_layouts {
+            self.device.destroy_pipeline_layout(layout);
         }
         self.render_pass.unwrap().deinit(&self.device);
         for fence in self.frame_fence {
