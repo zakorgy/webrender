@@ -70,10 +70,10 @@ env_logger = "0.5"
 euclid = "0.19"
 gfx-backend-empty = { git = "https://github.com/gfx-rs/gfx.git" }
 gleam = { version = "0.6", optional = true}
-glutin = { version = "0.18", optional = true }
+glutin = { version = "0.19", optional = true }
 rayon = "1"
 webrender = { path = "../webrender" }
-winit = "0.17"
+winit = "0.18"
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx12]
 git = "https://github.com/gfx-rs/gfx.git"
