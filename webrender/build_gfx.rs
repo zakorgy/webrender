@@ -198,7 +198,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let reader = BufReader::new(file);
     for line in reader.lines() {
         let mut l = line.unwrap();
-        let trimmed = l.trim_left();
+        let trimmed = l.trim_start();
 
         if trimmed.contains("#define WR_FEATURE_TEXTURE_2D") {
             color_texture_kind = "texture2D";
@@ -495,7 +495,7 @@ fn add_attribute_descriptors(
     vertex_offset: &mut u32,
 ) {
     let def = split_code(line);
-    let var_name = def[2].trim_right_matches(';');
+    let var_name = def[2].trim_end_matches(';');
     let (format, offset) = match def[1] {
         "float" => (Format::Rg32Float, 4),
         "int" => (Format::R32Int, 4),
@@ -645,7 +645,7 @@ fn compile_glsl_to_spirv(file_name_vector: Vec<String>, out_dir: &str, shader_fi
     for mut file_name in file_name_vector {
         let file_path = Path::new(&out_dir).join(&file_name);
         if let Some(req) = process_glsl_for_spirv(&file_path, &file_name) {
-            requirements.insert(file_name.trim_right_matches(".vert").to_owned(), req);
+            requirements.insert(file_name.trim_end_matches(".vert").to_owned(), req);
         }
         file_name.push_str(".spv");
         let spirv_file_path = Path::new(&out_dir).join(&file_name);
