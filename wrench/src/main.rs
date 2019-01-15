@@ -325,7 +325,25 @@ fn make_window(
                 .with_multitouch()
                 .with_dimensions(LogicalSize::new(size.width as f64, size.height as f64));
 
-            let init = |context: &glutin::GlContext| {
+            let init = |context: &glutin::GlWindow| {
+                unsafe {
+                    context
+                        .make_current()
+                        .expect("unable to make context current!");
+                }
+
+                match context.get_api() {
+                    glutin::Api::OpenGl => unsafe {
+                        gl::GlFns::load_with(|symbol| context.get_proc_address(symbol) as *const _)
+                    },
+                    glutin::Api::OpenGlEs => unsafe {
+                        gl::GlesFns::load_with(|symbol| context.get_proc_address(symbol) as *const _)
+                    },
+                    glutin::Api::WebGl => unimplemented!(),
+                }
+            };
+
+            let _init_angle = |context: &angle::Context| {
                 unsafe {
                     context
                         .make_current()
@@ -344,11 +362,11 @@ fn make_window(
             };
 
             if angle {
-                let (window, context) = angle::Context::with_window(
+                let (_window, _context) = angle::Context::with_window(
                     window_builder, context_builder, events_loop
                 ).unwrap();
-                let gl = init(&context);
-                WindowWrapper::Angle(window, context, gl)
+                let gl = _init_angle(&_context);
+                WindowWrapper::Angle(_window, _context, gl)
             } else {
                 let window = glutin::GlWindow::new(window_builder, context_builder, events_loop)
                     .unwrap();
