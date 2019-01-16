@@ -28,6 +28,7 @@ use super::{ShaderKind,VertexArrayKind, ExternalTexture, FrameId, TextureSlot, T
 use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat};
 use super::{Texture, TextureDrawTarget, TextureReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, SharedDepthTarget, ProgramCache};
 use super::super::shader_source;
+use super::pipeline_profile::{PipelineProfiler};
 use tiling::LineDecorationJob;
 use vertex_types::*;
 
@@ -1144,6 +1145,7 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &RenderPass<B>,
         frame_count: usize,
         shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
+        pipeline_profiler: &mut Option<PipelineProfiler>,
     ) -> Program<B> {
         if !shader_modules.contains_key(shader_name) {
             let vs_file = format!("{}.vert.spv", shader_name);
@@ -1169,6 +1171,10 @@ impl<B: hal::Backend> Program<B> {
         }
 
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
+
+        if pipeline_profiler.is_some() {
+            pipeline_profiler.as_mut().unwrap().start(shader_name.to_owned());
+        }
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -1310,6 +1316,10 @@ impl<B: hal::Backend> Program<B> {
                 .zip(pipelines.map(|pipeline| pipeline.unwrap()))
                 .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
         };
+
+        if pipeline_profiler.is_some() {
+            pipeline_profiler.as_mut().unwrap().end();
+        }
 
         let vertex_buffer_stride = match shader_kind {
             #[cfg(feature = "debug_renderer")]
@@ -2027,6 +2037,7 @@ pub struct Device<B: hal::Backend> {
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: HashMap<String, PipelineRequirements>,
     pipeline_layouts: FastHashMap<ShaderKind, B::PipelineLayout>,
+    pipeline_profiler: Option<PipelineProfiler>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -2145,6 +2156,10 @@ impl<B: hal::Backend> Device<B> {
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
+        use std::env;
+        let out_dir = env::current_dir().expect("current directory not found");
+        let pipeline_profiler = Some(PipelineProfiler::new(PathBuf::from(&out_dir).join("dx12_pipeline_load_times.ron")));
+
         Device {
             device,
             limits,
@@ -2212,6 +2227,7 @@ impl<B: hal::Backend> Device<B> {
             render_finished_semaphore,
             pipeline_requirements,
             pipeline_layouts: FastHashMap::default(),
+            pipeline_profiler,
         }
     }
 
@@ -2656,6 +2672,7 @@ impl<B: hal::Backend> Device<B> {
             self.render_pass.as_ref().unwrap(),
             self.frame_count,
             &mut self.shader_modules,
+            &mut self.pipeline_profiler,
         );
         self.bind_samplers(&program);
 
@@ -4473,6 +4490,10 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn deinit(self) {
         unsafe {
+            if let Some(p) = self.pipeline_profiler {
+                p.write_out();
+            }
+
             for command_pool in self.command_pool {
                 self.device.destroy_command_pool(command_pool.into_raw());
             }

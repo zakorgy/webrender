@@ -40,6 +40,8 @@ they're nestable.
 [notifier]: renderer/struct.Renderer.html#method.set_render_notifier
 */
 
+#![feature(duration_float)]
+
 #[macro_use]
 extern crate bitflags;
 #[macro_use]

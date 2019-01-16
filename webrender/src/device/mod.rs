@@ -28,6 +28,7 @@ cfg_if! {
         pub use self::query_gl as query;
     } else {
         mod gfx;
+        mod pipeline_profile;
         pub mod query_gfx;
 
         pub use self::gfx::*;
