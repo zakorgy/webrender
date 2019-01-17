@@ -2168,7 +2168,7 @@ impl<B: hal::Backend> Device<B> {
 
         use std::env;
         let out_dir = env::current_dir().expect("current directory not found");
-        let pipeline_profiler = Some(PipelineProfiler::new(PathBuf::from(&out_dir).join("dx12_pipeline_load_times.ron")));
+        let pipeline_profiler = Some(PipelineProfiler::new(PathBuf::from(&out_dir).join("cache_dx12_pipeline_load_times.ron")));
 
         let pipeline_cache = if let Some(ref path) = cache_path {
             Self::load_pipeline_cache(
@@ -4557,15 +4557,17 @@ impl<B: hal::Backend> Device<B> {
                 };
                 self.device.destroy_pipeline_cache(pipeline_cache);
 
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(&self.cache_path.as_ref().unwrap())
-                    .expect("File open/creation failed");
+                if data.len() > 0 {
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(&self.cache_path.as_ref().unwrap())
+                        .expect("File open/creation failed");
 
-                println!("##### Writing out cache into {:?}", &self.cache_path.as_ref().unwrap());
-                file.write(&data).expect("File write failed");
-                println!("##### Writing done");
+                    println!("##### Writing out cache into {:?}", &self.cache_path.as_ref().unwrap());
+                    file.write(&data).expect("File write failed");
+                    println!("##### Writing done");
+                }
             } else {
                 if let Some(cache) = self.pipeline_cache {
                     self.device.destroy_pipeline_cache(cache);
