@@ -8,6 +8,8 @@
 )]
 
 extern crate app_units;
+#[cfg(feature = "gfx-hal")]
+extern crate dirs;
 extern crate euclid;
 extern crate webrender;
 extern crate winit;
@@ -152,9 +154,9 @@ impl Window {
 
             #[cfg(feature = "gfx-hal")]
             let init = {
-                use std::env;
-                let out_dir = env::current_dir().expect("current directory not found");
-                let cache_path = Some(PathBuf::from(&out_dir).join("pipeline_cache.bin"));
+                use std::path::PathBuf;
+                let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
+                let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
 
                 webrender::DeviceInit {
                     adapter,

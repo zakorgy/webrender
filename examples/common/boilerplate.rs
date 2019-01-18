@@ -7,6 +7,8 @@
     allow(dead_code, unused_imports)
 )]
 
+#[cfg(feature = "gfx-hal")]
+extern crate dirs;
 extern crate env_logger;
 extern crate euclid;
 #[cfg(feature = "dx12")]
@@ -190,9 +192,8 @@ pub fn main_wrapper<E: Example>(
 
     #[cfg(feature = "gfx-hal")]
     let init = {
-        use std::env;
-        let out_dir = env::current_dir().expect("current directory not found");
-        let cache_path = Some(PathBuf::from(&out_dir).join("pipeline_cache.bin"));
+        let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
+        let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
 
         webrender::DeviceInit {
             adapter,
