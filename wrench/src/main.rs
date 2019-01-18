@@ -20,6 +20,8 @@ extern crate core_foundation;
 #[cfg(target_os = "macos")]
 extern crate core_graphics;
 extern crate crossbeam;
+#[cfg(feature = "gfx")]
+extern crate dirs;
 #[cfg(target_os = "windows")]
 extern crate dwrote;
 #[cfg(feature = "env_logger")]
@@ -579,9 +581,8 @@ fn main() {
 
     #[cfg(feature = "gfx")]
     let init = {
-        use std::env;
-        let out_dir = env::current_dir().expect("current directory not found");
-        let cache_path = Some(PathBuf::from(&out_dir).join("pipeline_cache.bin"));
+        let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
+        let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
         webrender::DeviceInit {
             adapter: instance.enumerate_adapters().remove(0),
             surface: instance.create_surface(window.get_window()),
