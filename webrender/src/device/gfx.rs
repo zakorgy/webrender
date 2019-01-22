@@ -2098,9 +2098,32 @@ impl<B: hal::Backend> Device<B> {
         let limits = adapter.physical_device.limits();
         let max_texture_size = 4400u32; // TODO use limits after it points to the correct texture size
 
-        let (device, queue_group) = adapter
-            .open_with::<_, hal::Graphics>(1, |family| surface.supports_queue_family(family))
-            .unwrap();
+        let (device, queue_group) = {
+            use hal::Capability;
+            use hal::queue::QueueFamily;
+
+            let family = adapter
+                .queue_families
+                .iter()
+                .find(|family| {
+                    hal::Graphics::supported_by(family.queue_type())
+                        && surface.supports_queue_family(&family)
+                })
+                .unwrap();
+
+            let priorities = vec![1.0];
+            let (id, families) = (family.id(), [(family, priorities.as_slice())]);
+            let hal::Gpu { device, mut queues } = unsafe {
+                adapter
+                    .physical_device
+                    .open(&families, hal::Features::DUAL_SRC_BLENDING)
+                    .unwrap_or_else( |_| {
+                        adapter.physical_device.open(&families, hal::Features::empty()).unwrap()
+                    }
+                )
+            };
+            (device, queues.take(id).unwrap())
+        };
 
         let (
             swap_chain,
