@@ -4188,6 +4188,8 @@ impl<B: hal::Backend> Renderer<B>
     fn set_blend(&mut self, mut blend: bool, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
+            #[cfg(not(feature = "gleam"))]
+            self.device.set_blend_mode_show_overdraw();
             blend = true
         }
         self.device.set_blend(blend)
