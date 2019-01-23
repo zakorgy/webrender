@@ -293,16 +293,16 @@ void main(void) {
         alpha *= float(all(greaterThanEqual(vUvClip, vec4(0.0))));
     }
 
-#if defined(WR_FEATURE_DEBUG_OVERDRAW)
-    oFragColor = WR_DEBUG_OVERDRAW_COLOR;
-#else
-    if (!dual_source_blending) {
-        oFragColor = vColor * mask * alpha;
+    if (debug_overdraw) {
+        oFragColor = WR_DEBUG_OVERDRAW_COLOR;
     } else {
-        vec4 alpha_mask = mask * alpha;
-        oFragColor = vColor * alpha_mask;
-        oFragBlend = alpha_mask * vColor.a;
+        if (!dual_source_blending) {
+            oFragColor = vColor * mask * alpha;
+        } else {
+            vec4 alpha_mask = mask * alpha;
+            oFragColor = vColor * alpha_mask;
+            oFragBlend = alpha_mask * vColor.a;
+        }
     }
-#endif
 }
 #endif

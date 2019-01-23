@@ -125,25 +125,25 @@ struct Fragment {
 Fragment brush_fs();
 
 void main(void) {
-#ifdef WR_FEATURE_DEBUG_OVERDRAW
-    oFragColor = WR_DEBUG_OVERDRAW_COLOR;
-#else
-    // Run the specific brush FS code to output the color.
-    Fragment frag = brush_fs();
+    if (debug_overdraw) {
+        oFragColor = WR_DEBUG_OVERDRAW_COLOR;
+    } else {
+        // Run the specific brush FS code to output the color.
+        Fragment frag = brush_fs();
 
-if (alpha_pass) {
-    // Apply the clip mask
-    float clip_alpha = do_clip();
+        if (alpha_pass) {
+            // Apply the clip mask
+            float clip_alpha = do_clip();
 
-    frag.color *= clip_alpha;
+            frag.color *= clip_alpha;
 
-    if (dual_source_blending) {
-        oFragBlend = frag.blend * clip_alpha;
+            if (dual_source_blending) {
+                oFragBlend = frag.blend * clip_alpha;
+            }
+        }
+
+        // TODO(gw): Handle pre-multiply common code here as required.
+        oFragColor = frag.color;
     }
-}
-
-    // TODO(gw): Handle pre-multiply common code here as required.
-    oFragColor = frag.color;
-#endif
 }
 #endif

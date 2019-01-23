@@ -91,7 +91,7 @@ const DESCRIPTOR_SET_PER_DRAW: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
 // The number of specialization constants in each shader.
-const SPECIALIZATION_CONSTANT_COUNT: usize = 7;
+const SPECIALIZATION_CONSTANT_COUNT: usize = 8;
 // Size of a specialization constant variable in bytes.
 const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
 const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
@@ -102,6 +102,7 @@ const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
     &["YUV_REC709"],
     &["DITHERING"],
     &["DUAL_SOURCE_BLENDING"],
+    &["DEBUG_OVERDRAW"],
 ];
 
 const SAMPLERS: [(usize, &'static str); 11] = [
@@ -1231,7 +1232,7 @@ impl<B: hal::Backend> Program<B> {
                 fragment: Some(fs_entry),
             };
 
-            let pipeline_states = match shader_kind {
+            let mut pipeline_states = match shader_kind {
                 ShaderKind::Cache(VertexArrayKind::Scale) => vec![
                     (BlendState::Off, DepthTest::Off),
                     (BlendState::MULTIPLY, DepthTest::Off),
@@ -1287,6 +1288,11 @@ impl<B: hal::Backend> Program<B> {
                     (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
                 ],
             };
+
+            if features.contains(&"DEBUG_OVERDRAW") {
+                pipeline_states.push((OVERDRAW, LESS_EQUAL_TEST));
+            }
+
             let format = match shader_kind {
                 ShaderKind::ClipCache => ImageFormat::R8,
                 ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => {
