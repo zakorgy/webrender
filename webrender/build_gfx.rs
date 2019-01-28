@@ -70,9 +70,12 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
     fn parse_shader_source(source: &str, shaders: &HashMap<String, String>, output: &mut String) {
         for line in source.lines() {
             if line.starts_with(SHADER_IMPORT) {
-                let imports = line[SHADER_IMPORT.len() ..].split(",");
+                let mut imports = line[SHADER_IMPORT.len() ..].split(",");
                 // For each import, get the source, and recurse.
-                for import in imports {
+                for mut import in imports {
+                    if import == "base" {
+                        import = "base_gfx";
+                    }
                     if let Some(include) = get_shader_source(import, shaders) {
                         parse_shader_source(&include, shaders, output);
                     }

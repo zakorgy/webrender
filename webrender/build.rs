@@ -63,15 +63,8 @@ fn main() {
     let shaders_file = Path::new(&out_dir).join("shaders.rs");
     let mut glsl_files = vec![];
 
-    #[cfg(feature = "gleam")]
     println!("cargo:rerun-if-changed=res");
-    #[cfg(not(feature = "gleam"))]
-    println!("cargo:rerun-if-changed=res_gfx");
-
-    #[cfg(feature = "gleam")]
     let res_dir = Path::new("res");
-    #[cfg(not(feature = "gleam"))]
-    let res_dir = Path::new("res_gfx");
     for entry in read_dir(res_dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
