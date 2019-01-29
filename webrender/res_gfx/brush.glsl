@@ -119,7 +119,9 @@ void main(void) {
 
 struct Fragment {
     vec4 color;
-    vec4 blend;
+#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+     vec4 blend;
+#endif
 };
 
 Fragment brush_fs();
@@ -137,9 +139,9 @@ void main(void) {
 
             frag.color *= clip_alpha;
 
-            if (dual_source_blending) {
+            #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
                 oFragBlend = frag.blend * clip_alpha;
-            }
+            #endif
         }
 
         // TODO(gw): Handle pre-multiply common code here as required.

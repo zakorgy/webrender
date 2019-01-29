@@ -52,6 +52,6 @@ Fragment brush_fs() {
         color *= init_transform_fs(vLocalPos);
     }
 
-    return Fragment(color, vec4(0.0));
+    return Fragment(color);
 }
 #endif

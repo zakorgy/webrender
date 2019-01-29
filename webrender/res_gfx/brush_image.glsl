@@ -233,9 +233,9 @@ if (alpha_pass) {
     vec4 alpha_mask = texel * alpha;
     frag.color = vColor * alpha_mask;
 
-    if (dual_source_blending) {
+    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
         frag.blend = alpha_mask * vColor.a;
-    }
+    #endif
 } else {
     frag.color = texel;
 }

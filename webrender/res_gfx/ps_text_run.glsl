@@ -296,13 +296,13 @@ void main(void) {
     if (debug_overdraw) {
         oFragColor = WR_DEBUG_OVERDRAW_COLOR;
     } else {
-        if (!dual_source_blending) {
-            oFragColor = vColor * mask * alpha;
-        } else {
-            vec4 alpha_mask = mask * alpha;
-            oFragColor = vColor * alpha_mask;
-            oFragBlend = alpha_mask * vColor.a;
-        }
+    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+        vec4 alpha_mask = mask * alpha;
+        oFragColor = vColor * alpha_mask;
+        oFragBlend = alpha_mask * vColor.a;
+    #else
+        oFragColor = vColor * mask * alpha;
+    #endif
     }
 }
 #endif

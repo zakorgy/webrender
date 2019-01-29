@@ -41,6 +41,9 @@
             "",// [0]
             "TEXTURE_2D",// [1]
             "TEXTURE_RECT",// [2]
+            "DUAL_SOURCE_BLENDING",// [3]
+            "TEXTURE_2D,DUAL_SOURCE_BLENDING",// [4]
+            "TEXTURE_RECT,DUAL_SOURCE_BLENDING",// [5]
         ],
     ),// [5]
     (
@@ -113,6 +116,7 @@
         source_name: "ps_text_run",
         features: [
             "",// [0]
+            "DUAL_SOURCE_BLENDING",// [1]
         ],
     ),// [15]
     (

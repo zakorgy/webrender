@@ -209,10 +209,10 @@ Fragment brush_fs() {
     vec4 Cs = textureLod(sPrevPassColor, vSrcUv, 0.0);
 
     if (Cb.a == 0.0) {
-        return Fragment(Cs, vec4(0.0));
+        return Fragment(Cs);
     }
     if (Cs.a == 0.0) {
-        return Fragment(vec4(0.0),vec4(0.0));
+        return Fragment(vec4(0.0));
     }
 
     // The mix-blend-mode functions assume no premultiplied alpha
@@ -283,6 +283,6 @@ Fragment brush_fs() {
 
     result.rgb *= result.a;
 
-    return Fragment(result, vec4(0.0));
+    return Fragment(result);
 }
 #endif

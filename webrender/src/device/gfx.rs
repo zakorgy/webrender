@@ -91,7 +91,7 @@ const DESCRIPTOR_SET_PER_DRAW: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
 // The number of specialization constants in each shader.
-const SPECIALIZATION_CONSTANT_COUNT: usize = 8;
+const SPECIALIZATION_CONSTANT_COUNT: usize = 7;
 // Size of a specialization constant variable in bytes.
 const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
 const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
@@ -101,8 +101,11 @@ const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
     &["YUV_NV12", "YUV_INTERLEAVED"],
     &["YUV_REC709"],
     &["DITHERING"],
-    &["DUAL_SOURCE_BLENDING"],
     &["DEBUG_OVERDRAW"],
+];
+
+const NON_SPECIALIZATION_FEATURES: &'static [&'static str] = &[
+    "TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"
 ];
 
 const SAMPLERS: [(usize, &'static str); 11] = [
@@ -2741,7 +2744,7 @@ impl<B: hal::Backend> Device<B> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
-                if feature == "TEXTURE_RECT" || feature == "TEXTURE_2D" {
+                if NON_SPECIALIZATION_FEATURES.iter().any(|f| *f == feature) {
                     name.push_str(&format!("_{}", feature.to_lowercase()));
                 }
             }
