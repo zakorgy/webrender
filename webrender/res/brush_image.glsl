@@ -9,8 +9,10 @@
 
 varying vec2 vLocalPos;
 
-// Interpolated uv coordinates in xy, and layer in z.
-varying vec3 vUv;
+// Interpolated UV coordinates to sample.
+varying vec2 vUv;
+// X = layer index to sample, Y = flag to allow perspective interpolation of UV.
+flat varying vec2 vLayerAndPerspective;
 // Normalized bounds of the source image in the texture.
 flat varying vec4 vUvBounds;
 // Normalized bounds of the source image in the texture, adjusted to avoid
@@ -93,7 +95,8 @@ void brush_vs(
         }
     }
 
-    vUv.z = res.layer;
+    float perspective_interpolate = (brush_flags & BRUSH_FLAG_PERSPECTIVE_INTERPOLATION) != 0 ? 1.0 : 0.0;
+    vLayerAndPerspective = vec2(res.layer, perspective_interpolate);
 
     // Handle case where the UV coords are inverted (e.g. from an
     // external image).
@@ -108,7 +111,6 @@ void brush_vs(
     vec2 f = (vi.local_pos - local_rect.p0) / local_rect.size;
 
     int color_mode, blend_mode;
-    vec2 repeat;
     if (alpha_pass) {
         color_mode = user_data.x & 0xffff;
         blend_mode = user_data.x >> 16;
@@ -138,10 +140,13 @@ void brush_vs(
     }
 
     // Offset and scale vUv here to avoid doing it in the fragment shader.
-    repeat = local_rect.size / stretch_size;
-    vUv.xy = mix(uv0, uv1, f) - min_uv;
-    vUv.xy /= texture_size;
-    vUv.xy *= repeat.xy;
+    vec2 repeat = local_rect.size / stretch_size;
+    vUv = mix(uv0, uv1, f) - min_uv;
+    vUv /= texture_size;
+    vUv *= repeat.xy;
+    if (perspective_interpolate == 0.0) {
+        vUv *= vi.world_pos.w;
+    }
 
 #ifdef WR_FEATURE_TEXTURE_RECT
     vUvBounds = vec4(0.0, 0.0, vec2(textureSize(sColor0)));
@@ -216,13 +221,14 @@ void brush_vs(
 
 Fragment brush_fs() {
     vec2 uv_size = vUvBounds.zw - vUvBounds.xy;
+    float perspective_divisor = mix(gl_FragCoord.w, 1.0, vLayerAndPerspective.y);
 
     vec2 repeated_uv;
-    if (alpha_pass) {
+    if (alpha_pass){
         // This prevents the uv on the top and left parts of the primitive that was inflated
         // for anti-aliasing purposes from going beyound the range covered by the regular
         // (non-inflated) primitive.
-        vec2 local_uv = max(vUv.xy, vec2(0.0));
+        vec2 local_uv = max(vUv * perspective_divisor, vec2(0.0));
 
         // Handle horizontal and vertical repetitions.
         repeated_uv = mod(local_uv, uv_size) + vUvBounds.xy;
@@ -238,13 +244,13 @@ Fragment brush_fs() {
         }
     } else {
         // Handle horizontal and vertical repetitions.
-        repeated_uv = mod(vUv.xy, uv_size) + vUvBounds.xy;
+        repeated_uv = mod(vUv * perspective_divisor, uv_size) + vUvBounds.xy;
     }
 
     // Clamp the uvs to avoid sampling artifacts.
     vec2 uv = clamp(repeated_uv, vUvSampleBounds.xy, vUvSampleBounds.zw);
 
-    vec4 texel = TEX_SAMPLE(sColor0, vec3(uv, vUv.z));
+    vec4 texel = TEX_SAMPLE(sColor0, vec3(uv, vLayerAndPerspective.x));
 
     Fragment frag;
 
