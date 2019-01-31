@@ -1997,6 +1997,7 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[hal::CommandPool<B, hal::Graphics>; 1]>,
+    command_buffers: SmallVec<[Vec<hal::command::CommandBuffer<B, hal::Graphics>>; 1]>,
     pub staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
     pub render_pass: Option<RenderPass<B>>,
@@ -2008,7 +2009,6 @@ pub struct Device<B: hal::Backend> {
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    command_buffers: Vec<hal::command::CommandBuffer<B, hal::Graphics>>,
     pub current_frame_id: usize,
     current_blend_state: BlendState,
     blend_color: ColorF,
@@ -2168,6 +2168,7 @@ impl<B: hal::Backend> Device<B> {
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
+        let mut command_buffers = SmallVec::new();
         let frame_count = frame_count.unwrap_or(MAX_FRAME_COUNT);
         for _ in 0 .. frame_count {
             descriptor_pools.push(DescriptorPools::new(
@@ -2201,6 +2202,7 @@ impl<B: hal::Backend> Device<B> {
                 (limits.min_buffer_copy_pitch_alignment - 1) as usize,
                 (limits.min_buffer_copy_offset_alignment - 1) as usize,
             ));
+            command_buffers.push(Vec::new());
         }
         let descriptor_pools_global = DescriptorPools::new(
             &device,
@@ -2245,7 +2247,7 @@ impl<B: hal::Backend> Device<B> {
             viewport,
             sampler_linear,
             sampler_nearest,
-            command_buffers: Vec::new(),
+            command_buffers,
             current_frame_id: 0,
             current_blend_state: BlendState::Off,
             current_depth_test: DepthTest::Off,
@@ -2947,7 +2949,7 @@ impl<B: hal::Backend> Device<B> {
                 )
         };
 
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     pub fn begin_frame(&mut self) -> FrameId {
@@ -3078,7 +3080,7 @@ impl<B: hal::Backend> Device<B> {
                 cmd_buffer.finish();
             }
 
-            self.command_buffers.push(cmd_buffer);
+            self.command_buffers[self.next_id].push(cmd_buffer);
         }
 
         self.bind_draw_target_impl(fbo_id);
@@ -3241,7 +3243,7 @@ impl<B: hal::Backend> Device<B> {
             }
             cmd_buffer.finish();
         }
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
 
         self.images.insert(texture.id, img);
 
@@ -3382,7 +3384,7 @@ impl<B: hal::Backend> Device<B> {
             );
             cmd_buffer.finish();
         }
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
@@ -3502,7 +3504,7 @@ impl<B: hal::Backend> Device<B> {
             }
             cmd_buffer.finish();
         }
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     fn acquire_depth_target(&mut self, dimensions: DeviceUintSize) -> RBOId {
@@ -3696,7 +3698,7 @@ impl<B: hal::Backend> Device<B> {
             cmd_buffer.finish();
         }
 
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     /// Notifies the device that the contents of a render target are no longer
@@ -3806,7 +3808,7 @@ impl<B: hal::Backend> Device<B> {
         let len = pixels.len() / texture.layer_count as usize;
         for i in 0 .. texture.layer_count {
             let start = len * i as usize;
-            self.command_buffers.push(
+            self.command_buffers[self.next_id].push(
                 self.images
                     .get_mut(&texture.id)
                     .expect("Texture not found.")
@@ -4230,7 +4232,7 @@ impl<B: hal::Backend> Device<B> {
             cmd_buffer
         };
 
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
@@ -4333,7 +4335,7 @@ impl<B: hal::Backend> Device<B> {
             cmd_buffer.finish();
         }
 
-        self.command_buffers.push(cmd_buffer);
+        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     pub fn clear_target(
@@ -4509,12 +4511,12 @@ impl<B: hal::Backend> Device<B> {
                 }
                 cmd_buffer.finish();
             }
-            self.command_buffers.push(cmd_buffer);
+            self.command_buffers[self.next_id].push(cmd_buffer);
         }
 
         let present_error = unsafe {
             let submission = Submission {
-                command_buffers: &self.command_buffers.drain(..).collect::<Vec<_>>(),
+                command_buffers: &self.command_buffers[self.next_id],
                 wait_semaphores: Some((
                     &self.image_available_semaphore,
                     PipelineStage::BOTTOM_OF_PIPE,
@@ -4551,7 +4553,13 @@ impl<B: hal::Backend> Device<B> {
             .expect("reset_fence failed");
             self.frame_fence[self.next_id].is_submitted = false;
         }
-        unsafe { self.command_pool[self.next_id].reset() };
+        unsafe {
+            let buffers = self.command_buffers[self.next_id].drain(..).collect::<Vec<_>>();
+            if buffers.len() > 0 {
+                self.command_pool[self.next_id].free(buffers);
+            }
+            self.command_pool[self.next_id].reset();
+        }
         self.staging_buffer_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset();
         self.reset_program_buffer_offsets();
@@ -4746,7 +4754,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
             height,
             data_stride
         );
-        self.device.command_buffers.push(
+        self.device.command_buffers[self.device.next_id].push(
             self.device
                 .images
                 .get_mut(&self.texture.id)
