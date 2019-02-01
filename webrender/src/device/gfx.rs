@@ -610,17 +610,17 @@ impl<B: hal::Backend> Image<B> {
     pub fn update(
         &self,
         device: &B::Device,
-        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        cmd_pool: &mut CommandPool<B>,
         staging_buffer_pool: &mut BufferPool<B>,
         rect: DeviceUintRect,
         layer_index: i32,
         image_data: &[u8],
-    ) -> hal::command::CommandBuffer<B, hal::Graphics> {
+    ) {
         let pos = rect.origin;
         let size = rect.size;
         staging_buffer_pool.add(device, image_data);
         let buffer = staging_buffer_pool.buffer();
-        let mut cmd_buffer = cmd_pool.acquire_command_buffer::<hal::command::OneShot>();
+        let cmd_buffer = cmd_pool.acquire_command_buffer();
 
         unsafe {
             cmd_buffer.begin();
@@ -685,7 +685,6 @@ impl<B: hal::Backend> Image<B> {
 
             cmd_buffer.finish();
         }
-        cmd_buffer
     }
 
     pub fn deinit(self, device: &B::Device) {
@@ -1517,7 +1516,7 @@ impl<B: hal::Backend> Program<B> {
 
     pub fn submit(
         &self,
-        cmd_pool: &mut hal::CommandPool<B, hal::queue::Graphics>,
+        cmd_pool: &mut CommandPool<B>,
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
@@ -1531,8 +1530,8 @@ impl<B: hal::Backend> Program<B> {
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
         pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
-    ) -> hal::command::CommandBuffer<B, hal::Graphics> {
-        let mut cmd_buffer = cmd_pool.acquire_command_buffer::<hal::command::OneShot>();
+    ) {
+        let cmd_buffer = cmd_pool.acquire_command_buffer();
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
 
@@ -1628,7 +1627,6 @@ impl<B: hal::Backend> Program<B> {
 
             cmd_buffer.finish();
         }
-        cmd_buffer
     }
 
     pub fn deinit(mut self, device: &B::Device) {
@@ -1987,6 +1985,47 @@ struct Fence<B: hal::Backend> {
     is_submitted: bool,
 }
 
+pub struct CommandPool<B: hal::Backend> {
+    command_pool: hal::CommandPool<B, hal::Graphics>,
+    command_buffers: Vec<hal::command::CommandBuffer<B, hal::Graphics>>,
+    size: usize,
+}
+
+impl<B: hal::Backend> CommandPool<B> {
+    fn new(mut command_pool: hal::CommandPool<B, hal::Graphics>) -> Self {
+        let command_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
+        CommandPool {
+            command_pool,
+            command_buffers: vec![command_buffer],
+            size: 0,
+        }
+    }
+
+    fn acquire_command_buffer(&mut self) -> &mut hal::command::CommandBuffer<B, hal::Graphics> {
+        if self.size >= self.command_buffers.len() {
+            let command_buffer = self
+                .command_pool
+                .acquire_command_buffer::<hal::command::OneShot>();
+            self.command_buffers.push(command_buffer);
+        }
+        self.size += 1;
+        &mut self.command_buffers[self.size - 1]
+    }
+
+    fn command_buffers(&self) -> &[hal::command::CommandBuffer<B, hal::Graphics>] {
+        &self.command_buffers[0 .. self.size]
+    }
+
+    unsafe fn reset(&mut self) {
+        self.command_pool.reset();
+        self.size = 0;
+    }
+
+    unsafe fn destroy(self, device: &B::Device) {
+        device.destroy_command_pool(self.command_pool.into_raw());
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
     pub memory_types: Vec<hal::MemoryType>,
@@ -1996,8 +2035,7 @@ pub struct Device<B: hal::Backend> {
     pub surface_format: hal::format::Format,
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
-    pub command_pool: SmallVec<[hal::CommandPool<B, hal::Graphics>; 1]>,
-    command_buffers: SmallVec<[Vec<hal::command::CommandBuffer<B, hal::Graphics>>; 1]>,
+    pub command_pool: SmallVec<[CommandPool<B>; 1]>,
     pub staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
     pub render_pass: Option<RenderPass<B>>,
@@ -2168,7 +2206,6 @@ impl<B: hal::Backend> Device<B> {
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
-        let mut command_buffers = SmallVec::new();
         let frame_count = frame_count.unwrap_or(MAX_FRAME_COUNT);
         for _ in 0 .. frame_count {
             descriptor_pools.push(DescriptorPools::new(
@@ -2184,14 +2221,15 @@ impl<B: hal::Backend> Device<B> {
                 is_submitted: false,
             });
 
-            let mut cp = unsafe {
+            let mut hal_cp = unsafe {
                 device.create_command_pool_typed(
                     &queue_group,
                     hal::pool::CommandPoolCreateFlags::empty(),
                 )
             }
             .expect("create_command_pool_typed failed");
-            unsafe { cp.reset() };
+            unsafe { hal_cp.reset() };
+            let cp = CommandPool::new(hal_cp);
             command_pool.push(cp);
             staging_buffer_pool.push(BufferPool::new(
                 &device,
@@ -2202,7 +2240,6 @@ impl<B: hal::Backend> Device<B> {
                 (limits.min_buffer_copy_pitch_alignment - 1) as usize,
                 (limits.min_buffer_copy_offset_alignment - 1) as usize,
             ));
-            command_buffers.push(Vec::new());
         }
         let descriptor_pools_global = DescriptorPools::new(
             &device,
@@ -2247,7 +2284,6 @@ impl<B: hal::Backend> Device<B> {
             viewport,
             sampler_linear,
             sampler_nearest,
-            command_buffers,
             current_frame_id: 0,
             current_blend_state: BlendState::Off,
             current_depth_test: DepthTest::Off,
@@ -2904,52 +2940,49 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn draw(&mut self) {
-        let cmd_buffer = {
-            let (fb, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (fb, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            (
+                &self.fbos[&self.bound_draw_fbo].fbo,
+                self.fbos[&self.bound_draw_fbo].format,
+            )
+        } else {
+            if self.current_depth_test == DepthTest::Off {
                 (
-                    &self.fbos[&self.bound_draw_fbo].fbo,
-                    self.fbos[&self.bound_draw_fbo].format,
+                    &self.framebuffers[self.current_frame_id],
+                    ImageFormat::BGRA8,
                 )
             } else {
-                if self.current_depth_test == DepthTest::Off {
-                    (
-                        &self.framebuffers[self.current_frame_id],
-                        ImageFormat::BGRA8,
-                    )
-                } else {
-                    (
-                        &self.framebuffers_depth[self.current_frame_id],
-                        ImageFormat::BGRA8,
-                    )
-                }
-            };
-            let rp = self
-                .render_pass
-                .as_ref()
-                .unwrap()
-                .get_render_pass(format, self.current_depth_test != DepthTest::Off);
-            self.programs
-                .get_mut(&self.bound_program)
-                .expect("Program not found")
-                .submit(
-                    &mut self.command_pool[self.next_id],
-                    self.viewport.clone(),
-                    rp,
-                    &fb,
-                    &mut self.descriptor_pools[self.next_id],
-                    &self.descriptor_pools_global,
-                    &self.descriptor_pools_sampler,
-                    &vec![],
-                    self.current_blend_state,
-                    self.blend_color,
-                    self.current_depth_test,
-                    self.scissor_rect,
-                    self.next_id,
-                    &self.pipeline_layouts,
+                (
+                    &self.framebuffers_depth[self.current_frame_id],
+                    ImageFormat::BGRA8,
                 )
+            }
         };
+        let rp = self
+            .render_pass
+            .as_ref()
+            .unwrap()
+            .get_render_pass(format, self.current_depth_test != DepthTest::Off);
 
-        self.command_buffers[self.next_id].push(cmd_buffer);
+        self.programs
+            .get_mut(&self.bound_program)
+            .expect("Program not found")
+            .submit(
+                &mut self.command_pool[self.next_id],
+                self.viewport.clone(),
+                rp,
+                &fb,
+                &mut self.descriptor_pools[self.next_id],
+                &self.descriptor_pools_global,
+                &self.descriptor_pools_sampler,
+                &vec![],
+                self.current_blend_state,
+                self.blend_color,
+                self.current_depth_test,
+                self.scissor_rect,
+                self.next_id,
+                &self.pipeline_layouts,
+            );
     }
 
     pub fn begin_frame(&mut self) -> FrameId {
@@ -3037,8 +3070,7 @@ impl<B: hal::Backend> Device<B> {
             with_depth,
         }) = texture_target
         {
-            let mut cmd_buffer =
-                self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
+            let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
             let rbos = &self.rbos;
 
             unsafe {
@@ -3079,8 +3111,6 @@ impl<B: hal::Backend> Device<B> {
                 }
                 cmd_buffer.finish();
             }
-
-            self.command_buffers[self.next_id].push(cmd_buffer);
         }
 
         self.bind_draw_target_impl(fbo_id);
@@ -3223,9 +3253,8 @@ impl<B: hal::Backend> Device<B> {
             usage,
         );
 
-        let mut cmd_buffer =
-            self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
         unsafe {
+            let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
             cmd_buffer.begin();
 
             if let Some(barrier) = img.core.transit(
@@ -3243,7 +3272,6 @@ impl<B: hal::Backend> Device<B> {
             }
             cmd_buffer.finish();
         }
-        self.command_buffers[self.next_id].push(cmd_buffer);
 
         self.images.insert(texture.id, img);
 
@@ -3297,8 +3325,7 @@ impl<B: hal::Backend> Device<B> {
         let rect = DeviceIntRect::new(DeviceIntPoint::zero(), src.get_dimensions().to_i32());
         let (src_img, layers) = (&self.images[&src.id].core, src.layer_count);
         let dst_img = &self.images[&dst.id].core;
-        let mut cmd_buffer =
-            self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
+        let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
 
         let range = hal::image::SubresourceRange {
             aspects: hal::format::Aspects::COLOR,
@@ -3384,12 +3411,10 @@ impl<B: hal::Backend> Device<B> {
             );
             cmd_buffer.finish();
         }
-        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
-        let mut cmd_buffer =
-            self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
+        let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
 
         let image = self
             .images
@@ -3504,7 +3529,6 @@ impl<B: hal::Backend> Device<B> {
             }
             cmd_buffer.finish();
         }
-        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     fn acquire_depth_target(&mut self, dimensions: DeviceUintSize) -> RBOId {
@@ -3566,8 +3590,7 @@ impl<B: hal::Backend> Device<B> {
             (&self.frame_images[self.current_frame_id], 0)
         };
 
-        let mut cmd_buffer =
-            self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
+        let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
 
         let src_range = hal::image::SubresourceRange {
             aspects: hal::format::Aspects::COLOR,
@@ -3697,8 +3720,6 @@ impl<B: hal::Backend> Device<B> {
             );
             cmd_buffer.finish();
         }
-
-        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     /// Notifies the device that the contents of a render target are no longer
@@ -3808,22 +3829,21 @@ impl<B: hal::Backend> Device<B> {
         let len = pixels.len() / texture.layer_count as usize;
         for i in 0 .. texture.layer_count {
             let start = len * i as usize;
-            self.command_buffers[self.next_id].push(
-                self.images
-                    .get_mut(&texture.id)
-                    .expect("Texture not found.")
-                    .update(
-                        &self.device,
-                        &mut self.command_pool[self.next_id],
-                        &mut self.staging_buffer_pool[self.next_id],
-                        DeviceUintRect::new(
-                            DeviceUintPoint::new(0, 0),
-                            DeviceUintSize::new(texture.width, texture.height),
-                        ),
-                        i,
-                        texels_to_u8_slice(&pixels[start .. (start + len)]),
+
+            self.images
+                .get_mut(&texture.id)
+                .expect("Texture not found.")
+                .update(
+                    &self.device,
+                    &mut self.command_pool[self.next_id],
+                    &mut self.staging_buffer_pool[self.next_id],
+                    DeviceUintRect::new(
+                        DeviceUintPoint::new(0, 0),
+                        DeviceUintSize::new(texture.width, texture.height),
                     ),
-            );
+                    i,
+                    texels_to_u8_slice(&pixels[start .. (start + len)]),
+                );
         }
         if texture.filter == TextureFilter::Trilinear {
             self.generate_mipmaps(texture);
@@ -4185,54 +4205,49 @@ impl<B: hal::Backend> Device<B> {
             });
         }
 
-        let cmd_buffer = {
-            let (frame_buffer, format, has_depth) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (frame_buffer, format, has_depth) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            (
+                &self.fbos[&self.bound_draw_fbo].fbo,
+                self.fbos[&self.bound_draw_fbo].format,
+                self.fbos[&self.bound_draw_fbo].rbo != RBOId(0),
+            )
+        } else {
+            if self.current_depth_test == DepthTest::Off {
                 (
-                    &self.fbos[&self.bound_draw_fbo].fbo,
-                    self.fbos[&self.bound_draw_fbo].format,
-                    self.fbos[&self.bound_draw_fbo].rbo != RBOId(0),
+                    &self.framebuffers[self.current_frame_id],
+                    ImageFormat::BGRA8,
+                    false,
                 )
             } else {
-                if self.current_depth_test == DepthTest::Off {
-                    (
-                        &self.framebuffers[self.current_frame_id],
-                        ImageFormat::BGRA8,
-                        false,
-                    )
-                } else {
-                    (
-                        &self.framebuffers_depth[self.current_frame_id],
-                        ImageFormat::BGRA8,
-                        true,
-                    )
-                }
-            };
-
-            let render_pass = self
-                .render_pass
-                .as_ref()
-                .unwrap()
-                .get_render_pass(format, has_depth);
-            let mut cmd_buffer =
-                self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
-            unsafe {
-                cmd_buffer.begin();
-                {
-                    let mut encoder = cmd_buffer.begin_render_pass_inline(
-                        render_pass,
-                        frame_buffer,
-                        self.viewport.rect,
-                        &vec![],
-                    );
-
-                    encoder.clear_attachments(clears, rects);
-                }
-                cmd_buffer.finish();
+                (
+                    &self.framebuffers_depth[self.current_frame_id],
+                    ImageFormat::BGRA8,
+                    true,
+                )
             }
-            cmd_buffer
         };
 
-        self.command_buffers[self.next_id].push(cmd_buffer);
+        let render_pass = self
+            .render_pass
+            .as_ref()
+            .unwrap()
+            .get_render_pass(format, has_depth);
+
+        let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
+        unsafe {
+            cmd_buffer.begin();
+            {
+                let mut encoder = cmd_buffer.begin_render_pass_inline(
+                    render_pass,
+                    frame_buffer,
+                    self.viewport.rect,
+                    &vec![],
+                );
+
+                encoder.clear_attachments(clears, rects);
+            }
+            cmd_buffer.finish();
+        }
     }
 
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
@@ -4253,8 +4268,7 @@ impl<B: hal::Backend> Device<B> {
             )
         };
 
-        let mut cmd_buffer =
-            self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
+        let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         //Note: this function is assumed to be called within an active FBO
         // thus, we bring back the targets into renderable state
 
@@ -4334,8 +4348,6 @@ impl<B: hal::Backend> Device<B> {
             }
             cmd_buffer.finish();
         }
-
-        self.command_buffers[self.next_id].push(cmd_buffer);
     }
 
     pub fn clear_target(
@@ -4492,8 +4504,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn submit_to_gpu(&mut self) -> bool {
         {
-            let mut cmd_buffer =
-                self.command_pool[self.next_id].acquire_command_buffer::<hal::command::OneShot>();
+            let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
             let image = &self.frame_images[self.current_frame_id];
             unsafe {
                 cmd_buffer.begin();
@@ -4511,12 +4522,11 @@ impl<B: hal::Backend> Device<B> {
                 }
                 cmd_buffer.finish();
             }
-            self.command_buffers[self.next_id].push(cmd_buffer);
         }
 
         let present_error = unsafe {
             let submission = Submission {
-                command_buffers: &self.command_buffers[self.next_id],
+                command_buffers: self.command_pool[self.next_id].command_buffers(),
                 wait_semaphores: Some((
                     &self.image_available_semaphore,
                     PipelineStage::BOTTOM_OF_PIPE,
@@ -4554,10 +4564,6 @@ impl<B: hal::Backend> Device<B> {
             self.frame_fence[self.next_id].is_submitted = false;
         }
         unsafe {
-            let buffers = self.command_buffers[self.next_id].drain(..).collect::<Vec<_>>();
-            if buffers.len() > 0 {
-                self.command_pool[self.next_id].free(buffers);
-            }
             self.command_pool[self.next_id].reset();
         }
         self.staging_buffer_pool[self.next_id].reset();
@@ -4630,7 +4636,7 @@ impl<B: hal::Backend> Device<B> {
             }
 
             for command_pool in self.command_pool {
-                self.device.destroy_command_pool(command_pool.into_raw());
+                command_pool.destroy(&self.device);
             }
             for mut staging_buffer_pool in self.staging_buffer_pool {
                 staging_buffer_pool.deinit(&self.device);
@@ -4754,20 +4760,19 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
             height,
             data_stride
         );
-        self.device.command_buffers[self.device.next_id].push(
-            self.device
-                .images
-                .get_mut(&self.texture.id)
-                .expect("Texture not found.")
-                .update(
-                    &self.device.device,
-                    &mut self.device.command_pool[self.device.next_id],
-                    &mut self.device.staging_buffer_pool[self.device.next_id],
-                    rect,
-                    layer_index,
-                    data,
-                ),
-        );
+
+        self.device
+            .images
+            .get_mut(&self.texture.id)
+            .expect("Texture not found.")
+            .update(
+                &self.device.device,
+                &mut self.device.command_pool[self.device.next_id],
+                &mut self.device.staging_buffer_pool[self.device.next_id],
+                rect,
+                layer_index,
+                data,
+            );
 
         if self.texture.filter == TextureFilter::Trilinear {
             self.device.generate_mipmaps(self.texture);
