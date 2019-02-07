@@ -163,7 +163,7 @@ pub trait PrimitiveType {
 
 impl Texture {
     pub fn still_in_flight(&self, frame_id: GpuFrameId, frame_count: usize) -> bool {
-        for i in 0 .. frame_count {
+        for i in 0 ..= frame_count {
             if self.bound_in_frame.get() == GpuFrameId(frame_id.0 - i) {
                 return true;
             }
@@ -2054,6 +2054,7 @@ pub struct Device<B: hal::Backend> {
     programs: FastHashMap<ProgramId, Program<B>>,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
+    retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
@@ -2304,6 +2305,7 @@ impl<B: hal::Backend> Device<B> {
             programs: FastHashMap::default(),
             shader_modules: FastHashMap::default(),
             images: FastHashMap::default(),
+            retained_textures: Vec::new(),
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
             descriptor_pools,
@@ -3777,10 +3779,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn free_image(&mut self, texture: &mut Texture) {
-        // Note: this is a very rare case, but if it becomes a problem
-        // we need to handle this in renderer.rs
         if texture.still_in_flight(self.frame_id, self.frame_count) {
-            self.wait_for_resources();
+            self.retained_textures.push(texture.clone());
+            return;
         }
 
         if texture.supports_depth() {
@@ -3789,6 +3790,7 @@ impl<B: hal::Backend> Device<B> {
 
         if !texture.fbos_with_depth.is_empty() {
             for old in texture.fbos_with_depth.drain(..) {
+                debug_assert!(self.bound_draw_fbo != old || self.bound_read_fbo != old);
                 let old_fbo = self.fbos.remove(&old).unwrap();
                 old_fbo.deinit(&self.device);
             }
@@ -3796,6 +3798,7 @@ impl<B: hal::Backend> Device<B> {
 
         if !texture.fbos.is_empty() {
             for old in texture.fbos.drain(..) {
+                debug_assert!(self.bound_draw_fbo != old || self.bound_read_fbo != old);
                 let old_fbo = self.fbos.remove(&old).unwrap();
                 old_fbo.deinit(&self.device);
             }
@@ -3804,6 +3807,14 @@ impl<B: hal::Backend> Device<B> {
         let image = self.images.remove(&texture.id).expect("Texture not found.");
         record_gpu_free(texture.size_in_bytes());
         image.deinit(&self.device);
+    }
+
+    fn delete_retained_textures(&mut self) {
+        let textures: Vec<_> = self.retained_textures.drain(..).collect();
+        for ref mut texture in textures {
+            self.free_image(texture);
+            texture.id = 0;
+        }
     }
 
     pub fn delete_texture(&mut self, mut texture: Texture) {
@@ -4577,6 +4588,7 @@ impl<B: hal::Backend> Device<B> {
         self.staging_buffer_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset();
         self.reset_program_buffer_offsets();
+        self.delete_retained_textures();
         return !present_error;
     }
 
@@ -4612,6 +4624,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn deinit(self) {
+        for mut texture in self.retained_textures {
+            texture.id = 0;
+        }
         unsafe {
             if self.save_cache && self.cache_path.is_some() {
                 let pipeline_cache = self.device.create_pipeline_cache(None).expect("Failed to create pipeline cache");

@@ -301,6 +301,7 @@ bitflags! {
 /// Because freeing a texture requires various device handles that are not
 /// reachable from this struct, manual destruction via `Device` is required.
 /// Our `Drop` implementation asserts that this has happened.
+#[cfg_attr(not(feature = "gleam"), derive(Clone))]
 pub struct Texture {
     id: IdType,
     #[cfg_attr(not(feature = "gleam"), allow(dead_code))]
