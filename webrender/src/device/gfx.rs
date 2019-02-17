@@ -3746,11 +3746,11 @@ impl<B: hal::Backend> Device<B> {
     /// origin-top-left).
     pub fn blit_render_target_invert_y(
         &mut self,
-        _src_rect: DeviceIntRect,
-        _dest_rect: DeviceIntRect,
+        src_rect: DeviceIntRect,
+        dest_rect: DeviceIntRect,
     ) {
         debug_assert!(self.inside_frame);
-        unimplemented!("blit_render_target_invert_y is not implemented yet!");
+        self.blit_render_target(src_rect, dest_rect);
     }
 
     /// Notifies the device that the contents of a render target are no longer

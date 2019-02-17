@@ -4155,7 +4155,11 @@ impl<B: hal::Backend> Renderer<B> {
                 let text_margin = 1;
                 let text_height = 14; // Visually aproximated.
                 let tag_height = text_height + text_margin * 2;
-                let tag_rect = rect(x, y, size, tag_height);
+                let tag_rect = if cfg!(feature = "gleam") {
+                    rect(x, y, size, tag_height)
+                } else {
+                    rect(x, fb_height - (y + tag_height), size, tag_height)
+                };
                 let tag_color = select_color(texture);
                 device.clear_target(Some(tag_color), None, Some(tag_rect));
 
@@ -4175,7 +4179,11 @@ impl<B: hal::Backend> Renderer<B> {
                 // Blit the contents of the layer. We need to invert Y because
                 // we're blitting from a texture to the main framebuffer, which
                 // use different conventions.
-                let dest_rect = rect(x, y + tag_height, size, size);
+                let dest_rect = if cfg!(feature = "gleam") {
+                    rect(x, y + tag_height, size, size)
+                } else {
+                    rect(x, fb_height - (y + tag_height + size), size, size)
+                };
                 device.blit_render_target_invert_y(src_rect, dest_rect);
                 i += 1;
             }
