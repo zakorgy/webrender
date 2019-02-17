@@ -335,7 +335,7 @@ pub struct Texture {
     fbos_with_depth: Vec<FBOId>,
     last_frame_used: GpuFrameId,
     #[cfg(not(feature = "gleam"))]
-    bound_in_frame: Cell<GpuFrameId>,
+    pub bound_in_frame: Cell<GpuFrameId>,
 }
 
 impl Texture {

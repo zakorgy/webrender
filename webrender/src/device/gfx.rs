@@ -163,7 +163,7 @@ pub trait PrimitiveType {
 
 impl Texture {
     pub fn still_in_flight(&self, frame_id: GpuFrameId, frame_count: usize) -> bool {
-        for i in 0 ..= frame_count {
+        for i in 0 .. frame_count {
             if self.bound_in_frame.get() == GpuFrameId(frame_id.0 - i) {
                 return true;
             }
@@ -3080,6 +3080,7 @@ impl<B: hal::Backend> Device<B> {
         let (fbo_id, dimensions, depth_available) = match texture_target {
             DrawTarget::Default(dim) => (DEFAULT_DRAW_FBO, dim, true),
             DrawTarget::Texture { texture, layer, with_depth } => {
+                texture.bound_in_frame.set(self.frame_id);
                 let fbo_id = if with_depth {
                     texture.fbos_with_depth[layer]
                 } else {
@@ -3334,6 +3335,8 @@ impl<B: hal::Backend> Device<B> {
 
     /// Copies the contents from one renderable texture to another.
     pub fn blit_renderable_texture(&mut self, dst: &mut Texture, src: &Texture) {
+        dst.bound_in_frame.set(self.frame_id);
+        src.bound_in_frame.set(self.frame_id);
         debug_assert!(self.inside_frame);
         debug_assert!(dst.size.width >= src.size.width);
         debug_assert!(dst.size.height >= src.size.height);
@@ -3431,6 +3434,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
+        texture.bound_in_frame.set(self.frame_id);
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
 
         let image = self
@@ -3865,6 +3869,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn upload_texture_immediate<T: Texel>(&mut self, texture: &Texture, pixels: &[T]) {
+        texture.bound_in_frame.set(self.frame_id);
         let len = pixels.len() / texture.layer_count as usize;
         for i in 0 .. texture.layer_count {
             let start = len * i as usize;
@@ -4781,6 +4786,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
             data_stride
         );
 
+        self.texture.bound_in_frame.set(self.device.frame_id);
         self.device
             .images
             .get_mut(&self.texture.id)
