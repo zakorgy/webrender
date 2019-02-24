@@ -4807,7 +4807,11 @@ impl<B: hal::Backend> Renderer<B> {
             plain.size.0.width,
             plain.size.0.height,
             plain.filter,
-            rt_info,
+            if plain.format == ImageFormat::RGBAF32 {
+                None
+            } else {
+                rt_info
+            },
             plain.size.1,
         );
         device.upload_texture_immediate(&texture, &texels);
