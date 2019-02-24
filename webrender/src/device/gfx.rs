@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, ImageFormat, MemoryReport};
+use api::round_to_int;
 use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature = "capture"))]
@@ -3912,12 +3913,12 @@ impl<B: hal::Backend> Device<B> {
     pub fn read_pixels_into(
         &mut self,
         rect: DeviceIntRect,
-        format: ReadPixelsFormat,
+        read_format: ReadPixelsFormat,
         output: &mut [u8],
     ) {
         self.wait_for_resources();
 
-        let bytes_per_pixel = match format {
+        let bytes_per_pixel = match read_format {
             ReadPixelsFormat::Standard(imf) => imf.bytes_per_pixel(),
             ReadPixelsFormat::Rgba8 => 4,
         };
@@ -3926,24 +3927,33 @@ impl<B: hal::Backend> Device<B> {
         let capture_read =
             cfg!(feature = "capture") && self.bound_read_texture.0 != INVALID_TEXTURE_ID;
 
-        let (image, layer) = if capture_read {
+        let (image, image_format, layer) = if capture_read {
             let img = &self.images[&self.bound_read_texture.0];
-            (&img.core, self.bound_read_texture.1 as u16)
+            (&img.core, img.format, self.bound_read_texture.1 as u16)
         } else if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
             let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
-            (&img.core, layer)
+            (&img.core, img.format, layer)
         } else {
-            (&self.frame_images[self.current_frame_id], 0)
+            (&self.frame_images[self.current_frame_id], ImageFormat::BGRA8, 0)
         };
+
+        let (fmt_mismatch, stride) = if bytes_per_pixel < image_format.bytes_per_pixel() {
+            // Special case which can occur during png save, because we force to read Rgba8 values from an Rgbaf32 texture.
+            (true, (image_format.bytes_per_pixel() / bytes_per_pixel) as usize)
+        } else {
+            assert_eq!(bytes_per_pixel, image_format.bytes_per_pixel());
+            (false, 1)
+        };
+
         let download_buffer: Buffer<B> = Buffer::new(
             &self.device,
             &self.memory_types,
             hal::buffer::Usage::TRANSFER_DST,
             (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
             output.len(),
-            1,
+            stride,
         );
 
         let mut command_pool = unsafe {
@@ -4035,16 +4045,36 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let mut data = vec![0; download_buffer.buffer_size];
-        if let Ok(reader) = unsafe {
-            self.device.acquire_mapping_reader::<u8>(
-                &download_buffer.memory,
-                0 .. download_buffer.buffer_size as u64,
-            )
-        } {
-            data[0 .. reader.len()].copy_from_slice(&reader);
-            unsafe { self.device.release_mapping_reader(reader) };
+
+        if fmt_mismatch {
+            let mut f32_data = vec![0f32; download_buffer.buffer_size];
+            if let Ok(reader) = unsafe {
+                self.device.acquire_mapping_reader::<f32>(
+                    &download_buffer.memory,
+                    0 .. download_buffer.buffer_size as u64,
+                )
+            } {
+                f32_data[0 .. reader.len()].copy_from_slice(&reader);
+                unsafe { self.device.release_mapping_reader(reader) };
+                assert_eq!(data.len(), f32_data.len());
+                for i in 0 .. f32_data.len() {
+                    data[i] = round_to_int(f32_data[i].min(0f32).max(1f32));
+                }
+            } else {
+                panic!("Failed to read the download buffer!");
+            }
         } else {
-            panic!("Fail to read the download buffer!");
+            if let Ok(reader) = unsafe {
+                self.device.acquire_mapping_reader::<u8>(
+                    &download_buffer.memory,
+                    0 .. download_buffer.buffer_size as u64,
+                )
+            } {
+                data[0 .. reader.len()].copy_from_slice(&reader);
+                unsafe { self.device.release_mapping_reader(reader) };
+            } else {
+                panic!("Failed to read the download buffer!");
+            }
         }
         data.truncate(output.len());
         if !capture_read
