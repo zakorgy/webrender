@@ -98,7 +98,7 @@ impl Window {
             .with_dimensions(LogicalSize::new(800., 600.));
 
         #[cfg(feature = "gl")]
-        let (init, instance, window) = {
+        let (init, window) = {
             let context_builder = glutin::ContextBuilder::new()
                 .with_gl(glutin::GlRequest::GlThenGles {
                     opengl_version: (3, 2),
@@ -125,7 +125,7 @@ impl Window {
                 gl,
                 phantom_data: PhantomData,
             };
-            (init, back::Instance{}, window)
+            (init, window)
         };
 
         #[cfg(feature = "gfx-hal")]
@@ -159,6 +159,7 @@ impl Window {
                 let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
 
                 webrender::DeviceInit {
+                    instance: Box::new(instance),
                     adapter,
                     surface,
                     window_size: (width as i32, height as i32),
@@ -173,7 +174,7 @@ impl Window {
                 clear_color: Some(clear_color),
                 ..webrender::RendererOptions::default()
             };
-            webrender::Renderer::new(init, Box::new(instance), notifier, opts, None).unwrap()
+            webrender::Renderer::new(init, notifier, opts, None).unwrap()
         };
         let api = sender.create_api();
         let document_id = api.add_document(framebuffer_size, 0);

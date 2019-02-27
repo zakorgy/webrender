@@ -69,6 +69,7 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 const ENTRY_NAME: &str = "main";
 
 pub struct DeviceInit<B: hal::Backend> {
+    pub instance: Box<hal::Instance<Backend=B>>,
     pub adapter: hal::Adapter<B>,
     pub surface: B::Surface,
     pub window_size: (i32, i32),
@@ -2036,6 +2037,7 @@ pub struct Device<B: hal::Backend> {
     pub limits: hal::Limits,
     adapter: hal::Adapter<B>,
     surface: B::Surface,
+    _instance: Box<hal::Instance<Backend=B>>,
     pub surface_format: hal::format::Format,
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
@@ -2125,6 +2127,7 @@ impl<B: hal::Backend> Device<B> {
         _cached_programs: Option<Rc<ProgramCache>>,
     ) -> Self {
         let DeviceInit {
+            instance,
             adapter,
             mut surface,
             window_size,
@@ -2276,6 +2279,7 @@ impl<B: hal::Backend> Device<B> {
             surface_format,
             adapter,
             surface,
+            _instance: instance,
             depth_format,
             queue_group,
             command_pool,
@@ -4752,6 +4756,9 @@ impl<B: hal::Backend> Device<B> {
                 .destroy_semaphore(self.render_finished_semaphore);
             self.device.destroy_swapchain(self.swap_chain.unwrap());
         }
+        // We must ensure these are dropped before `self._instance` or we segfault with Vulkan
+        mem::drop(self.device);
+        mem::drop(self.queue_group);
     }
 }
 

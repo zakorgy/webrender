@@ -149,7 +149,7 @@ pub fn main_wrapper<E: Example>(
         .with_dimensions(winit::dpi::LogicalSize::new(E::WIDTH as f64, E::HEIGHT as f64));
 
     #[cfg(feature = "gl")]
-    let (gl, init, instance, window) = {
+    let (gl, init, window) = {
         let context_builder = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::GlThenGles {
             opengl_version: (3, 2),
@@ -177,36 +177,33 @@ pub fn main_wrapper<E: Example>(
             gl: gl.clone(),
             phantom_data: PhantomData,
         };
-        (gl, init, back::Instance{}, window)
+        (gl, init, window)
     };
 
     #[cfg(feature = "gfx-hal")]
-    let (window, adapter, surface, instance) = {
+    let (window, init) = {
         let window = window_builder.build(&events_loop).unwrap();
         let instance = back::Instance::create("gfx-rs instance", 1);
         let mut adapters = instance.enumerate_adapters();
         let adapter = adapters.remove(0);
         let mut surface = instance.create_surface(&window);
-        (window, adapter, surface, instance)
-    };
+        let winit::dpi::LogicalSize { width, height } = window.get_inner_size().unwrap();
+        let init = {
+            let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
+            let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
 
-    #[cfg(feature = "gfx-hal")]
-    let winit::dpi::LogicalSize { width, height } = window.get_inner_size().unwrap();
-
-    #[cfg(feature = "gfx-hal")]
-    let init = {
-        let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
-        let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
-
-        webrender::DeviceInit {
-            adapter,
-            surface,
-            window_size: (width as i32, height as i32),
-            frame_count: None,
-            descriptor_count: None,
-            cache_path,
-            save_cache: true,
-        }
+            webrender::DeviceInit {
+                instance: Box::new(instance),
+                adapter,
+                surface,
+                window_size: (width as i32, height as i32),
+                frame_count: None,
+                descriptor_count: None,
+                cache_path,
+                save_cache: true,
+            }
+        };
+        (window, init)
     };
 
     println!("Shader resource path: {:?}", res_path);
@@ -233,7 +230,7 @@ pub fn main_wrapper<E: Example>(
         DeviceIntSize::new(size.width as i32, size.height as i32)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(init, Box::new(instance), notifier, opts, None).unwrap();
+    let (mut renderer, sender) = webrender::Renderer::new(init, notifier, opts, None).unwrap();
     let api = sender.create_api();
     let document_id = api.add_document(framebuffer_size, 0);
 
