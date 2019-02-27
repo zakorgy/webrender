@@ -585,8 +585,8 @@ impl<B: hal::Backend> Image<B> {
             ImageFormat::RG8 => hal::format::Format::Rg8Unorm,
             ImageFormat::RGBA8 => hal::format::Format::Rgba8Unorm,
             ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
-            ImageFormat::RGBAF32 => hal::format::Format::Rgba32Float,
-            ImageFormat::RGBAI32 => hal::format::Format::Rgba32Int,
+            ImageFormat::RGBAF32 => hal::format::Format::Rgba32Sfloat,
+            ImageFormat::RGBAI32 => hal::format::Format::Rgba32Sint,
         };
         let kind = hal::image::Kind::D2(image_width as _, image_height as _, image_depth as _, 1);
 
@@ -1804,7 +1804,11 @@ impl<B: hal::Backend> DescPool<B> {
         descriptor_set_layout: Vec<DescriptorSetLayoutBinding>,
     ) -> Self {
         let descriptor_pool = unsafe {
-            device.create_descriptor_pool(max_size, descriptor_range_descriptors.as_slice())
+            device.create_descriptor_pool(
+                max_size,
+                descriptor_range_descriptors.as_slice(),
+                hal::pso::DescriptorPoolCreateFlags::empty(),
+            )
         }
         .expect("create_descriptor_pool failed");
         let descriptor_set_layout =
@@ -2458,8 +2462,7 @@ impl<B: hal::Backend> Device<B> {
         Vec<ImageCore<B>>,
         hal::pso::Viewport,
     ) {
-        let (caps, formats, _present_modes, _composite_alphas) =
-            surface.compatibility(&adapter.physical_device);
+        let (caps, formats, _present_modes) = surface.compatibility(&adapter.physical_device);
         let surface_format = formats.map_or(hal::format::Format::Bgra8Unorm, |formats| {
             formats
                 .into_iter()
@@ -2499,7 +2502,7 @@ impl<B: hal::Backend> Device<B> {
             unsafe { device.create_swapchain(surface, swap_config, None) }
                 .expect("create_swapchain failed");
         println!("backbuffer={:?}", backbuffer);
-        let depth_format = hal::format::Format::D32Float; //maybe d24s8?
+        let depth_format = hal::format::Format::D32Sfloat; //maybe d24s8?
         let render_pass = {
             let attachment_r8 = hal::pass::Attachment {
                 format: Some(hal::format::Format::R8Unorm),
