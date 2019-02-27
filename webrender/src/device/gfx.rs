@@ -3783,10 +3783,15 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn free_image(&mut self, texture: &mut Texture) {
-        if texture.still_in_flight(self.frame_id, self.frame_count) {
+        if texture.bound_in_frame.get() == self.frame_id {
             self.retained_textures.push(texture.clone());
             return;
         }
+
+        if texture.still_in_flight(self.frame_id, self.frame_count) {
+            self.wait_for_resources();
+        }
+
 
         if texture.supports_depth() {
             self.release_depth_target(texture.get_dimensions());
