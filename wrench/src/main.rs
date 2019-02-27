@@ -573,18 +573,16 @@ fn main() {
     };
 
     #[cfg(feature = "gfx")]
-    let instance = back::Instance::create("gfx-rs instance", 1);
-
-    #[cfg(not(feature = "gfx"))]
-    let instance = back::Instance{};
-
-    #[cfg(feature = "gfx")]
     let init = {
         let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
         let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
+        let instance = back::Instance::create("gfx-rs instance", 1);
+        let adapter = instance.enumerate_adapters().remove(0);
+        let surface = instance.create_surface(window.get_window());
         webrender::DeviceInit {
-            adapter: instance.enumerate_adapters().remove(0),
-            surface: instance.create_surface(window.get_window()),
+            instance: Box::new(instance),
+            adapter,
+            surface,
             window_size: (dim.width, dim.height),
             frame_count: args.value_of("frame_count").map(|f| f.parse::<usize>().unwrap()),
             descriptor_count: args.value_of("descriptor_count").map(|d| d.parse::<usize>().unwrap()),
@@ -616,7 +614,6 @@ fn main() {
         chase_primitive,
         notifier,
         init,
-        instance,
     );
 
     if let Some(window_title) = wrench.take_title() {
