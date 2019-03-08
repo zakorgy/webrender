@@ -3616,22 +3616,22 @@ impl<B: hal::Backend> Device<B> {
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
         debug_assert!(self.inside_frame);
 
-        let (src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+        let (src_format, src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
             let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
-            (&img.core, layer)
+            (img.format, &img.core, layer)
         } else {
-            (&self.frame_images[self.current_frame_id], 0)
+            (ImageFormat::BGRA8, &self.frame_images[self.current_frame_id], 0)
         };
 
-        let (dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (dest_format, dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture];
             let layer = fbo.layer_index;
-            (&img.core, layer)
+            (img.format, &img.core, layer)
         } else {
-            (&self.frame_images[self.current_frame_id], 0)
+            (ImageFormat::BGRA8, &self.frame_images[self.current_frame_id], 0)
         };
 
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
@@ -3667,7 +3667,7 @@ impl<B: hal::Backend> Device<B> {
                 barriers,
             );
 
-            if src_rect.size != dest_rect.size {
+            if src_rect.size != dest_rect.size || src_format != dest_format {
                 cmd_buffer.blit_image(
                     &src_img.image,
                     hal::image::Layout::TransferSrcOptimal,
