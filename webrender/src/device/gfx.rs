@@ -4671,6 +4671,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn deinit(self) {
+        self.device.wait_idle().unwrap();
         for mut texture in self.retained_textures {
             texture.id = 0;
         }
