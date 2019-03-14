@@ -2074,6 +2074,7 @@ pub struct Device<B: hal::Backend> {
     bound_read_texture: (TextureId, i32),
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
+    bound_layer: u16,
     program_mode_id: i32,
     scissor_rect: Option<DeviceIntRect>,
     //default_read_fbo: FBOId,
@@ -2326,6 +2327,7 @@ impl<B: hal::Backend> Device<B> {
             bound_read_fbo: DEFAULT_READ_FBO,
             bound_read_texture: (INVALID_TEXTURE_ID, 0),
             bound_draw_fbo: DEFAULT_DRAW_FBO,
+            bound_layer: 0,
             program_mode_id: 0,
             scissor_rect: None,
 
@@ -3078,6 +3080,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn reset_draw_target(&mut self) {
         self.bind_draw_target_impl(DEFAULT_DRAW_FBO);
+        self.bound_layer = 0;
         self.depth_available = true;
     }
 
@@ -3085,8 +3088,8 @@ impl<B: hal::Backend> Device<B> {
         &mut self,
         texture_target: DrawTarget,
     ) {
-        let (fbo_id, dimensions, depth_available) = match texture_target {
-            DrawTarget::Default(dim) => (DEFAULT_DRAW_FBO, dim, true),
+        let (fbo_id, dimensions, depth_available, layer) = match texture_target {
+            DrawTarget::Default(dim) => (DEFAULT_DRAW_FBO, dim, true, 0),
             DrawTarget::Texture { texture, layer, with_depth } => {
                 texture.bound_in_frame.set(self.frame_id);
                 let fbo_id = if with_depth {
@@ -3135,11 +3138,12 @@ impl<B: hal::Backend> Device<B> {
                     }
                     cmd_buffer.finish();
                 }
-                (fbo_id, texture.get_dimensions(), with_depth)
+                (fbo_id, texture.get_dimensions(), with_depth, layer)
             },
         };
         self.depth_available = depth_available;
         self.bind_draw_target_impl(fbo_id);
+        self.bound_layer = layer as _;
         self.viewport.rect = hal::pso::Rect {
             x: 0,
             y: 0,
@@ -4252,31 +4256,33 @@ impl<B: hal::Backend> Device<B> {
         if color.is_none() && depth.is_none() {
             return;
         }
-        let mut clears = Vec::new();
-        let mut rects = Vec::new();
+        let mut color_clears = Vec::new();
+        let mut color_rects = Vec::new();
         if let Some(color) = color {
-            clears.push(hal::command::AttachmentClear::Color {
+            color_clears.push(hal::command::AttachmentClear::Color {
                 index: 0,
                 value: hal::command::ClearColor::Float(color),
             });
-            rects.push(hal::pso::ClearRect {
+            color_rects.push(hal::pso::ClearRect {
                 rect: hal::pso::Rect {
                     x: rect.origin.x as i16,
                     y: rect.origin.y as i16,
                     w: rect.size.width as i16,
                     h: rect.size.height as i16,
                 },
-                layers: 0 .. 1,
+                layers: self.bound_layer .. self.bound_layer + 1,
             });
         }
 
+        let mut depth_clears = Vec::new();
+        let mut depth_rects = Vec::new();
         if let Some(depth) = depth {
             assert!(self.current_depth_test != DepthTest::Off);
-            clears.push(hal::command::AttachmentClear::DepthStencil {
+            depth_clears.push(hal::command::AttachmentClear::DepthStencil {
                 depth: Some(depth),
                 stencil: None,
             });
-            rects.push(hal::pso::ClearRect {
+            depth_rects.push(hal::pso::ClearRect {
                 rect: hal::pso::Rect {
                     x: rect.origin.x as i16,
                     y: rect.origin.y as i16,
@@ -4326,7 +4332,13 @@ impl<B: hal::Backend> Device<B> {
                     &vec![],
                 );
 
-                encoder.clear_attachments(clears, rects);
+                if !color_clears.is_empty() {
+                    encoder.clear_attachments(color_clears, color_rects);
+                }
+
+                if !depth_clears.is_empty() {
+                    encoder.clear_attachments(depth_clears, depth_rects);
+                }
             }
             cmd_buffer.finish();
         }
