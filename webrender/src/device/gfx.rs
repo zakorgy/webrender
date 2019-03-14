@@ -1397,7 +1397,7 @@ impl<B: hal::Backend> Program<B> {
                 hal::buffer::Usage::VERTEX,
                 &QUAD,
                 vertex_buffer_stride,
-                (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             ));
             instance_buffer.push(InstanceBufferHandler::new(
                 device,
@@ -1405,7 +1405,7 @@ impl<B: hal::Backend> Program<B> {
                 hal::buffer::Usage::VERTEX,
                 instance_buffer_stride,
                 (limits.non_coherent_atom_size - 1) as usize,
-                (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             ));
             locals_buffer.push(UniformBufferHandler::new(
                 memory_types,
@@ -1420,7 +1420,7 @@ impl<B: hal::Backend> Program<B> {
                     hal::buffer::Usage::INDEX,
                     &vec![0u32; MAX_INDEX_COUNT],
                     mem::size_of::<u32>(),
-                    (limits.min_buffer_copy_pitch_alignment - 1) as usize,
+                    (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                 ));
             }
         }
@@ -2246,8 +2246,8 @@ impl<B: hal::Backend> Device<B> {
                 hal::buffer::Usage::TRANSFER_SRC,
                 1,
                 (limits.non_coherent_atom_size - 1) as usize,
-                (limits.min_buffer_copy_pitch_alignment - 1) as usize,
-                (limits.min_buffer_copy_offset_alignment - 1) as usize,
+                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+                (limits.optimal_buffer_copy_offset_alignment - 1) as usize,
             ));
         }
         let descriptor_pools_global = DescriptorPools::new(
@@ -3963,7 +3963,7 @@ impl<B: hal::Backend> Device<B> {
             &self.device,
             &self.memory_types,
             hal::buffer::Usage::TRANSFER_DST,
-            (self.limits.min_buffer_copy_pitch_alignment - 1) as usize,
+            (self.limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             output.len(),
             stride,
         );
