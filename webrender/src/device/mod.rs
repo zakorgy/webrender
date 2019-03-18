@@ -663,8 +663,8 @@ impl<'a> From<DrawTarget<'a>> for ReadTarget<'a> {
     }
 }
 
-/// Flags that control how shaders are pre-cached, if at all.
 bitflags! {
+    /// Flags that control how shaders are pre-cached, if at all.
     #[derive(Default)]
     pub struct ShaderPrecacheFlags: u32 {
         /// Needed for const initialization
