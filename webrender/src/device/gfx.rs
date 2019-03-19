@@ -1167,6 +1167,7 @@ impl<B: hal::Backend> Program<B> {
         frame_count: usize,
         shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
         pipeline_cache: Option<&B::PipelineCache>,
+        surface_format: ImageFormat,
     ) -> Program<B> {
         if !shader_modules.contains_key(shader_name) {
             let vs_file = format!("{}.vert.spv", shader_name);
@@ -1303,7 +1304,7 @@ impl<B: hal::Backend> Program<B> {
                 ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => {
                     ImageFormat::R8
                 }
-                _ => ImageFormat::BGRA8,
+                _ => surface_format,
             };
 
             let pipelines_descriptors = pipeline_states
@@ -1773,7 +1774,7 @@ impl<B: hal::Backend> RenderPass<B> {
             ImageFormat::R8 => &self.r8,
             ImageFormat::BGRA8 if depth_enabled => &self.bgra8_depth,
             ImageFormat::BGRA8 => &self.bgra8,
-            _ => unimplemented!(),
+            f => unimplemented!("No render pass for image format {:?}", f),
         }
     }
 
@@ -2036,7 +2037,7 @@ pub struct Device<B: hal::Backend> {
     adapter: hal::Adapter<B>,
     surface: B::Surface,
     _instance: Box<hal::Instance<Backend=B>>,
-    pub surface_format: hal::format::Format,
+    pub surface_format: ImageFormat,
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[CommandPool<B>; 1]>,
@@ -2455,7 +2456,7 @@ impl<B: hal::Backend> Device<B> {
         window_size: (i32, i32),
     ) -> (
         B::Swapchain,
-        hal::format::Format,
+        ImageFormat,
         hal::format::Format,
         RenderPass<B>,
         Vec<B::Framebuffer>,
@@ -2478,7 +2479,7 @@ impl<B: hal::Backend> Device<B> {
             formats
                 .into_iter()
                 .find(|format| format == &hal::format::Format::Bgra8Unorm)
-                .unwrap()
+                .expect("Bgra8Unorm surface is not supported!")
         });
 
         let mut extent = caps.current_extent.unwrap_or(hal::window::Extent2D {
@@ -2529,7 +2530,7 @@ impl<B: hal::Backend> Device<B> {
             };
 
             let attachment_bgra8 = hal::pass::Attachment {
-                format: Some(hal::format::Format::Bgra8Unorm),
+                format: Some(surface_format),
                 samples: 1,
                 ops: hal::pass::AttachmentOps::new(
                     hal::pass::AttachmentLoadOp::DontCare,
@@ -2707,7 +2708,10 @@ impl<B: hal::Backend> Device<B> {
         };
         (
             swap_chain,
-            surface_format,
+            match surface_format {
+                hal::format::Format::Bgra8Unorm => ImageFormat::BGRA8,
+                f => unimplemented!("Unsupported surface format: {:?}", f),
+            },
             depth_format,
             render_pass,
             framebuffers,
@@ -2850,6 +2854,7 @@ impl<B: hal::Backend> Device<B> {
             self.frame_count,
             &mut self.shader_modules,
             self.pipeline_cache.as_ref(),
+            self.surface_format,
         );
         self.bind_samplers(&program);
 
@@ -2983,12 +2988,12 @@ impl<B: hal::Backend> Device<B> {
             if self.current_depth_test == DepthTest::Off {
                 (
                     &self.framebuffers[self.current_frame_id],
-                    ImageFormat::BGRA8,
+                    self.surface_format,
                 )
             } else {
                 (
                     &self.framebuffers_depth[self.current_frame_id],
-                    ImageFormat::BGRA8,
+                    self.surface_format,
                 )
             }
         };
@@ -3622,7 +3627,7 @@ impl<B: hal::Backend> Device<B> {
             let layer = fbo.layer_index;
             (img.format, &img.core, layer)
         } else {
-            (ImageFormat::BGRA8, &self.frame_images[self.current_frame_id], 0)
+            (self.surface_format, &self.frame_images[self.current_frame_id], 0)
         };
 
         let (dest_format, dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
@@ -3631,7 +3636,7 @@ impl<B: hal::Backend> Device<B> {
             let layer = fbo.layer_index;
             (img.format, &img.core, layer)
         } else {
-            (ImageFormat::BGRA8, &self.frame_images[self.current_frame_id], 0)
+            (self.surface_format, &self.frame_images[self.current_frame_id], 0)
         };
 
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
@@ -3961,7 +3966,7 @@ impl<B: hal::Backend> Device<B> {
             let layer = fbo.layer_index;
             (&img.core, img.format, layer)
         } else {
-            (&self.frame_images[self.current_frame_id], ImageFormat::BGRA8, 0)
+            (&self.frame_images[self.current_frame_id], self.surface_format, 0)
         };
 
         let (fmt_mismatch, stride) = if bytes_per_pixel < image_format.bytes_per_pixel() {
@@ -4102,8 +4107,7 @@ impl<B: hal::Backend> Device<B> {
             }
         }
         data.truncate(output.len());
-        if !capture_read
-            && self.surface_format.base_format().0 == hal::format::SurfaceType::B8_G8_R8_A8
+        if !capture_read && self.surface_format == ImageFormat::BGRA8
         {
             let width = rect.size.width as usize;
             let height = rect.size.height as usize;
@@ -4310,13 +4314,13 @@ impl<B: hal::Backend> Device<B> {
             if self.current_depth_test == DepthTest::Off {
                 (
                     &self.framebuffers[self.current_frame_id],
-                    ImageFormat::BGRA8,
+                    self.surface_format,
                     false,
                 )
             } else {
                 (
                     &self.framebuffers_depth[self.current_frame_id],
-                    ImageFormat::BGRA8,
+                    self.surface_format,
                     true,
                 )
             }
