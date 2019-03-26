@@ -703,11 +703,11 @@ impl<B: hal::Backend> Buffer<B> {
         heaps: &mut Heaps<B>,
         memory_usage: MemoryUsageValue,
         buffer_usage: hal::buffer::Usage,
-        pitch_alignment_mask: usize,
+        alignment_mask: usize,
         data_len: usize,
         stride: usize,
     ) -> Self {
-        let buffer_size = (data_len * stride + pitch_alignment_mask) & !pitch_alignment_mask;
+        let buffer_size = (data_len * stride + alignment_mask) & !alignment_mask;
         let mut buffer = unsafe {
             device
                 .create_buffer(buffer_size as u64, buffer_usage)
@@ -720,7 +720,7 @@ impl<B: hal::Backend> Buffer<B> {
             requirements.type_mask as u32,
             memory_usage,
             requirements.size,
-            requirements.alignment
+            std::cmp::max(requirements.alignment, (alignment_mask + 1) as u64)
         ).expect("Allocate memory failed");
 
         unsafe { device.bind_buffer_memory(&memory_block.memory(), memory_block.range().start, &mut buffer) }
@@ -752,7 +752,6 @@ impl<B: hal::Backend> Buffer<B> {
         device: &B::Device,
         data: &[T],
         offset: usize,
-        alignment_mask: usize,
     ) -> usize {
         let offset = self.memory_block.range().start + (offset * self.stride) as u64;
         let size = (data.len() * self.stride) as u64;
@@ -791,7 +790,6 @@ impl<B: hal::Backend> Buffer<B> {
 pub struct BufferPool<B: hal::Backend> {
     pub buffer: Buffer<B>,
     pub data_stride: usize,
-    non_coherent_atom_size: usize,
     copy_alignment_mask: usize,
     offset: usize,
     size: usize,
@@ -813,14 +811,13 @@ impl<B: hal::Backend> BufferPool<B> {
             heaps,
             MemoryUsageValue::Upload,
             buffer_usage,
-            pitch_alignment_mask,
+            std::cmp::max(pitch_alignment_mask, non_coherent_atom_size),
             TEXTURE_CACHE_SIZE,
             data_stride,
         );
         BufferPool {
             buffer,
             data_stride,
-            non_coherent_atom_size,
             copy_alignment_mask,
             offset: 0,
             size: 0,
@@ -846,7 +843,7 @@ impl<B: hal::Backend> BufferPool<B> {
         );
         self.size = self
             .buffer
-            .update(device, data, self.offset, self.non_coherent_atom_size);
+            .update(device, data, self.offset);
         self.buffer_offset = self.offset;
         self.offset += (self.size + self.copy_alignment_mask) & !self.copy_alignment_mask;
     }
@@ -877,14 +874,14 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         heaps: &mut Heaps<B>,
         buffer_usage: hal::buffer::Usage,
         data_stride: usize,
-        pitch_alignment_mask: usize,
+        alignment_mask: usize,
     ) -> Self {
         let buffer = Buffer::new(
             device,
             heaps,
             MemoryUsageValue::Dynamic,
             buffer_usage,
-            pitch_alignment_mask,
+            alignment_mask,
             MAX_INSTANCE_COUNT,
             data_stride,
         );
@@ -895,9 +892,9 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         }
     }
 
-    fn update<T: Copy>(&mut self, device: &B::Device, data: &[T], non_coherent_atom_size: usize) {
+    fn update<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
         self.buffer
-            .update(device, data, self.offset, non_coherent_atom_size);
+            .update(device, data, self.offset);
         self.last_update_size = data.len();
         self.offset += self.last_update_size;
     }
@@ -915,8 +912,7 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
 pub struct InstanceBufferHandler<B: hal::Backend> {
     buffers: Vec<InstancePoolBuffer<B>>,
     data_stride: usize,
-    non_coherent_atom_size: usize,
-    pitch_alignment_mask: usize,
+    alignment_mask: usize,
     current_buffer_index: usize,
 }
 
@@ -924,23 +920,22 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
     pub fn new(
         device: &B::Device,
         heaps: &mut Heaps<B>,
-        usage: hal::buffer::Usage,
         data_stride: usize,
         non_coherent_atom_size: usize,
         pitch_alignment_mask: usize,
     ) -> Self {
+        let alignment_mask = std::cmp::max(non_coherent_atom_size, pitch_alignment_mask);
         let buffers = vec![InstancePoolBuffer::new(
             device,
             heaps,
-            usage,
+            hal::buffer::Usage::VERTEX,
             data_stride,
-            pitch_alignment_mask,
+            alignment_mask,
         )];
 
         InstanceBufferHandler {
             buffers,
-            non_coherent_atom_size,
-            pitch_alignment_mask,
+            alignment_mask,
             data_stride,
             current_buffer_index: 0,
         }
@@ -959,7 +954,7 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
                         heaps,
                         hal::buffer::Usage::VERTEX,
                         self.data_stride,
-                        self.pitch_alignment_mask,
+                        self.alignment_mask,
                     ))
                 }
             }
@@ -976,7 +971,6 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
             self.buffers[self.current_buffer_index].update(
                 device,
                 &data[0 .. update_size],
-                self.non_coherent_atom_size,
             );
 
             data = &data[update_size ..]
@@ -1385,7 +1379,6 @@ impl<B: hal::Backend> Program<B> {
             instance_buffer.push(InstanceBufferHandler::new(
                 device,
                 heaps,
-                hal::buffer::Usage::VERTEX,
                 instance_buffer_stride,
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
