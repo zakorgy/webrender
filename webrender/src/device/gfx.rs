@@ -2727,7 +2727,7 @@ impl<B: hal::Backend> Device<B> {
                 (cores, fbos, fbos_depth)
             }
             // TODO fix depth fbos
-            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo], vec![]),
+            Backbuffer::Framebuffer(fbo) => (vec![], vec![fbo], vec![]),
         };
 
         // Rendering setup
@@ -4421,40 +4421,30 @@ impl<B: hal::Backend> Device<B> {
         if color.is_none() && depth.is_none() {
             return;
         }
-        let mut clears = Vec::new();
-        let mut rects = Vec::new();
-        if let Some(color) = color {
-            clears.push(hal::command::AttachmentClear::Color {
-                index: 0,
-                value: hal::command::ClearColor::Float(color),
-            });
-            rects.push(hal::pso::ClearRect {
-                rect: hal::pso::Rect {
-                    x: rect.origin.x as i16,
-                    y: rect.origin.y as i16,
-                    w: rect.size.width as i16,
-                    h: rect.size.height as i16,
-                },
-                layers: 0 .. 1,
-            });
-        }
 
-        if let Some(depth) = depth {
-            assert!(self.current_depth_test != DepthTest::Off);
-            clears.push(hal::command::AttachmentClear::DepthStencil {
-                depth: Some(depth),
+        let rect = hal::pso::ClearRect {
+            rect: hal::pso::Rect {
+                x: rect.origin.x as i16,
+                y: rect.origin.y as i16,
+                w: rect.size.width as i16,
+                h: rect.size.height as i16,
+            },
+            layers: 0 .. 1,
+        };
+
+        let color_clear = color.map(|c| {
+            hal::command::AttachmentClear::Color {
+                index: 0,
+                value: hal::command::ClearColor::Float(c),
+            }
+        });
+
+        let depth_clear = depth.map(|d| {
+            hal::command::AttachmentClear::DepthStencil {
+                depth: Some(d),
                 stencil: None,
-            });
-            rects.push(hal::pso::ClearRect {
-                rect: hal::pso::Rect {
-                    x: rect.origin.x as i16,
-                    y: rect.origin.y as i16,
-                    w: rect.size.width as i16,
-                    h: rect.size.height as i16,
-                },
-                layers: 0 .. 1,
-            });
-        }
+            }
+        });
 
         let (frame_buffer, format, has_depth) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             (
@@ -4495,7 +4485,7 @@ impl<B: hal::Backend> Device<B> {
                     &vec![],
                 );
 
-                encoder.clear_attachments(clears, rects);
+                encoder.clear_attachments(color_clear.into_iter().chain(depth_clear.into_iter()), Some(rect));
             }
             cmd_buffer.finish();
         }
