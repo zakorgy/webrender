@@ -13,7 +13,11 @@ pub(super) struct RenderPass<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> RenderPass<B> {
-    pub(super) fn get_render_pass(&self, format: ImageFormat, depth_enabled: bool) -> &B::RenderPass {
+    pub(super) fn get_render_pass(
+        &self,
+        format: ImageFormat,
+        depth_enabled: bool,
+    ) -> &B::RenderPass {
         match format {
             ImageFormat::R8 if depth_enabled => &self.r8_depth,
             ImageFormat::R8 => &self.r8,
@@ -32,4 +36,3 @@ impl<B: hal::Backend> RenderPass<B> {
         }
     }
 }
-

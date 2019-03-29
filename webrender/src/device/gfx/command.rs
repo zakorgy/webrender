@@ -20,7 +20,9 @@ impl<B: hal::Backend> CommandPool<B> {
         }
     }
 
-    pub(super) fn acquire_command_buffer(&mut self) -> &mut hal::command::CommandBuffer<B, hal::Graphics> {
+    pub(super) fn acquire_command_buffer(
+        &mut self,
+    ) -> &mut hal::command::CommandBuffer<B, hal::Graphics> {
         if self.size >= self.command_buffers.len() {
             let command_buffer = self
                 .command_pool

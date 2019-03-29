@@ -85,7 +85,7 @@ pub struct Vertex {
 #[cfg(feature = "pathfinder")]
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
-pub struct VectorStencilInstance  {
+pub struct VectorStencilInstance {
     pub aFromPosition: [f32; 2],
     pub aCtrlPosition: [f32; 2],
     pub aToPosition: [f32; 2],
