@@ -38,17 +38,25 @@ impl<B: hal::Backend> Buffer<B> {
                 .expect("create_buffer failed")
         };
         let requirements = unsafe { device.get_buffer_requirements(&buffer) };
-        let alignment = ((requirements.alignment -1) | (alignment_mask as u64)) + 1;
-        let memory_block = heaps.allocate(
-            device,
-            requirements.type_mask as u32,
-            memory_usage,
-            requirements.size,
-            alignment,
-        ).expect("Allocate memory failed");
+        let alignment = ((requirements.alignment - 1) | (alignment_mask as u64)) + 1;
+        let memory_block = heaps
+            .allocate(
+                device,
+                requirements.type_mask as u32,
+                memory_usage,
+                requirements.size,
+                alignment,
+            )
+            .expect("Allocate memory failed");
 
-        unsafe { device.bind_buffer_memory(&memory_block.memory(), memory_block.range().start, &mut buffer) }
-            .expect("Bind buffer memory failed");
+        unsafe {
+            device.bind_buffer_memory(
+                &memory_block.memory(),
+                memory_block.range().start,
+                &mut buffer,
+            )
+        }
+        .expect("Bind buffer memory failed");
 
         Buffer {
             memory_block,
@@ -60,12 +68,23 @@ impl<B: hal::Backend> Buffer<B> {
         }
     }
 
-    fn update_all<T: Copy>(&mut self, device: &B::Device, data: &[T], non_coherent_atom_size_mask: u64) {
+    fn update_all<T: Copy>(
+        &mut self,
+        device: &B::Device,
+        data: &[T],
+        non_coherent_atom_size_mask: u64,
+    ) {
         let size = (data.len() * std::mem::size_of::<T>()) as u64;
-        let range = 0..((size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
+        let range = 0 .. ((size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
         unsafe {
-            let mut mapped = self.memory_block.map(device, range.clone()).expect("Mapping memory block failed");
-            mapped.write(device, 0..size).expect("Writer creation failed").write(&data);
+            let mut mapped = self
+                .memory_block
+                .map(device, range.clone())
+                .expect("Mapping memory block failed");
+            mapped
+                .write(device, 0 .. size)
+                .expect("Writer creation failed")
+                .write(&data);
         }
         self.memory_block.unmap(device);
     }
@@ -79,10 +98,17 @@ impl<B: hal::Backend> Buffer<B> {
     ) -> usize {
         let offset = (offset * self.stride) as u64;
         let size = (data.len() * self.stride) as u64;
-        let range = offset..((offset + size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
+        let range = offset
+            .. ((offset + size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
         unsafe {
-            let mut mapped = self.memory_block.map(device, range).expect("Mapping memory block failed");
-            mapped.write(device, 0..size).expect("Writer creation failed").write(&data);
+            let mut mapped = self
+                .memory_block
+                .map(device, range)
+                .expect("Mapping memory block failed");
+            mapped
+                .write(device, 0 .. size)
+                .expect("Writer creation failed")
+                .write(&data);
         }
         self.memory_block.unmap(device);
         size as usize
@@ -167,9 +193,12 @@ impl<B: hal::Backend> BufferPool<B> {
             buffer_len,
             self.buffer.buffer_size
         );
-        self.size = self
-            .buffer
-            .update(device, data, self.offset, self.non_coherent_atom_size_mask as u64);
+        self.size = self.buffer.update(
+            device,
+            data,
+            self.offset,
+            self.non_coherent_atom_size_mask as u64,
+        );
         self.buffer_offset = self.offset;
         self.offset += (self.size + self.copy_alignment_mask) & !self.copy_alignment_mask;
     }
@@ -222,8 +251,12 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
     }
 
     fn update<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
-        self.buffer
-            .update(device, data, self.offset, self.non_coherent_atom_size_mask as u64);
+        self.buffer.update(
+            device,
+            data,
+            self.offset,
+            self.non_coherent_atom_size_mask as u64,
+        );
         self.last_update_size = data.len();
         self.offset += self.last_update_size;
     }
@@ -272,7 +305,12 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
         }
     }
 
-    pub(super) fn add<T: Copy>(&mut self, device: &B::Device, mut data: &[T], heaps: &mut Heaps<B>) {
+    pub(super) fn add<T: Copy>(
+        &mut self,
+        device: &B::Device,
+        mut data: &[T],
+        heaps: &mut Heaps<B>,
+    ) {
         assert_eq!(self.data_stride, mem::size_of::<T>());
         while !data.is_empty() {
             if self.current_buffer().buffer.buffer_size
@@ -300,10 +338,7 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
                 data.len()
             };
 
-            self.buffers[self.current_buffer_index].update(
-                device,
-                &data[0 .. update_size],
-            );
+            self.buffers[self.current_buffer_index].update(device, &data[0 .. update_size]);
 
             data = &data[update_size ..]
         }
@@ -440,7 +475,8 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
             );
             old_buffer.deinit(device, heaps);
         }
-        self.buffer.update_all(device, data, self.non_coherent_atom_size_mask as u64);
+        self.buffer
+            .update_all(device, data, self.non_coherent_atom_size_mask as u64);
         self.buffer_len = buffer_len;
     }
 
@@ -456,4 +492,3 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
         self.buffer.deinit(device, heaps);
     }
 }
-

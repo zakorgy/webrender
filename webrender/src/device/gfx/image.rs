@@ -77,17 +77,23 @@ impl<B: hal::Backend> ImageCore<B> {
         .expect("create_image failed");
         let requirements = unsafe { device.get_image_requirements(&image) };
 
-        let memory_block = heaps.allocate(
-            device,
-            requirements.type_mask as u32,
-            MemoryUsageValue::Data,
-            requirements.size,
-            requirements.alignment
-        ).expect("Allocate memory failed");
+        let memory_block = heaps
+            .allocate(
+                device,
+                requirements.type_mask as u32,
+                MemoryUsageValue::Data,
+                requirements.size,
+                requirements.alignment,
+            )
+            .expect("Allocate memory failed");
 
         unsafe {
             device
-                .bind_image_memory(&memory_block.memory(), memory_block.range().start, &mut image)
+                .bind_image_memory(
+                    &memory_block.memory(),
+                    memory_block.range().start,
+                    &mut image,
+                )
                 .expect("Bind image memory failed")
         };
 
@@ -377,4 +383,3 @@ impl<B: hal::Backend> DepthBuffer<B> {
         self.core.deinit(device, heaps);
     }
 }
-

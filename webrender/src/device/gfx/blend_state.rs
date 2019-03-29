@@ -130,4 +130,3 @@ pub(super) const OVERDRAW: BlendState = BlendState::On {
         dst: Factor::OneMinusSrcAlpha,
     },
 };
-

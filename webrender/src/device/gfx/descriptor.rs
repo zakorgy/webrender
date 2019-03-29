@@ -208,4 +208,3 @@ impl<B: hal::Backend> DescriptorPools<B> {
         self.default_pool.deinit(device);
     }
 }
-

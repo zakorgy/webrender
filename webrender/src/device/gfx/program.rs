@@ -126,11 +126,13 @@ impl<B: hal::Backend> Program<B> {
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
         let mut constants = Vec::with_capacity(SPECIALIZATION_CONSTANT_COUNT);
-        let mut specialization_data = vec![0; SPECIALIZATION_CONSTANT_COUNT * SPECIALIZATION_CONSTANT_SIZE];
+        let mut specialization_data =
+            vec![0; SPECIALIZATION_CONSTANT_COUNT * SPECIALIZATION_CONSTANT_SIZE];
         for i in 0 .. SPECIALIZATION_CONSTANT_COUNT {
             constants.push(hal::pso::SpecializationConstant {
                 id: i as _,
-                range: (SPECIALIZATION_CONSTANT_SIZE * i) as _ .. (SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
+                range: (SPECIALIZATION_CONSTANT_SIZE * i) as _
+                    .. (SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
             });
             for (index, feature) in SPECIALIZATION_FEATURES[i].iter().enumerate() {
                 if features.contains(feature) {
@@ -279,9 +281,10 @@ impl<B: hal::Backend> Program<B> {
                 })
                 .collect::<Vec<_>>();
 
-            let pipelines =
-                unsafe { device.create_graphics_pipelines(pipelines_descriptors.as_slice(), pipeline_cache) }
-                    .into_iter();
+            let pipelines = unsafe {
+                device.create_graphics_pipelines(pipelines_descriptors.as_slice(), pipeline_cache)
+            }
+            .into_iter();
 
             pipeline_states
                 .iter()
@@ -306,9 +309,15 @@ impl<B: hal::Backend> Program<B> {
             ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => {
                 mem::size_of::<vertex_types::ClipMaskInstance>()
             }
-            ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<vertex_types::BlurInstance>(),
-            ShaderKind::Cache(VertexArrayKind::Border) => mem::size_of::<vertex_types::BorderInstance>(),
-            ShaderKind::Cache(VertexArrayKind::Scale) => mem::size_of::<vertex_types::ScalingInstance>(),
+            ShaderKind::Cache(VertexArrayKind::Blur) => {
+                mem::size_of::<vertex_types::BlurInstance>()
+            }
+            ShaderKind::Cache(VertexArrayKind::Border) => {
+                mem::size_of::<vertex_types::BorderInstance>()
+            }
+            ShaderKind::Cache(VertexArrayKind::Scale) => {
+                mem::size_of::<vertex_types::ScalingInstance>()
+            }
             ShaderKind::Cache(VertexArrayKind::LineDecoration) => {
                 mem::size_of::<vertex_types::LineDecorationInstance>()
             }
@@ -589,4 +598,3 @@ impl<B: hal::Backend> Program<B> {
         }
     }
 }
-
