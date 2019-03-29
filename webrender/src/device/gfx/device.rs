@@ -831,7 +831,7 @@ impl<B: hal::Backend> Device<B> {
                         unsafe {
                             device.create_framebuffer(
                                 render_pass.get_render_pass(image_format, true),
-                                vec![&core.view, &depth.core.view],
+                                Some(&core.view).into_iter().chain(Some(&depth.core.view)),
                                 extent,
                             )
                         }
@@ -1099,11 +1099,10 @@ impl<B: hal::Backend> Device<B> {
         if !self.pipeline_layouts.contains_key(shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
-                    vec![
-                        self.descriptor_pools[self.next_id].get_layout(shader_kind),
-                        self.descriptor_pools_global.get_layout(shader_kind),
-                        self.descriptor_pools_sampler.get_layout(shader_kind),
-                    ],
+                    Some(self.descriptor_pools[self.next_id].get_layout(shader_kind))
+                        .into_iter()
+                        .chain(Some(self.descriptor_pools_global.get_layout(shader_kind)))
+                        .chain(Some(self.descriptor_pools_sampler.get_layout(shader_kind))),
                     &[],
                 )
             }
@@ -2608,13 +2607,10 @@ impl<B: hal::Backend> Device<B> {
                     render_pass,
                     frame_buffer,
                     self.viewport.rect,
-                    &vec![],
+                    &[],
                 );
 
-                encoder.clear_attachments(
-                    color_clear.into_iter().chain(depth_clear.into_iter()),
-                    Some(rect),
-                );
+                encoder.clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
             }
             cmd_buffer.finish();
         }

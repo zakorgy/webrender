@@ -173,47 +173,67 @@ impl<B: hal::Backend> Program<B> {
             use super::blend_state::*;
             use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
 
-            let mut pipeline_states = match shader_kind {
-                ShaderKind::Cache(VertexArrayKind::Scale) => vec![
+            let pipeline_states = match shader_kind {
+                ShaderKind::Cache(VertexArrayKind::Scale) => [
                     (BlendState::Off, DepthTest::Off),
                     (BlendState::MULTIPLY, DepthTest::Off),
-                ],
-                ShaderKind::Cache(VertexArrayKind::Blur) => vec![
+                ]
+                .into_iter(),
+                ShaderKind::Cache(VertexArrayKind::Blur) => [
                     (BlendState::Off, DepthTest::Off),
                     (BlendState::Off, LESS_EQUAL_TEST),
-                ],
+                ]
+                .into_iter(),
                 ShaderKind::Cache(VertexArrayKind::Border)
                 | ShaderKind::Cache(VertexArrayKind::LineDecoration) => {
-                    vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)]
+                    [(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)].into_iter()
                 }
-                ShaderKind::ClipCache => vec![(BlendState::MULTIPLY, DepthTest::Off)],
+                ShaderKind::ClipCache => [(BlendState::MULTIPLY, DepthTest::Off)].into_iter(),
                 ShaderKind::Text => {
-                    let mut states = vec![
-                        (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
-                        (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
-                        (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
-                        (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
-                        (SUBPIXEL_PASS0, DepthTest::Off),
-                        (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
-                        (SUBPIXEL_PASS1, DepthTest::Off),
-                        (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
-                    ];
                     if features.contains(&"DUAL_SOURCE_BLENDING") {
-                        states.push((SUBPIXEL_DUAL_SOURCE, DepthTest::Off));
-                        states.push((SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST));
+                        [
+                            (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                            (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                            (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
+                            (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
+                            (SUBPIXEL_PASS0, DepthTest::Off),
+                            (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
+                            (SUBPIXEL_PASS1, DepthTest::Off),
+                            (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
+                            (SUBPIXEL_DUAL_SOURCE, DepthTest::Off),
+                            (SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST),
+                        ]
+                        .into_iter()
+                    } else {
+                        [
+                            (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
+                            (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
+                            (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
+                            (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
+                            (SUBPIXEL_PASS0, DepthTest::Off),
+                            (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
+                            (SUBPIXEL_PASS1, DepthTest::Off),
+                            (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
+                            (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
+                        ]
+                        .into_iter()
                     }
-                    states
                 }
                 ShaderKind::DebugColor | ShaderKind::DebugFont => {
-                    vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)]
+                    [(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)].into_iter()
                 }
-                _ => vec![
+                _ => [
                     (BlendState::Off, DepthTest::Off),
                     (BlendState::Off, LESS_EQUAL_TEST),
                     (BlendState::Off, LESS_EQUAL_WRITE),
@@ -226,12 +246,9 @@ impl<B: hal::Backend> Program<B> {
                     (PREMULTIPLIED_DEST_OUT, DepthTest::Off),
                     (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_TEST),
                     (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
-                ],
+                ]
+                .into_iter(),
             };
-
-            if features.contains(&"DEBUG_OVERDRAW") {
-                pipeline_states.push((OVERDRAW, LESS_EQUAL_TEST));
-            }
 
             let format = match shader_kind {
                 ShaderKind::ClipCache => ImageFormat::R8,
@@ -244,53 +261,62 @@ impl<B: hal::Backend> Program<B> {
                 _ => surface_format,
             };
 
-            let pipelines_descriptors = pipeline_states
-                .iter()
-                .map(|&(blend_state, depth_test)| {
-                    let subpass = hal::pass::Subpass {
-                        index: 0,
-                        main_pass: render_pass
-                            .get_render_pass(format, depth_test != hal::pso::DepthTest::Off),
-                    };
-                    let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
-                        shader_entries.clone(),
-                        hal::Primitive::TriangleList,
-                        hal::pso::Rasterizer::FILL,
-                        &pipeline_layout,
-                        subpass,
-                    );
-                    pipeline_descriptor
-                        .blender
-                        .targets
-                        .push(hal::pso::ColorBlendDesc(
-                            hal::pso::ColorMask::ALL,
-                            blend_state,
-                        ));
+            let create_desc = |(blend_state, depth_test)| {
+                let subpass = hal::pass::Subpass {
+                    index: 0,
+                    main_pass: render_pass
+                        .get_render_pass(format, depth_test != hal::pso::DepthTest::Off),
+                };
+                let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
+                    shader_entries.clone(),
+                    hal::Primitive::TriangleList,
+                    hal::pso::Rasterizer::FILL,
+                    &pipeline_layout,
+                    subpass,
+                );
+                pipeline_descriptor
+                    .blender
+                    .targets
+                    .push(hal::pso::ColorBlendDesc(
+                        hal::pso::ColorMask::ALL,
+                        blend_state,
+                    ));
 
-                    pipeline_descriptor.depth_stencil = hal::pso::DepthStencilDesc {
-                        depth: depth_test,
-                        depth_bounds: false,
-                        stencil: hal::pso::StencilTest::Off,
-                    };
+                pipeline_descriptor.depth_stencil = hal::pso::DepthStencilDesc {
+                    depth: depth_test,
+                    depth_bounds: false,
+                    stencil: hal::pso::StencilTest::Off,
+                };
 
-                    pipeline_descriptor.vertex_buffers =
-                        pipeline_requirements.vertex_buffer_descriptors.clone();
-                    pipeline_descriptor.attributes =
-                        pipeline_requirements.attribute_descriptors.clone();
-                    pipeline_descriptor
-                })
-                .collect::<Vec<_>>();
+                pipeline_descriptor.vertex_buffers =
+                    pipeline_requirements.vertex_buffer_descriptors.clone();
+                pipeline_descriptor.attributes =
+                    pipeline_requirements.attribute_descriptors.clone();
+                pipeline_descriptor
+            };
 
-            let pipelines = unsafe {
-                device.create_graphics_pipelines(pipelines_descriptors.as_slice(), pipeline_cache)
-            }
-            .into_iter();
+            let pipelines_descriptors = pipeline_states.clone().map(|ps| create_desc(*ps));
 
-            pipeline_states
-                .iter()
+            let pipelines =
+                unsafe { device.create_graphics_pipelines(pipelines_descriptors, pipeline_cache) }
+                    .into_iter();
+
+            let mut states = pipeline_states
                 .cloned()
-                .zip(pipelines.map(|pipeline| pipeline.unwrap()))
-                .collect::<FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>>()
+                .zip(pipelines.map(|pipeline| pipeline.expect("Pipeline creation failed")))
+                .collect::<FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>>();
+
+            if features.contains(&"DEBUG_OVERDRAW") {
+                let pipeline_state = (OVERDRAW, LESS_EQUAL_TEST);
+                let pipeline_descriptor = create_desc(pipeline_state);
+                let pipeline = unsafe {
+                    device.create_graphics_pipeline(&pipeline_descriptor, pipeline_cache)
+                }
+                .expect("Pipeline creation failed");
+                states.insert(pipeline_state, pipeline);
+            }
+
+            states
         };
 
         let vertex_buffer_stride = match shader_kind {
@@ -404,13 +430,13 @@ impl<B: hal::Backend> Program<B> {
         u_mode: i32,
         buffer_id: usize,
     ) {
-        let locals_data = vec![Locals {
+        let locals_data = Locals {
             uTransform: projection.to_row_arrays(),
             uMode: u_mode,
-        }];
-        self.locals_buffer[buffer_id].add(device, &locals_data, heaps);
+        };
+        self.locals_buffer[buffer_id].add(device, &[locals_data], heaps);
         unsafe {
-            device.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
+            device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
                 set,
                 binding: self.bindings_map["Locals"],
                 array_offset: 0,
@@ -418,7 +444,7 @@ impl<B: hal::Backend> Program<B> {
                     &self.locals_buffer[buffer_id].buffer().buffer,
                     Some(0) .. None,
                 )),
-            }]);
+            }));
         }
     }
 
@@ -431,7 +457,7 @@ impl<B: hal::Backend> Program<B> {
     ) {
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             unsafe {
-                device.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
+                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
                     set,
                     binding: *binding,
                     array_offset: 0,
@@ -439,7 +465,7 @@ impl<B: hal::Backend> Program<B> {
                         &image.view,
                         image.state.get().1,
                     )),
-                }]);
+                }));
             }
         }
     }
@@ -453,12 +479,12 @@ impl<B: hal::Backend> Program<B> {
     ) {
         if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
             unsafe {
-                device.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
+                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
                     set,
                     binding: *binding,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Sampler(sampler)),
-                }]);
+                }));
             }
         }
     }
@@ -512,11 +538,10 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_descriptor_sets(
                 &pipeline_layouts[&self.shader_kind],
                 0,
-                vec![
-                    desc_pools.get(&self.shader_kind),
-                    desc_pools_global.get(&self.shader_kind),
-                    desc_pools_sampler.get(&self.shader_kind),
-                ],
+                Some(desc_pools.get(&self.shader_kind))
+                    .into_iter()
+                    .chain(Some(desc_pools_global.get(&self.shader_kind)))
+                    .chain(Some(desc_pools_sampler.get(&self.shader_kind))),
                 &[],
             );
             desc_pools.next(&self.shader_kind);
@@ -526,7 +551,7 @@ impl<B: hal::Backend> Program<B> {
             }
 
             if let Some(ref index_buffer) = self.index_buffer {
-                cmd_buffer.bind_vertex_buffers(0, vec![(&vertex_buffer.buffer().buffer, 0)]);
+                cmd_buffer.bind_vertex_buffers(0, Some((&vertex_buffer.buffer().buffer, 0)));
                 cmd_buffer.bind_index_buffer(hal::buffer::IndexBufferView {
                     buffer: &index_buffer[next_id].buffer().buffer,
                     offset: 0,
@@ -551,10 +576,9 @@ impl<B: hal::Backend> Program<B> {
                 for i in 0 ..= instance_buffer.current_buffer_index {
                     cmd_buffer.bind_vertex_buffers(
                         0,
-                        vec![
-                            (&vertex_buffer.buffer().buffer, 0),
-                            (&instance_buffer.buffers[i].buffer.buffer, 0),
-                        ],
+                        Some((&vertex_buffer.buffer().buffer, 0))
+                            .into_iter()
+                            .chain(Some((&instance_buffer.buffers[i].buffer.buffer, 0))),
                     );
 
                     {
