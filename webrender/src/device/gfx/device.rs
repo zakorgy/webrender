@@ -9,47 +9,45 @@ use api::TextureTarget;
 #[cfg(any(feature = "debug_renderer", feature = "capture"))]
 use api::ImageDescriptor;
 use euclid::Transform3D;
-use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
-use rendy_memory::{Block, Heaps, HeapsConfig, MemoryBlock, MemoryUsageValue, Write};
+use rendy_memory::{Block, Heaps, HeapsConfig, MemoryUsageValue};
 use ron::de::from_str;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::convert::Into;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::slice;
-use super::Capabilities;
-use super::{ShaderKind,VertexArrayKind, ExternalTexture, GpuFrameId, TextureSlot, TextureFilter};
-use super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, TextureFlags};
-use super::{Texture, DrawTarget, ReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, SharedDepthTarget, ProgramCache};
-use super::{depth_target_size_in_bytes, record_gpu_alloc, record_gpu_free};
-use super::super::shader_source;
-use tiling::LineDecorationJob;
-use vertex_types::*;
+
+use super::blend_state::*;
+use super::buffer::*;
+use super::command::*;
+use super::descriptor::*;
+use super::image::*;
+use super::program::Program;
+use super::render_pass::*;
+use super::{PipelineRequirements, PrimitiveType, TextureId};
+use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
+
+use super::super::Capabilities;
+use super::super::{ShaderKind, ExternalTexture, GpuFrameId, TextureSlot, TextureFilter};
+use super::super::{VertexDescriptor, UploadMethod, Texel, ReadPixelsFormat, TextureFlags};
+use super::super::{Texture, DrawTarget, ReadTarget, FBOId, RBOId, VertexUsageHint, ShaderError, ShaderPrecacheFlags, SharedDepthTarget, ProgramCache};
+use super::super::{depth_target_size_in_bytes, record_gpu_alloc, record_gpu_free};
+use super::super::super::shader_source;
 
 use hal;
-
-// gfx-hal
-use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
-use hal::pso::{BlendState, BlendOp, Comparison, DepthTest, Factor};
-use hal::{Device as BackendDevice, PhysicalDevice};
-use hal::{DescriptorPool, Primitive, Swapchain, Backbuffer, SwapchainConfig, Surface};
-use hal::pass::Subpass;
+use hal::pso::{BlendState, DepthTest};
+use hal::{Device as BackendDevice, PhysicalDevice, Surface, Swapchain};
+use hal::{Backbuffer, SwapchainConfig};
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
 
-pub type TextureId = u32;
-
-pub const MAX_INDEX_COUNT: usize = 4096;
-pub const MAX_INSTANCE_COUNT: usize = 8192;
-pub const TEXTURE_CACHE_SIZE: usize = 128 << 20; // 128MB
 pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
@@ -61,13 +59,6 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     levels: 0 .. 1,
     layers: 0 .. 1,
 };
-const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
-    aspects: hal::format::Aspects::DEPTH,
-    levels: 0 .. 1,
-    layers: 0 .. 1,
-};
-
-const ENTRY_NAME: &str = "main";
 
 pub struct DeviceInit<B: hal::Backend> {
     pub instance: Box<hal::Instance<Backend=B>>,
@@ -79,29 +70,10 @@ pub struct DeviceInit<B: hal::Backend> {
     pub save_cache: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct Locals {
-    uTransform: [[f32; 4]; 4],
-    uMode: i32,
-}
-
 const DESCRIPTOR_COUNT: usize = 400;
-const DEBUG_DESCRIPTOR_COUNT: usize = 5;
 const DESCRIPTOR_SET_PER_DRAW: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
-// The number of specialization constants in each shader.
-const SPECIALIZATION_CONSTANT_COUNT: usize = 5;
-// Size of a specialization constant variable in bytes.
-const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
-const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
-    &["ALPHA_PASS"],
-    &["COLOR_TARGET"],
-    &["GLYPH_TRANSFORM"],
-    &["DITHERING"],
-    &["DEBUG_OVERDRAW"],
-];
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] = &[
     "TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"
@@ -121,45 +93,10 @@ const SAMPLERS: [(usize, &'static str); 11] = [
     (10, "PrimitiveHeadersI"),
 ];
 
-#[derive(Clone, Deserialize)]
-pub struct PipelineRequirements {
-    pub attribute_descriptors: Vec<AttributeDesc>,
-    pub bindings_map: HashMap<String, u32>,
-    pub descriptor_range_descriptors: Vec<Vec<DescriptorRangeDesc>>,
-    pub descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>>,
-    pub vertex_buffer_descriptors: Vec<VertexBufferDesc>,
-}
-
-const QUAD: [Vertex; 6] = [
-    Vertex {
-        aPosition: [0.0, 0.0, 0.0],
-    },
-    Vertex {
-        aPosition: [1.0, 0.0, 0.0],
-    },
-    Vertex {
-        aPosition: [0.0, 1.0, 0.0],
-    },
-    Vertex {
-        aPosition: [0.0, 1.0, 0.0],
-    },
-    Vertex {
-        aPosition: [1.0, 0.0, 0.0],
-    },
-    Vertex {
-        aPosition: [1.0, 1.0, 0.0],
-    },
-];
-
 #[repr(u32)]
 pub enum DepthFunction {
     Less,
     LessEqual,
-}
-
-pub trait PrimitiveType {
-    type Primitive: Clone + Copy;
-    fn to_primitive_type(&self) -> Self::Primitive;
 }
 
 impl Texture {
@@ -173,1858 +110,15 @@ impl Texture {
     }
 }
 
-impl PrimitiveType for gpu_types::BlurInstance {
-    type Primitive = BlurInstance;
-    fn to_primitive_type(&self) -> BlurInstance {
-        BlurInstance {
-            aData: [0, 0, 0, 0],
-            aBlurRenderTaskAddress: self.task_address.0 as i32,
-            aBlurSourceTaskAddress: self.src_task_address.0 as i32,
-            aBlurDirection: self.blur_direction as i32,
-        }
-    }
-}
-
-impl PrimitiveType for gpu_types::BorderInstance {
-    type Primitive = BorderInstance;
-    fn to_primitive_type(&self) -> BorderInstance {
-        BorderInstance {
-            aTaskOrigin: [self.task_origin.x, self.task_origin.y],
-            aRect: [
-                self.local_rect.origin.x,
-                self.local_rect.origin.y,
-                self.local_rect.size.width,
-                self.local_rect.size.height,
-            ],
-            aColor0: self.color0.to_array(),
-            aColor1: self.color1.to_array(),
-            aFlags: self.flags,
-            aWidths: [self.widths.width, self.widths.height],
-            aRadii: [self.radius.width, self.radius.height],
-            aClipParams1: [
-                self.clip_params[0],
-                self.clip_params[1],
-                self.clip_params[2],
-                self.clip_params[3],
-            ],
-            aClipParams2: [
-                self.clip_params[4],
-                self.clip_params[5],
-                self.clip_params[6],
-                self.clip_params[7],
-            ],
-        }
-    }
-}
-
-impl PrimitiveType for gpu_types::ClipMaskInstance {
-    type Primitive = ClipMaskInstance;
-    fn to_primitive_type(&self) -> ClipMaskInstance {
-        ClipMaskInstance {
-            aClipRenderTaskAddress: self.render_task_address.0 as i32,
-            aClipTransformId: self.clip_transform_id.0 as i32,
-            aPrimTransformId: self.prim_transform_id.0 as i32,
-            aClipDataResourceAddress: [
-                self.clip_data_address.u as i32,
-                self.clip_data_address.v as i32,
-                self.resource_address.u as i32,
-                self.resource_address.v as i32,
-            ],
-            aClipLocalPos: [
-                self.local_pos.x,
-                self.local_pos.y,
-            ],
-            aClipTileRect: [
-                self.tile_rect.origin.x,
-                self.tile_rect.origin.y,
-                self.tile_rect.size.width,
-                self.tile_rect.size.height,
-            ],
-            aClipDeviceArea: [
-                self.sub_rect.origin.x,
-                self.sub_rect.origin.y,
-                self.sub_rect.size.width,
-                self.sub_rect.size.height,
-            ],
-        }
-    }
-}
-
-impl PrimitiveType for gpu_types::PrimitiveInstanceData {
-    type Primitive = PrimitiveInstanceData;
-    fn to_primitive_type(&self) -> PrimitiveInstanceData {
-        PrimitiveInstanceData { aData: self.data }
-    }
-}
-
-impl PrimitiveType for gpu_types::ScalingInstance {
-    type Primitive = ScalingInstance;
-    fn to_primitive_type(&self) -> ScalingInstance {
-        ScalingInstance {
-            aData: [0, 0, 0, 0],
-            aScaleRenderTaskAddress: self.task_address.0 as i32,
-            aScaleSourceTaskAddress: self.src_task_address.0 as i32,
-        }
-    }
-}
-
-impl PrimitiveType for LineDecorationJob {
-    type Primitive = LineDecorationInstance;
-    fn to_primitive_type(&self) -> LineDecorationInstance {
-        LineDecorationInstance {
-            aTaskRect: [
-                self.task_rect.origin.x,
-                self.task_rect.origin.y,
-                self.task_rect.size.width,
-                self.task_rect.size.height,
-            ],
-            aLocalSize: [self.local_size.width, self.local_size.height],
-            aStyle: self.style,
-            aOrientation: self.orientation,
-            aWavyLineThickness: self.wavy_line_thickness,
-        }
-    }
-}
-
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 pub struct ProgramId(u32);
 
 pub struct PBO;
 pub struct VAO;
 
-impl ShaderKind {
-    fn is_debug(&self) -> bool {
-        match *self {
-            ShaderKind::DebugFont | ShaderKind::DebugColor => true,
-            _ => false,
-        }
-    }
-}
-
-const ALPHA: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::SrcAlpha,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-};
-
-const PREMULTIPLIED_DEST_OUT: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-};
-
-const MAX: BlendState = BlendState::On {
-    color: BlendOp::Max,
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-};
-
-const MIN: BlendState = BlendState::On {
-    color: BlendOp::Min,
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-};
-
-const SUBPIXEL_PASS0: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::OneMinusSrcColor,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-};
-
-const SUBPIXEL_PASS1: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-};
-
-const SUBPIXEL_WITH_BG_COLOR_PASS0: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::OneMinusSrcColor,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::One,
-    },
-};
-
-const SUBPIXEL_WITH_BG_COLOR_PASS1: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::OneMinusDstAlpha,
-        dst: Factor::One,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::Zero,
-        dst: Factor::One,
-    },
-};
-
-const SUBPIXEL_WITH_BG_COLOR_PASS2: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::One,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-};
-
-// This requires blend color to be set
-const SUBPIXEL_CONSTANT_TEXT_COLOR: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::ConstColor,
-        dst: Factor::OneMinusSrcColor,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::ConstAlpha,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-};
-
-const SUBPIXEL_DUAL_SOURCE: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::OneMinusSrc1Color,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::OneMinusSrc1Alpha,
-    },
-};
-
-const OVERDRAW: BlendState = BlendState::On {
-    color: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-    alpha: BlendOp::Add {
-        src: Factor::One,
-        dst: Factor::OneMinusSrcAlpha,
-    },
-};
-
-const LESS_EQUAL_TEST: DepthTest = DepthTest::On {
-    fun: Comparison::LessEqual,
-    write: false,
-};
-
-const LESS_EQUAL_WRITE: DepthTest = DepthTest::On {
-    fun: Comparison::LessEqual,
-    write: true,
-};
-
-pub struct ImageCore<B: hal::Backend> {
-    pub image: B::Image,
-    pub memory_block: Option<MemoryBlock<B>>,
-    pub view: B::ImageView,
-    pub subresource_range: hal::image::SubresourceRange,
-    pub state: Cell<hal::image::State>,
-}
-
-impl<B: hal::Backend> ImageCore<B> {
-    fn from_image(
-        device: &B::Device,
-        image: B::Image,
-        view_kind: hal::image::ViewKind,
-        format: hal::format::Format,
-        subresource_range: hal::image::SubresourceRange,
-    ) -> Self {
-        let view = unsafe {
-            device.create_image_view(
-                &image,
-                view_kind,
-                format,
-                hal::format::Swizzle::NO,
-                subresource_range.clone(),
-            )
-        }
-        .expect("create_image_view failed");
-        ImageCore {
-            image,
-            memory_block: None,
-            view,
-            subresource_range,
-            state: Cell::new((hal::image::Access::empty(), hal::image::Layout::Undefined)),
-        }
-    }
-
-    fn create(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        kind: hal::image::Kind,
-        view_kind: hal::image::ViewKind,
-        mip_levels: hal::image::Level,
-        format: hal::format::Format,
-        usage: hal::image::Usage,
-        subresource_range: hal::image::SubresourceRange,
-    ) -> Self {
-        let mut image = unsafe {
-            device.create_image(
-                kind,
-                mip_levels,
-                format,
-                hal::image::Tiling::Optimal,
-                usage,
-                hal::image::ViewCapabilities::empty(),
-            )
-        }
-        .expect("create_image failed");
-        let requirements = unsafe { device.get_image_requirements(&image) };
-
-        let memory_block = heaps.allocate(
-            device,
-            requirements.type_mask as u32,
-            MemoryUsageValue::Data,
-            requirements.size,
-            requirements.alignment
-        ).expect("Allocate memory failed");
-
-        unsafe {
-            device
-                .bind_image_memory(&memory_block.memory(), memory_block.range().start, &mut image)
-                .expect("Bind image memory failed")
-        };
-
-        ImageCore {
-            memory_block: Some(memory_block),
-            ..Self::from_image(device, image, view_kind, format, subresource_range)
-        }
-    }
-
-    fn _reset(&self) {
-        self.state
-            .set((hal::image::Access::empty(), hal::image::Layout::Undefined));
-    }
-
-    fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        unsafe { device.destroy_image_view(self.view) };
-        if let Some(memory_block) = self.memory_block {
-            unsafe {
-                device.destroy_image(self.image);
-                heaps.free(device, memory_block);
-            }
-        }
-    }
-
-    fn transit(
-        &self,
-        access: hal::image::Access,
-        layout: hal::image::Layout,
-        range: hal::image::SubresourceRange,
-    ) -> Option<hal::memory::Barrier<B>> {
-        let src_state = self.state.get();
-        if src_state == (access, layout) {
-            None
-        } else {
-            self.state.set((access, layout));
-            Some(hal::memory::Barrier::Image {
-                states: src_state .. (access, layout),
-                target: &self.image,
-                families: None,
-                range,
-            })
-        }
-    }
-}
-
-pub struct Image<B: hal::Backend> {
-    pub core: ImageCore<B>,
-    pub kind: hal::image::Kind,
-    pub format: ImageFormat,
-}
-
-impl<B: hal::Backend> Image<B> {
-    pub fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        image_format: ImageFormat,
-        image_width: i32,
-        image_height: i32,
-        image_depth: i32,
-        view_kind: hal::image::ViewKind,
-        mip_levels: hal::image::Level,
-        usage: hal::image::Usage,
-    ) -> Self {
-        let format = match image_format {
-            ImageFormat::R8 => hal::format::Format::R8Unorm,
-            ImageFormat::R16 => hal::format::Format::R16Unorm,
-            ImageFormat::RG8 => hal::format::Format::Rg8Unorm,
-            ImageFormat::RGBA8 => hal::format::Format::Rgba8Unorm,
-            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
-            ImageFormat::RGBAF32 => hal::format::Format::Rgba32Sfloat,
-            ImageFormat::RGBAI32 => hal::format::Format::Rgba32Sint,
-        };
-        let kind = hal::image::Kind::D2(image_width as _, image_height as _, image_depth as _, 1);
-
-        let core = ImageCore::create(
-            device,
-            heaps,
-            kind,
-            view_kind,
-            mip_levels,
-            format,
-            usage,
-            hal::image::SubresourceRange {
-                aspects: hal::format::Aspects::COLOR,
-                levels: 0 .. mip_levels,
-                layers: 0 .. image_depth as _,
-            },
-        );
-
-        Image {
-            core,
-            kind,
-            format: image_format,
-        }
-    }
-
-    pub fn update(
-        &self,
-        device: &B::Device,
-        cmd_pool: &mut CommandPool<B>,
-        staging_buffer_pool: &mut BufferPool<B>,
-        rect: DeviceIntRect,
-        layer_index: i32,
-        image_data: &[u8],
-    ) {
-        let pos = rect.origin;
-        let size = rect.size;
-        staging_buffer_pool.add(device, image_data);
-        let buffer = staging_buffer_pool.buffer();
-        let cmd_buffer = cmd_pool.acquire_command_buffer();
-
-        unsafe {
-            cmd_buffer.begin();
-
-            let range = hal::image::SubresourceRange {
-                aspects: hal::format::Aspects::COLOR,
-                levels: 0 .. 1,
-                layers: layer_index as _ .. (layer_index + 1) as _,
-            };
-            let barriers = buffer
-                .transit(hal::buffer::Access::TRANSFER_READ)
-                .into_iter()
-                .chain(self.core.transit(
-                    hal::image::Access::TRANSFER_WRITE,
-                    hal::image::Layout::TransferDstOptimal,
-                    range.clone(),
-                ));
-
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
-                hal::memory::Dependencies::empty(),
-                barriers,
-            );
-            cmd_buffer.copy_buffer_to_image(
-                &buffer.buffer,
-                &self.core.image,
-                hal::image::Layout::TransferDstOptimal,
-                &[hal::command::BufferImageCopy {
-                    buffer_offset: staging_buffer_pool.buffer_offset as _,
-                    buffer_width: size.width as _,
-                    buffer_height: size.height as _,
-                    image_layers: hal::image::SubresourceLayers {
-                        aspects: hal::format::Aspects::COLOR,
-                        level: 0,
-                        layers: layer_index as _ .. (layer_index + 1) as _,
-                    },
-                    image_offset: hal::image::Offset {
-                        x: pos.x as i32,
-                        y: pos.y as i32,
-                        z: 0,
-                    },
-                    image_extent: hal::image::Extent {
-                        width: size.width as u32,
-                        height: size.height as u32,
-                        depth: 1,
-                    },
-                }],
-            );
-
-            if let Some(barrier) = self.core.transit(
-                hal::image::Access::COLOR_ATTACHMENT_READ
-                    | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                hal::image::Layout::ColorAttachmentOptimal,
-                range,
-            ) {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
-
-            cmd_buffer.finish();
-        }
-    }
-
-    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        self.core.deinit(device, heaps);
-    }
-}
-
-pub struct Buffer<B: hal::Backend> {
-    pub memory_block: MemoryBlock<B>,
-    pub buffer: B::Buffer,
-    pub buffer_size: usize,
-    pub buffer_len: usize,
-    pub stride: usize,
-    state: Cell<hal::buffer::State>,
-}
-
-impl<B: hal::Backend> Buffer<B> {
-    pub fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        memory_usage: MemoryUsageValue,
-        buffer_usage: hal::buffer::Usage,
-        alignment_mask: usize,
-        data_len: usize,
-        stride: usize,
-    ) -> Self {
-        let buffer_size = (data_len * stride + alignment_mask) & !alignment_mask;
-        let mut buffer = unsafe {
-            device
-                .create_buffer(buffer_size as u64, buffer_usage)
-                .expect("create_buffer failed")
-        };
-        let requirements = unsafe { device.get_buffer_requirements(&buffer) };
-
-        let alignment = ((requirements.alignment -1) | (alignment_mask as u64)) + 1;
-        let memory_block = heaps.allocate(
-            device,
-            requirements.type_mask as u32,
-            memory_usage,
-            requirements.size,
-            alignment,
-        ).expect("Allocate memory failed");
-
-        unsafe { device.bind_buffer_memory(&memory_block.memory(), memory_block.range().start, &mut buffer) }
-            .expect("Bind buffer memory failed");
-
-        Buffer {
-            memory_block,
-            buffer,
-            buffer_size: requirements.size as _,
-            buffer_len: data_len,
-            stride,
-            state: Cell::new(hal::buffer::Access::empty()),
-        }
-    }
-
-    pub fn update_all<T: Copy>(&mut self, device: &B::Device, data: &[T], non_coherent_atom_size_mask: u64) {
-        let size = (data.len() * std::mem::size_of::<T>()) as u64;
-        let range = 0..((size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
-        unsafe {
-            let mut mapped = self.memory_block.map(device, range.clone()).expect("Mapping memory block failed");
-            mapped.write(device, 0..size).expect("Writer creation failed").write(&data);
-        }
-        self.memory_block.unmap(device);
-    }
-
-    pub fn update<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        data: &[T],
-        offset: usize,
-        non_coherent_atom_size_mask: u64,
-    ) -> usize {
-        let offset = (offset * self.stride) as u64;
-        let size = (data.len() * self.stride) as u64;
-        let range = offset..((offset + size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
-        unsafe {
-            let mut mapped = self.memory_block.map(device, range).expect("Mapping memory block failed");
-            mapped.write(device, 0..size).expect("Writer creation failed").write(&data);
-        }
-        self.memory_block.unmap(device);
-        size as usize
-    }
-
-    fn transit(&self, access: hal::buffer::Access) -> Option<hal::memory::Barrier<B>> {
-        let src_state = self.state.get();
-        if src_state == access {
-            None
-        } else {
-            self.state.set(access);
-            Some(hal::memory::Barrier::Buffer {
-                states: src_state .. access,
-                target: &self.buffer,
-                families: None,
-                range: None .. None,
-            })
-        }
-    }
-
-    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        unsafe {
-            device.destroy_buffer(self.buffer);
-            heaps.free(device, self.memory_block);
-        }
-    }
-}
-
-pub struct BufferPool<B: hal::Backend> {
-    pub buffer: Buffer<B>,
-    pub data_stride: usize,
-    non_coherent_atom_size_mask: usize,
-    copy_alignment_mask: usize,
-    offset: usize,
-    size: usize,
-    pub buffer_offset: usize,
-}
-
-impl<B: hal::Backend> BufferPool<B> {
-    fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        buffer_usage: hal::buffer::Usage,
-        data_stride: usize,
-        non_coherent_atom_size_mask: usize,
-        pitch_alignment_mask: usize,
-        copy_alignment_mask: usize,
-    ) -> Self {
-        let buffer = Buffer::new(
-            device,
-            heaps,
-            MemoryUsageValue::Upload,
-            buffer_usage,
-            pitch_alignment_mask | non_coherent_atom_size_mask,
-            TEXTURE_CACHE_SIZE,
-            data_stride,
-        );
-        BufferPool {
-            buffer,
-            data_stride,
-            non_coherent_atom_size_mask,
-            copy_alignment_mask,
-            offset: 0,
-            size: 0,
-            buffer_offset: 0,
-        }
-    }
-
-    pub fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
-        assert!(
-            mem::size_of::<T>() <= self.data_stride,
-            "mem::size_of::<T>()={:?} <= self.data_stride={:?}",
-            mem::size_of::<T>(),
-            self.data_stride
-        );
-        let buffer_len = data.len() * self.data_stride;
-        assert!(
-            self.offset * self.data_stride + buffer_len < self.buffer.buffer_size,
-            "offset({:?}) * data_stride({:?}) + buffer_len({:?}) < buffer_size({:?})",
-            self.offset,
-            self.data_stride,
-            buffer_len,
-            self.buffer.buffer_size
-        );
-        self.size = self
-            .buffer
-            .update(device, data, self.offset, self.non_coherent_atom_size_mask as u64);
-        self.buffer_offset = self.offset;
-        self.offset += (self.size + self.copy_alignment_mask) & !self.copy_alignment_mask;
-    }
-
-    fn buffer(&self) -> &Buffer<B> {
-        &self.buffer
-    }
-
-    pub fn reset(&mut self) {
-        self.offset = 0;
-        self.size = 0;
-    }
-
-    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        self.buffer.deinit(device, heaps);
-    }
-}
-
-struct InstancePoolBuffer<B: hal::Backend> {
-    buffer: Buffer<B>,
-    pub offset: usize,
-    pub last_update_size: usize,
-    non_coherent_atom_size_mask: usize,
-}
-
-impl<B: hal::Backend> InstancePoolBuffer<B> {
-    fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        buffer_usage: hal::buffer::Usage,
-        data_stride: usize,
-        alignment_mask: usize,
-        non_coherent_atom_size_mask: usize,
-    ) -> Self {
-        let buffer = Buffer::new(
-            device,
-            heaps,
-            MemoryUsageValue::Dynamic,
-            buffer_usage,
-            alignment_mask,
-            MAX_INSTANCE_COUNT,
-            data_stride,
-        );
-        InstancePoolBuffer {
-            buffer,
-            offset: 0,
-            last_update_size: 0,
-            non_coherent_atom_size_mask,
-        }
-    }
-
-    fn update<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
-        self.buffer
-            .update(device, data, self.offset, self.non_coherent_atom_size_mask as u64);
-        self.last_update_size = data.len();
-        self.offset += self.last_update_size;
-    }
-
-    fn reset(&mut self) {
-        self.offset = 0;
-        self.last_update_size = 0;
-    }
-
-    fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        self.buffer.deinit(device, heaps);
-    }
-}
-
-pub struct InstanceBufferHandler<B: hal::Backend> {
-    buffers: Vec<InstancePoolBuffer<B>>,
-    data_stride: usize,
-    alignment_mask: usize,
-    non_coherent_atom_size_mask: usize,
-    current_buffer_index: usize,
-}
-
-impl<B: hal::Backend> InstanceBufferHandler<B> {
-    pub fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        data_stride: usize,
-        non_coherent_atom_size_mask: usize,
-        pitch_alignment_mask: usize,
-    ) -> Self {
-        let alignment_mask = non_coherent_atom_size_mask | pitch_alignment_mask;
-        let buffers = vec![InstancePoolBuffer::new(
-            device,
-            heaps,
-            hal::buffer::Usage::VERTEX,
-            data_stride,
-            alignment_mask,
-            non_coherent_atom_size_mask,
-        )];
-
-        InstanceBufferHandler {
-            buffers,
-            data_stride,
-            alignment_mask,
-            non_coherent_atom_size_mask,
-            current_buffer_index: 0,
-        }
-    }
-
-    pub fn add<T: Copy>(&mut self, device: &B::Device, mut data: &[T], heaps: &mut Heaps<B>) {
-        assert_eq!(self.data_stride, mem::size_of::<T>());
-        while !data.is_empty() {
-            if self.current_buffer().buffer.buffer_size
-                == self.current_buffer().offset * self.data_stride
-            {
-                self.current_buffer_index += 1;
-                if self.buffers.len() <= self.current_buffer_index {
-                    self.buffers.push(InstancePoolBuffer::new(
-                        device,
-                        heaps,
-                        hal::buffer::Usage::VERTEX,
-                        self.data_stride,
-                        self.alignment_mask,
-                        self.non_coherent_atom_size_mask,
-                    ))
-                }
-            }
-
-            let update_size = if (self.current_buffer().offset + data.len()) * self.data_stride
-                > self.current_buffer().buffer.buffer_size
-            {
-                self.current_buffer().buffer.buffer_size / self.data_stride
-                    - self.current_buffer().offset
-            } else {
-                data.len()
-            };
-
-            self.buffers[self.current_buffer_index].update(
-                device,
-                &data[0 .. update_size],
-            );
-
-            data = &data[update_size ..]
-        }
-    }
-
-    fn current_buffer(&self) -> &InstancePoolBuffer<B> {
-        &self.buffers[self.current_buffer_index]
-    }
-
-    fn reset(&mut self) {
-        for buffer in &mut self.buffers {
-            buffer.reset();
-        }
-        self.current_buffer_index = 0;
-    }
-
-    fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        for buffer in self.buffers {
-            buffer.deinit(device, heaps);
-        }
-    }
-}
-
-pub struct UniformBufferHandler<B: hal::Backend> {
-    buffers: Vec<Buffer<B>>,
-    offset: usize,
-    usage: hal::buffer::Usage,
-    data_stride: usize,
-    pitch_alignment_mask: usize,
-    non_coherent_atom_size_mask: usize,
-}
-
-impl<B: hal::Backend> UniformBufferHandler<B> {
-    pub fn new(
-        usage: hal::buffer::Usage,
-        data_stride: usize,
-        pitch_alignment_mask: usize,
-        non_coherent_atom_size_mask: usize,
-    ) -> Self {
-        UniformBufferHandler {
-            buffers: vec![],
-            offset: 0,
-            usage,
-            data_stride,
-            pitch_alignment_mask,
-            non_coherent_atom_size_mask,
-        }
-    }
-
-    pub fn add<T: Copy>(&mut self, device: &B::Device, data: &[T], heaps: &mut Heaps<B>) {
-        if self.buffers.len() == self.offset {
-            self.buffers.push(Buffer::new(
-                device,
-                heaps,
-                MemoryUsageValue::Dynamic,
-                self.usage,
-                self.pitch_alignment_mask,
-                data.len(),
-                self.data_stride,
-            ));
-        }
-        self.buffers[self.offset].update_all(device, data, self.non_coherent_atom_size_mask as u64);
-        self.offset += 1;
-    }
-
-    pub fn buffer(&self) -> &Buffer<B> {
-        &self.buffers[self.offset - 1]
-    }
-
-    pub fn reset(&mut self) {
-        self.offset = 0;
-    }
-
-    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        for buffer in self.buffers {
-            buffer.deinit(device, heaps);
-        }
-    }
-}
-
-pub struct VertexBufferHandler<B: hal::Backend> {
-    buffer: Buffer<B>,
-    buffer_usage: hal::buffer::Usage,
-    data_stride: usize,
-    pitch_alignment_mask: usize,
-    non_coherent_atom_size_mask: usize,
-    pub buffer_len: usize,
-}
-
-impl<B: hal::Backend> VertexBufferHandler<B> {
-    pub fn new<T: Copy>(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        buffer_usage: hal::buffer::Usage,
-        data: &[T],
-        data_stride: usize,
-        pitch_alignment_mask: usize,
-        non_coherent_atom_size_mask: usize,
-    ) -> Self {
-        let mut buffer = Buffer::new(
-            device,
-            heaps,
-            MemoryUsageValue::Dynamic,
-            buffer_usage,
-            pitch_alignment_mask,
-            data.len(),
-            data_stride,
-        );
-        buffer.update_all(device, data, non_coherent_atom_size_mask as u64);
-        VertexBufferHandler {
-            buffer_len: buffer.buffer_len,
-            buffer,
-            buffer_usage,
-            data_stride,
-            pitch_alignment_mask,
-            non_coherent_atom_size_mask,
-        }
-    }
-
-    pub fn update<T: Copy>(&mut self, device: &B::Device, data: &[T], heaps: &mut Heaps<B>) {
-        let buffer_len = data.len() * self.data_stride;
-        if self.buffer.buffer_len < buffer_len {
-            let old_buffer = mem::replace(
-                &mut self.buffer,
-                Buffer::new(
-                    device,
-                    heaps,
-                    MemoryUsageValue::Dynamic,
-                    self.buffer_usage,
-                    self.pitch_alignment_mask,
-                    data.len(),
-                    self.data_stride,
-                ),
-            );
-            old_buffer.deinit(device, heaps);
-        }
-        self.buffer.update_all(device, data, self.non_coherent_atom_size_mask as u64);
-        self.buffer_len = buffer_len;
-    }
-
-    pub fn buffer(&self) -> &Buffer<B> {
-        &self.buffer
-    }
-
-    pub fn reset(&mut self) {
-        self.buffer_len = 0;
-    }
-
-    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        self.buffer.deinit(device, heaps);
-    }
-}
-
-pub(crate) struct Program<B: hal::Backend> {
-    pub bindings_map: HashMap<String, u32>,
-    pub pipelines: HashMap<(BlendState, DepthTest), B::GraphicsPipeline>,
-    pub vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
-    pub index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
-    pub instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
-    pub locals_buffer: SmallVec<[UniformBufferHandler<B>; 1]>,
-    shader_name: String,
-    shader_kind: ShaderKind,
-    bound_textures: [u32; 16],
-}
-
-impl<B: hal::Backend> Program<B> {
-    pub fn create(
-        pipeline_requirements: PipelineRequirements,
-        device: &B::Device,
-        pipeline_layout: &B::PipelineLayout,
-        heaps: &mut Heaps<B>,
-        limits: &hal::Limits,
-        shader_name: &str,
-        features: &[&str],
-        shader_kind: ShaderKind,
-        render_pass: &RenderPass<B>,
-        frame_count: usize,
-        shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
-        pipeline_cache: Option<&B::PipelineCache>,
-        surface_format: ImageFormat,
-    ) -> Program<B> {
-        if !shader_modules.contains_key(shader_name) {
-            let vs_file = format!("{}.vert.spv", shader_name);
-            let vs_module = unsafe {
-                device.create_shader_module(
-                    shader_source::SPIRV_BINARIES
-                        .get(vs_file.as_str())
-                        .expect("create_shader_module failed"),
-                )
-            }
-            .expect(&format!("Failed to create vs module for: {}!", vs_file));
-
-            let fs_file = format!("{}.frag.spv", shader_name);
-            let fs_module = unsafe {
-                device.create_shader_module(
-                    shader_source::SPIRV_BINARIES
-                        .get(fs_file.as_str())
-                        .expect("create_shader_module failed"),
-                )
-            }
-            .expect(&format!("Failed to create vs module for: {}!", fs_file));
-            shader_modules.insert(String::from(shader_name), (vs_module, fs_module));
-        }
-
-        let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
-
-        let mut constants = Vec::with_capacity(SPECIALIZATION_CONSTANT_COUNT);
-        let mut specialization_data = vec![0; SPECIALIZATION_CONSTANT_COUNT * SPECIALIZATION_CONSTANT_SIZE];
-        for i in 0 .. SPECIALIZATION_CONSTANT_COUNT {
-            constants.push(hal::pso::SpecializationConstant {
-                id: i as _,
-                range: (SPECIALIZATION_CONSTANT_SIZE * i) as _ .. (SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
-            });
-            for (index, feature) in SPECIALIZATION_FEATURES[i].iter().enumerate() {
-                if features.contains(feature) {
-                    specialization_data[SPECIALIZATION_CONSTANT_SIZE * i] = (index + 1) as u8;
-                }
-            }
-        }
-
-        let pipelines = {
-            let (vs_entry, fs_entry) = (
-                hal::pso::EntryPoint::<B> {
-                    entry: ENTRY_NAME,
-                    module: &vs_module,
-                    specialization: hal::pso::Specialization {
-                        constants: &constants,
-                        data: &specialization_data.as_slice(),
-                    },
-                },
-                hal::pso::EntryPoint::<B> {
-                    entry: ENTRY_NAME,
-                    module: &fs_module,
-                    specialization: hal::pso::Specialization {
-                        constants: &constants,
-                        data: &specialization_data.as_slice(),
-                    },
-                },
-            );
-
-            let shader_entries = hal::pso::GraphicsShaderSet {
-                vertex: vs_entry,
-                hull: None,
-                domain: None,
-                geometry: None,
-                fragment: Some(fs_entry),
-            };
-
-            let mut pipeline_states = match shader_kind {
-                ShaderKind::Cache(VertexArrayKind::Scale) => vec![
-                    (BlendState::Off, DepthTest::Off),
-                    (BlendState::MULTIPLY, DepthTest::Off),
-                ],
-                ShaderKind::Cache(VertexArrayKind::Blur) => vec![
-                    (BlendState::Off, DepthTest::Off),
-                    (BlendState::Off, LESS_EQUAL_TEST),
-                ],
-                ShaderKind::Cache(VertexArrayKind::Border)
-                | ShaderKind::Cache(VertexArrayKind::LineDecoration) => {
-                    vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)]
-                }
-                ShaderKind::ClipCache => vec![(BlendState::MULTIPLY, DepthTest::Off)],
-                ShaderKind::Text => {
-                    let mut states = vec![
-                        (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
-                        (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
-                        (SUBPIXEL_CONSTANT_TEXT_COLOR, DepthTest::Off),
-                        (SUBPIXEL_CONSTANT_TEXT_COLOR, LESS_EQUAL_TEST),
-                        (SUBPIXEL_PASS0, DepthTest::Off),
-                        (SUBPIXEL_PASS0, LESS_EQUAL_TEST),
-                        (SUBPIXEL_PASS1, DepthTest::Off),
-                        (SUBPIXEL_PASS1, LESS_EQUAL_TEST),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS0, DepthTest::Off),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS0, LESS_EQUAL_TEST),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS1, DepthTest::Off),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS1, LESS_EQUAL_TEST),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS2, DepthTest::Off),
-                        (SUBPIXEL_WITH_BG_COLOR_PASS2, LESS_EQUAL_TEST),
-                    ];
-                    if features.contains(&"DUAL_SOURCE_BLENDING") {
-                        states.push((SUBPIXEL_DUAL_SOURCE, DepthTest::Off));
-                        states.push((SUBPIXEL_DUAL_SOURCE, LESS_EQUAL_TEST));
-                    }
-                    states
-                }
-                ShaderKind::DebugColor | ShaderKind::DebugFont => {
-                    vec![(BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off)]
-                }
-                _ => vec![
-                    (BlendState::Off, DepthTest::Off),
-                    (BlendState::Off, LESS_EQUAL_TEST),
-                    (BlendState::Off, LESS_EQUAL_WRITE),
-                    (ALPHA, DepthTest::Off),
-                    (ALPHA, LESS_EQUAL_TEST),
-                    (ALPHA, LESS_EQUAL_WRITE),
-                    (BlendState::PREMULTIPLIED_ALPHA, DepthTest::Off),
-                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_TEST),
-                    (BlendState::PREMULTIPLIED_ALPHA, LESS_EQUAL_WRITE),
-                    (PREMULTIPLIED_DEST_OUT, DepthTest::Off),
-                    (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_TEST),
-                    (PREMULTIPLIED_DEST_OUT, LESS_EQUAL_WRITE),
-                ],
-            };
-
-            if features.contains(&"DEBUG_OVERDRAW") {
-                pipeline_states.push((OVERDRAW, LESS_EQUAL_TEST));
-            }
-
-            let format = match shader_kind {
-                ShaderKind::ClipCache => ImageFormat::R8,
-                ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => {
-                    ImageFormat::R8
-                }
-                ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => {
-                    ImageFormat::R8
-                }
-                _ => surface_format,
-            };
-
-            let pipelines_descriptors = pipeline_states
-                .iter()
-                .map(|&(blend_state, depth_test)| {
-                    let subpass = Subpass {
-                        index: 0,
-                        main_pass: render_pass
-                            .get_render_pass(format, depth_test != DepthTest::Off),
-                    };
-                    let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
-                        shader_entries.clone(),
-                        Primitive::TriangleList,
-                        hal::pso::Rasterizer::FILL,
-                        &pipeline_layout,
-                        subpass,
-                    );
-                    pipeline_descriptor
-                        .blender
-                        .targets
-                        .push(hal::pso::ColorBlendDesc(
-                            hal::pso::ColorMask::ALL,
-                            blend_state,
-                        ));
-
-                    pipeline_descriptor.depth_stencil = hal::pso::DepthStencilDesc {
-                        depth: depth_test,
-                        depth_bounds: false,
-                        stencil: hal::pso::StencilTest::Off,
-                    };
-
-                    pipeline_descriptor.vertex_buffers =
-                        pipeline_requirements.vertex_buffer_descriptors.clone();
-                    pipeline_descriptor.attributes =
-                        pipeline_requirements.attribute_descriptors.clone();
-                    pipeline_descriptor
-                })
-                .collect::<Vec<_>>();
-
-            let pipelines =
-                unsafe { device.create_graphics_pipelines(pipelines_descriptors.as_slice(), pipeline_cache) }
-                    .into_iter();
-
-            pipeline_states
-                .iter()
-                .cloned()
-                .zip(pipelines.map(|pipeline| pipeline.unwrap()))
-                .collect::<HashMap<(BlendState, DepthTest), B::GraphicsPipeline>>()
-        };
-
-        let vertex_buffer_stride = match shader_kind {
-            ShaderKind::DebugColor => mem::size_of::<DebugColorVertex>(),
-            ShaderKind::DebugFont => mem::size_of::<DebugFontVertex>(),
-            _ => mem::size_of::<Vertex>(),
-        };
-
-        let instance_buffer_stride = match shader_kind {
-            ShaderKind::Primitive
-            | ShaderKind::Brush
-            | ShaderKind::Text
-            | ShaderKind::Cache(VertexArrayKind::Primitive) => {
-                mem::size_of::<PrimitiveInstanceData>()
-            }
-            ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => {
-                mem::size_of::<ClipMaskInstance>()
-            }
-            ShaderKind::Cache(VertexArrayKind::Blur) => mem::size_of::<BlurInstance>(),
-            ShaderKind::Cache(VertexArrayKind::Border) => mem::size_of::<BorderInstance>(),
-            ShaderKind::Cache(VertexArrayKind::Scale) => mem::size_of::<ScalingInstance>(),
-            ShaderKind::Cache(VertexArrayKind::LineDecoration) => {
-                mem::size_of::<LineDecorationInstance>()
-            }
-            sk if sk.is_debug() => 1,
-            _ => unreachable!(),
-        };
-
-        let mut vertex_buffer = SmallVec::new();
-        let mut instance_buffer = SmallVec::new();
-        let mut locals_buffer = SmallVec::new();
-        let mut index_buffer = if shader_kind.is_debug() {
-            Some(SmallVec::new())
-        } else {
-            None
-        };
-        for _ in 0 .. frame_count {
-            vertex_buffer.push(VertexBufferHandler::new(
-                device,
-                heaps,
-                hal::buffer::Usage::VERTEX,
-                &QUAD,
-                vertex_buffer_stride,
-                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
-                (limits.non_coherent_atom_size - 1) as usize,
-            ));
-            instance_buffer.push(InstanceBufferHandler::new(
-                device,
-                heaps,
-                instance_buffer_stride,
-                (limits.non_coherent_atom_size - 1) as usize,
-                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
-            ));
-            locals_buffer.push(UniformBufferHandler::new(
-                hal::buffer::Usage::UNIFORM,
-                mem::size_of::<Locals>(),
-                (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-                (limits.non_coherent_atom_size - 1) as usize,
-            ));
-            if let Some(ref mut index_buffer) = index_buffer {
-                index_buffer.push(VertexBufferHandler::new(
-                    device,
-                    heaps,
-                    hal::buffer::Usage::INDEX,
-                    &vec![0u32; MAX_INDEX_COUNT],
-                    mem::size_of::<u32>(),
-                    (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
-                    (limits.non_coherent_atom_size - 1) as usize,
-                ));
-            }
-        }
-
-        let bindings_map = pipeline_requirements.bindings_map;
-
-        Program {
-            bindings_map,
-            pipelines,
-            vertex_buffer,
-            index_buffer,
-            instance_buffer,
-            locals_buffer,
-            shader_name: String::from(shader_name),
-            shader_kind,
-            bound_textures: [0; 16],
-        }
-    }
-
-    pub fn bind_instances<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        instances: &[T],
-        buffer_id: usize,
-    ) {
-        assert!(!instances.is_empty());
-        self.instance_buffer[buffer_id].add(device, instances, heaps);
-    }
-
-    fn bind_locals(
-        &mut self,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        set: &B::DescriptorSet,
-        projection: &Transform3D<f32>,
-        u_mode: i32,
-        buffer_id: usize,
-    ) {
-        let locals_data = vec![Locals {
-            uTransform: projection.to_row_arrays(),
-            uMode: u_mode,
-        }];
-        self.locals_buffer[buffer_id].add(device, &locals_data, heaps);
-        unsafe {
-            device.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
-                set,
-                binding: self.bindings_map["Locals"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Buffer(
-                    &self.locals_buffer[buffer_id].buffer().buffer,
-                    Some(0) .. None,
-                )),
-            }]);
-        }
-    }
-
-    fn bind_texture(
-        &self,
-        device: &B::Device,
-        set: &B::DescriptorSet,
-        image: &ImageCore<B>,
-        binding: &'static str,
-    ) {
-        if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
-            unsafe {
-                device.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
-                    set,
-                    binding: *binding,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Image(
-                        &image.view,
-                        image.state.get().1,
-                    )),
-                }]);
-            }
-        }
-    }
-
-    fn bind_sampler(
-        &self,
-        device: &B::Device,
-        set: &B::DescriptorSet,
-        sampler: &B::Sampler,
-        binding: &'static str,
-    ) {
-        if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
-            unsafe {
-                device.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
-                    set,
-                    binding: *binding,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Sampler(sampler)),
-                }]);
-            }
-        }
-    }
-
-    pub fn submit(
-        &self,
-        cmd_pool: &mut CommandPool<B>,
-        viewport: hal::pso::Viewport,
-        render_pass: &B::RenderPass,
-        frame_buffer: &B::Framebuffer,
-        desc_pools: &mut DescriptorPools<B>,
-        desc_pools_global: &DescriptorPools<B>,
-        desc_pools_sampler: &DescriptorPools<B>,
-        clear_values: &[hal::command::ClearValue],
-        blend_state: BlendState,
-        blend_color: ColorF,
-        depth_test: DepthTest,
-        scissor_rect: Option<DeviceIntRect>,
-        next_id: usize,
-        pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
-    ) {
-        let cmd_buffer = cmd_pool.acquire_command_buffer();
-        let vertex_buffer = &self.vertex_buffer[next_id];
-        let instance_buffer = &self.instance_buffer[next_id];
-
-        unsafe {
-            cmd_buffer.begin();
-            cmd_buffer.set_viewports(0, &[viewport.clone()]);
-            match scissor_rect {
-                Some(r) => cmd_buffer.set_scissors(
-                    0,
-                    &[hal::pso::Rect {
-                        x: r.origin.x as _,
-                        y: r.origin.y as _,
-                        w: r.size.width as _,
-                        h: r.size.height as _,
-                    }],
-                ),
-                None => cmd_buffer.set_scissors(0, &[viewport.rect]),
-            }
-            cmd_buffer.bind_graphics_pipeline(
-                &self
-                    .pipelines
-                    .get(&(blend_state, depth_test))
-                    .expect(&format!(
-                        "The blend state {:?} with depth test {:?} not found for {} program!",
-                        blend_state, depth_test, self.shader_name
-                    )),
-            );
-
-            cmd_buffer.bind_graphics_descriptor_sets(
-                &pipeline_layouts[&self.shader_kind],
-                0,
-                vec![
-                    desc_pools.get(&self.shader_kind),
-                    desc_pools_global.get(&self.shader_kind),
-                    desc_pools_sampler.get(&self.shader_kind),
-                ],
-                &[],
-            );
-            desc_pools.next(&self.shader_kind);
-
-            if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
-                cmd_buffer.set_blend_constants(blend_color.to_array());
-            }
-
-            if let Some(ref index_buffer) = self.index_buffer {
-                cmd_buffer.bind_vertex_buffers(0, vec![(&vertex_buffer.buffer().buffer, 0)]);
-                cmd_buffer.bind_index_buffer(hal::buffer::IndexBufferView {
-                    buffer: &index_buffer[next_id].buffer().buffer,
-                    offset: 0,
-                    index_type: hal::IndexType::U32,
-                });
-
-                {
-                    let mut encoder = cmd_buffer.begin_render_pass_inline(
-                        render_pass,
-                        frame_buffer,
-                        viewport.rect,
-                        clear_values,
-                    );
-
-                    encoder.draw_indexed(
-                        0 .. index_buffer[next_id].buffer().buffer_len as u32,
-                        0,
-                        0 .. 1,
-                    );
-                }
-            } else {
-                for i in 0 ..= instance_buffer.current_buffer_index {
-                    cmd_buffer.bind_vertex_buffers(
-                        0,
-                        vec![
-                            (&vertex_buffer.buffer().buffer, 0),
-                            (&instance_buffer.buffers[i].buffer.buffer, 0),
-                        ],
-                    );
-
-                    {
-                        let mut encoder = cmd_buffer.begin_render_pass_inline(
-                            render_pass,
-                            frame_buffer,
-                            viewport.rect,
-                            clear_values,
-                        );
-                        let offset = instance_buffer.buffers[i].offset;
-                        let size = instance_buffer.buffers[i].last_update_size;
-                        encoder.draw(
-                            0 .. vertex_buffer.buffer_len as _,
-                            (offset - size) as u32 .. offset as u32,
-                        );
-                    }
-                }
-            }
-
-            cmd_buffer.finish();
-        }
-    }
-
-    pub fn deinit(mut self, device: &B::Device, heaps: &mut Heaps<B>) {
-        for mut vertex_buffer in self.vertex_buffer {
-            vertex_buffer.deinit(device, heaps);
-        }
-        if let Some(index_buffer) = self.index_buffer {
-            for mut index_buffer in index_buffer {
-                index_buffer.deinit(device, heaps);
-            }
-        }
-        for mut instance_buffer in self.instance_buffer {
-            instance_buffer.deinit(device, heaps);
-        }
-        for mut locals_buffer in self.locals_buffer {
-            locals_buffer.deinit(device, heaps);
-        }
-        for pipeline in self.pipelines.drain() {
-            unsafe { device.destroy_graphics_pipeline(pipeline.1) };
-        }
-    }
-}
-
-pub struct Framebuffer<B: hal::Backend> {
-    pub texture: TextureId,
-    pub layer_index: u16,
-    pub format: ImageFormat,
-    pub image_view: B::ImageView,
-    pub fbo: B::Framebuffer,
-    pub rbo: RBOId,
-}
-
-impl<B: hal::Backend> Framebuffer<B> {
-    pub fn new(
-        device: &B::Device,
-        texture: &Texture,
-        image: &Image<B>,
-        layer_index: u16,
-        render_pass: &RenderPass<B>,
-        rbo: RBOId,
-        depth: Option<&B::ImageView>,
-    ) -> Self {
-        let extent = hal::image::Extent {
-            width: texture.size.width as _,
-            height: texture.size.height as _,
-            depth: 1,
-        };
-        let format = match texture.format {
-            ImageFormat::R8 => hal::format::Format::R8Unorm,
-            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
-            f => unimplemented!("TODO image format missing {:?}", f),
-        };
-        let image_view = unsafe {
-            device.create_image_view(
-                &image.core.image,
-                hal::image::ViewKind::D2Array,
-                format,
-                hal::format::Swizzle::NO,
-                hal::image::SubresourceRange {
-                    aspects: hal::format::Aspects::COLOR,
-                    levels: 0 .. 1,
-                    layers: layer_index .. layer_index + 1,
-                },
-            )
-        }
-        .expect("create_image_view failed");
-        let fbo = unsafe {
-            if rbo != RBOId(0) {
-                device.create_framebuffer(
-                    render_pass.get_render_pass(texture.format, true),
-                    vec![&image_view, depth.unwrap()],
-                    extent,
-                )
-            } else {
-                device.create_framebuffer(
-                    render_pass.get_render_pass(texture.format, false),
-                    Some(&image_view),
-                    extent,
-                )
-            }
-        }
-        .expect("create_framebuffer failed");
-
-        Framebuffer {
-            texture: texture.id,
-            layer_index,
-            format: texture.format,
-            image_view,
-            fbo,
-            rbo,
-        }
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        unsafe {
-            device.destroy_framebuffer(self.fbo);
-            device.destroy_image_view(self.image_view);
-        }
-    }
-}
-
-pub struct DepthBuffer<B: hal::Backend> {
-    pub core: ImageCore<B>,
-}
-
-impl<B: hal::Backend> DepthBuffer<B> {
-    pub fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        pixel_width: u32,
-        pixel_height: u32,
-        depth_format: hal::format::Format,
-    ) -> Self {
-        let core = ImageCore::create(
-            device,
-            heaps,
-            hal::image::Kind::D2(pixel_width, pixel_height, 1, 1),
-            hal::image::ViewKind::D2,
-            1,
-            depth_format,
-            hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
-            DEPTH_RANGE,
-        );
-        DepthBuffer { core }
-    }
-
-    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>,) {
-        self.core.deinit(device, heaps);
-    }
-}
-
-pub struct RenderPass<B: hal::Backend> {
-    pub r8: B::RenderPass,
-    pub r8_depth: B::RenderPass,
-    pub bgra8: B::RenderPass,
-    pub bgra8_depth: B::RenderPass,
-}
-
-impl<B: hal::Backend> RenderPass<B> {
-    pub fn get_render_pass(&self, format: ImageFormat, depth_enabled: bool) -> &B::RenderPass {
-        match format {
-            ImageFormat::R8 if depth_enabled => &self.r8_depth,
-            ImageFormat::R8 => &self.r8,
-            ImageFormat::BGRA8 if depth_enabled => &self.bgra8_depth,
-            ImageFormat::BGRA8 => &self.bgra8,
-            f => unimplemented!("No render pass for image format {:?}", f),
-        }
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        unsafe {
-            device.destroy_render_pass(self.r8);
-            device.destroy_render_pass(self.r8_depth);
-            device.destroy_render_pass(self.bgra8);
-            device.destroy_render_pass(self.bgra8_depth);
-        }
-    }
-}
-
-pub struct DescPool<B: hal::Backend> {
-    descriptor_pool: B::DescriptorPool,
-    descriptor_set: Vec<B::DescriptorSet>,
-    descriptor_set_layout: B::DescriptorSetLayout,
-    current_descriptor_set_id: usize,
-    max_descriptor_set_size: usize,
-}
-
-impl<B: hal::Backend> DescPool<B> {
-    pub fn new(
-        device: &B::Device,
-        max_size: usize,
-        descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
-        descriptor_set_layout: Vec<DescriptorSetLayoutBinding>,
-    ) -> Self {
-        let descriptor_pool = unsafe {
-            device.create_descriptor_pool(
-                max_size,
-                descriptor_range_descriptors.as_slice(),
-                hal::pso::DescriptorPoolCreateFlags::empty(),
-            )
-        }
-        .expect("create_descriptor_pool failed");
-        let descriptor_set_layout =
-            unsafe { device.create_descriptor_set_layout(&descriptor_set_layout, &[]) }
-                .expect("create_descriptor_set_layout failed");
-        let mut dp = DescPool {
-            descriptor_pool,
-            descriptor_set: vec![],
-            descriptor_set_layout,
-            current_descriptor_set_id: 0,
-            max_descriptor_set_size: max_size,
-        };
-        dp.allocate();
-        dp
-    }
-
-    pub fn descriptor_set(&self) -> &B::DescriptorSet {
-        &self.descriptor_set[self.current_descriptor_set_id]
-    }
-
-    pub fn descriptor_set_layout(&self) -> &B::DescriptorSetLayout {
-        &self.descriptor_set_layout
-    }
-
-    pub fn next(&mut self) {
-        self.current_descriptor_set_id += 1;
-        assert!(
-            self.current_descriptor_set_id < self.max_descriptor_set_size,
-            "Maximum descriptor set size({}) exceeded!",
-            self.max_descriptor_set_size
-        );
-        if self.current_descriptor_set_id == self.descriptor_set.len() {
-            self.allocate();
-        }
-    }
-
-    fn allocate(&mut self) {
-        let desc_set = unsafe {
-            self.descriptor_pool
-                .allocate_set(&self.descriptor_set_layout)
-        }
-        .expect(&format!(
-            "Failed to allocate set with layout: {:?}",
-            self.descriptor_set_layout
-        ));
-        self.descriptor_set.push(desc_set);
-    }
-
-    pub fn reset(&mut self) {
-        self.current_descriptor_set_id = 0;
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        unsafe {
-            device.destroy_descriptor_set_layout(self.descriptor_set_layout);
-            device.destroy_descriptor_pool(self.descriptor_pool);
-        }
-    }
-}
-
-pub struct DescriptorPools<B: hal::Backend> {
-    pub debug_pool: DescPool<B>,
-    pub cache_clip_pool: DescPool<B>,
-    pub default_pool: DescPool<B>,
-}
-
-impl<B: hal::Backend> DescriptorPools<B> {
-    pub fn new(
-        device: &B::Device,
-        descriptor_count: usize,
-        pipeline_requirements: &HashMap<String, PipelineRequirements>,
-        set: usize,
-    ) -> Self {
-        fn increase_range_count(range: &mut Vec<DescriptorRangeDesc>, count: usize) {
-            for r in range {
-                r.count *= count;
-            }
-        }
-        fn get_layout_and_range(
-            pipeline: &PipelineRequirements,
-            set: usize,
-        ) -> (Vec<DescriptorSetLayoutBinding>, Vec<DescriptorRangeDesc>) {
-            (
-                pipeline.descriptor_set_layout_bindings[set].clone(),
-                pipeline.descriptor_range_descriptors[set].clone(),
-            )
-        }
-
-        let (debug_layout, mut debug_layout_range) = get_layout_and_range(
-            pipeline_requirements
-                .get("debug_color")
-                .expect("debug_color missing"),
-            set,
-        );
-        increase_range_count(&mut debug_layout_range, DEBUG_DESCRIPTOR_COUNT);
-
-        let (cache_clip_layout, mut cache_clip_layout_range) = get_layout_and_range(
-            pipeline_requirements
-                .get("cs_clip_rectangle")
-                .expect("cs_clip_rectangle missing"),
-            set,
-        );
-        increase_range_count(&mut cache_clip_layout_range, descriptor_count);
-
-        let (default_layout, mut default_layout_range) = get_layout_and_range(
-            pipeline_requirements
-                .get("brush_solid")
-                .expect("brush_solid missing"),
-            set,
-        );
-        increase_range_count(&mut default_layout_range, descriptor_count);
-
-        DescriptorPools {
-            debug_pool: DescPool::new(
-                device,
-                DEBUG_DESCRIPTOR_COUNT,
-                debug_layout_range,
-                debug_layout,
-            ),
-            cache_clip_pool: DescPool::new(
-                device,
-                descriptor_count,
-                cache_clip_layout_range,
-                cache_clip_layout,
-            ),
-            default_pool: DescPool::new(
-                device,
-                descriptor_count,
-                default_layout_range,
-                default_layout,
-            ),
-        }
-    }
-
-    fn get_pool(&self, shader_kind: &ShaderKind) -> &DescPool<B> {
-        match *shader_kind {
-            ShaderKind::DebugColor | ShaderKind::DebugFont => &self.debug_pool,
-            ShaderKind::ClipCache => &self.cache_clip_pool,
-            _ => &self.default_pool,
-        }
-    }
-
-    fn get_pool_mut(&mut self, shader_kind: &ShaderKind) -> &mut DescPool<B> {
-        match *shader_kind {
-            ShaderKind::DebugColor | ShaderKind::DebugFont => &mut self.debug_pool,
-            ShaderKind::ClipCache => &mut self.cache_clip_pool,
-            _ => &mut self.default_pool,
-        }
-    }
-
-    pub fn get(&self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
-        self.get_pool(shader_kind).descriptor_set()
-    }
-
-    pub fn get_layout(&self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
-        self.get_pool(shader_kind).descriptor_set_layout()
-    }
-
-    pub fn next(&mut self, shader_kind: &ShaderKind) {
-        self.get_pool_mut(shader_kind).next()
-    }
-
-    pub fn reset(&mut self) {
-        self.debug_pool.reset();
-        self.cache_clip_pool.reset();
-        self.default_pool.reset();
-    }
-
-    pub fn deinit(self, device: &B::Device) {
-        self.debug_pool.deinit(device);
-        self.cache_clip_pool.deinit(device);
-        self.default_pool.deinit(device);
-    }
-}
-
 struct Fence<B: hal::Backend> {
     inner: B::Fence,
     is_submitted: bool,
-}
-
-pub struct CommandPool<B: hal::Backend> {
-    command_pool: hal::CommandPool<B, hal::Graphics>,
-    command_buffers: Vec<hal::command::CommandBuffer<B, hal::Graphics>>,
-    size: usize,
-}
-
-impl<B: hal::Backend> CommandPool<B> {
-    fn new(mut command_pool: hal::CommandPool<B, hal::Graphics>) -> Self {
-        let command_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
-        CommandPool {
-            command_pool,
-            command_buffers: vec![command_buffer],
-            size: 0,
-        }
-    }
-
-    fn acquire_command_buffer(&mut self) -> &mut hal::command::CommandBuffer<B, hal::Graphics> {
-        if self.size >= self.command_buffers.len() {
-            let command_buffer = self
-                .command_pool
-                .acquire_command_buffer::<hal::command::OneShot>();
-            self.command_buffers.push(command_buffer);
-        }
-        self.size += 1;
-        &mut self.command_buffers[self.size - 1]
-    }
-
-    fn command_buffers(&self) -> &[hal::command::CommandBuffer<B, hal::Graphics>] {
-        &self.command_buffers[0 .. self.size]
-    }
-
-    unsafe fn reset(&mut self) {
-        self.command_pool.reset();
-        self.size = 0;
-    }
-
-    unsafe fn destroy(self, device: &B::Device) {
-        device.destroy_command_pool(self.command_pool.into_raw());
-    }
 }
 
 pub struct Device<B: hal::Backend> {
@@ -2038,13 +132,13 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[CommandPool<B>; 1]>,
-    pub staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
+    staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
-    pub render_pass: Option<RenderPass<B>>,
+    render_pass: Option<RenderPass<B>>,
     pub framebuffers: Vec<B::Framebuffer>,
     pub framebuffers_depth: Vec<B::Framebuffer>,
-    pub frame_images: Vec<ImageCore<B>>,
-    pub frame_depths: Vec<DepthBuffer<B>>,
+    frame_images: Vec<ImageCore<B>>,
+    frame_depths: Vec<DepthBuffer<B>>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -2107,7 +201,7 @@ pub struct Device<B: hal::Backend> {
     frame_fence: SmallVec<[Fence<B>; 1]>,
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
-    pipeline_requirements: HashMap<String, PipelineRequirements>,
+    pipeline_requirements: FastHashMap<String, PipelineRequirements>,
     pipeline_layouts: FastHashMap<ShaderKind, B::PipelineLayout>,
     pipeline_cache: Option<B::PipelineCache>,
     cache_path: Option<PathBuf>,
@@ -2362,7 +456,7 @@ impl<B: hal::Backend> Device<B> {
         }
         .expect("sampler_linear failed");
 
-        let pipeline_requirements: HashMap<String, PipelineRequirements> =
+        let pipeline_requirements: FastHashMap<String, PipelineRequirements> =
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
         let mut descriptor_pools = SmallVec::new();
@@ -2672,8 +766,11 @@ impl<B: hal::Backend> Device<B> {
 
         let render_pass = Device::create_render_passes(device, surface_format, depth_format);
 
+        let image_format = match surface_format {
+            hal::format::Format::Bgra8Unorm => ImageFormat::BGRA8,
+            f => unimplemented!("Unsupported surface format: {:?}", f),
+        };
         let mut frame_depths = Vec::new();
-
         // Framebuffer and render target creation
         let (frame_images, framebuffers, framebuffers_depth) = match backbuffer {
             Backbuffer::Images(images) => {
@@ -2705,7 +802,7 @@ impl<B: hal::Backend> Device<B> {
                     .iter()
                     .map(|core| {
                         unsafe {
-                            device.create_framebuffer(&render_pass.bgra8, Some(&core.view), extent)
+                            device.create_framebuffer(render_pass.get_render_pass(image_format, false), Some(&core.view), extent)
                         }
                         .expect("create_framebuffer failed")
                     })
@@ -2716,7 +813,7 @@ impl<B: hal::Backend> Device<B> {
                     .map(|(core, depth)| {
                         unsafe {
                             device.create_framebuffer(
-                                &render_pass.bgra8_depth,
+                                render_pass.get_render_pass(image_format, true),
                                 vec![&core.view, &depth.core.view],
                                 extent,
                             )
@@ -2742,10 +839,7 @@ impl<B: hal::Backend> Device<B> {
         };
         (
             swap_chain,
-            match surface_format {
-                hal::format::Format::Bgra8Unorm => ImageFormat::BGRA8,
-                f => unimplemented!("Unsupported surface format: {:?}", f),
-            },
+            image_format,
             depth_format,
             render_pass,
             framebuffers,
@@ -2761,7 +855,7 @@ impl<B: hal::Backend> Device<B> {
         )
     }
 
-    pub fn create_render_passes(
+    fn create_render_passes(
         device: &<B as hal::Backend>::Device,
         surface_format: hal::format::Format,
         depth_format: hal::format::Format,
@@ -3106,7 +1200,7 @@ impl<B: hal::Backend> Device<B> {
             .get_mut(&self.bound_program)
             .expect("Program not found.");
 
-        if program.shader_name.contains("debug") {
+        if program.shader_kind.is_debug() {
             program.vertex_buffer[self.next_id].update(&self.device, vertices, &mut self.heaps);
         } else {
             warn!("This function is for debug shaders only!");
@@ -3785,7 +1879,7 @@ impl<B: hal::Backend> Device<B> {
 
         let (src_format, src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
-            let img = &self.images[&fbo.texture];
+            let img = &self.images[&fbo.texture_id];
             let layer = fbo.layer_index;
             (img.format, &img.core, layer)
         } else {
@@ -3794,7 +1888,7 @@ impl<B: hal::Backend> Device<B> {
 
         let (dest_format, dest_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
-            let img = &self.images[&fbo.texture];
+            let img = &self.images[&fbo.texture_id];
             let layer = fbo.layer_index;
             (img.format, &img.core, layer)
         } else {
@@ -4124,7 +2218,7 @@ impl<B: hal::Backend> Device<B> {
             (&img.core, img.format, self.bound_read_texture.1 as u16)
         } else if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
-            let img = &self.images[&fbo.texture];
+            let img = &self.images[&fbo.texture_id];
             let layer = fbo.layer_index;
             (&img.core, img.format, layer)
         } else {
@@ -4494,7 +2588,7 @@ impl<B: hal::Backend> Device<B> {
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
         let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
-            let img = &self.images[&fbo.texture];
+            let img = &self.images[&fbo.texture_id];
             let dimg = if depth.is_some() {
                 Some(&self.rbos[&fbo.rbo].core)
             } else {
@@ -4599,7 +2693,7 @@ impl<B: hal::Backend> Device<B> {
     ) {
         if let Some(rect) = rect {
             let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-                let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture]
+                let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture_id]
                     .kind
                     .extent();
                 DeviceIntRect::new(
@@ -5043,3 +3137,4 @@ fn texels_to_u8_slice<T: Texel>(texels: &[T]) -> &[u8] {
         )
     }
 }
+
