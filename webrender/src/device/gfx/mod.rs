@@ -10,7 +10,7 @@ mod device;
 mod image;
 mod program;
 mod render_pass;
-mod vertex_types;
+pub(crate) mod vertex_types;
 
 pub use self::device::*;
 
