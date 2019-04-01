@@ -738,11 +738,11 @@ impl<B: hal::Backend> Buffer<B> {
 
     pub fn update_all<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
         let offset = self.memory_block.range().start;
-        let length = (data.len() * std::mem::size_of::<T>()) as u64;
-        let range = offset .. offset + length;
+        let size = (data.len() * std::mem::size_of::<T>()) as u64;
+        let range = offset .. offset + size;
         unsafe {
             let mut mapped = self.memory_block.map(device, range).expect("Mapping memory block failed");
-            mapped.write(device, 0 .. length).expect("Writer creation failed").write(&data);
+            mapped.write(device, 0 .. size).expect("Writer creation failed").write(&data);
         }
         self.memory_block.unmap(device);
     }
@@ -2138,7 +2138,7 @@ impl<B: hal::Backend> Device<B> {
                         },
                         dynamic: Some(DynamicConfig {
                             max_block_size: min(
-                                32 * 1024 * 1024,
+                                8 * 512 * 1024,
                                 memory_properties.memory_heaps[mt.heap_index as usize] / 8,
                             ),
                             block_size_granularity: min(
@@ -2146,12 +2146,14 @@ impl<B: hal::Backend> Device<B> {
                                 memory_properties.memory_heaps[mt.heap_index as usize] / 1024,
                             ),
                             blocks_per_chunk: 64,
+                            max_chunk_size: 256 * 1024 * 1024,
                         }),
                     };
                     (mt.properties, mt.heap_index as u32, config)
                 });
 
             let heaps = memory_properties.memory_heaps.iter().cloned();
+            println!("###### Types {:?}, heaps {:?}", types, heaps);
             unsafe { Heaps::new(types, heaps) }
         };
 
