@@ -715,12 +715,13 @@ impl<B: hal::Backend> Buffer<B> {
         };
         let requirements = unsafe { device.get_buffer_requirements(&buffer) };
 
+        let alignment = ((requirements.alignment -1) | (alignment_mask as u64)) + 1;
         let memory_block = heaps.allocate(
             device,
             requirements.type_mask as u32,
             memory_usage,
             requirements.size,
-            std::cmp::max(requirements.alignment, (alignment_mask + 1) as u64)
+            alignment,
         ).expect("Allocate memory failed");
 
         unsafe { device.bind_buffer_memory(&memory_block.memory(), memory_block.range().start, &mut buffer) }
@@ -737,12 +738,11 @@ impl<B: hal::Backend> Buffer<B> {
     }
 
     pub fn update_all<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
-        let offset = self.memory_block.range().start;
-        let length = (data.len() * std::mem::size_of::<T>()) as u64;
-        let range = offset .. offset + length;
+        let size = (data.len() * std::mem::size_of::<T>()) as u64;
+        let range = 0 ..  size;
         unsafe {
-            let mut mapped = self.memory_block.map(device, range).expect("Mapping memory block failed");
-            mapped.write(device, 0 .. length).expect("Writer creation failed").write(&data);
+            let mut mapped = self.memory_block.map(device, range.clone()).expect("Mapping memory block failed");
+            mapped.write(device, range).expect("Writer creation failed").write(&data);
         }
         self.memory_block.unmap(device);
     }
@@ -753,7 +753,7 @@ impl<B: hal::Backend> Buffer<B> {
         data: &[T],
         offset: usize,
     ) -> usize {
-        let offset = self.memory_block.range().start + (offset * self.stride) as u64;
+        let offset = (offset * self.stride) as u64;
         let size = (data.len() * self.stride) as u64;
         let range = offset .. offset + size;
         unsafe {
@@ -802,7 +802,7 @@ impl<B: hal::Backend> BufferPool<B> {
         heaps: &mut Heaps<B>,
         buffer_usage: hal::buffer::Usage,
         data_stride: usize,
-        non_coherent_atom_size: usize,
+        non_coherent_atom_size_mask: usize,
         pitch_alignment_mask: usize,
         copy_alignment_mask: usize,
     ) -> Self {
@@ -811,7 +811,7 @@ impl<B: hal::Backend> BufferPool<B> {
             heaps,
             MemoryUsageValue::Upload,
             buffer_usage,
-            std::cmp::max(pitch_alignment_mask, non_coherent_atom_size),
+            pitch_alignment_mask | non_coherent_atom_size_mask,
             TEXTURE_CACHE_SIZE,
             data_stride,
         );
@@ -921,10 +921,10 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
         device: &B::Device,
         heaps: &mut Heaps<B>,
         data_stride: usize,
-        non_coherent_atom_size: usize,
+        non_coherent_atom_size_mask: usize,
         pitch_alignment_mask: usize,
     ) -> Self {
-        let alignment_mask = std::cmp::max(non_coherent_atom_size, pitch_alignment_mask);
+        let alignment_mask = non_coherent_atom_size_mask | pitch_alignment_mask;
         let buffers = vec![InstancePoolBuffer::new(
             device,
             heaps,
@@ -2130,7 +2130,7 @@ impl<B: hal::Backend> Device<B> {
                             Some(LinearConfig {
                                 linear_size: min(
                                     128 * 1024 * 1024,
-                                    memory_properties.memory_heaps[mt.heap_index as usize] / 8,
+                                    (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two(),
                                 ),
                             })
                         } else {
@@ -2138,14 +2138,18 @@ impl<B: hal::Backend> Device<B> {
                         },
                         dynamic: Some(DynamicConfig {
                             max_block_size: min(
-                                32 * 1024 * 1024,
-                                memory_properties.memory_heaps[mt.heap_index as usize] / 8,
+                                256 * 1024,
+                                (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two(),
                             ),
                             block_size_granularity: min(
                                 256,
-                                memory_properties.memory_heaps[mt.heap_index as usize] / 1024,
+                                (memory_properties.memory_heaps[mt.heap_index as usize] / 1024 - 1).next_power_of_two(),
                             ),
-                            blocks_per_chunk: 64,
+                            blocks_per_chunk: 256,
+                            max_chunk_size: min(
+                                32 * 1024 * 1024,
+                                (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two(),
+                            ),
                         }),
                     };
                     (mt.properties, mt.heap_index as u32, config)

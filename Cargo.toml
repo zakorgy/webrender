@@ -22,3 +22,4 @@ panic = "abort"
 "https://github.com/rust-lang/crates.io-index#gfx-backend-metal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb" }
 "https://github.com/rust-lang/crates.io-index#gfx-backend-vulkan:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb" }
 "https://github.com/rust-lang/crates.io-index#gfx-hal:0.1.0" = { git = "https://github.com/gfx-rs/gfx.git", rev="dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb" }
+"https://github.com/rust-lang/crates.io-index#rendy-memory:0.1.0" = { git = "https://github.com/omni-viral/rendy.git" }

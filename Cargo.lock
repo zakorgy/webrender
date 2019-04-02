@@ -1707,7 +1707,7 @@ dependencies = [
 [[package]]
 name = "rendy-memory"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/omni-viral/rendy.git#c5b9a5b476042d3abdf2fc838340d1f1a0d8f9e4"
 dependencies = [
  "derivative 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1718,6 +1718,12 @@ dependencies = [
  "smallvec 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "veclist 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "rendy-memory"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+replace = "rendy-memory 0.1.0 (git+https://github.com/omni-viral/rendy.git)"
 
 [[package]]
 name = "ron"
@@ -2696,6 +2702,7 @@ dependencies = [
 "checksum regex-syntax 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)" = "8c2f35eedad5295fdf00a63d7d4b238135723f92b434ec06774dad15c7ab0861"
 "checksum relevant 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a26af7cf5c3b52f38db71875f247226949a7cda8f1441862171bf48bba256945"
 "checksum remove_dir_all 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "3488ba1b9a2084d38645c4c08276a1752dcbf2c7130d74f1569681ad5d2799c5"
+"checksum rendy-memory 0.1.0 (git+https://github.com/omni-viral/rendy.git)" = "<none>"
 "checksum rendy-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "47cb8650615600d582ff3a15e9b6c9ba85f6be66b46d26f5511b42679f2df32e"
 "checksum ron 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "da06feaa07f69125ab9ddc769b11de29090122170b402547f64b86fe16ebc399"
 "checksum rustc-demangle 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)" = "adacaae16d02b6ec37fdc7acfcddf365978de76d1983d3ee22afc260e1ca9619"
