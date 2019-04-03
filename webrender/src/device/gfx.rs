@@ -737,12 +737,12 @@ impl<B: hal::Backend> Buffer<B> {
         }
     }
 
-    pub fn update_all<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+    pub fn update_all<T: Copy>(&mut self, device: &B::Device, data: &[T], non_coherent_atom_size_mask: u64) {
         let size = (data.len() * std::mem::size_of::<T>()) as u64;
-        let range = 0 ..  size;
+        let range = 0..((size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
         unsafe {
             let mut mapped = self.memory_block.map(device, range.clone()).expect("Mapping memory block failed");
-            mapped.write(device, range).expect("Writer creation failed").write(&data);
+            mapped.write(device, 0..size).expect("Writer creation failed").write(&data);
         }
         self.memory_block.unmap(device);
     }
@@ -752,13 +752,14 @@ impl<B: hal::Backend> Buffer<B> {
         device: &B::Device,
         data: &[T],
         offset: usize,
+        non_coherent_atom_size_mask: u64,
     ) -> usize {
         let offset = (offset * self.stride) as u64;
         let size = (data.len() * self.stride) as u64;
-        let range = offset .. offset + size;
+        let range = offset..((offset + size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
         unsafe {
             let mut mapped = self.memory_block.map(device, range).expect("Mapping memory block failed");
-            mapped.write(device, 0 .. size).expect("Writer creation failed").write(&data);
+            mapped.write(device, 0..size).expect("Writer creation failed").write(&data);
         }
         self.memory_block.unmap(device);
         size as usize
@@ -790,6 +791,7 @@ impl<B: hal::Backend> Buffer<B> {
 pub struct BufferPool<B: hal::Backend> {
     pub buffer: Buffer<B>,
     pub data_stride: usize,
+    non_coherent_atom_size_mask: usize,
     copy_alignment_mask: usize,
     offset: usize,
     size: usize,
@@ -818,6 +820,7 @@ impl<B: hal::Backend> BufferPool<B> {
         BufferPool {
             buffer,
             data_stride,
+            non_coherent_atom_size_mask,
             copy_alignment_mask,
             offset: 0,
             size: 0,
@@ -843,7 +846,7 @@ impl<B: hal::Backend> BufferPool<B> {
         );
         self.size = self
             .buffer
-            .update(device, data, self.offset);
+            .update(device, data, self.offset, self.non_coherent_atom_size_mask as u64);
         self.buffer_offset = self.offset;
         self.offset += (self.size + self.copy_alignment_mask) & !self.copy_alignment_mask;
     }
@@ -866,6 +869,7 @@ struct InstancePoolBuffer<B: hal::Backend> {
     buffer: Buffer<B>,
     pub offset: usize,
     pub last_update_size: usize,
+    non_coherent_atom_size_mask: usize,
 }
 
 impl<B: hal::Backend> InstancePoolBuffer<B> {
@@ -875,6 +879,7 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         buffer_usage: hal::buffer::Usage,
         data_stride: usize,
         alignment_mask: usize,
+        non_coherent_atom_size_mask: usize,
     ) -> Self {
         let buffer = Buffer::new(
             device,
@@ -889,12 +894,13 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
             buffer,
             offset: 0,
             last_update_size: 0,
+            non_coherent_atom_size_mask,
         }
     }
 
     fn update<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
         self.buffer
-            .update(device, data, self.offset);
+            .update(device, data, self.offset, self.non_coherent_atom_size_mask as u64);
         self.last_update_size = data.len();
         self.offset += self.last_update_size;
     }
@@ -913,6 +919,7 @@ pub struct InstanceBufferHandler<B: hal::Backend> {
     buffers: Vec<InstancePoolBuffer<B>>,
     data_stride: usize,
     alignment_mask: usize,
+    non_coherent_atom_size_mask: usize,
     current_buffer_index: usize,
 }
 
@@ -931,12 +938,14 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
             hal::buffer::Usage::VERTEX,
             data_stride,
             alignment_mask,
+            non_coherent_atom_size_mask,
         )];
 
         InstanceBufferHandler {
             buffers,
-            alignment_mask,
             data_stride,
+            alignment_mask,
+            non_coherent_atom_size_mask,
             current_buffer_index: 0,
         }
     }
@@ -955,6 +964,7 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
                         hal::buffer::Usage::VERTEX,
                         self.data_stride,
                         self.alignment_mask,
+                        self.non_coherent_atom_size_mask,
                     ))
                 }
             }
@@ -1001,6 +1011,7 @@ pub struct UniformBufferHandler<B: hal::Backend> {
     usage: hal::buffer::Usage,
     data_stride: usize,
     pitch_alignment_mask: usize,
+    non_coherent_atom_size_mask: usize,
 }
 
 impl<B: hal::Backend> UniformBufferHandler<B> {
@@ -1008,6 +1019,7 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
         usage: hal::buffer::Usage,
         data_stride: usize,
         pitch_alignment_mask: usize,
+        non_coherent_atom_size_mask: usize,
     ) -> Self {
         UniformBufferHandler {
             buffers: vec![],
@@ -1015,6 +1027,7 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
             usage,
             data_stride,
             pitch_alignment_mask,
+            non_coherent_atom_size_mask,
         }
     }
 
@@ -1030,7 +1043,7 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
                 self.data_stride,
             ));
         }
-        self.buffers[self.offset].update_all(device, data);
+        self.buffers[self.offset].update_all(device, data, self.non_coherent_atom_size_mask as u64);
         self.offset += 1;
     }
 
@@ -1054,6 +1067,7 @@ pub struct VertexBufferHandler<B: hal::Backend> {
     buffer_usage: hal::buffer::Usage,
     data_stride: usize,
     pitch_alignment_mask: usize,
+    non_coherent_atom_size_mask: usize,
     pub buffer_len: usize,
 }
 
@@ -1065,6 +1079,7 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
         data: &[T],
         data_stride: usize,
         pitch_alignment_mask: usize,
+        non_coherent_atom_size_mask: usize,
     ) -> Self {
         let mut buffer = Buffer::new(
             device,
@@ -1075,13 +1090,14 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
             data.len(),
             data_stride,
         );
-        buffer.update_all(device, data);
+        buffer.update_all(device, data, non_coherent_atom_size_mask as u64);
         VertexBufferHandler {
             buffer_len: buffer.buffer_len,
             buffer,
             buffer_usage,
             data_stride,
             pitch_alignment_mask,
+            non_coherent_atom_size_mask,
         }
     }
 
@@ -1102,7 +1118,7 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
             );
             old_buffer.deinit(device, heaps);
         }
-        self.buffer.update_all(device, data);
+        self.buffer.update_all(device, data, self.non_coherent_atom_size_mask as u64);
         self.buffer_len = buffer_len;
     }
 
@@ -1375,6 +1391,7 @@ impl<B: hal::Backend> Program<B> {
                 &QUAD,
                 vertex_buffer_stride,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+                (limits.non_coherent_atom_size - 1) as usize,
             ));
             instance_buffer.push(InstanceBufferHandler::new(
                 device,
@@ -1387,6 +1404,7 @@ impl<B: hal::Backend> Program<B> {
                 hal::buffer::Usage::UNIFORM,
                 mem::size_of::<Locals>(),
                 (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+                (limits.non_coherent_atom_size - 1) as usize,
             ));
             if let Some(ref mut index_buffer) = index_buffer {
                 index_buffer.push(VertexBufferHandler::new(
@@ -1396,6 +1414,7 @@ impl<B: hal::Backend> Program<B> {
                     &vec![0u32; MAX_INDEX_COUNT],
                     mem::size_of::<u32>(),
                     (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+                    (limits.non_coherent_atom_size - 1) as usize,
                 ));
             }
         }
