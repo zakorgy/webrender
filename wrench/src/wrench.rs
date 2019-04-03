@@ -224,6 +224,18 @@ impl Wrench {
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
             disable_dual_source_blending,
             chase_primitive,
+            #[cfg(feature = "gfx")]
+            heaps_config: webrender::HeapsConfig {
+                linear: Some(webrender::LinearConfig {
+                    linear_size: 128 * 1024 * 1024,
+                }),
+                dynamic: Some(webrender::DynamicConfig {
+                    max_block_size: 256 * 1024,
+                    block_size_granularity: 256,
+                    blocks_per_chunk: 256,
+                    max_chunk_size: 32 * 1024 * 1024,
+                })
+            },
             ..Default::default()
         };
 
