@@ -76,6 +76,8 @@ use render_backend::{FrameId, RenderBackend};
 use scene_builder::{SceneBuilder, LowPrioritySceneBuilder};
 use shade::{Shaders, WrShaders};
 use smallvec::SmallVec;
+#[cfg(not(feature = "gleam"))]
+use rendy_memory::HeapsConfig;
 use render_task::{RenderTask, RenderTaskKind, RenderTaskTree};
 use resource_cache::ResourceCache;
 use util::drain_filter;
@@ -1324,6 +1326,8 @@ impl<B: hal::Backend> Renderer<B> {
             options.resource_override_path.clone(),
             options.upload_method.clone(),
             options.cached_programs.take(),
+            #[cfg(not(feature = "gleam"))]
+            options.heaps_config,
         );
 
         #[cfg(feature = "gleam")]
@@ -4576,6 +4580,8 @@ pub struct RendererOptions {
     pub support_low_priority_transactions: bool,
     pub namespace_alloc_by_client: bool,
     pub enable_picture_caching: bool,
+    #[cfg(not(feature = "gleam"))]
+    pub heaps_config: HeapsConfig,
 }
 
 impl Default for RendererOptions {
@@ -4613,6 +4619,11 @@ impl Default for RendererOptions {
             support_low_priority_transactions: false,
             namespace_alloc_by_client: false,
             enable_picture_caching: false,
+            #[cfg(not(feature = "gleam"))]
+            heaps_config: HeapsConfig {
+                linear: None,
+                dynamic: None,
+            }
         }
     }
 }

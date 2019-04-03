@@ -12,7 +12,7 @@ use euclid::Transform3D;
 use gpu_types;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
-use rendy_memory::{Block, DynamicConfig, Heaps, HeapsConfig, LinearConfig, MemoryBlock, MemoryUsageValue, Write};
+use rendy_memory::{Block, Heaps, HeapsConfig, MemoryBlock, MemoryUsageValue, Write};
 use ron::de::from_str;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -2102,6 +2102,7 @@ impl<B: hal::Backend> Device<B> {
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _cached_programs: Option<Rc<ProgramCache>>,
+        heaps_config: HeapsConfig,
     ) -> Self {
         let DeviceInit {
             instance,
@@ -2117,41 +2118,27 @@ impl<B: hal::Backend> Device<B> {
 
         let memory_properties = adapter.physical_device.memory_properties();
         let mut heaps = {
-            use std::cmp::min;
             let types = memory_properties.
                 memory_types
                 .iter()
                 .map(|ref mt| {
-                    let config = HeapsConfig {
-                        linear: if mt
-                            .properties
-                            .contains(gfx_hal::memory::Properties::CPU_VISIBLE)
-                        {
-                            Some(LinearConfig {
-                                linear_size: min(
-                                    128 * 1024 * 1024,
-                                    (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two(),
-                                ),
-                            })
+                    let mut config = heaps_config;
+                    if let Some(mut linear) = config.linear {
+                        if !mt.properties.contains(gfx_hal::memory::Properties::CPU_VISIBLE) {
+                            config.linear = None;
                         } else {
-                            None
-                        },
-                        dynamic: Some(DynamicConfig {
-                            max_block_size: min(
-                                256 * 1024,
-                                (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two(),
-                            ),
-                            block_size_granularity: min(
-                                256,
-                                (memory_properties.memory_heaps[mt.heap_index as usize] / 1024 - 1).next_power_of_two(),
-                            ),
-                            blocks_per_chunk: 256,
-                            max_chunk_size: min(
-                                32 * 1024 * 1024,
-                                (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two(),
-                            ),
-                        }),
-                    };
+                            linear.linear_size = linear.linear_size
+                                .min((memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two());
+                        }
+                    }
+                    if let Some(mut dynamic) = config.dynamic {
+                        dynamic.max_block_size = dynamic.max_block_size
+                            .min((memory_properties.memory_heaps[mt.heap_index as usize] / 32 - 1).next_power_of_two());
+                        dynamic.block_size_granularity = dynamic.block_size_granularity
+                            .min((memory_properties.memory_heaps[mt.heap_index as usize] / 1024 - 1).next_power_of_two());
+                        dynamic.max_chunk_size = dynamic.max_chunk_size
+                            .min((memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1).next_power_of_two());
+                    }
                     (mt.properties, mt.heap_index as u32, config)
                 });
 

@@ -214,6 +214,7 @@ pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource, Gpu
 pub use renderer::{GraphicsApi, GraphicsApiInfo, PipelineInfo, Renderer, RendererOptions};
 pub use renderer::{RendererStats, SceneBuilderHooks, ThreadListener};
 pub use renderer::MAX_VERTEX_TEXTURE_WIDTH;
+pub use rendy_memory::{DynamicConfig, HeapsConfig, LinearConfig};
 pub use shade::{Shaders, WrShaders};
 pub use webrender_api as api;
 pub use webrender_api::euclid;
