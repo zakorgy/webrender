@@ -218,6 +218,18 @@ pub fn main_wrapper<E: Example>(
         clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
         //scatter_gpu_cache_updates: false,
         debug_flags,
+        #[cfg(feature = "gfx-hal")]
+        heaps_config: webrender::HeapsConfig {
+            linear: Some(webrender::LinearConfig {
+                linear_size: 128 * 1024 * 1024,
+            }),
+            dynamic: Some(webrender::DynamicConfig {
+                max_block_size: 256 * 1024,
+                block_size_granularity: 256,
+                blocks_per_chunk: 256,
+                max_chunk_size: 32 * 1024 * 1024,
+            })
+        },
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
