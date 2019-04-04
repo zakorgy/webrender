@@ -2097,7 +2097,6 @@ pub struct Device<B: hal::Backend> {
     _resource_override_path: Option<PathBuf>,
 
     max_texture_size: i32,
-    max_texture_layers: u32,
     _renderer_name: String,
 
     // Frame counter. This is used to map between CPU
@@ -2459,8 +2458,6 @@ impl<B: hal::Backend> Device<B> {
             scissor_rect: None,
 
             max_texture_size,
-            //TODO: Add to the limits in gfx-rs
-            max_texture_layers: 2048,
             _renderer_name: renderer_name,
             frame_id: GpuFrameId(0),
             features,
@@ -2896,7 +2893,7 @@ impl<B: hal::Backend> Device<B> {
 
     /// Returns the limit on texture array layers.
     pub fn max_texture_layers(&self) -> usize {
-        self.max_texture_layers as usize
+        self.limits.max_image_array_layers as usize
     }
 
     pub fn get_capabilities(&self) -> &Capabilities {
