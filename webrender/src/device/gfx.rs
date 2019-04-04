@@ -39,7 +39,7 @@ use hal;
 use hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding, VertexBufferDesc};
 use hal::pso::{BlendState, BlendOp, Comparison, DepthTest, Factor};
 use hal::{Device as BackendDevice, PhysicalDevice};
-use hal::{DescriptorPool, Primitive, Swapchain, Backbuffer, FrameSync, SwapchainConfig, Surface};
+use hal::{DescriptorPool, Primitive, Swapchain, Backbuffer, SwapchainConfig, Surface};
 use hal::pass::Subpass;
 use hal::pso::PipelineStage;
 use hal::queue::Submission;
@@ -4715,7 +4715,8 @@ impl<B: hal::Backend> Device<B> {
                 Some(swap_chain) => {
                     match swap_chain.acquire_image(
                         !0,
-                        FrameSync::Semaphore(&mut self.image_available_semaphore),
+                        Some(&mut self.image_available_semaphore),
+                        None,
                     ) {
                         Ok(id) => {
                             self.current_frame_id = id as _;
