@@ -296,6 +296,11 @@ version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "copyless"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "core-foundation"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -682,14 +687,14 @@ dependencies = [
 [[package]]
 name = "gfx-backend-dx12"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb#dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3#fcc3806aba14e4c0f54adb51dd34057e192800d3"
 dependencies = [
  "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "d3d12 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "derivative 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)",
+ "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "range-alloc 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)",
+ "range-alloc 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)",
  "smallvec 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "spirv_cross 0.12.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -700,38 +705,40 @@ dependencies = [
 name = "gfx-backend-dx12"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-replace = "gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)"
+replace = "gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)"
 
 [[package]]
 name = "gfx-backend-empty"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb#dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3#fcc3806aba14e4c0f54adb51dd34057e192800d3"
 dependencies = [
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)",
+ "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)",
 ]
 
 [[package]]
 name = "gfx-backend-empty"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-replace = "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)"
+replace = "gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)"
 
 [[package]]
 name = "gfx-backend-metal"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb#dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3#fcc3806aba14e4c0f54adb51dd34057e192800d3"
 dependencies = [
+ "arrayvec 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "block 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "cocoa 0.18.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "copyless 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "core-graphics 0.17.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "foreign-types 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)",
+ "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "metal 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "objc 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.6.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "range-alloc 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)",
+ "range-alloc 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)",
  "smallvec 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "spirv_cross 0.12.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "storage-map 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -742,16 +749,16 @@ dependencies = [
 name = "gfx-backend-metal"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-replace = "gfx-backend-metal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)"
+replace = "gfx-backend-metal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)"
 
 [[package]]
 name = "gfx-backend-vulkan"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb#dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3#fcc3806aba14e4c0f54adb51dd34057e192800d3"
 dependencies = [
  "ash 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)",
+ "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)",
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -765,12 +772,12 @@ dependencies = [
 name = "gfx-backend-vulkan"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-replace = "gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)"
+replace = "gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)"
 
 [[package]]
 name = "gfx-hal"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb#dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3#fcc3806aba14e4c0f54adb51dd34057e192800d3"
 dependencies = [
  "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -782,7 +789,7 @@ dependencies = [
 name = "gfx-hal"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-replace = "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)"
+replace = "gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)"
 
 [[package]]
 name = "gif"
@@ -1597,7 +1604,7 @@ dependencies = [
 [[package]]
 name = "range-alloc"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb#dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb"
+source = "git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3#fcc3806aba14e4c0f54adb51dd34057e192800d3"
 
 [[package]]
 name = "rayon"
@@ -2496,6 +2503,7 @@ dependencies = [
 "checksum cocoa 0.18.4 (registry+https://github.com/rust-lang/crates.io-index)" = "cf79daa4e11e5def06e55306aa3601b87de6b5149671529318da048f67cdd77b"
 "checksum color_quant 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0dbbb57365263e881e805dc77d94697c9118fd94d8da011240555aa7b23445bd"
 "checksum constant_time_eq 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "8ff012e225ce166d4422e0e78419d901719760f62ae2b7969ca6b564d1b54a9e"
+"checksum copyless 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "59de7722d3b5c7b35dd519d617fe5116c9b879a0f145dc5431d78ab1f61d7c23"
 "checksum core-foundation 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)" = "4e2640d6d0bf22e82bed1b73c6aef8d5dd31e5abe6666c57e6d45e2649f4f887"
 "checksum core-foundation-sys 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "e7ca8a5221364ef15ce201e8ed2f609fc312682a8f4e0e3d4aa5879764e0fa3b"
 "checksum core-graphics 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e54c4ab33705fa1fc8af375bb7929d68e1c1546c1ecef408966d8c3e49a1d84a"
@@ -2539,15 +2547,15 @@ dependencies = [
 "checksum gdi32-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0912515a8ff24ba900422ecda800b52f4016a56251922d397c576bf92c690518"
 "checksum generic-array 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c0f28c2f5bfb5960175af447a2da7c18900693738343dc896ffbcabd9839592"
 "checksum generic-array 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ef25c5683767570c2bbd7deba372926a55eaae9982d7726ee2a1050239d45b9d"
-"checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)" = "<none>"
+"checksum gfx-backend-dx12 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)" = "<none>"
 "checksum gfx-backend-dx12 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2c373f40998da0fd605a7a90ce8d775a8cbcb06558edc2ea9740df1db2077686"
-"checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)" = "<none>"
+"checksum gfx-backend-empty 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)" = "<none>"
 "checksum gfx-backend-empty 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "6bb068297aed95a014abaa01738986c2ed5d08c5f9f152c992300c415e9b917c"
-"checksum gfx-backend-metal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)" = "<none>"
+"checksum gfx-backend-metal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)" = "<none>"
 "checksum gfx-backend-metal 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "68fa011e32280f7566bddbb736734291b685c812087c99bc848d6ac7ae3e0b7f"
-"checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)" = "<none>"
+"checksum gfx-backend-vulkan 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)" = "<none>"
 "checksum gfx-backend-vulkan 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "982c618fd9ddeea7e68b2d872b9b6cf13024fc7d4033ba90f0e54ac0d33c798f"
-"checksum gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)" = "<none>"
+"checksum gfx-hal 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)" = "<none>"
 "checksum gfx-hal 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "84c470bce77fcaaea6854858682a99026ff796b880b0ca30511593a6b2bc77c0"
 "checksum gif 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)" = "dd4bca55ac1f213920ce3527ccd62386f1f15fa3f1714aeee1cf93f2c416903f"
 "checksum gl_generator 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a0ffaf173cf76c73a73e080366bf556b4776ece104b06961766ff11449f38604"
@@ -2638,7 +2646,7 @@ dependencies = [
 "checksum rand_os 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "7b75f676a1e053fc562eafbb47838d67c84801e38fc1ba459e8f180deabd5071"
 "checksum rand_pcg 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "abf9b09b01790cfe0364f52bf32995ea3c39f4d2dd011eac241d2914146d0b44"
 "checksum rand_xorshift 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "cbf7e9e623549b0e21f6e97cf8ecf247c1a8fd2e8a992ae265314300b2455d5c"
-"checksum range-alloc 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=dea8caac9c09e907eeeb7a1d3d18fdd3e42062cb)" = "<none>"
+"checksum range-alloc 0.1.0 (git+https://github.com/gfx-rs/gfx.git?rev=fcc3806aba14e4c0f54adb51dd34057e192800d3)" = "<none>"
 "checksum rayon 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "373814f27745b2686b350dd261bfd24576a6fb0e2c5919b3a2b6005f820b0473"
 "checksum rayon-core 1.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b055d1e92aba6877574d8fe604a63c8b5df60f60e5982bf7ccbb1338ea527356"
 "checksum rdrand 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
