@@ -505,6 +505,8 @@ impl<B: hal::Backend> Program<B> {
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
         pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
+        pipeline_requirements: &FastHashMap<String, PipelineRequirements>,
+        device: &B::Device,
     ) {
         let cmd_buffer = cmd_pool.acquire_command_buffer();
         let vertex_buffer = &self.vertex_buffer[next_id];
@@ -544,7 +546,7 @@ impl<B: hal::Backend> Program<B> {
                     .chain(Some(desc_pools_sampler.get(&self.shader_kind))),
                 &[],
             );
-            desc_pools.next(&self.shader_kind);
+            desc_pools.next(&self.shader_kind, device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
                 cmd_buffer.set_blend_constants(blend_color.to_array());

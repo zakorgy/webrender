@@ -70,7 +70,7 @@ pub struct DeviceInit<B: hal::Backend> {
     pub save_cache: bool,
 }
 
-const DESCRIPTOR_COUNT: usize = 400;
+const DESCRIPTOR_COUNT: usize = 256;
 const DESCRIPTOR_SET_PER_DRAW: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
@@ -647,8 +647,8 @@ impl<B: hal::Backend> Device<B> {
 
         self.render_pass.take().unwrap().deinit(&self.device);
 
-        self.descriptor_pools_global.reset();
-        self.descriptor_pools_sampler.reset();
+        self.descriptor_pools_global.reset(&self.device);
+        self.descriptor_pools_sampler.reset(&self.device);
 
         unsafe {
             for framebuffer in self.framebuffers.drain(..) {
@@ -1293,6 +1293,8 @@ impl<B: hal::Backend> Device<B> {
                 self.scissor_rect,
                 self.next_id,
                 &self.pipeline_layouts,
+                &self.pipeline_requirements,
+                &self.device,
             );
     }
 
@@ -2970,7 +2972,7 @@ impl<B: hal::Backend> Device<B> {
             self.command_pool[self.next_id].reset();
         }
         self.staging_buffer_pool[self.next_id].reset();
-        self.descriptor_pools[self.next_id].reset();
+        self.descriptor_pools[self.next_id].reset(&self.device);
         self.reset_program_buffer_offsets();
         self.delete_retained_textures();
         return !present_error;
