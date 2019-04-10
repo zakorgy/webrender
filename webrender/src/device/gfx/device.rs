@@ -6,7 +6,7 @@ use api::{ColorF, ImageFormat, MemoryReport};
 use api::round_to_int;
 use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::TextureTarget;
-#[cfg(any(feature = "debug_renderer", feature = "capture"))]
+#[cfg(feature = "capture")]
 use api::ImageDescriptor;
 use euclid::Transform3D;
 use internal_types::{FastHashMap, RenderTargetInfo};
@@ -2294,7 +2294,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    #[cfg(feature = "capture")]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
         let mut pixels = vec![0; (img_desc.size.width * img_desc.size.height * 4) as usize];
         self.read_pixels_into(
@@ -2516,12 +2516,12 @@ impl<B: hal::Backend> Device<B> {
     }
 
     /// Attaches the provided texture to the current Read FBO binding.
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    #[cfg(feature = "capture")]
     fn attach_read_texture_raw(&mut self, texture_id: u32, _target: TextureTarget, layer_id: i32) {
         self.bind_read_texture(texture_id, layer_id);
     }
 
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    #[cfg(feature = "capture")]
     pub fn attach_read_texture_external(
         &mut self,
         _texture_id: u32,
@@ -2531,7 +2531,7 @@ impl<B: hal::Backend> Device<B> {
         unimplemented!();
     }
 
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
+    #[cfg(feature = "capture")]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
         self.attach_read_texture_raw(texture.id, texture.target.into(), layer_id)
     }
@@ -2562,7 +2562,7 @@ impl<B: hal::Backend> Device<B> {
         _vertices: &[V],
         _usage_hint: VertexUsageHint,
     ) {
-        if cfg!(feature = "debug_renderer") && self.bound_program != INVALID_PROGRAM_ID {
+        if self.bound_program != INVALID_PROGRAM_ID {
             self.update_vertices(
                 &_vertices
                     .iter()
