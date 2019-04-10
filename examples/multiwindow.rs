@@ -135,7 +135,7 @@ impl Window {
             let mut adapters = instance.enumerate_adapters();
             let adapter = adapters.remove(0);
             let mut surface = instance.create_surface(&window);
-            (window, instance, adapter, surface)
+            (window, instance, adapter, Some(surface))
         };
 
         let device_pixel_ratio = window.get_hidpi_factor() as f32;
