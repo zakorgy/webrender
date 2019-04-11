@@ -3,14 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, DeviceIntRect, ImageFormat};
-use euclid::Transform3D;
 use hal::{self, Device as BackendDevice};
 use internal_types::FastHashMap;
 use smallvec::SmallVec;
 use rendy_memory::Heaps;
 use std::borrow::Cow::{Borrowed};
 
-use super::buffer::{InstanceBufferHandler, UniformBufferHandler, VertexBufferHandler};
+use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
 use super::descriptor::DescriptorPools;
 use super::image::ImageCore;
@@ -24,6 +23,8 @@ use std::mem;
 
 const ENTRY_NAME: &str = "main";
 const MAX_INDEX_COUNT: usize = 4096;
+// The size of the push constant block is 68 bytes, and we upload it with u32 data (4 bytes).
+pub(super) const PUSH_CONSTANT_BLOCK_SIZE: usize = 17; // 68 / 4
 // The number of specialization constants in each shader.
 const SPECIALIZATION_CONSTANT_COUNT: usize = 5;
 // Size of a specialization constant variable in bytes.
@@ -56,21 +57,6 @@ const QUAD: [vertex_types::Vertex; 6] = [
     },
 ];
 
-impl ShaderKind {
-    pub(super) fn is_debug(&self) -> bool {
-        match *self {
-            ShaderKind::DebugFont | ShaderKind::DebugColor => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct Locals {
-    uTransform: [[f32; 4]; 4],
-    uMode: i32,
-}
 
 pub(crate) struct Program<B: hal::Backend> {
     bindings_map: FastHashMap<String, u32>,
@@ -78,10 +64,10 @@ pub(crate) struct Program<B: hal::Backend> {
     pub(super) vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
-    pub(super) locals_buffer: SmallVec<[UniformBufferHandler<B>; 1]>,
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
     pub(super) bound_textures: [u32; 16],
+    pub(super) constants: [u32; PUSH_CONSTANT_BLOCK_SIZE],
 }
 
 impl<B: hal::Backend> Program<B> {
@@ -353,7 +339,6 @@ impl<B: hal::Backend> Program<B> {
 
         let mut vertex_buffer = SmallVec::new();
         let mut instance_buffer = SmallVec::new();
-        let mut locals_buffer = SmallVec::new();
         let mut index_buffer = if shader_kind.is_debug() {
             Some(SmallVec::new())
         } else {
@@ -376,12 +361,6 @@ impl<B: hal::Backend> Program<B> {
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             ));
-            locals_buffer.push(UniformBufferHandler::new(
-                hal::buffer::Usage::UNIFORM,
-                mem::size_of::<Locals>(),
-                (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-                (limits.non_coherent_atom_size - 1) as usize,
-            ));
             if let Some(ref mut index_buffer) = index_buffer {
                 index_buffer.push(VertexBufferHandler::new(
                     device,
@@ -403,10 +382,10 @@ impl<B: hal::Backend> Program<B> {
             vertex_buffer,
             index_buffer,
             instance_buffer,
-            locals_buffer,
             shader_name: String::from(shader_name),
             shader_kind,
             bound_textures: [0; 16],
+            constants: [0; PUSH_CONSTANT_BLOCK_SIZE],
         }
     }
 
@@ -419,33 +398,6 @@ impl<B: hal::Backend> Program<B> {
     ) {
         assert!(!instances.is_empty());
         self.instance_buffer[buffer_id].add(device, instances, heaps);
-    }
-
-    pub(super) fn bind_locals(
-        &mut self,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        set: &B::DescriptorSet,
-        projection: &Transform3D<f32>,
-        u_mode: i32,
-        buffer_id: usize,
-    ) {
-        let locals_data = Locals {
-            uTransform: projection.to_row_arrays(),
-            uMode: u_mode,
-        };
-        self.locals_buffer[buffer_id].add(device, &[locals_data], heaps);
-        unsafe {
-            device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                set,
-                binding: self.bindings_map["Locals"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Buffer(
-                    &self.locals_buffer[buffer_id].buffer().buffer,
-                    Some(0) .. None,
-                )),
-            }));
-        }
     }
 
     pub(super) fn bind_texture(
@@ -505,28 +457,36 @@ impl<B: hal::Backend> Program<B> {
     }
 
     pub(super) fn submit(
-        &self,
+        &mut self,
         cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
-        desc_pools: &mut DescriptorPools<B>,
-        desc_pools_global: &mut DescriptorPools<B>,
+        desc_pools_per_frame: &mut DescriptorPools<B>,
         desc_pools_sampler: &mut DescriptorPools<B>,
+        desc_set_per_draw: &B::DescriptorSet,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
         blend_color: ColorF,
         depth_test: hal::pso::DepthTest,
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
+        program_mode_id: u32,
         pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
         pipeline_requirements: &FastHashMap<String, PipelineRequirements>,
         device: &B::Device,
     ) {
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
-
+        let ref pipeline_layout = pipeline_layouts[&self.shader_kind];
+        *self.constants.last_mut().unwrap() = program_mode_id;
         unsafe {
+            cmd_buffer.push_graphics_constants(
+                pipeline_layout,
+                hal::pso::ShaderStageFlags::VERTEX,
+                0,
+                &self.constants,
+            );
             cmd_buffer.set_viewports(0, &[viewport.clone()]);
             match scissor_rect {
                 Some(r) => cmd_buffer.set_scissors(
@@ -550,18 +510,17 @@ impl<B: hal::Backend> Program<B> {
                     )),
             );
 
+            use std::iter;
             cmd_buffer.bind_graphics_descriptor_sets(
-                &pipeline_layouts[&self.shader_kind],
+                pipeline_layout,
                 0,
-                Some(desc_pools.get(&self.shader_kind))
-                    .into_iter()
-                    .chain(Some(desc_pools_global.get(&self.shader_kind)))
-                    .chain(Some(desc_pools_sampler.get(&self.shader_kind))),
+                iter::once(desc_pools_per_frame.get_set_by_group(self.shader_kind.into()).0)
+                    .chain(iter::once(desc_pools_sampler.get_set_by_group(self.shader_kind.into()).0))
+                    .chain(iter::once(desc_set_per_draw)),
                 &[],
             );
-            desc_pools.next(&self.shader_kind, device, pipeline_requirements);
-            desc_pools_global.next(&self.shader_kind, device, pipeline_requirements);
-            desc_pools_sampler.next(&self.shader_kind, device, pipeline_requirements);
+            desc_pools_per_frame.next(self.shader_kind.into(), device, pipeline_requirements);
+            desc_pools_sampler.next(self.shader_kind.into(), device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
                 cmd_buffer.set_blend_constants(blend_color.to_array());
@@ -628,9 +587,6 @@ impl<B: hal::Backend> Program<B> {
         }
         for mut instance_buffer in self.instance_buffer {
             instance_buffer.deinit(device, heaps);
-        }
-        for mut locals_buffer in self.locals_buffer {
-            locals_buffer.deinit(device, heaps);
         }
         for pipeline in self.pipelines.drain() {
             unsafe { device.destroy_graphics_pipeline(pipeline.1) };

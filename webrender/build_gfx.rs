@@ -28,9 +28,9 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
-const DESCRIPTOR_SET_PER_DRAW: usize = 0;
-const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
-const DESCRIPTOR_SET_SAMPLER: usize = 2;
+const DESCRIPTOR_SET_PER_FRAME: usize = 0;
+const DESCRIPTOR_SET_SAMPLER: usize = 1;
+const DESCRIPTOR_SET_PER_DRAW: usize = 2;
 const DESCRIPTOR_SET_COUNT: usize = 3;
 
 const DRAW_UNIFORM_COUNT: usize = 6;
@@ -70,7 +70,7 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
     fn parse_shader_source(source: &str, shaders: &HashMap<String, String>, output: &mut String) {
         for line in source.lines() {
             if line.starts_with(SHADER_IMPORT) {
-                let mut imports = line[SHADER_IMPORT.len() ..].split(",");
+                let imports = line[SHADER_IMPORT.len() ..].split(",");
                 // For each import, get the source, and recurse.
                 for mut import in imports {
                     if import == "base" {
@@ -148,7 +148,7 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
 
             features.push_str(VK_EXTENSIONS);
 
-            let (mut vs_source, mut fs_source) =
+            let (vs_source, fs_source) =
                 build_shader_strings(&shader.source_name, &features, shaders);
 
             let mut filename = shader.name.clone();
@@ -177,7 +177,6 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
 fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineRequirements> {
     let mut new_data = String::new();
     let mut binding = [0; DESCRIPTOR_SET_COUNT];
-    binding[0] = 1; // set=0, binding=0 is reserved for Locals
     let mut bindings_map: HashMap<String, u32> = HashMap::new();
     let mut descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>> = vec![Vec::new(); DESCRIPTOR_SET_COUNT];
     let mut in_location = 0;
@@ -200,7 +199,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let file = File::open(file_path).unwrap();
     let reader = BufReader::new(file);
     for line in reader.lines() {
-        let mut l = line.unwrap();
+        let l = line.unwrap();
         let trimmed = l.trim_start();
 
         if trimmed.contains("#define WR_FEATURE_TEXTURE_2D") {
@@ -235,9 +234,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
-                if write_ron {
-                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW], &mut bindings_map);
-                }
             }
 
         // Adding location info for non-uniform variables.
@@ -273,8 +269,12 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 }
                 new_data.push_str(&line);
                 new_data.push('\n');
-            } else {
-            new_data.push_str(&l);
+        } else {
+            new_data.push_str(
+                &l
+                    .replace("uTransform", "pushConstants.uTransform")
+                    .replace("uMode", "pushConstants.uMode")
+            );
             new_data.push('\n');
         }
     }
@@ -286,9 +286,9 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             attribute_descriptors,
             bindings_map,
             descriptor_range_descriptors: vec![
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage,true),
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_INSTANCE].len(), DescriptorType::SampledImage, false),
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler, false),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_FRAME].len(), DescriptorType::SampledImage),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage),
             ],
             descriptor_set_layout_bindings,
             vertex_buffer_descriptors,
@@ -398,12 +398,12 @@ fn replace_sampler_definition_with_texture_and_sampler(
 
 fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
-        "\tlayout(set = 0, binding = 0) uniform Locals {\n\
-         \t\tuniform mat4 uTransform;       // Orthographic projection\n\
+        "\tlayout(push_constant) uniform PushConsts {\n\
+         \t\tmat4 uTransform;       // Orthographic projection\n\
          \t\t// A generic uniform that shaders can optionally use to configure\n\
          \t\t// an operation mode for this batch.\n\
-         \t\tuniform int uMode;\n\
-         \t};\n",
+         \t\tint uMode;\n\
+         \t} pushConstants;\n",
     );
 }
 
@@ -420,25 +420,9 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
         "sGpuCache" |
         "sTransformPalette" |
         "sPrimitiveHeadersF" |
-        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_INSTANCE,
+        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_FRAME,
         x => unreachable!("Sampler not found: {:?}", x),
     }
-}
-
-fn add_locals_to_descriptor_set_layout(
-    descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
-    bindings_map: &mut HashMap<String, u32>,
-) {
-    descriptor_set_layouts.push(
-        DescriptorSetLayoutBinding {
-            binding: 0,
-            ty: DescriptorType::UniformBuffer,
-            count: 1,
-            stage_flags: ShaderStageFlags::VERTEX,
-            immutable_samplers: false,
-        }
-    );
-    bindings_map.insert("Locals".to_owned(), 0);
 }
 
 fn extend_non_uniform_variables_with_location_info(
@@ -538,24 +522,12 @@ fn add_attribute_descriptors(
     };
 }
 
-fn create_descriptor_range_descriptors(count: usize, ty: DescriptorType, add_uniform_buffer: bool) -> Vec<DescriptorRangeDesc> {
-    let mut range = vec![
+fn create_descriptor_range_descriptors(count: usize, ty: DescriptorType) -> Vec<DescriptorRangeDesc> {
+    vec![
         DescriptorRangeDesc {
             ty,
             count,
-        },
-    ];
-
-    if add_uniform_buffer {
-        range[0].count -= 1;
-        range.push(
-            DescriptorRangeDesc {
-                ty: DescriptorType::UniformBuffer,
-                count: 1,
-            }
-        );
-    }
-    range
+        }]
 }
 
 fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {

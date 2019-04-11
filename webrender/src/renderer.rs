@@ -3057,11 +3057,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.device.set_scissor_rect(scissor_rect);
                             }
 
-                            #[cfg(not(feature = "gleam"))]
-                            let program = self.device.bound_program();
-                            #[cfg(not(feature = "gleam"))]
-                            self.device.set_uniforms(&program, projection);
-
                             self.draw_instanced_batch(
                                 &batch.instances,
                                 VertexArrayKind::Primitive,
@@ -3154,11 +3149,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.device.set_scissor_rect(scissor_rect);
                             }
 
-                            #[cfg(not(feature = "gleam"))]
-                            let program = self.device.bound_program();
-                            #[cfg(not(feature = "gleam"))]
-                            self.device.set_uniforms(&program, projection);
-
                             self.draw_instanced_batch(
                                 &batch.instances,
                                 VertexArrayKind::Primitive,
@@ -3170,10 +3160,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.set_blend_mode_subpixel_with_bg_color_pass1(framebuffer_kind);
                                 self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
 
-                                #[cfg(not(feature = "gleam"))]
-                                let program = self.device.bound_program();
-                                #[cfg(not(feature = "gleam"))]
-                                self.device.set_uniforms(&program, projection);
                                 #[cfg(not(feature = "gleam"))]
                                 self.device.bind_textures();
 
@@ -3189,8 +3175,6 @@ impl<B: hal::Backend> Renderer<B> {
 
                                 // In case of gfx we can't avoid re-uploading and re-binding,
                                 // since we have a new pipeline for the new draw.
-                                #[cfg(not(feature = "gleam"))]
-                                self.device.set_uniforms(&program, projection);
                                 #[cfg(not(feature = "gleam"))]
                                 self.device.bind_textures();
 
