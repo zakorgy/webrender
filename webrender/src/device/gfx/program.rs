@@ -496,6 +496,7 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         desc_pools: &mut DescriptorPools<B>,
+        desc_pools_locals: &mut DescriptorPools<B>,
         desc_pools_global: &DescriptorPools<B>,
         desc_pools_sampler: &DescriptorPools<B>,
         clear_values: &[hal::command::ClearValue],
@@ -540,12 +541,14 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_descriptor_sets(
                 &pipeline_layouts[&self.shader_kind],
                 0,
-                Some(desc_pools.get(&self.shader_kind))
+                Some(desc_pools_locals.get(&self.shader_kind))
                     .into_iter()
                     .chain(Some(desc_pools_global.get(&self.shader_kind)))
-                    .chain(Some(desc_pools_sampler.get(&self.shader_kind))),
+                    .chain(Some(desc_pools_sampler.get(&self.shader_kind)))
+                    .chain(Some(desc_pools.get(&self.shader_kind))),
                 &[],
             );
+            desc_pools_locals.next(&self.shader_kind, device, pipeline_requirements);
             desc_pools.next(&self.shader_kind, device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {

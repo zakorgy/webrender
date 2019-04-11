@@ -28,10 +28,11 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
-const DESCRIPTOR_SET_PER_DRAW: usize = 0;
+const DESCRIPTOR_SET_LOCALS: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
-const DESCRIPTOR_SET_COUNT: usize = 3;
+const DESCRIPTOR_SET_PER_DRAW: usize = 3;
+const DESCRIPTOR_SET_COUNT: usize = 4;
 
 const DRAW_UNIFORM_COUNT: usize = 6;
 
@@ -236,7 +237,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
                 if write_ron {
-                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW], &mut bindings_map);
+                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS], &mut bindings_map);
                 }
             }
 
@@ -286,9 +287,10 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             attribute_descriptors,
             bindings_map,
             descriptor_range_descriptors: vec![
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage,true),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS].len(), DescriptorType::SampledImage, true),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_INSTANCE].len(), DescriptorType::SampledImage, false),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler, false),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage,false),
             ],
             descriptor_set_layout_bindings,
             vertex_buffer_descriptors,
@@ -539,23 +541,19 @@ fn add_attribute_descriptors(
 }
 
 fn create_descriptor_range_descriptors(count: usize, ty: DescriptorType, add_uniform_buffer: bool) -> Vec<DescriptorRangeDesc> {
-    let mut range = vec![
-        DescriptorRangeDesc {
-            ty,
-            count,
-        },
-    ];
-
     if add_uniform_buffer {
-        range[0].count -= 1;
-        range.push(
+        vec![
             DescriptorRangeDesc {
                 ty: DescriptorType::UniformBuffer,
                 count: 1,
-            }
-        );
+            }]
+    } else {
+        vec![
+            DescriptorRangeDesc {
+                ty,
+                count,
+            }]
     }
-    range
 }
 
 fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {

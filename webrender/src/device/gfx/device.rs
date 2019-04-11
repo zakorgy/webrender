@@ -71,9 +71,10 @@ pub struct DeviceInit<B: hal::Backend> {
 }
 
 const DESCRIPTOR_COUNT: usize = 256;
-const DESCRIPTOR_SET_PER_DRAW: usize = 0;
+const DESCRIPTOR_SET_LOCALS: usize = 0;
 const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
+const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
     &["TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"];
@@ -154,6 +155,7 @@ pub struct Device<B: hal::Backend> {
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
+    descriptor_pools_locals: SmallVec<[DescriptorPools<B>; 1]>,
     descriptor_pools_global: DescriptorPools<B>,
     descriptor_pools_sampler: DescriptorPools<B>,
     // device state
@@ -392,6 +394,7 @@ impl<B: hal::Backend> Device<B> {
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
         let mut descriptor_pools = SmallVec::new();
+        let mut descriptor_pools_locals = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
@@ -401,6 +404,13 @@ impl<B: hal::Backend> Device<B> {
                 descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
                 &pipeline_requirements,
                 DESCRIPTOR_SET_PER_DRAW,
+            ));
+
+            descriptor_pools_locals.push(DescriptorPools::new(
+                &device,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                &pipeline_requirements,
+                DESCRIPTOR_SET_LOCALS,
             ));
 
             let fence = device.create_fence(false).expect("create_fence failed");
@@ -493,6 +503,7 @@ impl<B: hal::Backend> Device<B> {
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
             descriptor_pools,
+            descriptor_pools_locals,
             descriptor_pools_global,
             descriptor_pools_sampler,
             bound_textures: [0; 16],
@@ -569,6 +580,14 @@ impl<B: hal::Backend> Device<B> {
         }
 
         self.render_pass.take().unwrap().deinit(&self.device);
+
+        for pools in self.descriptor_pools.iter_mut() {
+            pools.reset(&self.device)
+        }
+
+        for pools in self.descriptor_pools_locals.iter_mut() {
+            pools.reset(&self.device)
+        }
 
         self.descriptor_pools_global.reset(&self.device);
         self.descriptor_pools_sampler.reset(&self.device);
@@ -1189,10 +1208,11 @@ impl<B: hal::Backend> Device<B> {
         if !self.pipeline_layouts.contains_key(shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
-                    Some(self.descriptor_pools[self.next_id].get_layout(shader_kind))
+                    Some(self.descriptor_pools_locals[self.next_id].get_layout(shader_kind))
                         .into_iter()
                         .chain(Some(self.descriptor_pools_global.get_layout(shader_kind)))
-                        .chain(Some(self.descriptor_pools_sampler.get_layout(shader_kind))),
+                        .chain(Some(self.descriptor_pools_sampler.get_layout(shader_kind)))
+                        .chain(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind))),
                     &[],
                 )
             }
@@ -1242,6 +1262,25 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub fn set_uniforms(&mut self, program: &ProgramId, transform: &Transform3D<f32>) {
+        debug_assert!(self.inside_frame);
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        assert_eq!(*program, self.bound_program);
+        let program = self
+            .programs
+            .get_mut(&self.bound_program)
+            .expect("Program not found.");
+        let desc_set = &self.descriptor_pools_locals[self.next_id].get(&program.shader_kind);
+        program.bind_locals(
+            &self.device,
+            &mut self.heaps,
+            desc_set,
+            transform,
+            self.program_mode_id,
+            self.next_id,
+        );
+    }
+
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
@@ -1257,6 +1296,7 @@ impl<B: hal::Backend> Device<B> {
                 &self.images[&self.bound_textures[index]].core,
                 sampler_name,
             );
+            program.bound_textures[index] = self.bound_textures[index];
         }
         let desc_set = self.descriptor_pools_global.get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS[5 .. 11].iter() {
@@ -1313,25 +1353,6 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn set_uniforms(&mut self, program: &ProgramId, transform: &Transform3D<f32>) {
-        debug_assert!(self.inside_frame);
-        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        assert_eq!(*program, self.bound_program);
-        let program = self
-            .programs
-            .get_mut(&self.bound_program)
-            .expect("Program not found.");
-        let desc_set = &self.descriptor_pools[self.next_id].get(&program.shader_kind);
-        program.bind_locals(
-            &self.device,
-            &mut self.heaps,
-            desc_set,
-            transform,
-            self.program_mode_id,
-            self.next_id,
-        );
-    }
-
     fn update_instances<T: Copy>(&mut self, instances: &[T]) {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         self.programs
@@ -1374,6 +1395,7 @@ impl<B: hal::Backend> Device<B> {
                 rp,
                 &fb,
                 &mut self.descriptor_pools[self.next_id],
+                &mut self.descriptor_pools_locals[self.next_id],
                 &self.descriptor_pools_global,
                 &self.descriptor_pools_sampler,
                 &vec![],
@@ -3063,6 +3085,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset(&self.device);
+        self.descriptor_pools_locals[self.next_id].reset(&self.device);
         self.reset_program_buffer_offsets();
         self.delete_retained_textures();
         return !present_error;
@@ -3174,6 +3197,9 @@ impl<B: hal::Backend> Device<B> {
             self.device.destroy_sampler(self.sampler_linear);
             self.device.destroy_sampler(self.sampler_nearest);
             for descriptor_pool in self.descriptor_pools {
+                descriptor_pool.deinit(&self.device);
+            }
+            for descriptor_pool in self.descriptor_pools_locals {
                 descriptor_pool.deinit(&self.device);
             }
             self.descriptor_pools_global.deinit(&self.device);
