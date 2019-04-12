@@ -3,13 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{ColorF, DeviceIntRect, ImageFormat};
-use euclid::Transform3D;
 use hal::{self, Device as BackendDevice};
 use internal_types::FastHashMap;
 use smallvec::SmallVec;
 use rendy_memory::Heaps;
 
-use super::buffer::{InstanceBufferHandler, UniformBufferHandler, VertexBufferHandler};
+use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
 use super::command::CommandPool;
 use super::descriptor::DescriptorPools;
@@ -65,20 +64,12 @@ impl ShaderKind {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct Locals {
-    uTransform: [[f32; 4]; 4],
-    uMode: i32,
-}
-
 pub(crate) struct Program<B: hal::Backend> {
     bindings_map: FastHashMap<String, u32>,
     pipelines: FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>,
     pub(super) vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
-    pub(super) locals_buffer: SmallVec<[UniformBufferHandler<B>; 1]>,
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
     pub(super) bound_textures: [u32; 16],
@@ -353,7 +344,6 @@ impl<B: hal::Backend> Program<B> {
 
         let mut vertex_buffer = SmallVec::new();
         let mut instance_buffer = SmallVec::new();
-        let mut locals_buffer = SmallVec::new();
         let mut index_buffer = if shader_kind.is_debug() {
             Some(SmallVec::new())
         } else {
@@ -376,12 +366,6 @@ impl<B: hal::Backend> Program<B> {
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             ));
-            locals_buffer.push(UniformBufferHandler::new(
-                hal::buffer::Usage::UNIFORM,
-                mem::size_of::<Locals>(),
-                (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-                (limits.non_coherent_atom_size - 1) as usize,
-            ));
             if let Some(ref mut index_buffer) = index_buffer {
                 index_buffer.push(VertexBufferHandler::new(
                     device,
@@ -403,7 +387,6 @@ impl<B: hal::Backend> Program<B> {
             vertex_buffer,
             index_buffer,
             instance_buffer,
-            locals_buffer,
             shader_name: String::from(shader_name),
             shader_kind,
             bound_textures: [0; 16],
@@ -419,33 +402,6 @@ impl<B: hal::Backend> Program<B> {
     ) {
         assert!(!instances.is_empty());
         self.instance_buffer[buffer_id].add(device, instances, heaps);
-    }
-
-    pub(super) fn bind_locals(
-        &mut self,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        set: &B::DescriptorSet,
-        projection: &Transform3D<f32>,
-        u_mode: i32,
-        buffer_id: usize,
-    ) {
-        let locals_data = Locals {
-            uTransform: projection.to_row_arrays(),
-            uMode: u_mode,
-        };
-        self.locals_buffer[buffer_id].add(device, &[locals_data], heaps);
-        unsafe {
-            device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                set,
-                binding: self.bindings_map["Locals"],
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Buffer(
-                    &self.locals_buffer[buffer_id].buffer().buffer,
-                    Some(0) .. None,
-                )),
-            }));
-        }
     }
 
     pub(super) fn bind_texture(
@@ -496,9 +452,9 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         desc_pools: &mut DescriptorPools<B>,
-        desc_pools_locals: &mut DescriptorPools<B>,
         desc_pools_global: &DescriptorPools<B>,
         desc_pools_sampler: &DescriptorPools<B>,
+        desc_set_locals: &B::DescriptorSet,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
         blend_color: ColorF,
@@ -541,14 +497,13 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_descriptor_sets(
                 &pipeline_layouts[&self.shader_kind],
                 0,
-                Some(desc_pools_locals.get(&self.shader_kind))
+                Some(desc_set_locals)
                     .into_iter()
                     .chain(Some(desc_pools_global.get(&self.shader_kind)))
                     .chain(Some(desc_pools_sampler.get(&self.shader_kind)))
                     .chain(Some(desc_pools.get(&self.shader_kind))),
                 &[],
             );
-            desc_pools_locals.next(&self.shader_kind, device, pipeline_requirements);
             desc_pools.next(&self.shader_kind, device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
@@ -618,9 +573,6 @@ impl<B: hal::Backend> Program<B> {
         }
         for mut instance_buffer in self.instance_buffer {
             instance_buffer.deinit(device, heaps);
-        }
-        for mut locals_buffer in self.locals_buffer {
-            locals_buffer.deinit(device, heaps);
         }
         for pipeline in self.pipelines.drain() {
             unsafe { device.destroy_graphics_pipeline(pipeline.1) };

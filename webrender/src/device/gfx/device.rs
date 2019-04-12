@@ -116,6 +116,13 @@ pub struct ProgramId(u32);
 pub struct PBO;
 pub struct VAO;
 
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub struct Locals {
+    uTransform: [[f32; 4]; 4],
+    uMode: i32,
+}
+
 struct Fence<B: hal::Backend> {
     inner: B::Fence,
     is_submitted: bool,
@@ -155,7 +162,10 @@ pub struct Device<B: hal::Backend> {
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
-    descriptor_pools_locals: SmallVec<[DescriptorPools<B>; 1]>,
+    desc_pool_locals: DescPool<B>,
+    locals: FastHashMap<(i32, [u32; 16]), usize>,
+    locals_idx: usize,
+    locals_buffer: UniformBufferHandler<B>,
     descriptor_pools_global: DescriptorPools<B>,
     descriptor_pools_sampler: DescriptorPools<B>,
     // device state
@@ -394,7 +404,6 @@ impl<B: hal::Backend> Device<B> {
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
         let mut descriptor_pools = SmallVec::new();
-        let mut descriptor_pools_locals = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
@@ -404,13 +413,6 @@ impl<B: hal::Backend> Device<B> {
                 descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
                 &pipeline_requirements,
                 DESCRIPTOR_SET_PER_DRAW,
-            ));
-
-            descriptor_pools_locals.push(DescriptorPools::new(
-                &device,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                &pipeline_requirements,
-                DESCRIPTOR_SET_LOCALS,
             ));
 
             let fence = device.create_fence(false).expect("create_fence failed");
@@ -447,6 +449,28 @@ impl<B: hal::Backend> Device<B> {
         );
         let descriptor_pools_sampler =
             DescriptorPools::new(&device, 1, &pipeline_requirements, DESCRIPTOR_SET_SAMPLER);
+
+        let desc_pool_locals = {
+            let (layout, range) = get_layout_and_range(
+                &pipeline_requirements,
+                "brush_solid",
+                DESCRIPTOR_SET_LOCALS,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT)
+            );
+            DescPool::new(
+                &device,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                range,
+                layout,
+            )
+        };
+
+        let locals_buffer = UniformBufferHandler::new(
+            hal::buffer::Usage::UNIFORM,
+            mem::size_of::<Locals>(),
+            (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+            (limits.non_coherent_atom_size - 1) as usize,
+        );
 
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
@@ -503,7 +527,12 @@ impl<B: hal::Backend> Device<B> {
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
             descriptor_pools,
-            descriptor_pools_locals,
+
+            desc_pool_locals,
+            locals: FastHashMap::default(),
+            locals_idx: 0,
+            locals_buffer,
+
             descriptor_pools_global,
             descriptor_pools_sampler,
             bound_textures: [0; 16],
@@ -585,9 +614,10 @@ impl<B: hal::Backend> Device<B> {
             pools.reset(&self.device)
         }
 
-        for pools in self.descriptor_pools_locals.iter_mut() {
-            pools.reset(&self.device)
-        }
+        self.desc_pool_locals.reset();
+        self.locals_buffer.reset();
+        self.locals_idx = 0;
+        self.locals.clear();
 
         self.descriptor_pools_global.reset(&self.device);
         self.descriptor_pools_sampler.reset(&self.device);
@@ -1156,7 +1186,6 @@ impl<B: hal::Backend> Device<B> {
     fn reset_program_buffer_offsets(&mut self) {
         for program in self.programs.values_mut() {
             program.instance_buffer[self.next_id].reset();
-            program.locals_buffer[self.next_id].reset();
             if let Some(ref mut index_buffer) = program.index_buffer {
                 index_buffer[self.next_id].reset();
                 program.vertex_buffer[self.next_id].reset();
@@ -1208,7 +1237,7 @@ impl<B: hal::Backend> Device<B> {
         if !self.pipeline_layouts.contains_key(shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
-                    Some(self.descriptor_pools_locals[self.next_id].get_layout(shader_kind))
+                    Some(self.desc_pool_locals.descriptor_set_layout())
                         .into_iter()
                         .chain(Some(self.descriptor_pools_global.get_layout(shader_kind)))
                         .chain(Some(self.descriptor_pools_sampler.get_layout(shader_kind)))
@@ -1262,23 +1291,41 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn set_uniforms(&mut self, program: &ProgramId, transform: &Transform3D<f32>) {
+    pub fn set_uniforms(&mut self, program: &ProgramId, projection: &Transform3D<f32>) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         assert_eq!(*program, self.bound_program);
-        let program = self
-            .programs
-            .get_mut(&self.bound_program)
-            .expect("Program not found.");
-        let desc_set = &self.descriptor_pools_locals[self.next_id].get(&program.shader_kind);
-        program.bind_locals(
-            &self.device,
-            &mut self.heaps,
-            desc_set,
-            transform,
-            self.program_mode_id,
-            self.next_id,
-        );
+
+        let transmuted = unsafe {
+            std::mem::transmute::<[[f32; 4]; 4], [u32; 16]>(projection.to_row_arrays())
+        };
+        let locals_idx = if self.locals.contains_key(&(self.program_mode_id, transmuted)) {
+            *self.locals.get(&(self.program_mode_id, transmuted)).unwrap()
+        } else {
+            assert!(self.desc_pool_locals.next());
+
+            let locals_data = Locals {
+                uTransform: projection.to_row_arrays(),
+                uMode: self.program_mode_id,
+            };
+            let descriptor_set = self.desc_pool_locals.descriptor_set();
+            self.locals_buffer.add(&self.device, &[locals_data], &mut self.heaps);
+            unsafe {
+                self.device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
+                    set: descriptor_set,
+                    binding: DESCRIPTOR_SET_LOCALS as _,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Buffer(
+                        &self.locals_buffer.buffer().buffer,
+                        Some(0) .. None,
+                    )),
+                }));
+            }
+            let idx = self.desc_pool_locals.current_descriptor_set_idx;
+            self.locals.insert((self.program_mode_id, transmuted), idx);
+            idx
+        };
+        self.locals_idx = locals_idx;
     }
 
     pub fn bind_textures(&mut self) {
@@ -1395,9 +1442,9 @@ impl<B: hal::Backend> Device<B> {
                 rp,
                 &fb,
                 &mut self.descriptor_pools[self.next_id],
-                &mut self.descriptor_pools_locals[self.next_id],
                 &self.descriptor_pools_global,
                 &self.descriptor_pools_sampler,
+                &self.desc_pool_locals.descriptor_set_at_idx(self.locals_idx),
                 &vec![],
                 self.current_blend_state.get(),
                 self.blend_color.get(),
@@ -3085,7 +3132,6 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset(&self.device);
-        self.descriptor_pools_locals[self.next_id].reset(&self.device);
         self.reset_program_buffer_offsets();
         self.delete_retained_textures();
         return !present_error;
@@ -3199,9 +3245,8 @@ impl<B: hal::Backend> Device<B> {
             for descriptor_pool in self.descriptor_pools {
                 descriptor_pool.deinit(&self.device);
             }
-            for descriptor_pool in self.descriptor_pools_locals {
-                descriptor_pool.deinit(&self.device);
-            }
+            self.desc_pool_locals.deinit(&self.device);
+            self.locals_buffer.deinit(&self.device, &mut self.heaps);
             self.descriptor_pools_global.deinit(&self.device);
             self.descriptor_pools_sampler.deinit(&self.device);
             for (_, program) in self.programs {
