@@ -169,11 +169,33 @@ impl<B: hal::Backend> DescriptorPools<B> {
         }
     }
 
-    fn get_pool(&self, shader_kind: &ShaderKind) -> &DescPool<B> {
+    pub(super) fn get_pool(&self, shader_kind: &ShaderKind) -> &DescPool<B> {
         match *shader_kind {
             ShaderKind::DebugColor | ShaderKind::DebugFont => &self.debug_pool,
             ShaderKind::ClipCache => &self.cache_clip_pool[self.cache_clip_pool_idx],
             _ => &self.default_pool[self.default_pool_idx],
+        }
+    }
+
+    pub(super) fn get_pool_idx(&self, shader_kind: &ShaderKind) -> usize {
+        match *shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => 0,
+            ShaderKind::ClipCache => self.cache_clip_pool_idx,
+            _ => self.default_pool_idx,
+        }
+    }
+
+    pub(super) fn pool_at_idx(&self, shader_kind: &ShaderKind, idx: usize) -> &DescPool<B> {
+        match *shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => &self.debug_pool,
+            ShaderKind::ClipCache => {
+                assert!(idx <= self.cache_clip_pool_idx);
+                &self.cache_clip_pool[idx]
+            },
+            _ => {
+                assert!(idx <= self.default_pool_idx);
+                &self.default_pool[idx]
+            },
         }
     }
 

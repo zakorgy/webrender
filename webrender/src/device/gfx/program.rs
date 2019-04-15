@@ -55,15 +55,6 @@ const QUAD: [vertex_types::Vertex; 6] = [
     },
 ];
 
-impl ShaderKind {
-    pub(super) fn is_debug(&self) -> bool {
-        match *self {
-            ShaderKind::DebugFont | ShaderKind::DebugColor => true,
-            _ => false,
-        }
-    }
-}
-
 pub(crate) struct Program<B: hal::Backend> {
     bindings_map: FastHashMap<String, u32>,
     pipelines: FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>,
@@ -451,9 +442,10 @@ impl<B: hal::Backend> Program<B> {
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
-        desc_pools: &mut DescriptorPools<B>,
+        //desc_pools: &mut DescriptorPools<B>,
         desc_pools_global: &DescriptorPools<B>,
         desc_pools_sampler: &DescriptorPools<B>,
+        desc_set_per_draw: &B::DescriptorSet,
         desc_set_locals: &B::DescriptorSet,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
@@ -497,14 +489,15 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_descriptor_sets(
                 &pipeline_layouts[&self.shader_kind],
                 0,
-                Some(desc_set_locals)
+                Some(desc_set_per_draw)
                     .into_iter()
                     .chain(Some(desc_pools_global.get(&self.shader_kind)))
                     .chain(Some(desc_pools_sampler.get(&self.shader_kind)))
-                    .chain(Some(desc_pools.get(&self.shader_kind))),
+                    //.chain(Some(desc_pools.get(&self.shader_kind))),
+                    .chain(Some(desc_set_locals)),
                 &[],
             );
-            desc_pools.next(&self.shader_kind, device, pipeline_requirements);
+            //desc_pools.next(&self.shader_kind, device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
                 cmd_buffer.set_blend_constants(blend_color.to_array());
