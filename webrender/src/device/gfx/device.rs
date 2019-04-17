@@ -18,7 +18,6 @@ use std::cell::Cell;
 use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::fs::{File, OpenOptions};
-use std::hash::{Hash, Hasher};
 use std::io::prelude::*;
 use std::mem;
 use std::path::PathBuf;
@@ -154,11 +153,10 @@ enum DescriptorGroup {
     ClipCache,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 struct DescriptorSetKey {
     descriptor_group: DescriptorGroup,
     bound_textures: [TextureId; 5],
-    last_frame_used: Cell<GpuFrameId>,
 }
 
 impl Default for DescriptorSetKey {
@@ -166,42 +164,20 @@ impl Default for DescriptorSetKey {
         DescriptorSetKey {
             descriptor_group: DescriptorGroup::Default,
             bound_textures: [INVALID_TEXTURE_ID; 5],
-            last_frame_used: Cell::new(GpuFrameId(0)),
         }
     }
 }
 
-impl PartialEq for DescriptorSetKey {
-    fn eq(&self, other: &DescriptorSetKey) -> bool {
-        self.descriptor_group == other.descriptor_group &&
-        self.bound_textures == other.bound_textures
-    }
-}
-
-impl Eq for DescriptorSetKey {}
-
-impl Hash for DescriptorSetKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.descriptor_group.hash(state);
-        self.bound_textures.hash(state);
-    }
-}
-
 impl DescriptorSetKey {
-    fn new(descriptor_group: DescriptorGroup, bound_textures: [TextureId; 5], frame_id: GpuFrameId) -> Self {
+    fn new(descriptor_group: DescriptorGroup, bound_textures: [TextureId; 5]) -> Self {
         DescriptorSetKey {
             descriptor_group,
             bound_textures,
-            last_frame_used: Cell::new(frame_id),
         }
     }
 
     fn has_texture_id(&self, id: &TextureId) -> bool {
         self.bound_textures.contains(id)
-    }
-
-    pub fn used_recently(&self, current_frame_id: GpuFrameId, threshold: usize) -> bool {
-        self.last_frame_used.get() + threshold >= current_frame_id
     }
 }
 
@@ -1435,21 +1411,19 @@ impl<B: hal::Backend> Device<B> {
                     self.bound_textures[SAMPLERS[2].0],
                     self.bound_textures[SAMPLERS[3].0],
                     self.bound_textures[SAMPLERS[4].0]],
-                self.frame_id,
                 );
 
             let (desc_set, need_alloc) = if self.descriptors_per_draw[self.next_id].contains_key(&key) {
                 let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&key];
-                self.descriptors_per_draw[self.next_id].entry(key.clone()).key().last_frame_used.set(self.frame_id);
-                println!("#### Reusing desc set with key {:?}", &key);
+                println!("#### Reusing desc set with key {:?}", key);
                 (self.descriptor_pools[self.next_id].pool_at_idx(&program.shader_kind, pool_idx).descriptor_set_at_idx(desc_idx), false)
             } else {
-                println!("#### Creating desc set with key {:?}", &key);
+                println!("#### Creating desc set with key {:?}", key);
                 let desc_set = self.descriptor_pools[self.next_id].get(&program.shader_kind);
                 let pool_idx = self.descriptor_pools[self.next_id].get_pool_idx(&program.shader_kind);
                 let desc_idx = self.descriptor_pools[self.next_id].get_pool(&program.shader_kind).current_descriptor_set_idx;
                 let value = (pool_idx, desc_idx);
-                self.descriptors_per_draw[self.next_id].insert(key.clone(), value);
+                self.descriptors_per_draw[self.next_id].insert(key, value);
                 (desc_set, true)
             };
             self.current_desc_set_key = key;
@@ -1589,8 +1563,6 @@ impl<B: hal::Backend> Device<B> {
                 self.scissor_rect,
                 self.next_id,
                 &self.pipeline_layouts,
-                &self.pipeline_requirements,
-                &self.device,
             );
     }
 
