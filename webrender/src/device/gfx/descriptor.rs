@@ -20,12 +20,20 @@ const DEBUG_SHADER: &'static str = "debug_color";
 const CACHE_CLIP_SHADER: &'static str = "cs_clip_rectangle";
 const DEFAULT_SHADER: &'static str = "brush_solid";
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
+pub(super) enum DescriptorGroup {
+    Default,
+    Debug,
+    ClipCache,
+}
+
 pub(super) struct DescPool<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
     descriptor_set: Vec<B::DescriptorSet>,
     descriptor_set_layout: B::DescriptorSetLayout,
-    pub(super) current_descriptor_set_idx: usize,
+    current_descriptor_set_idx: usize,
     max_descriptor_set_size: usize,
+    free_sets: Vec<usize>,
 }
 
 impl<B: hal::Backend> DescPool<B> {
@@ -52,13 +60,17 @@ impl<B: hal::Backend> DescPool<B> {
             descriptor_set_layout,
             current_descriptor_set_idx: 0,
             max_descriptor_set_size: max_size,
+            free_sets: vec![]
         };
         dp.allocate();
         dp
     }
 
-    pub(super) fn descriptor_set(&self) -> &B::DescriptorSet {
-        &self.descriptor_set[self.current_descriptor_set_idx]
+    pub(super) fn descriptor_set(&mut self) -> (&B::DescriptorSet, usize) {
+        if let Some(idx) = self.free_sets.pop() {
+            return (&self.descriptor_set[idx], idx)
+        }
+        (&self.descriptor_set[self.current_descriptor_set_idx], self.current_descriptor_set_idx)
     }
 
     pub(super) fn descriptor_set_at_idx(&self, index: usize) -> &B::DescriptorSet {
@@ -71,6 +83,9 @@ impl<B: hal::Backend> DescPool<B> {
     }
 
     pub(super) fn next(&mut self) -> bool {
+        if !self.free_sets.is_empty() {
+            return true;
+        }
         self.current_descriptor_set_idx += 1;
         if self.current_descriptor_set_idx >= self.max_descriptor_set_size {
             return false;
@@ -93,8 +108,20 @@ impl<B: hal::Backend> DescPool<B> {
         self.descriptor_set.push(desc_set);
     }
 
+    fn mark_as_free(&mut self, idx: usize) {
+        assert!(idx <= self.current_descriptor_set_idx);
+        if !self.free_sets.contains(&idx) {
+            self.free_sets.push(idx);
+        }
+    }
+
+    fn has_free_sets(&self) -> bool {
+        !self.free_sets.is_empty()
+    }
+
     pub(super) fn reset(&mut self) {
         self.current_descriptor_set_idx = 0;
+        self.free_sets.clear();
     }
 
     pub(super) fn deinit(self, device: &B::Device) {
@@ -109,8 +136,10 @@ pub(super) struct DescriptorPools<B: hal::Backend> {
     debug_pool: DescPool<B>,
     cache_clip_pool: Vec<DescPool<B>>,
     cache_clip_pool_idx: usize,
+    marked_cache_clip_pools: Vec<usize>,
     default_pool: Vec<DescPool<B>>,
     default_pool_idx: usize,
+    marked_default_pools: Vec<usize>,
     descriptors_per_pool: usize,
     descriptor_group_id: usize,
 }
@@ -157,6 +186,7 @@ impl<B: hal::Backend> DescriptorPools<B> {
                 cache_clip_layout,
             )],
             cache_clip_pool_idx: 0,
+            marked_cache_clip_pools: vec![],
             default_pool: vec![DescPool::new(
                 device,
                 descriptors_per_pool,
@@ -164,6 +194,7 @@ impl<B: hal::Backend> DescriptorPools<B> {
                 default_layout,
             )],
             default_pool_idx: 0,
+            marked_default_pools: vec![],
             descriptors_per_pool,
             descriptor_group_id,
         }
@@ -174,14 +205,6 @@ impl<B: hal::Backend> DescriptorPools<B> {
             ShaderKind::DebugColor | ShaderKind::DebugFont => &self.debug_pool,
             ShaderKind::ClipCache => &self.cache_clip_pool[self.cache_clip_pool_idx],
             _ => &self.default_pool[self.default_pool_idx],
-        }
-    }
-
-    pub(super) fn get_pool_idx(&self, shader_kind: &ShaderKind) -> usize {
-        match *shader_kind {
-            ShaderKind::DebugColor | ShaderKind::DebugFont => 0,
-            ShaderKind::ClipCache => self.cache_clip_pool_idx,
-            _ => self.default_pool_idx,
         }
     }
 
@@ -202,17 +225,56 @@ impl<B: hal::Backend> DescriptorPools<B> {
     fn get_pool_mut(&mut self, shader_kind: &ShaderKind) -> &mut DescPool<B> {
         match *shader_kind {
             ShaderKind::DebugColor | ShaderKind::DebugFont => &mut self.debug_pool,
-            ShaderKind::ClipCache => &mut self.cache_clip_pool[self.cache_clip_pool_idx],
-            _ => &mut self.default_pool[self.default_pool_idx],
+            ShaderKind::ClipCache => {
+                {
+                    let ref pool = self.cache_clip_pool;
+                    self.marked_cache_clip_pools.retain(|p| pool[*p].has_free_sets());
+                }
+                let idx = *self.marked_cache_clip_pools.first().unwrap_or(&self.cache_clip_pool_idx);
+                &mut self.cache_clip_pool[idx]
+            },
+            _ => {
+                {
+                    let ref pool = self.default_pool;
+                    self.marked_default_pools.retain(|p| pool[*p].has_free_sets());
+                }
+                let idx = *self.marked_default_pools.first().unwrap_or(&self.default_pool_idx);
+                &mut self.default_pool[idx]
+            },
         }
     }
 
-    pub(super) fn get(&self, shader_kind: &ShaderKind) -> &B::DescriptorSet {
-        self.get_pool(shader_kind).descriptor_set()
+    pub(super) fn get(&mut self, shader_kind: &ShaderKind) -> (&B::DescriptorSet, usize, usize) {
+        let pool_idx = match shader_kind {
+            ShaderKind::DebugColor | ShaderKind::DebugFont => 0,
+            ShaderKind::ClipCache => *self.marked_cache_clip_pools.first().unwrap_or(&self.cache_clip_pool_idx),
+            _ => *self.marked_default_pools.first().unwrap_or(&self.default_pool_idx),
+        };
+        let (desc_set, set_idx) = self.get_pool_mut(shader_kind).descriptor_set();
+        (desc_set, pool_idx, set_idx)
     }
 
     pub(super) fn get_layout(&self, shader_kind: &ShaderKind) -> &B::DescriptorSetLayout {
         self.get_pool(shader_kind).descriptor_set_layout()
+    }
+
+    pub(super) fn mark_as_free(&mut self, descriptor_group: &DescriptorGroup, pool_idx: usize, set_idx: usize) {
+        let pool = match descriptor_group {
+            DescriptorGroup::Debug => &mut self.debug_pool,
+            DescriptorGroup::ClipCache => {
+                if pool_idx != self.cache_clip_pool_idx && !self.marked_cache_clip_pools.contains(&pool_idx) {
+                    self.marked_cache_clip_pools.push(pool_idx)
+                }
+                &mut self.cache_clip_pool[pool_idx]
+            },
+            DescriptorGroup::Default => {
+                if pool_idx != self.default_pool_idx && !self.marked_default_pools.contains(&pool_idx) {
+                    self.marked_default_pools.push(pool_idx)
+                }
+                &mut self.default_pool[pool_idx]
+            },
+        };
+        pool.mark_as_free(set_idx);
     }
 
     pub(super) fn next(
@@ -299,6 +361,8 @@ impl<B: hal::Backend> DescriptorPools<B> {
             pool.reset()
         }
         self.default_pool_idx = 0;
+        self.marked_default_pools.clear();
+        self.marked_cache_clip_pools.clear();
     }
 
     pub(super) fn deinit(self, device: &B::Device) {

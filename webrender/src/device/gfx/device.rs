@@ -146,13 +146,6 @@ struct Fence<B: hal::Backend> {
     is_submitted: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-enum DescriptorGroup {
-    Default,
-    Debug,
-    ClipCache,
-}
-
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 struct DescriptorSetKey {
     descriptor_group: DescriptorGroup,
@@ -1235,7 +1228,8 @@ impl<B: hal::Backend> Device<B> {
 
     /// Returns the limit on texture array layers.
     pub fn max_texture_layers(&self) -> usize {
-        self.limits.max_image_array_layers as usize
+        //self.limits.max_image_array_layers as usize
+        2048
     }
 
     pub fn get_capabilities(&self) -> &Capabilities {
@@ -1375,7 +1369,7 @@ impl<B: hal::Backend> Device<B> {
                 uTransform: projection.to_row_arrays(),
                 uMode: self.program_mode_id,
             };
-            let descriptor_set = self.desc_pool_locals.descriptor_set();
+            let (descriptor_set, idx) = self.desc_pool_locals.descriptor_set();
             self.locals_buffer.add(&self.device, &[locals_data], &mut self.heaps);
             unsafe {
                 self.device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
@@ -1388,7 +1382,6 @@ impl<B: hal::Backend> Device<B> {
                     )),
                 }));
             }
-            let idx = self.desc_pool_locals.current_descriptor_set_idx;
             self.locals.insert((self.program_mode_id, transmuted), idx);
             idx
         };
@@ -1415,14 +1408,10 @@ impl<B: hal::Backend> Device<B> {
 
             let (desc_set, need_alloc) = if self.descriptors_per_draw[self.next_id].contains_key(&key) {
                 let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&key];
-                println!("#### Reusing desc set with key {:?}", key);
                 (self.descriptor_pools[self.next_id].pool_at_idx(&program.shader_kind, pool_idx).descriptor_set_at_idx(desc_idx), false)
             } else {
-                println!("#### Creating desc set with key {:?}", key);
-                let desc_set = self.descriptor_pools[self.next_id].get(&program.shader_kind);
-                let pool_idx = self.descriptor_pools[self.next_id].get_pool_idx(&program.shader_kind);
-                let desc_idx = self.descriptor_pools[self.next_id].get_pool(&program.shader_kind).current_descriptor_set_idx;
-                let value = (pool_idx, desc_idx);
+                let (desc_set, pool_idx, set_idx) = self.descriptor_pools[self.next_id].get(&program.shader_kind);
+                let value = (pool_idx, set_idx);
                 self.descriptors_per_draw[self.next_id].insert(key, value);
                 (desc_set, true)
             };
@@ -1444,7 +1433,7 @@ impl<B: hal::Backend> Device<B> {
                 .next(&program.shader_kind, &self.device, &self.pipeline_requirements);
         }
 
-        let desc_set = self.descriptor_pools_global.get(&program.shader_kind);
+        let (desc_set, _, _) = self.descriptor_pools_global.get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS[5 .. 11].iter() {
             if self.bound_textures[index] != program.bound_textures[index] {
                 program.bind_texture(
@@ -1458,8 +1447,8 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_samplers(&self, program: &Program<B>) {
-        let desc_set = self.descriptor_pools_sampler.get(&program.shader_kind);
+    fn bind_samplers(&mut self, program: &Program<B>) {
+        let (desc_set, _, _) = self.descriptor_pools_sampler.get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS.iter() {
             let sampler = match self.bound_sampler[index] {
                 TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
@@ -1552,8 +1541,8 @@ impl<B: hal::Backend> Device<B> {
                 self.viewport.clone(),
                 rp,
                 &fb,
-                &self.descriptor_pools_global,
-                &self.descriptor_pools_sampler,
+                &mut self.descriptor_pools_global,
+                &mut self.descriptor_pools_sampler,
                 &self.desc_pool_locals.descriptor_set_at_idx(self.locals_idx),
                 desc_set_per_draw,
                 &vec![],
@@ -2391,10 +2380,15 @@ impl<B: hal::Backend> Device<B> {
             }
         }
 
-        for map in self.descriptors_per_draw.iter_mut() {
-            let len = map.len();
-            map.retain(|ref k, _| !k.has_texture_id(&texture.id));
-            println!("##### Removed {} elements from a descriptor map with id {}", len - map.len(), &texture.id);
+        let ref mut descriptor_pools = self.descriptor_pools;
+        for (idx, map) in self.descriptors_per_draw.iter_mut().enumerate() {
+            map.retain(|ref k, v| {
+                if k.has_texture_id(&texture.id) {
+                    descriptor_pools[idx].mark_as_free(&k.descriptor_group, v.0, v.1);
+                    return false;
+                }
+                true
+            });
         }
 
         let image = self.images.remove(&texture.id).expect("Texture not found.");

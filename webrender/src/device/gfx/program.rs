@@ -442,8 +442,8 @@ impl<B: hal::Backend> Program<B> {
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
-        desc_pools_global: &DescriptorPools<B>,
-        desc_pools_sampler: &DescriptorPools<B>,
+        desc_pools_global: &mut DescriptorPools<B>,
+        desc_pools_sampler: &mut DescriptorPools<B>,
         desc_set_per_draw: &B::DescriptorSet,
         desc_set_locals: &B::DescriptorSet,
         clear_values: &[hal::command::ClearValue],
@@ -488,8 +488,8 @@ impl<B: hal::Backend> Program<B> {
                 0,
                 Some(desc_set_per_draw)
                     .into_iter()
-                    .chain(Some(desc_pools_global.get(&self.shader_kind)))
-                    .chain(Some(desc_pools_sampler.get(&self.shader_kind)))
+                    .chain(Some(desc_pools_global.get(&self.shader_kind).0))
+                    .chain(Some(desc_pools_sampler.get(&self.shader_kind).0))
                     .chain(Some(desc_set_locals)),
                 &[],
             );
