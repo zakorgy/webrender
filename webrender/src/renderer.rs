@@ -1150,6 +1150,11 @@ impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
             debug_renderer.deinit(device);
         }
     }
+
+    #[cfg(not(feature = "gleam"))]
+    fn take(&mut self) -> Option<DebugRenderer> {
+        self.debug_renderer.take()
+    }
 }
 
 // NB: If you add more VAOs here, be sure to deinitialize them in
@@ -1917,6 +1922,9 @@ impl<B: hal::Backend> Renderer<B> {
     fn resize(&mut self, window_size: Option<(i32, i32)>) -> DeviceIntSize {
         self.shaders.borrow_mut().reset();
         let size = self.device.recreate_swapchain(window_size);
+        if let Some(debug_renderer) = self.debug.take() {
+            debug_renderer.deinit(&mut self.device);
+        }
         size
     }
 
