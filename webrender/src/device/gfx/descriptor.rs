@@ -21,7 +21,7 @@ const CACHE_CLIP_SHADER: &'static str = "cs_clip_rectangle";
 const DEFAULT_SHADER: &'static str = "brush_solid";
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub(super) enum DescriptorGroup {
+pub(super) enum ShaderGroup {
     Default,
     Debug,
     ClipCache,
@@ -258,16 +258,16 @@ impl<B: hal::Backend> DescriptorPools<B> {
         self.get_pool(shader_kind).descriptor_set_layout()
     }
 
-    pub(super) fn mark_as_free(&mut self, descriptor_group: &DescriptorGroup, pool_idx: usize, set_idx: usize) {
+    pub(super) fn mark_as_free(&mut self, descriptor_group: &ShaderGroup, pool_idx: usize, set_idx: usize) {
         let pool = match descriptor_group {
-            DescriptorGroup::Debug => &mut self.debug_pool,
-            DescriptorGroup::ClipCache => {
+            ShaderGroup::Debug => &mut self.debug_pool,
+            ShaderGroup::ClipCache => {
                 if pool_idx != self.cache_clip_pool_idx && !self.marked_cache_clip_pools.contains(&pool_idx) {
                     self.marked_cache_clip_pools.push(pool_idx)
                 }
                 &mut self.cache_clip_pool[pool_idx]
             },
-            DescriptorGroup::Default => {
+            ShaderGroup::Default => {
                 if pool_idx != self.default_pool_idx && !self.marked_default_pools.contains(&pool_idx) {
                     self.marked_default_pools.push(pool_idx)
                 }

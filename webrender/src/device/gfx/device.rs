@@ -18,6 +18,7 @@ use std::cell::Cell;
 use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::fs::{File, OpenOptions};
+use std::hash::{Hash, Hasher};
 use std::io::prelude::*;
 use std::mem;
 use std::path::PathBuf;
@@ -107,12 +108,12 @@ impl ShaderKind {
         }
     }
 
-    fn descriptor_group(&self) -> DescriptorGroup {
+    fn descriptor_group(&self) -> ShaderGroup {
         match *self {
             ShaderKind::VectorStencil | ShaderKind::VectorCover => unimplemented!("VectorStencil and VectorCover shader kinds are not supported!"),
-            ShaderKind::DebugColor | ShaderKind::DebugFont => DescriptorGroup::Debug,
-            ShaderKind::ClipCache => DescriptorGroup::ClipCache,
-            _ => DescriptorGroup::Default,
+            ShaderKind::DebugColor | ShaderKind::DebugFont => ShaderGroup::Debug,
+            ShaderKind::ClipCache => ShaderGroup::ClipCache,
+            _ => ShaderGroup::Default,
         }
     }
 }
@@ -136,10 +137,34 @@ pub struct VAO;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
-pub struct Locals {
+pub(super) struct Locals {
     uTransform: [[f32; 4]; 4],
     uMode: i32,
 }
+
+impl Locals {
+    fn transform_as_u32_slice(&self) -> &[u32; 16] {
+        unsafe {
+            std::mem::transmute::<&[[f32; 4]; 4], &[u32; 16]>(&self.uTransform)
+        }
+    }
+}
+
+impl Hash for Locals {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.transform_as_u32_slice().hash(state);
+        self.uMode.hash(state);
+    }
+}
+
+impl PartialEq for Locals {
+    fn eq(&self, other: &Locals) -> bool {
+        self.transform_as_u32_slice() == other.transform_as_u32_slice() &&
+        self.uMode == other.uMode
+    }
+}
+
+impl Eq for Locals {}
 
 struct Fence<B: hal::Backend> {
     inner: B::Fence,
@@ -147,23 +172,23 @@ struct Fence<B: hal::Backend> {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-struct DescriptorSetKey {
-    descriptor_group: DescriptorGroup,
+struct DescriptorSetResources {
+    descriptor_group: ShaderGroup,
     bound_textures: [TextureId; 5],
 }
 
-impl Default for DescriptorSetKey {
+impl Default for DescriptorSetResources {
     fn default() -> Self {
-        DescriptorSetKey {
-            descriptor_group: DescriptorGroup::Default,
+        DescriptorSetResources {
+            descriptor_group: ShaderGroup::Default,
             bound_textures: [INVALID_TEXTURE_ID; 5],
         }
     }
 }
 
-impl DescriptorSetKey {
-    fn new(descriptor_group: DescriptorGroup, bound_textures: [TextureId; 5]) -> Self {
-        DescriptorSetKey {
+impl DescriptorSetResources {
+    fn new(descriptor_group: ShaderGroup, bound_textures: [TextureId; 5]) -> Self {
+        DescriptorSetResources {
             descriptor_group,
             bound_textures,
         }
@@ -208,13 +233,11 @@ pub struct Device<B: hal::Backend> {
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
-
-    descriptors_per_draw: SmallVec<[FastHashMap<DescriptorSetKey, (usize, usize)>; 1]>,
-    current_desc_set_key: DescriptorSetKey,
-
+    descriptors_per_draw: SmallVec<[FastHashMap<DescriptorSetResources, (usize, usize)>; 1]>,
+    bound_desc_set_resources: DescriptorSetResources,
     desc_pool_locals: DescPool<B>,
-    locals: FastHashMap<(i32, [u32; 16]), usize>,
-    locals_idx: usize,
+    locals: FastHashMap<Locals, usize>,
+    bound_locals: usize,
     locals_buffer: UniformBufferHandler<B>,
     descriptor_pools_global: DescriptorPools<B>,
     descriptor_pools_sampler: DescriptorPools<B>,
@@ -579,15 +602,12 @@ impl<B: hal::Backend> Device<B> {
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
             descriptor_pools,
-
             descriptors_per_draw,
-            current_desc_set_key: DescriptorSetKey::default(),
-
+            bound_desc_set_resources: DescriptorSetResources::default(),
             desc_pool_locals,
             locals: FastHashMap::default(),
-            locals_idx: 0,
+            bound_locals: 0,
             locals_buffer,
-
             descriptor_pools_global,
             descriptor_pools_sampler,
             bound_textures: [0; 16],
@@ -669,14 +689,14 @@ impl<B: hal::Backend> Device<B> {
             pools.reset(&self.device)
         }
 
-        self.current_desc_set_key = DescriptorSetKey::default();
+        self.bound_desc_set_resources = DescriptorSetResources::default();
         for map in self.descriptors_per_draw.iter_mut() {
             map.clear();
         }
 
         self.desc_pool_locals.reset();
         self.locals_buffer.reset();
-        self.locals_idx = 0;
+        self.bound_locals = 0;
         self.locals.clear();
 
         self.descriptor_pools_global.reset(&self.device);
@@ -1228,8 +1248,7 @@ impl<B: hal::Backend> Device<B> {
 
     /// Returns the limit on texture array layers.
     pub fn max_texture_layers(&self) -> usize {
-        //self.limits.max_image_array_layers as usize
-        2048
+        self.limits.max_image_array_layers as usize
     }
 
     pub fn get_capabilities(&self) -> &Capabilities {
@@ -1357,20 +1376,17 @@ impl<B: hal::Backend> Device<B> {
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         assert_eq!(*program, self.bound_program);
 
-        let transmuted = unsafe {
-            std::mem::transmute::<[[f32; 4]; 4], [u32; 16]>(projection.to_row_arrays())
+        let locals = Locals {
+            uTransform: projection.to_row_arrays(),
+            uMode: self.program_mode_id,
         };
-        let locals_idx = if self.locals.contains_key(&(self.program_mode_id, transmuted)) {
-            *self.locals.get(&(self.program_mode_id, transmuted)).unwrap()
+
+        let bound_locals = if self.locals.contains_key(&locals) {
+            *self.locals.get(&locals).unwrap()
         } else {
             assert!(self.desc_pool_locals.next());
-
-            let locals_data = Locals {
-                uTransform: projection.to_row_arrays(),
-                uMode: self.program_mode_id,
-            };
             let (descriptor_set, idx) = self.desc_pool_locals.descriptor_set();
-            self.locals_buffer.add(&self.device, &[locals_data], &mut self.heaps);
+            self.locals_buffer.add(&self.device, &[locals], &mut self.heaps);
             unsafe {
                 self.device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
                     set: descriptor_set,
@@ -1382,10 +1398,10 @@ impl<B: hal::Backend> Device<B> {
                     )),
                 }));
             }
-            self.locals.insert((self.program_mode_id, transmuted), idx);
+            self.locals.insert(locals, idx);
             idx
         };
-        self.locals_idx = locals_idx;
+        self.bound_locals = bound_locals;
     }
 
     pub fn bind_textures(&mut self) {
@@ -1397,7 +1413,7 @@ impl<B: hal::Backend> Device<B> {
             .expect("Program not found.");
 
         let need_alloc = {
-            let key = DescriptorSetKey::new(
+            let bound_resources = DescriptorSetResources::new(
                 program.shader_kind.descriptor_group(),
                 [self.bound_textures[SAMPLERS[0].0],
                     self.bound_textures[SAMPLERS[1].0],
@@ -1406,16 +1422,16 @@ impl<B: hal::Backend> Device<B> {
                     self.bound_textures[SAMPLERS[4].0]],
                 );
 
-            let (desc_set, need_alloc) = if self.descriptors_per_draw[self.next_id].contains_key(&key) {
-                let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&key];
+            let (desc_set, need_alloc) = if self.descriptors_per_draw[self.next_id].contains_key(&bound_resources) {
+                let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&bound_resources];
                 (self.descriptor_pools[self.next_id].pool_at_idx(&program.shader_kind, pool_idx).descriptor_set_at_idx(desc_idx), false)
             } else {
                 let (desc_set, pool_idx, set_idx) = self.descriptor_pools[self.next_id].get(&program.shader_kind);
                 let value = (pool_idx, set_idx);
-                self.descriptors_per_draw[self.next_id].insert(key, value);
+                self.descriptors_per_draw[self.next_id].insert(bound_resources, value);
                 (desc_set, true)
             };
-            self.current_desc_set_key = key;
+            self.bound_desc_set_resources = bound_resources;
 
             for &(index, sampler_name) in SAMPLERS[0 .. 5].iter() {
                 program.bind_texture(
@@ -1523,7 +1539,7 @@ impl<B: hal::Backend> Device<B> {
 
 
         let ref desc_set_per_draw = {
-            let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&self.current_desc_set_key];
+            let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&self.bound_desc_set_resources];
             let shader_kind = self.programs
                 .get(&self.bound_program)
                 .expect("Program not found")
@@ -1543,7 +1559,7 @@ impl<B: hal::Backend> Device<B> {
                 &fb,
                 &mut self.descriptor_pools_global,
                 &mut self.descriptor_pools_sampler,
-                &self.desc_pool_locals.descriptor_set_at_idx(self.locals_idx),
+                &self.desc_pool_locals.descriptor_set_at_idx(self.bound_locals),
                 desc_set_per_draw,
                 &vec![],
                 self.current_blend_state.get(),
@@ -3240,7 +3256,6 @@ impl<B: hal::Backend> Device<B> {
             self.command_pool[self.next_id].reset();
         }
         self.staging_buffer_pool[self.next_id].reset();
-        //self.descriptor_pools[self.next_id].reset(&self.device);
         self.reset_program_buffer_offsets();
         self.delete_retained_textures();
         return !present_error;
