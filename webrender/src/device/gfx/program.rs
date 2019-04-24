@@ -23,6 +23,8 @@ use std::mem;
 
 const ENTRY_NAME: &str = "main";
 const MAX_INDEX_COUNT: usize = 4096;
+// The size of the push constant block is 68 bytes, and we upload it with u32 data (4 bytes).
+pub(super) const PUSH_CONSTANT_BLOCK_SIZE: usize = 17; // 68 / 4
 // The number of specialization constants in each shader.
 const SPECIALIZATION_CONSTANT_COUNT: usize = 5;
 // Size of a specialization constant variable in bytes.
@@ -55,6 +57,7 @@ const QUAD: [vertex_types::Vertex; 6] = [
     },
 ];
 
+
 pub(crate) struct Program<B: hal::Backend> {
     bindings_map: FastHashMap<String, u32>,
     pipelines: FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>,
@@ -64,6 +67,7 @@ pub(crate) struct Program<B: hal::Backend> {
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
     pub(super) bound_textures: [u32; 16],
+    pub(super) constants: [u32; PUSH_CONSTANT_BLOCK_SIZE],
 }
 
 impl<B: hal::Backend> Program<B> {
@@ -381,6 +385,7 @@ impl<B: hal::Backend> Program<B> {
             shader_name: String::from(shader_name),
             shader_kind,
             bound_textures: [0; 16],
+            constants: [0; PUSH_CONSTANT_BLOCK_SIZE],
         }
     }
 
@@ -437,7 +442,7 @@ impl<B: hal::Backend> Program<B> {
     }
 
     pub(super) fn submit(
-        &self,
+        &mut self,
         cmd_pool: &mut CommandPool<B>,
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
@@ -445,7 +450,6 @@ impl<B: hal::Backend> Program<B> {
         desc_pools_global: &mut DescriptorPools<B>,
         desc_pools_sampler: &mut DescriptorPools<B>,
         desc_set_per_draw: &B::DescriptorSet,
-        desc_set_locals: &B::DescriptorSet,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
         blend_color: ColorF,
@@ -453,13 +457,21 @@ impl<B: hal::Backend> Program<B> {
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
         pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
+        program_mode_id: u32,
     ) {
         let cmd_buffer = cmd_pool.acquire_command_buffer();
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
-
+        let ref pipeline_layout = pipeline_layouts[&self.shader_kind];
+        *self.constants.last_mut().unwrap() = program_mode_id;
         unsafe {
             cmd_buffer.begin();
+            cmd_buffer.push_graphics_constants(
+                pipeline_layout,
+                hal::pso::ShaderStageFlags::VERTEX,
+                0,
+                &self.constants,
+            );
             cmd_buffer.set_viewports(0, &[viewport.clone()]);
             match scissor_rect {
                 Some(r) => cmd_buffer.set_scissors(
@@ -483,14 +495,13 @@ impl<B: hal::Backend> Program<B> {
                     )),
             );
 
+            use std::iter;
             cmd_buffer.bind_graphics_descriptor_sets(
-                &pipeline_layouts[&self.shader_kind],
+                pipeline_layout,
                 0,
-                Some(desc_set_per_draw)
-                    .into_iter()
-                    .chain(Some(desc_pools_global.get(&self.shader_kind).0))
-                    .chain(Some(desc_pools_sampler.get(&self.shader_kind).0))
-                    .chain(Some(desc_set_locals)),
+                iter::once(desc_pools_global.get(&self.shader_kind).0)
+                    .chain(iter::once(desc_pools_sampler.get(&self.shader_kind).0))
+                    .chain(iter::once(desc_set_per_draw)),
                 &[],
             );
 

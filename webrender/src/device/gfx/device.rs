@@ -18,7 +18,6 @@ use std::cell::Cell;
 use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::fs::{File, OpenOptions};
-use std::hash::{Hash, Hasher};
 use std::io::prelude::*;
 use std::mem;
 use std::path::PathBuf;
@@ -30,7 +29,7 @@ use super::buffer::*;
 use super::command::*;
 use super::descriptor::*;
 use super::image::*;
-use super::program::Program;
+use super::program::{Program, PUSH_CONSTANT_BLOCK_SIZE};
 use super::render_pass::*;
 use super::{PipelineRequirements, PrimitiveType, TextureId};
 use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
@@ -72,10 +71,9 @@ pub struct DeviceInit<B: hal::Backend> {
 }
 
 const DESCRIPTOR_COUNT: usize = 256;
-const DESCRIPTOR_SET_LOCALS: usize = 0;
-const DESCRIPTOR_SET_PER_INSTANCE: usize = 1;
-const DESCRIPTOR_SET_SAMPLER: usize = 2;
-const DESCRIPTOR_SET_PER_DRAW: usize = 3;
+const DESCRIPTOR_SET_PER_INSTANCE: usize = 0;
+const DESCRIPTOR_SET_SAMPLER: usize = 1;
+const DESCRIPTOR_SET_PER_DRAW: usize = 2;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
     &["TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"];
@@ -134,37 +132,6 @@ pub struct ProgramId(u32);
 
 pub struct PBO;
 pub struct VAO;
-
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub(super) struct Locals {
-    uTransform: [[f32; 4]; 4],
-    uMode: i32,
-}
-
-impl Locals {
-    fn transform_as_u32_slice(&self) -> &[u32; 16] {
-        unsafe {
-            std::mem::transmute::<&[[f32; 4]; 4], &[u32; 16]>(&self.uTransform)
-        }
-    }
-}
-
-impl Hash for Locals {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.transform_as_u32_slice().hash(state);
-        self.uMode.hash(state);
-    }
-}
-
-impl PartialEq for Locals {
-    fn eq(&self, other: &Locals) -> bool {
-        self.transform_as_u32_slice() == other.transform_as_u32_slice() &&
-        self.uMode == other.uMode
-    }
-}
-
-impl Eq for Locals {}
 
 struct Fence<B: hal::Backend> {
     inner: B::Fence,
@@ -235,10 +202,6 @@ pub struct Device<B: hal::Backend> {
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
     descriptors_per_draw: SmallVec<[FastHashMap<DescriptorSetResources, (usize, usize)>; 1]>,
     bound_desc_set_resources: DescriptorSetResources,
-    desc_pool_locals: DescPool<B>,
-    locals: FastHashMap<Locals, usize>,
-    bound_locals: usize,
-    locals_buffer: UniformBufferHandler<B>,
     descriptor_pools_global: DescriptorPools<B>,
     descriptor_pools_sampler: DescriptorPools<B>,
     // device state
@@ -525,28 +488,6 @@ impl<B: hal::Backend> Device<B> {
         let descriptor_pools_sampler =
             DescriptorPools::new(&device, 1, &pipeline_requirements, DESCRIPTOR_SET_SAMPLER);
 
-        let desc_pool_locals = {
-            let (layout, range) = get_layout_and_range(
-                &pipeline_requirements,
-                "brush_solid",
-                DESCRIPTOR_SET_LOCALS,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT)
-            );
-            DescPool::new(
-                &device,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                range,
-                layout,
-            )
-        };
-
-        let locals_buffer = UniformBufferHandler::new(
-            hal::buffer::Usage::UNIFORM,
-            mem::size_of::<Locals>(),
-            (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-            (limits.non_coherent_atom_size - 1) as usize,
-        );
-
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
@@ -604,10 +545,6 @@ impl<B: hal::Backend> Device<B> {
             descriptor_pools,
             descriptors_per_draw,
             bound_desc_set_resources: DescriptorSetResources::default(),
-            desc_pool_locals,
-            locals: FastHashMap::default(),
-            bound_locals: 0,
-            locals_buffer,
             descriptor_pools_global,
             descriptor_pools_sampler,
             bound_textures: [0; 16],
@@ -693,11 +630,6 @@ impl<B: hal::Backend> Device<B> {
         for map in self.descriptors_per_draw.iter_mut() {
             map.clear();
         }
-
-        self.desc_pool_locals.reset();
-        self.locals_buffer.reset();
-        self.bound_locals = 0;
-        self.locals.clear();
 
         self.descriptor_pools_global.reset(&self.device);
         self.descriptor_pools_sampler.reset(&self.device);
@@ -1218,10 +1150,6 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub(crate) fn bound_program(&self) -> ProgramId {
-        self.bound_program
-    }
-
     pub(crate) fn viewport_size(&self) -> DeviceIntSize {
         DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _)
     }
@@ -1305,6 +1233,7 @@ impl<B: hal::Backend> Device<B> {
         shader_kind: &ShaderKind,
         features: &[&str],
     ) -> Result<ProgramId, ShaderError> {
+        use std::iter;
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
@@ -1317,12 +1246,10 @@ impl<B: hal::Backend> Device<B> {
         if !self.pipeline_layouts.contains_key(shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
-                    Some(self.desc_pool_locals.descriptor_set_layout())
-                        .into_iter()
-                        .chain(Some(self.descriptor_pools_global.get_layout(shader_kind)))
-                        .chain(Some(self.descriptor_pools_sampler.get_layout(shader_kind)))
-                        .chain(Some(self.descriptor_pools[self.next_id].get_layout(shader_kind))),
-                    &[],
+                    iter::once(self.descriptor_pools_global.get_layout(shader_kind))
+                        .chain(iter::once(self.descriptor_pools_sampler.get_layout(shader_kind)))
+                        .chain(iter::once(self.descriptor_pools[self.next_id].get_layout(shader_kind))),
+                    Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32)),
                 )
             }
             .expect("create_pipeline_layout failed");
@@ -1371,37 +1298,18 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn set_uniforms(&mut self, program: &ProgramId, projection: &Transform3D<f32>) {
+    pub fn set_uniforms(&mut self, program_id: &ProgramId, projection: &Transform3D<f32>) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        assert_eq!(*program, self.bound_program);
-
-        let locals = Locals {
-            uTransform: projection.to_row_arrays(),
-            uMode: self.program_mode_id,
-        };
-
-        let bound_locals = if self.locals.contains_key(&locals) {
-            *self.locals.get(&locals).unwrap()
-        } else {
-            assert!(self.desc_pool_locals.next());
-            let (descriptor_set, idx) = self.desc_pool_locals.descriptor_set();
-            self.locals_buffer.add(&self.device, &[locals], &mut self.heaps);
-            unsafe {
-                self.device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                    set: descriptor_set,
-                    binding: DESCRIPTOR_SET_LOCALS as _,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Buffer(
-                        &self.locals_buffer.buffer().buffer,
-                        Some(0) .. None,
-                    )),
-                }));
-            }
-            self.locals.insert(locals, idx);
-            idx
-        };
-        self.bound_locals = bound_locals;
+        assert_eq!(*program_id, self.bound_program);
+        self.programs
+            .get_mut(program_id)
+            .expect(&format!("No program with id {:?}", program_id))
+            .constants[0..16].copy_from_slice(
+                unsafe {
+                    std::mem::transmute::<_, &[u32; 16]>(&projection.to_row_arrays())
+                }
+            );
     }
 
     pub fn bind_textures(&mut self) {
@@ -1559,7 +1467,6 @@ impl<B: hal::Backend> Device<B> {
                 &fb,
                 &mut self.descriptor_pools_global,
                 &mut self.descriptor_pools_sampler,
-                &self.desc_pool_locals.descriptor_set_at_idx(self.bound_locals),
                 desc_set_per_draw,
                 &vec![],
                 self.current_blend_state.get(),
@@ -1568,6 +1475,7 @@ impl<B: hal::Backend> Device<B> {
                 self.scissor_rect,
                 self.next_id,
                 &self.pipeline_layouts,
+                self.program_mode_id as u32,
             );
     }
 
@@ -3369,8 +3277,6 @@ impl<B: hal::Backend> Device<B> {
             for descriptor_pool in self.descriptor_pools {
                 descriptor_pool.deinit(&self.device);
             }
-            self.desc_pool_locals.deinit(&self.device);
-            self.locals_buffer.deinit(&self.device, &mut self.heaps);
             self.descriptor_pools_global.deinit(&self.device);
             self.descriptor_pools_sampler.deinit(&self.device);
             for (_, program) in self.programs {
