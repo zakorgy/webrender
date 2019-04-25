@@ -71,9 +71,10 @@ pub struct DeviceInit<B: hal::Backend> {
 }
 
 const DESCRIPTOR_COUNT: usize = 256;
-const DESCRIPTOR_SET_PER_INSTANCE: usize = 0;
+const DESCRIPTOR_SET_PER_FRAME: usize = 0;
 const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
+const PER_DRAW_SAMPLER_COUNT: usize = 5;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
     &["TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"];
@@ -105,13 +106,15 @@ impl ShaderKind {
             _ => false,
         }
     }
+}
 
-    fn descriptor_group(&self) -> ShaderGroup {
-        match *self {
+impl From<ShaderKind> for ShaderGroup {
+    fn from(kind: ShaderKind) -> Self {
+        match kind {
             ShaderKind::VectorStencil | ShaderKind::VectorCover => unimplemented!("VectorStencil and VectorCover shader kinds are not supported!"),
             ShaderKind::DebugColor | ShaderKind::DebugFont => ShaderGroup::Debug,
             ShaderKind::ClipCache => ShaderGroup::ClipCache,
-            _ => ShaderGroup::Default,
+            _ => ShaderGroup::Brush,
         }
     }
 }
@@ -140,23 +143,23 @@ struct Fence<B: hal::Backend> {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 struct DescriptorSetResources {
-    descriptor_group: ShaderGroup,
-    bound_textures: [TextureId; 5],
+    shader_group: ShaderGroup,
+    bound_textures: [TextureId; PER_DRAW_SAMPLER_COUNT],
 }
 
 impl Default for DescriptorSetResources {
     fn default() -> Self {
         DescriptorSetResources {
-            descriptor_group: ShaderGroup::Default,
-            bound_textures: [INVALID_TEXTURE_ID; 5],
+            shader_group: ShaderGroup::Brush,
+            bound_textures: [INVALID_TEXTURE_ID; PER_DRAW_SAMPLER_COUNT],
         }
     }
 }
 
 impl DescriptorSetResources {
-    fn new(descriptor_group: ShaderGroup, bound_textures: [TextureId; 5]) -> Self {
+    fn new(shader_group: ShaderGroup, bound_textures: [TextureId; PER_DRAW_SAMPLER_COUNT]) -> Self {
         DescriptorSetResources {
-            descriptor_group,
+            shader_group,
             bound_textures,
         }
     }
@@ -199,10 +202,10 @@ pub struct Device<B: hal::Backend> {
     retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
-    descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
-    descriptors_per_draw: SmallVec<[FastHashMap<DescriptorSetResources, (usize, usize)>; 1]>,
+    descriptor_pools_per_draw: SmallVec<[DescriptorPools<B>; 1]>,
+    per_draw_descriptor_bindings: SmallVec<[FastHashMap<DescriptorSetResources, DescriptorSetLocation>; 1]>,
     bound_desc_set_resources: DescriptorSetResources,
-    descriptor_pools_global: DescriptorPools<B>,
+    descriptor_pools_per_frame: DescriptorPools<B>,
     descriptor_pools_sampler: DescriptorPools<B>,
     // device state
     bound_textures: [u32; 16],
@@ -439,13 +442,13 @@ impl<B: hal::Backend> Device<B> {
         let pipeline_requirements: FastHashMap<String, PipelineRequirements> =
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
-        let mut descriptor_pools = SmallVec::new();
+        let mut descriptor_pools_per_draw = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
-        let mut descriptors_per_draw = SmallVec::new();
+        let mut per_draw_descriptor_bindings = SmallVec::new();
         for _ in 0 .. frame_count {
-            descriptor_pools.push(DescriptorPools::new(
+            descriptor_pools_per_draw.push(DescriptorPools::new(
                 &device,
                 descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
                 &pipeline_requirements,
@@ -477,13 +480,13 @@ impl<B: hal::Backend> Device<B> {
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                 (limits.optimal_buffer_copy_offset_alignment - 1) as usize,
             ));
-            descriptors_per_draw.push(FastHashMap::default());
+            per_draw_descriptor_bindings.push(FastHashMap::default());
         }
-        let descriptor_pools_global = DescriptorPools::new(
+        let descriptor_pools_per_frame = DescriptorPools::new(
             &device,
             1,
             &pipeline_requirements,
-            DESCRIPTOR_SET_PER_INSTANCE,
+            DESCRIPTOR_SET_PER_FRAME,
         );
         let descriptor_pools_sampler =
             DescriptorPools::new(&device, 1, &pipeline_requirements, DESCRIPTOR_SET_SAMPLER);
@@ -542,10 +545,10 @@ impl<B: hal::Backend> Device<B> {
             retained_textures: Vec::new(),
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
-            descriptor_pools,
-            descriptors_per_draw,
+            descriptor_pools_per_draw,
+            per_draw_descriptor_bindings,
             bound_desc_set_resources: DescriptorSetResources::default(),
-            descriptor_pools_global,
+            descriptor_pools_per_frame,
             descriptor_pools_sampler,
             bound_textures: [0; 16],
             bound_program: INVALID_PROGRAM_ID,
@@ -622,16 +625,16 @@ impl<B: hal::Backend> Device<B> {
 
         self.render_pass.take().unwrap().deinit(&self.device);
 
-        for pools in self.descriptor_pools.iter_mut() {
+        for pools in self.descriptor_pools_per_draw.iter_mut() {
             pools.reset(&self.device)
         }
 
         self.bound_desc_set_resources = DescriptorSetResources::default();
-        for map in self.descriptors_per_draw.iter_mut() {
+        for map in self.per_draw_descriptor_bindings.iter_mut() {
             map.clear();
         }
 
-        self.descriptor_pools_global.reset(&self.device);
+        self.descriptor_pools_per_frame.reset(&self.device);
         self.descriptor_pools_sampler.reset(&self.device);
 
         unsafe {
@@ -1243,12 +1246,13 @@ impl<B: hal::Backend> Device<B> {
             }
         }
 
+        let shader_group = ShaderGroup::from(*shader_kind);
         if !self.pipeline_layouts.contains_key(shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
-                    iter::once(self.descriptor_pools_global.get_layout(shader_kind))
-                        .chain(iter::once(self.descriptor_pools_sampler.get_layout(shader_kind)))
-                        .chain(iter::once(self.descriptor_pools[self.next_id].get_layout(shader_kind))),
+                    iter::once(self.descriptor_pools_per_frame.get_layout(shader_group))
+                        .chain(iter::once(self.descriptor_pools_sampler.get_layout(shader_group)))
+                        .chain(iter::once(self.descriptor_pools_per_draw[self.next_id].get_layout(shader_group))),
                     Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32)),
                 )
             }
@@ -1320,9 +1324,10 @@ impl<B: hal::Backend> Device<B> {
             .get_mut(&self.bound_program)
             .expect("Program not found.");
 
+        let shader_group = program.shader_kind.into();
         let need_alloc = {
             let bound_resources = DescriptorSetResources::new(
-                program.shader_kind.descriptor_group(),
+                shader_group,
                 [self.bound_textures[SAMPLERS[0].0],
                     self.bound_textures[SAMPLERS[1].0],
                     self.bound_textures[SAMPLERS[2].0],
@@ -1330,18 +1335,17 @@ impl<B: hal::Backend> Device<B> {
                     self.bound_textures[SAMPLERS[4].0]],
                 );
 
-            let (desc_set, need_alloc) = if self.descriptors_per_draw[self.next_id].contains_key(&bound_resources) {
-                let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&bound_resources];
-                (self.descriptor_pools[self.next_id].pool_at_idx(&program.shader_kind, pool_idx).descriptor_set_at_idx(desc_idx), false)
+            let (desc_set, need_alloc) = if self.per_draw_descriptor_bindings[self.next_id].contains_key(&bound_resources) {
+                let location = self.per_draw_descriptor_bindings[self.next_id][&bound_resources];
+                (self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, location), false)
             } else {
-                let (desc_set, pool_idx, set_idx) = self.descriptor_pools[self.next_id].get(&program.shader_kind);
-                let value = (pool_idx, set_idx);
-                self.descriptors_per_draw[self.next_id].insert(bound_resources, value);
+                let (desc_set, set_location) = self.descriptor_pools_per_draw[self.next_id].get_set_by_group(shader_group);
+                self.per_draw_descriptor_bindings[self.next_id].insert(bound_resources, set_location);
                 (desc_set, true)
             };
             self.bound_desc_set_resources = bound_resources;
 
-            for &(index, sampler_name) in SAMPLERS[0 .. 5].iter() {
+            for &(index, sampler_name) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
                 program.bind_texture(
                     &self.device,
                     desc_set,
@@ -1353,12 +1357,12 @@ impl<B: hal::Backend> Device<B> {
             need_alloc
         };
         if need_alloc {
-            self.descriptor_pools[self.next_id]
-                .next(&program.shader_kind, &self.device, &self.pipeline_requirements);
+            self.descriptor_pools_per_draw[self.next_id]
+                .next(shader_group, &self.device, &self.pipeline_requirements);
         }
 
-        let (desc_set, _, _) = self.descriptor_pools_global.get(&program.shader_kind);
-        for &(index, sampler_name) in SAMPLERS[5 .. 11].iter() {
+        let (desc_set, _) = self.descriptor_pools_per_frame.get_set_by_group(shader_group);
+        for &(index, sampler_name) in SAMPLERS[PER_DRAW_SAMPLER_COUNT..].iter() {
             if self.bound_textures[index] != program.bound_textures[index] {
                 program.bind_texture(
                     &self.device,
@@ -1372,7 +1376,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn bind_samplers(&mut self, program: &Program<B>) {
-        let (desc_set, _, _) = self.descriptor_pools_sampler.get(&program.shader_kind);
+        let (desc_set, _) = self.descriptor_pools_sampler.get_set_by_group(program.shader_kind.into());
         for &(index, sampler_name) in SAMPLERS.iter() {
             let sampler = match self.bound_sampler[index] {
                 TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
@@ -1447,14 +1451,11 @@ impl<B: hal::Backend> Device<B> {
 
 
         let ref desc_set_per_draw = {
-            let (pool_idx, desc_idx) = self.descriptors_per_draw[self.next_id][&self.bound_desc_set_resources];
-            let shader_kind = self.programs
-                .get(&self.bound_program)
-                .expect("Program not found")
-                .shader_kind;
-            self.descriptor_pools[self.next_id]
-               .pool_at_idx(&shader_kind, pool_idx)
-                .descriptor_set_at_idx(desc_idx)
+            let location = self.per_draw_descriptor_bindings[self.next_id][&self.bound_desc_set_resources];
+            let shader_group = self.programs
+                .get(&self.bound_program).expect("Program not found")
+                .shader_kind.into();
+            self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, location)
         };
 
         self.programs
@@ -1465,7 +1466,7 @@ impl<B: hal::Backend> Device<B> {
                 self.viewport.clone(),
                 rp,
                 &fb,
-                &mut self.descriptor_pools_global,
+                &mut self.descriptor_pools_per_frame,
                 &mut self.descriptor_pools_sampler,
                 desc_set_per_draw,
                 &vec![],
@@ -2304,11 +2305,11 @@ impl<B: hal::Backend> Device<B> {
             }
         }
 
-        let ref mut descriptor_pools = self.descriptor_pools;
-        for (idx, map) in self.descriptors_per_draw.iter_mut().enumerate() {
+        let ref mut descriptor_pools_per_draw = self.descriptor_pools_per_draw;
+        for (idx, map) in self.per_draw_descriptor_bindings.iter_mut().enumerate() {
             map.retain(|ref k, v| {
                 if k.has_texture_id(&texture.id) {
-                    descriptor_pools[idx].mark_as_free(&k.descriptor_group, v.0, v.1);
+                    descriptor_pools_per_draw[idx].mark_as_free(k.shader_group, *v);
                     return false;
                 }
                 true
@@ -3274,10 +3275,10 @@ impl<B: hal::Backend> Device<B> {
             }
             self.device.destroy_sampler(self.sampler_linear);
             self.device.destroy_sampler(self.sampler_nearest);
-            for descriptor_pool in self.descriptor_pools {
+            for descriptor_pool in self.descriptor_pools_per_draw {
                 descriptor_pool.deinit(&self.device);
             }
-            self.descriptor_pools_global.deinit(&self.device);
+            self.descriptor_pools_per_frame.deinit(&self.device);
             self.descriptor_pools_sampler.deinit(&self.device);
             for (_, program) in self.programs {
                 program.deinit(&self.device, &mut self.heaps)

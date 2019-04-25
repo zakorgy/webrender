@@ -28,7 +28,7 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
-const DESCRIPTOR_SET_PER_INSTANCE: usize = 0;
+const DESCRIPTOR_SET_PER_FRAME: usize = 0;
 const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
 const DESCRIPTOR_SET_COUNT: usize = 3;
@@ -286,7 +286,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             attribute_descriptors,
             bindings_map,
             descriptor_range_descriptors: vec![
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_INSTANCE].len(), DescriptorType::SampledImage),
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_FRAME].len(), DescriptorType::SampledImage),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage),
             ],
@@ -420,7 +420,7 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
         "sGpuCache" |
         "sTransformPalette" |
         "sPrimitiveHeadersF" |
-        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_INSTANCE,
+        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_FRAME,
         x => unreachable!("Sampler not found: {:?}", x),
     }
 }
