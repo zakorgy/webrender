@@ -1247,7 +1247,7 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let shader_group = ShaderGroup::from(*shader_kind);
-        if !self.pipeline_layouts.contains_key(shader_kind) {
+        if let Entry::Vacant(v) = self.pipeline_layouts.entry(*shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
                     iter::once(self.descriptor_pools_per_frame.get_layout(shader_group))
@@ -1257,7 +1257,7 @@ impl<B: hal::Backend> Device<B> {
                 )
             }
             .expect("create_pipeline_layout failed");
-            self.pipeline_layouts.insert(shader_kind.clone(), layout);
+            v.insert(layout);
         };
         let program = Program::create(
             self.pipeline_requirements
@@ -1335,14 +1335,18 @@ impl<B: hal::Backend> Device<B> {
                     self.bound_textures[SAMPLERS[4].0]],
                 );
 
-            let (desc_set, need_alloc) = if self.per_draw_descriptor_bindings[self.next_id].contains_key(&bound_resources) {
-                let location = self.per_draw_descriptor_bindings[self.next_id][&bound_resources];
-                (self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, location), false)
-            } else {
-                let (desc_set, set_location) = self.descriptor_pools_per_draw[self.next_id].get_set_by_group(shader_group);
-                self.per_draw_descriptor_bindings[self.next_id].insert(bound_resources, set_location);
-                (desc_set, true)
+
+            let (desc_set, need_alloc) = match self.per_draw_descriptor_bindings[self.next_id].entry(bound_resources) {
+                Entry::Occupied(o) => {
+                    (self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, *o.get()), false)
+                }
+                Entry::Vacant(v) => {
+                    let (desc_set, set_location) = self.descriptor_pools_per_draw[self.next_id].get_set_by_group(shader_group);
+                    v.insert(set_location);
+                    (desc_set, true)
+                }
             };
+
             self.bound_desc_set_resources = bound_resources;
 
             for &(index, sampler_name) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
@@ -2038,28 +2042,27 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn acquire_depth_target(&mut self, dimensions: DeviceIntSize) -> RBOId {
-        if self.depth_targets.contains_key(&dimensions) {
-            let target = self.depth_targets.get_mut(&dimensions).unwrap();
-            target.refcount += 1;
-            target.rbo_id
-        } else {
-            let rbo_id = self.generate_rbo_id();
-            let rbo = DepthBuffer::new(
-                &self.device,
-                &mut self.heaps,
-                dimensions.width as _,
-                dimensions.height as _,
-                self.depth_format,
-            );
-            self.rbos.insert(rbo_id, rbo);
-            let target = SharedDepthTarget {
-                rbo_id,
-                refcount: 1,
-            };
-            record_gpu_alloc(depth_target_size_in_bytes(&dimensions));
-            self.depth_targets.insert(dimensions, target);
-            rbo_id
+        if let Entry::Occupied(mut o) = self.depth_targets.entry(dimensions) {
+            o.get_mut().refcount += 1;
+            return o.get().rbo_id
         }
+
+        let rbo_id = self.generate_rbo_id();
+        let rbo = DepthBuffer::new(
+            &self.device,
+            &mut self.heaps,
+            dimensions.width as _,
+            dimensions.height as _,
+            self.depth_format,
+        );
+        self.rbos.insert(rbo_id, rbo);
+        let target = SharedDepthTarget {
+            rbo_id,
+            refcount: 1,
+        };
+        record_gpu_alloc(depth_target_size_in_bytes(&dimensions));
+        self.depth_targets.insert(dimensions, target);
+        rbo_id
     }
 
     fn release_depth_target(&mut self, dimensions: DeviceIntSize) {
