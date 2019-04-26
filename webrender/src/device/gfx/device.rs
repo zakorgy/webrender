@@ -1350,12 +1350,14 @@ impl<B: hal::Backend> Device<B> {
             self.bound_desc_set_resources = bound_resources;
 
             for &(index, sampler_name) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
-                program.bind_texture(
-                    &self.device,
-                    desc_set,
-                    &self.images[&self.bound_textures[index]].core,
-                    sampler_name,
-                );
+                if need_alloc {
+                    program.bind_texture(
+                        &self.device,
+                        desc_set,
+                        &self.images[&self.bound_textures[index]].core,
+                        sampler_name,
+                    );
+                }
                 program.bound_textures[index] = self.bound_textures[index];
             }
             need_alloc
