@@ -2429,18 +2429,17 @@ impl<B: hal::Backend> Renderer<B> {
             if let Some(debug_renderer) = self.debug.try_get_mut() {
                 debug_renderer.render(&mut self.device, framebuffer_size);
             }
+
+            #[cfg(not(feature="gleam"))]
+            {
+                if !self.device.submit_to_gpu() {
+                    self.resize(None);
+                }
+            }
             self.device.end_frame();
         });
         if framebuffer_size.is_some() {
             self.last_time = current_time;
-        }
-
-        #[cfg(not(feature="gleam"))]
-        {
-            if !self.device.submit_to_gpu() {
-                self.resize(None);
-                return Ok(RendererStats::empty());
-            }
         }
 
         if self.renderer_errors.is_empty() {
