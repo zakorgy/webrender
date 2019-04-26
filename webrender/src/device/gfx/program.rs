@@ -447,8 +447,9 @@ impl<B: hal::Backend> Program<B> {
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
-        desc_pools_per_frame: &mut DescriptorPools<B>,
         desc_pools_sampler: &mut DescriptorPools<B>,
+        desc_pools_per_frame: &mut DescriptorPools<B>,
+        desc_pools_per_pass: &mut DescriptorPools<B>,
         desc_set_per_draw: &B::DescriptorSet,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
@@ -499,8 +500,9 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_descriptor_sets(
                 pipeline_layout,
                 0,
-                iter::once(desc_pools_per_frame.get_set_by_group(self.shader_kind.into()).0)
-                    .chain(iter::once(desc_pools_sampler.get_set_by_group(self.shader_kind.into()).0))
+                iter::once(desc_pools_sampler.get_set_by_group(self.shader_kind.into()).0)
+                    .chain(iter::once(desc_pools_per_frame.get_set_by_group(self.shader_kind.into()).0))
+                    .chain(iter::once(desc_pools_per_pass.get_set_by_group(self.shader_kind.into()).0))
                     .chain(iter::once(desc_set_per_draw)),
                 &[],
             );

@@ -71,10 +71,12 @@ pub struct DeviceInit<B: hal::Backend> {
 }
 
 const DESCRIPTOR_COUNT: usize = 256;
-const DESCRIPTOR_SET_PER_FRAME: usize = 0;
-const DESCRIPTOR_SET_SAMPLER: usize = 1;
-const DESCRIPTOR_SET_PER_DRAW: usize = 2;
-const PER_DRAW_SAMPLER_COUNT: usize = 5;
+const DESCRIPTOR_SET_SAMPLER: usize = 0;
+const DESCRIPTOR_SET_PER_FRAME: usize = 1;
+const DESCRIPTOR_SET_PER_PASS: usize = 2;
+const DESCRIPTOR_SET_PER_DRAW: usize = 3;
+const PER_DRAW_SAMPLER_COUNT: usize = 3;
+const PER_PASS_SAMPLER_COUNT: usize = 2;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
     &["TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"];
@@ -205,6 +207,7 @@ pub struct Device<B: hal::Backend> {
     descriptor_pools_per_draw: SmallVec<[DescriptorPools<B>; 1]>,
     per_draw_descriptor_bindings: SmallVec<[FastHashMap<DescriptorSetResources, DescriptorSetLocation>; 1]>,
     bound_desc_set_resources: DescriptorSetResources,
+    descriptor_pools_per_pass: DescriptorPools<B>,
     descriptor_pools_per_frame: DescriptorPools<B>,
     descriptor_pools_sampler: DescriptorPools<B>,
     // device state
@@ -482,14 +485,24 @@ impl<B: hal::Backend> Device<B> {
             ));
             per_draw_descriptor_bindings.push(FastHashMap::default());
         }
+        let descriptor_pools_sampler = DescriptorPools::new(
+            &device,
+            1,
+            &pipeline_requirements,
+            DESCRIPTOR_SET_SAMPLER
+        );
         let descriptor_pools_per_frame = DescriptorPools::new(
             &device,
             1,
             &pipeline_requirements,
             DESCRIPTOR_SET_PER_FRAME,
         );
-        let descriptor_pools_sampler =
-            DescriptorPools::new(&device, 1, &pipeline_requirements, DESCRIPTOR_SET_SAMPLER);
+        let descriptor_pools_per_pass = DescriptorPools::new(
+            &device,
+            1,
+            &pipeline_requirements,
+            DESCRIPTOR_SET_PER_PASS,
+        );
 
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
@@ -549,6 +562,7 @@ impl<B: hal::Backend> Device<B> {
             per_draw_descriptor_bindings,
             bound_desc_set_resources: DescriptorSetResources::default(),
             descriptor_pools_per_frame,
+            descriptor_pools_per_pass,
             descriptor_pools_sampler,
             bound_textures: [0; 16],
             bound_program: INVALID_PROGRAM_ID,
@@ -635,6 +649,7 @@ impl<B: hal::Backend> Device<B> {
         }
 
         self.descriptor_pools_per_frame.reset(&self.device);
+        self.descriptor_pools_per_pass.reset(&self.device);
         self.descriptor_pools_sampler.reset(&self.device);
 
         unsafe {
@@ -1250,8 +1265,9 @@ impl<B: hal::Backend> Device<B> {
         if let Entry::Vacant(v) = self.pipeline_layouts.entry(*shader_kind) {
             let layout = unsafe {
                 self.device.create_pipeline_layout(
-                    iter::once(self.descriptor_pools_per_frame.get_layout(shader_group))
-                        .chain(iter::once(self.descriptor_pools_sampler.get_layout(shader_group)))
+                    iter::once(self.descriptor_pools_sampler.get_layout(shader_group))
+                        .chain(iter::once(self.descriptor_pools_per_frame.get_layout(shader_group)))
+                        .chain(iter::once(self.descriptor_pools_per_pass.get_layout(shader_group)))
                         .chain(iter::once(self.descriptor_pools_per_draw[self.next_id].get_layout(shader_group))),
                     Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32)),
                 )
@@ -1330,11 +1346,9 @@ impl<B: hal::Backend> Device<B> {
                 shader_group,
                 [self.bound_textures[SAMPLERS[0].0],
                     self.bound_textures[SAMPLERS[1].0],
-                    self.bound_textures[SAMPLERS[2].0],
-                    self.bound_textures[SAMPLERS[3].0],
-                    self.bound_textures[SAMPLERS[4].0]],
+                    self.bound_textures[SAMPLERS[2].0]
+                ]
                 );
-
 
             let (desc_set, need_alloc) = match self.per_draw_descriptor_bindings[self.next_id].entry(bound_resources) {
                 Entry::Occupied(o) => {
@@ -1367,8 +1381,21 @@ impl<B: hal::Backend> Device<B> {
                 .next(shader_group, &self.device, &self.pipeline_requirements);
         }
 
+        let (desc_set, _) = self.descriptor_pools_per_pass.get_set_by_group(shader_group);
+        for &(index, sampler_name) in SAMPLERS[PER_DRAW_SAMPLER_COUNT..PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT].iter() {
+            if self.bound_textures[index] != program.bound_textures[index] {
+                program.bind_texture(
+                    &self.device,
+                    desc_set,
+                    &self.images[&self.bound_textures[index]].core,
+                    sampler_name,
+                );
+                program.bound_textures[index] = self.bound_textures[index];
+            }
+        }
+
         let (desc_set, _) = self.descriptor_pools_per_frame.get_set_by_group(shader_group);
-        for &(index, sampler_name) in SAMPLERS[PER_DRAW_SAMPLER_COUNT..].iter() {
+        for &(index, sampler_name) in SAMPLERS[PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT..].iter() {
             if self.bound_textures[index] != program.bound_textures[index] {
                 program.bind_texture(
                     &self.device,
@@ -1472,8 +1499,9 @@ impl<B: hal::Backend> Device<B> {
                 self.viewport.clone(),
                 rp,
                 &fb,
-                &mut self.descriptor_pools_per_frame,
                 &mut self.descriptor_pools_sampler,
+                &mut self.descriptor_pools_per_frame,
+                &mut self.descriptor_pools_per_pass,
                 desc_set_per_draw,
                 &vec![],
                 self.current_blend_state.get(),
