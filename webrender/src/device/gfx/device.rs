@@ -154,8 +154,8 @@ pub struct Device<B: hal::Backend> {
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
     descriptor_pools: SmallVec<[DescriptorPools<B>; 1]>,
-    descriptor_pools_global: DescriptorPools<B>,
-    descriptor_pools_sampler: DescriptorPools<B>,
+    descriptor_pools_global: SmallVec<[DescriptorPools<B>; 1]>,
+    descriptor_pools_sampler: SmallVec<[DescriptorPools<B>; 1]>,
     // device state
     bound_textures: [u32; 16],
     bound_program: ProgramId,
@@ -392,6 +392,8 @@ impl<B: hal::Backend> Device<B> {
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
         let mut descriptor_pools = SmallVec::new();
+        let mut descriptor_pools_global = SmallVec::new();
+        let mut descriptor_pools_sampler = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
@@ -401,6 +403,20 @@ impl<B: hal::Backend> Device<B> {
                 descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
                 &pipeline_requirements,
                 DESCRIPTOR_SET_PER_DRAW,
+            ));
+
+            descriptor_pools_global.push(DescriptorPools::new(
+                &device,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                &pipeline_requirements,
+                DESCRIPTOR_SET_PER_INSTANCE,
+            ));
+
+            descriptor_pools_sampler.push(DescriptorPools::new(
+                &device,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                &pipeline_requirements,
+                DESCRIPTOR_SET_SAMPLER,
             ));
 
             let fence = device.create_fence(false).expect("create_fence failed");
@@ -429,15 +445,6 @@ impl<B: hal::Backend> Device<B> {
                 (limits.optimal_buffer_copy_offset_alignment - 1) as usize,
             ));
         }
-        let descriptor_pools_global = DescriptorPools::new(
-            &device,
-            1,
-            &pipeline_requirements,
-            DESCRIPTOR_SET_PER_INSTANCE,
-        );
-        let descriptor_pools_sampler =
-            DescriptorPools::new(&device, 1, &pipeline_requirements, DESCRIPTOR_SET_SAMPLER);
-
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
@@ -569,9 +576,6 @@ impl<B: hal::Backend> Device<B> {
         }
 
         self.render_pass.take().unwrap().deinit(&self.device);
-
-        self.descriptor_pools_global.reset(&self.device);
-        self.descriptor_pools_sampler.reset(&self.device);
 
         unsafe {
             for framebuffer in self.framebuffers.drain(..) {
@@ -748,7 +752,6 @@ impl<B: hal::Backend> Device<B> {
         let (swap_chain, backbuffer) =
             unsafe { device.create_swapchain(surface, swap_config, None) }
                 .expect("create_swapchain failed");
-        println!("backbuffer={:?}", backbuffer);
         let depth_format = hal::format::Format::D32Sfloat; //maybe d24s8?
 
         let render_pass = Device::create_render_passes(device, surface_format, depth_format);
@@ -1191,8 +1194,8 @@ impl<B: hal::Backend> Device<B> {
                 self.device.create_pipeline_layout(
                     Some(self.descriptor_pools[self.next_id].get_layout(shader_kind))
                         .into_iter()
-                        .chain(Some(self.descriptor_pools_global.get_layout(shader_kind)))
-                        .chain(Some(self.descriptor_pools_sampler.get_layout(shader_kind))),
+                        .chain(Some(self.descriptor_pools_global[self.next_id].get_layout(shader_kind)))
+                        .chain(Some(self.descriptor_pools_sampler[self.next_id].get_layout(shader_kind))),
                     &[],
                 )
             }
@@ -1217,7 +1220,6 @@ impl<B: hal::Backend> Device<B> {
             self.pipeline_cache.as_ref(),
             self.surface_format,
         );
-        self.bind_samplers(&program);
 
         let id = self.generate_program_id();
         self.programs.insert(id, program);
@@ -1258,22 +1260,17 @@ impl<B: hal::Backend> Device<B> {
                 sampler_name,
             );
         }
-        let desc_set = self.descriptor_pools_global.get(&program.shader_kind);
+        let desc_set = self.descriptor_pools_global[self.next_id].get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS[5 .. 11].iter() {
-            if self.bound_textures[index] != program.bound_textures[index] {
-                program.bind_texture(
-                    &self.device,
-                    desc_set,
-                    &self.images[&self.bound_textures[index]].core,
-                    sampler_name,
-                );
-                program.bound_textures[index] = self.bound_textures[index];
-            }
+            program.bind_texture(
+                &self.device,
+                desc_set,
+                &self.images[&self.bound_textures[index]].core,
+                sampler_name,
+            );
+            program.bound_textures[index] = self.bound_textures[index];
         }
-    }
-
-    fn bind_samplers(&self, program: &Program<B>) {
-        let desc_set = self.descriptor_pools_sampler.get(&program.shader_kind);
+        let desc_set = self.descriptor_pools_sampler[self.next_id].get(&program.shader_kind);
         for &(index, sampler_name) in SAMPLERS.iter() {
             let sampler = match self.bound_sampler[index] {
                 TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
@@ -1374,8 +1371,8 @@ impl<B: hal::Backend> Device<B> {
                 rp,
                 &fb,
                 &mut self.descriptor_pools[self.next_id],
-                &self.descriptor_pools_global,
-                &self.descriptor_pools_sampler,
+                &mut self.descriptor_pools_global[self.next_id],
+                &mut self.descriptor_pools_sampler[self.next_id],
                 &vec![],
                 self.current_blend_state.get(),
                 self.blend_color.get(),
@@ -2227,7 +2224,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn delete_texture(&mut self, mut texture: Texture) {
-        debug_assert!(self.inside_frame);
+        //debug_assert!(self.inside_frame);
         if texture.size.width + texture.size.height == 0 {
             return;
         }
@@ -3063,6 +3060,8 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.descriptor_pools[self.next_id].reset(&self.device);
+        self.descriptor_pools_sampler[self.next_id].reset(&self.device);
+        self.descriptor_pools_global[self.next_id].reset(&self.device);
         self.reset_program_buffer_offsets();
         self.delete_retained_textures();
         return !present_error;
@@ -3176,8 +3175,12 @@ impl<B: hal::Backend> Device<B> {
             for descriptor_pool in self.descriptor_pools {
                 descriptor_pool.deinit(&self.device);
             }
-            self.descriptor_pools_global.deinit(&self.device);
-            self.descriptor_pools_sampler.deinit(&self.device);
+            for descriptor_pool in self.descriptor_pools_global {
+                descriptor_pool.deinit(&self.device);
+            }
+            for descriptor_pool in self.descriptor_pools_sampler {
+                descriptor_pool.deinit(&self.device);
+            }
             for (_, program) in self.programs {
                 program.deinit(&self.device, &mut self.heaps)
             }

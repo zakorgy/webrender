@@ -496,8 +496,8 @@ impl<B: hal::Backend> Program<B> {
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
         desc_pools: &mut DescriptorPools<B>,
-        desc_pools_global: &DescriptorPools<B>,
-        desc_pools_sampler: &DescriptorPools<B>,
+        desc_pools_global: &mut DescriptorPools<B>,
+        desc_pools_sampler: &mut DescriptorPools<B>,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
         blend_color: ColorF,
@@ -547,6 +547,8 @@ impl<B: hal::Backend> Program<B> {
                 &[],
             );
             desc_pools.next(&self.shader_kind, device, pipeline_requirements);
+            desc_pools_global.next(&self.shader_kind, device, pipeline_requirements);
+            desc_pools_sampler.next(&self.shader_kind, device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
                 cmd_buffer.set_blend_constants(blend_color.to_array());
