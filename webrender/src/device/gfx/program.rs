@@ -454,16 +454,29 @@ impl<B: hal::Backend> Program<B> {
         set: &B::DescriptorSet,
         image: &ImageCore<B>,
         binding: &'static str,
+        cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
     ) {
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             unsafe {
+                if let Some((barrier, src_stage)) = image.transit(
+                    hal::image::Access::SHADER_READ,
+                    hal::image::Layout::ShaderReadOnlyOptimal,
+                    image.subresource_range.clone(),
+                ) {
+                    cmd_buffer.pipeline_barrier(
+                        src_stage
+                            .. hal::pso::PipelineStage::FRAGMENT_SHADER,
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                }
                 device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
                     set,
                     binding: *binding,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Image(
                         &image.view,
-                        image.state.get().1,
+                        hal::image::Layout::ShaderReadOnlyOptimal,
                     )),
                 }));
             }
