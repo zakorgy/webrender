@@ -407,14 +407,14 @@ impl<B: hal::Backend> Device<B> {
 
             descriptor_pools_global.push(DescriptorPools::new(
                 &device,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                8,
                 &pipeline_requirements,
                 DESCRIPTOR_SET_PER_INSTANCE,
             ));
 
             descriptor_pools_sampler.push(DescriptorPools::new(
                 &device,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                8,
                 &pipeline_requirements,
                 DESCRIPTOR_SET_SAMPLER,
             ));
