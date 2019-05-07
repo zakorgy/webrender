@@ -27,6 +27,12 @@ pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) state: Cell<hal::image::State>,
 }
 
+impl<B: hal::Backend> std::fmt::Debug for ImageCore<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "ImageCore {{ Image {:?} }}", self.image)
+    }
+}
+
 impl<B: hal::Backend> ImageCore<B> {
     pub(super) fn from_image(
         device: &B::Device,
@@ -139,7 +145,6 @@ impl<B: hal::Backend> ImageCore<B> {
                 hal::image::Access::SHADER_READ => hal::pso::PipelineStage::FRAGMENT_SHADER,
                 _ => hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
             };
-            //println!("## Barrier {:#?}", barrier);
             Some((barrier, src_stage))
         }
     }
@@ -224,6 +229,7 @@ impl<B: hal::Backend> Image<B> {
             if let Some(barrier) = buffer.transit(
                 hal::buffer::Access::TRANSFER_READ
             ) {
+                //println!("\n## CmdBuffer {:?}\n## Barrier {:?}", cmd_buffer, barrier);
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
@@ -231,11 +237,15 @@ impl<B: hal::Backend> Image<B> {
                 );
             }
 
+            let begin_state = self.core.state.get();
+            let mut pre_stage = None;
             if let Some((barrier, src_stage)) = self.core.transit(
                 hal::image::Access::TRANSFER_WRITE,
                 hal::image::Layout::TransferDstOptimal,
                 range.clone(),
             ) {
+                pre_stage = Some(src_stage);
+                //println!("### Update image begin transition\n## CmdBuffer {:?}\n## Barrier {:?}", cmd_buffer, barrier);
                 cmd_buffer.pipeline_barrier(
                     src_stage .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
@@ -270,13 +280,13 @@ impl<B: hal::Backend> Image<B> {
             );
 
             if let Some((barrier, _)) = self.core.transit(
-                hal::image::Access::COLOR_ATTACHMENT_READ
-                    | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                hal::image::Layout::ColorAttachmentOptimal,
+                begin_state.0,
+                begin_state.1,
                 range,
             ) {
+                //println!("### Update image end transition\n## CmdBuffer {:?}\n## Barrier {:?}", cmd_buffer, barrier);
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::TRANSFER .. pre_stage.unwrap(),
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -369,6 +379,7 @@ impl<B: hal::Backend> Framebuffer<B> {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct DepthBuffer<B: hal::Backend> {
     pub(super) core: ImageCore<B>,
 }

@@ -458,11 +458,15 @@ impl<B: hal::Backend> Program<B> {
     ) {
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             unsafe {
+                let prev_state = image.state.get();
+                let mut pre_stage = None;
                 if let Some((barrier, src_stage)) = image.transit(
                     hal::image::Access::SHADER_READ,
                     hal::image::Layout::ShaderReadOnlyOptimal,
                     image.subresource_range.clone(),
                 ) {
+                    pre_stage = Some(src_stage);
+                    //println!("### Bind texture begin\n## CmdBuffer {:?}\n## Barrier {:?}", cmd_buffer, barrier);
                     cmd_buffer.pipeline_barrier(
                         src_stage
                             .. hal::pso::PipelineStage::FRAGMENT_SHADER,
@@ -479,6 +483,19 @@ impl<B: hal::Backend> Program<B> {
                         hal::image::Layout::ShaderReadOnlyOptimal,
                     )),
                 }));
+                /*if let Some((barrier, _)) = image.transit(
+                    prev_state.0,
+                    prev_state.1,
+                    image.subresource_range.clone(),
+                ) {
+                    println!("### Bind texture end\n## CmdBuffer {:?}\n## Barrier {:?}", cmd_buffer, barrier);
+                    cmd_buffer.pipeline_barrier(
+                        hal::pso::PipelineStage::FRAGMENT_SHADER
+                            .. pre_stage.unwrap(),
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                }*/
             }
         }
     }

@@ -30,6 +30,7 @@ impl<B: hal::Backend> CommandPool<B> {
             self.command_buffers.push(command_buffer);
         }
         self.size += 1;
+        //println!("# Acquired command buffer {:?}", self.command_buffers[self.size - 1]);
         &mut self.command_buffers[self.size - 1]
     }
 
