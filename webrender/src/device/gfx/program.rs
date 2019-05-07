@@ -11,7 +11,6 @@ use rendy_memory::Heaps;
 
 use super::buffer::{InstanceBufferHandler, UniformBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
-use super::command::CommandPool;
 use super::descriptor::DescriptorPools;
 use super::image::ImageCore;
 use super::render_pass::RenderPass;
@@ -458,13 +457,15 @@ impl<B: hal::Backend> Program<B> {
     ) {
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             unsafe {
-                if let Some((barrier, src_stage)) = image.transit(
+                let mut src_stage = Some(hal::pso::PipelineStage::empty());
+                if let Some(barrier) = image.transit(
                     hal::image::Access::SHADER_READ,
                     hal::image::Layout::ShaderReadOnlyOptimal,
                     image.subresource_range.clone(),
+                    src_stage.as_mut(),
                 ) {
                     cmd_buffer.pipeline_barrier(
-                        src_stage
+                        src_stage.unwrap()
                             .. hal::pso::PipelineStage::FRAGMENT_SHADER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
@@ -504,7 +505,7 @@ impl<B: hal::Backend> Program<B> {
 
     pub(super) fn submit(
         &self,
-        cmd_pool: &mut CommandPool<B>,
+        cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
@@ -521,12 +522,10 @@ impl<B: hal::Backend> Program<B> {
         pipeline_requirements: &FastHashMap<String, PipelineRequirements>,
         device: &B::Device,
     ) {
-        let cmd_buffer = cmd_pool.acquire_command_buffer();
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
 
         unsafe {
-            cmd_buffer.begin();
             cmd_buffer.set_viewports(0, &[viewport.clone()]);
             match scissor_rect {
                 Some(r) => cmd_buffer.set_scissors(
@@ -614,8 +613,6 @@ impl<B: hal::Backend> Program<B> {
                     }
                 }
             }
-
-            cmd_buffer.finish();
         }
     }
 

@@ -123,7 +123,8 @@ impl<B: hal::Backend> ImageCore<B> {
         access: hal::image::Access,
         layout: hal::image::Layout,
         range: hal::image::SubresourceRange,
-    ) -> Option<(hal::memory::Barrier<B>, hal::pso::PipelineStage)> {
+        stage: Option<&mut hal::pso::PipelineStage>,
+    ) -> Option<hal::memory::Barrier<B>> {
         let src_state = self.state.get();
         if src_state == (access, layout) {
             None
@@ -135,12 +136,13 @@ impl<B: hal::Backend> ImageCore<B> {
                 families: None,
                 range,
             };
-            let src_stage = match src_state.0 {
-                hal::image::Access::SHADER_READ => hal::pso::PipelineStage::FRAGMENT_SHADER,
-                _ => hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-            };
-            //println!("## Barrier {:#?}", barrier);
-            Some((barrier, src_stage))
+            if let Some(stage) = stage {
+                *stage = match src_state.0 {
+                    hal::image::Access::SHADER_READ => hal::pso::PipelineStage::FRAGMENT_SHADER,
+                    _ => hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                };
+            }
+            Some(barrier)
         }
     }
 }
@@ -221,27 +223,23 @@ impl<B: hal::Backend> Image<B> {
                 layers: layer_index as _ .. (layer_index + 1) as _,
             };
 
-            if let Some(barrier) = buffer.transit(
-                hal::buffer::Access::TRANSFER_READ
-            ) {
-                cmd_buffer.pipeline_barrier(
-                    PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
+            let begin_state = self.core.state.get();
+            let mut pre_stage = Some(PipelineStage::COLOR_ATTACHMENT_OUTPUT);
+            let barriers = buffer
+                .transit(hal::buffer::Access::TRANSFER_READ)
+                .into_iter()
+                .chain(self.core.transit(
+                    hal::image::Access::TRANSFER_WRITE,
+                    hal::image::Layout::TransferDstOptimal,
+                    range.clone(),
+                    pre_stage.as_mut(),
+                ));
 
-            if let Some((barrier, src_stage)) = self.core.transit(
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::Layout::TransferDstOptimal,
-                range.clone(),
-            ) {
-                cmd_buffer.pipeline_barrier(
-                    src_stage .. PipelineStage::TRANSFER,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
+            cmd_buffer.pipeline_barrier(
+                pre_stage.unwrap() .. PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                barriers,
+            );
 
             cmd_buffer.copy_buffer_to_image(
                 &buffer.buffer,
@@ -269,14 +267,14 @@ impl<B: hal::Backend> Image<B> {
                 }],
             );
 
-            if let Some((barrier, _)) = self.core.transit(
-                hal::image::Access::COLOR_ATTACHMENT_READ
-                    | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                hal::image::Layout::ColorAttachmentOptimal,
+            if let Some(barrier) = self.core.transit(
+                begin_state.0,
+                begin_state.1,
                 range,
+               None,
             ) {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::TRANSFER .. pre_stage.unwrap(),
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
