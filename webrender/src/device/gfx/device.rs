@@ -821,7 +821,7 @@ impl<B: hal::Backend> Device<B> {
             Backbuffer::Framebuffer(fbo) => (vec![], vec![fbo], vec![]),
         };
 
-        println!("Frame images: {:#?}\nFrame depths: {:#?}", frame_images, frame_depths);
+        println!("Frame images: {:?}\nFrame depths: {:?}", frame_images, frame_depths);
 
         // Rendering setup
         let viewport = hal::pso::Viewport {
@@ -1559,9 +1559,34 @@ impl<B: hal::Backend> Device<B> {
                 } else {
                     texture.fbos[layer]
                 };
+
+                let fbo = self.fbos.get_mut(&fbo_id).unwrap();
+                fbo.layer_index = layer as u16;
+
+                let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
+                unsafe {
+                    cmd_buffer.begin();
+                    let mut src_stage = Some(PipelineStage::empty());
+                    if let Some(barrier) = self.images[&texture.id].core.transit(
+                        hal::image::Access::COLOR_ATTACHMENT_READ
+                            | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                        hal::image::Layout::ColorAttachmentOptimal,
+                        self.images[&texture.id].core.subresource_range.clone(),
+                        src_stage.as_mut(),
+                    ) {
+                        cmd_buffer.pipeline_barrier(
+                            src_stage.unwrap() .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                            hal::memory::Dependencies::empty(),
+                            &[barrier],
+                        );
+                    }
+                    cmd_buffer.finish();
+                }
+
                 (fbo_id, texture.get_dimensions(), with_depth)
             }
         };
+
         self.depth_available = depth_available;
         self.bind_draw_target_impl(fbo_id);
         self.viewport.rect = hal::pso::Rect {
@@ -2880,17 +2905,12 @@ impl<B: hal::Backend> Device<B> {
         unsafe {
             cmd_buffer.begin();
             if let Some(color) = color {
-                let color_range = hal::image::SubresourceRange {
-                    aspects: hal::format::Aspects::COLOR,
-                    levels: 0 .. 1,
-                    layers: layer .. layer + 1,
-                };
                 let mut src_stage = Some(PipelineStage::empty());
                 if let Some(barrier) = img.transit(
                     hal::image::Access::COLOR_ATTACHMENT_READ
                         | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                     hal::image::Layout::TransferDstOptimal,
-                    color_range.clone(),
+                    img.subresource_range.clone(),
                     src_stage.as_mut(),
                 ) {
                     cmd_buffer.pipeline_barrier(
@@ -2904,7 +2924,11 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::TransferDstOptimal,
                     hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]]),
                     hal::command::ClearDepthStencil(0.0, 0),
-                    Some(color_range.clone()),
+                    Some(hal::image::SubresourceRange {
+                        aspects: hal::format::Aspects::COLOR,
+                        levels: 0 .. 1,
+                        layers: layer .. layer + 1,
+                    }),
                 );
             }
 
