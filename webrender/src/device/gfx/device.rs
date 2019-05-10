@@ -821,6 +821,8 @@ impl<B: hal::Backend> Device<B> {
             Backbuffer::Framebuffer(fbo) => (vec![], vec![fbo], vec![]),
         };
 
+        println!("Frame images: {:#?}\nFrame depths: {:#?}", frame_images, frame_depths);
+
         // Rendering setup
         let viewport = hal::pso::Viewport {
             rect: hal::pso::Rect {
@@ -3096,7 +3098,7 @@ impl<B: hal::Backend> Device<B> {
                         Some(&mut self.image_available_semaphore),
                         None,
                     ) {
-                        Ok(id) => {
+                        Ok((id, _)) => {
                             self.current_frame_id = id as _;
                             let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
                             let image = &self.frame_images[self.current_frame_id];

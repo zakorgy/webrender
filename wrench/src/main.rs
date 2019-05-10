@@ -65,7 +65,7 @@ cfg_if! {
         mod angle;
         mod egl;
         use gleam::gl;
-        use glutin::GlContext;
+        use glutin::ContextTrait;
         use std::marker::PhantomData;
         use std::os::raw::c_void;
         use std::ptr;
@@ -201,7 +201,7 @@ pub enum WindowWrapper {}
 
 #[cfg(feature = "gl")]
 pub enum WindowWrapper {
-    Window(glutin::GlWindow, Rc<gl::Gl>),
+    Window(glutin::WindowedContext, Rc<gl::Gl>),
     Angle(winit::Window, angle::Context, Rc<gl::Gl>),
     Headless(HeadlessContext, Rc<gl::Gl>),
 }
@@ -327,7 +327,7 @@ fn make_window(
                 .with_multitouch()
                 .with_dimensions(LogicalSize::new(size.width as f64, size.height as f64));
 
-            let init = |context: &glutin::GlWindow| {
+            let init = |context: &glutin::WindowedContext| {
                 unsafe {
                     context
                         .make_current()
@@ -370,7 +370,7 @@ fn make_window(
                 let gl = _init_angle(&_context);
                 WindowWrapper::Angle(_window, _context, gl)
             } else {
-                let window = glutin::GlWindow::new(window_builder, context_builder, events_loop)
+                let window = glutin::WindowedContext::new_windowed(window_builder, context_builder, events_loop)
                     .unwrap();
                 let gl = init(&window);
                 WindowWrapper::Window(window, gl)
@@ -412,23 +412,34 @@ fn make_window(
 #[cfg(feature = "gfx")]
 fn make_window(
     size: DeviceIntSize,
-    _dp_ratio: Option<f32>,
+    dp_ratio: Option<f32>,
     _vsync: bool,
     events_loop: &Option<winit::EventsLoop>,
     _angle: bool,
 ) -> WindowWrapper {
     let lsize = LogicalSize::new(size.width as f64, size.height as f64);
-    match *events_loop {
+    let mut wrapper = match *events_loop {
         Some(ref events_loop) => {
             let window = winit::WindowBuilder::new()
                 .with_title("WRench")
                 .with_multitouch()
                 .with_min_dimensions(lsize)
                 .build(events_loop).unwrap();
-            return WindowWrapper::Window(window);
+            WindowWrapper::Window(window)
         },
-        None => return WindowWrapper::Headless(HeadlessContext::new(size.width, size.height)),
-    }
+        None => WindowWrapper::Headless(HeadlessContext::new(size.width, size.height)),
+    };
+
+    // Need to resize here else the window will be smaller than the requested size
+    wrapper.resize(size);
+
+    let dp_ratio = dp_ratio.unwrap_or(wrapper.hidpi_factor());
+    println!(
+        "hidpi factor: {} (native {})",
+        dp_ratio,
+        wrapper.hidpi_factor()
+    );
+    wrapper
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

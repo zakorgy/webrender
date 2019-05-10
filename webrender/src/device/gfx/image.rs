@@ -19,6 +19,7 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     layers: 0 .. 1,
 };
 
+#[derive(Debug)]
 pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) image: B::Image,
     pub(super) memory_block: Option<MemoryBlock<B>>,
@@ -367,6 +368,7 @@ impl<B: hal::Backend> Framebuffer<B> {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct DepthBuffer<B: hal::Backend> {
     pub(super) core: ImageCore<B>,
 }

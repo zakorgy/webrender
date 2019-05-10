@@ -23,7 +23,7 @@ extern crate gfx_backend_empty as back;
 #[cfg(feature = "gl")]
 use gleam::gl;
 #[cfg(feature = "gl")]
-use glutin::{self, GlContext};
+use glutin::{self, ContextTrait};
 use std::env;
 #[cfg(feature = "gl")]
 use std::marker::PhantomData;
@@ -155,7 +155,7 @@ pub fn main_wrapper<E: Example>(
             opengl_version: (3, 2),
             opengles_version: (3, 0),
         });
-        let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+        let window = glutin::WindowedContext::new_windowed(window_builder, context_builder, &events_loop)
         .unwrap();
 
         unsafe {
