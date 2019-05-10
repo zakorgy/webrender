@@ -218,12 +218,6 @@ impl<B: hal::Backend> Image<B> {
         unsafe {
             cmd_buffer.begin();
 
-            let range = hal::image::SubresourceRange {
-                aspects: hal::format::Aspects::COLOR,
-                levels: 0 .. 1,
-                layers: layer_index as _ .. (layer_index + 1) as _,
-            };
-
             let begin_state = self.core.state.get();
             let mut pre_stage = Some(PipelineStage::COLOR_ATTACHMENT_OUTPUT);
             let barriers = buffer
@@ -232,7 +226,7 @@ impl<B: hal::Backend> Image<B> {
                 .chain(self.core.transit(
                     hal::image::Access::TRANSFER_WRITE,
                     hal::image::Layout::TransferDstOptimal,
-                    range.clone(),
+                    self.core.subresource_range.clone(),
                     pre_stage.as_mut(),
                 ));
 
@@ -271,7 +265,7 @@ impl<B: hal::Backend> Image<B> {
             if let Some(barrier) = self.core.transit(
                 begin_state.0,
                 begin_state.1,
-                range,
+                self.core.subresource_range.clone(),
                None,
             ) {
                 cmd_buffer.pipeline_barrier(
