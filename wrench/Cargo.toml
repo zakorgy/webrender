@@ -16,7 +16,7 @@ euclid = "0.19"
 gfx-backend-empty = "0.1.0"
 gfx-hal = "0.1"
 gleam = { optional = true, version = "0.6.2" }
-glutin = { optional = true, version = "0.19" }
+glutin = { optional = true, version = "0.20" }
 app_units = "0.7"
 image = "0.21"
 clap = { version = "2", features = ["yaml"] }
@@ -31,7 +31,7 @@ osmesa-sys = { version = "0.1.2", optional = true }
 osmesa-src = { git = "https://github.com/servo/osmesa-src", optional = true }
 webrender = {path = "../webrender", features=["capture","replay","debugger","png","profiler","serde"]}
 webrender_api = {path = "../webrender_api", features=["serialize","deserialize"]}
-winit = "0.18"
+winit = "0.19"
 serde = {version = "1.0", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

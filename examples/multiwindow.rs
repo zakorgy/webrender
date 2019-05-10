@@ -31,7 +31,7 @@ use app_units::Au;
 #[cfg(feature = "gl")]
 use gleam::gl;
 #[cfg(feature = "gl")]
-use glutin::GlContext;
+use glutin::ContextTrait;
 use std::fs::File;
 use std::io::Read;
 #[cfg(feature = "gl")]
@@ -76,7 +76,7 @@ impl RenderNotifier for Notifier {
 struct Window {
     events_loop: winit::EventsLoop, //TODO: share events loop?
     #[cfg(feature = "gl")]
-    window: glutin::GlWindow,
+    window: glutin::WindowedContext,
     #[cfg(feature = "gfx-hal")]
     window: winit::Window,
     renderer: webrender::Renderer<back::Backend>,
@@ -104,7 +104,7 @@ impl Window {
                     opengl_version: (3, 2),
                     opengles_version: (3, 0),
                 });
-            let window = glutin::GlWindow::new(window_builder, context_builder, &events_loop)
+            let window = glutin::WindowedContext::new_windowed(window_builder, context_builder, &events_loop)
                 .unwrap();
 
             unsafe {
