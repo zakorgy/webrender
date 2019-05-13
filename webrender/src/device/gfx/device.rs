@@ -1700,19 +1700,22 @@ impl<B: hal::Backend> Device<B> {
         let usage_base = hal::image::Usage::TRANSFER_SRC
             | hal::image::Usage::TRANSFER_DST
             | hal::image::Usage::SAMPLED;
-        let (view_kind, mip_levels, usage) = match texture.filter {
+
+        let view_kind = match target {
+            TextureTarget::Array => hal::image::ViewKind::D2Array,
+            _ => hal::image::ViewKind::D2,
+        };
+
+        let (mip_levels, usage) = match texture.filter {
             TextureFilter::Nearest => (
-                hal::image::ViewKind::D2,
                 1,
                 usage_base | hal::image::Usage::COLOR_ATTACHMENT,
             ),
             TextureFilter::Linear => (
-                hal::image::ViewKind::D2Array,
                 1,
                 usage_base | hal::image::Usage::COLOR_ATTACHMENT,
             ),
             TextureFilter::Trilinear => (
-                hal::image::ViewKind::D2Array,
                 (width as f32).max(height as f32).log2().floor() as u8 + 1,
                 usage_base | hal::image::Usage::COLOR_ATTACHMENT,
             ),
