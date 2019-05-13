@@ -178,10 +178,11 @@ impl<B: hal::Backend> BufferPool<B> {
     }
 
     pub(super) fn add<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+        let size_of_data = mem::size_of::<T>();
         assert!(
-            mem::size_of::<T>() <= self.data_stride,
+            size_of_data <= self.data_stride,
             "mem::size_of::<T>()={:?} <= self.data_stride={:?}",
-            mem::size_of::<T>(),
+            size_of_data,
             self.data_stride
         );
         let buffer_len = data.len() * self.data_stride;
@@ -200,7 +201,12 @@ impl<B: hal::Backend> BufferPool<B> {
             self.non_coherent_atom_size_mask as u64,
         );
         self.buffer_offset = self.offset;
-        self.offset += (self.size + self.copy_alignment_mask) & !self.copy_alignment_mask;
+        let alignment_mask = if size_of_data.is_power_of_two() {
+            self.copy_alignment_mask | size_of_data
+        } else {
+            self.copy_alignment_mask
+        };
+        self.offset += (self.size + alignment_mask) & !alignment_mask;
     }
 
     pub(super) fn buffer(&self) -> &Buffer<B> {
