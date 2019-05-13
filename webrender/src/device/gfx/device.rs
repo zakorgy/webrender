@@ -736,7 +736,7 @@ impl<B: hal::Backend> Device<B> {
             extent.height = 1;
         }
 
-        let swap_config = SwapchainConfig::new(
+        let mut swap_config = SwapchainConfig::new(
             extent.width,
             extent.height,
             surface_format,
@@ -748,6 +748,12 @@ impl<B: hal::Backend> Device<B> {
                 | hal::image::Usage::COLOR_ATTACHMENT,
         )
         .with_mode(present_mode);
+
+        if caps.composite_alpha.contains(hal::CompositeAlpha::INHERIT) {
+            swap_config.composite_alpha =  hal::CompositeAlpha::INHERIT;
+        } else if caps.composite_alpha.contains(hal::CompositeAlpha::OPAQUE) {
+            swap_config.composite_alpha = hal::CompositeAlpha::OPAQUE;
+        }
 
         let (swap_chain, backbuffer) =
             unsafe { device.create_swapchain(surface, swap_config, None) }
