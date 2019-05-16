@@ -1351,7 +1351,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn draw(&mut self) {
-        let (img, frame_buffer, format, depth_img) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (img, frame_buffer, format, (depth_img, depth_test_changed)) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let texture_id = self.fbos[&self.bound_draw_fbo].texture_id;
             let rbo_id = self.fbos[&self.bound_draw_fbo].rbo;
             (
@@ -1359,9 +1359,15 @@ impl<B: hal::Backend> Device<B> {
                 &self.fbos[&self.bound_draw_fbo].fbo,
                 self.fbos[&self.bound_draw_fbo].format,
                 if rbo_id == RBOId(0) {
-                    None
+                    (None, false)
                 } else {
-                    Some(&self.rbos[&rbo_id].core)
+                    let mut depth_test_changed =  false;
+                    // This is needed to avoid validation layer errors for different attachments between frambuffer renderpass and pipelinelayout
+                    if self.current_depth_test == DepthTest::Off {
+                        self.current_depth_test = LESS_EQUAL_TEST;
+                        depth_test_changed = true;
+                    }
+                    (Some(&self.rbos[&rbo_id].core), depth_test_changed)
                 },
             )
         } else {
@@ -1370,14 +1376,14 @@ impl<B: hal::Backend> Device<B> {
                     &self.frame_images[self.current_frame_id],
                     &self.framebuffers[self.current_frame_id],
                     self.surface_format,
-                    None,
+                    (None, false)
                 )
             } else {
                 (
                     &self.frame_images[self.current_frame_id],
                     &self.framebuffers_depth[self.current_frame_id],
                     self.surface_format,
-                    Some(&self.frame_depths[self.current_frame_id].core),
+                    (Some(&self.frame_depths[self.current_frame_id].core), false)
                 )
             }
         };
@@ -1385,7 +1391,7 @@ impl<B: hal::Backend> Device<B> {
             .render_pass
             .as_ref()
             .unwrap()
-            .get_render_pass(format, self.current_depth_test != DepthTest::Off);
+            .get_render_pass(format, depth_img.is_some());
 
         let before_state = img.state.get();
         let mut before_depth_state = None;
@@ -1444,6 +1450,10 @@ impl<B: hal::Backend> Device<B> {
                 &self.pipeline_requirements,
                 &self.device,
             );
+
+        if depth_test_changed {
+            self.current_depth_test = DepthTest::Off;
+        }
 
         unsafe {
             if let Some(barrier) = img.transit(
