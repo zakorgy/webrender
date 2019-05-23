@@ -1391,6 +1391,7 @@ impl<B: hal::Backend> Device<B> {
         let before_state = img.state.get();
         let mut before_depth_state = None;
         let mut pre_stage = Some(PipelineStage::empty());
+        let mut pre_depth_stage = Some(PipelineStage::empty());
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         unsafe {
             cmd_buffer.begin();
@@ -1412,11 +1413,10 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::empty(),
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     depth_img.subresource_range.clone(),
-                    None,
+                    pre_depth_stage.as_mut(),
                 ) {
                     cmd_buffer.pipeline_barrier(
-                        PipelineStage::EARLY_FRAGMENT_TESTS
-                            .. PipelineStage::LATE_FRAGMENT_TESTS,
+                        pre_depth_stage.unwrap() .. PipelineStage::EARLY_FRAGMENT_TESTS,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
@@ -1471,8 +1471,7 @@ impl<B: hal::Backend> Device<B> {
                     None,
                 ) {
                     cmd_buffer.pipeline_barrier(
-                        PipelineStage::LATE_FRAGMENT_TESTS
-                            .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                        PipelineStage::EARLY_FRAGMENT_TESTS .. pre_depth_stage.unwrap(),
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
@@ -2820,6 +2819,7 @@ impl<B: hal::Backend> Device<B> {
             let before_state = img.state.get();
             let mut before_depth_state = None;
             let mut pre_stage = Some(PipelineStage::empty());
+            let mut pre_depth_stage = Some(PipelineStage::empty());
             cmd_buffer.begin();
             if let Some(barrier) = img.transit(
                 hal::image::Access::empty(),
@@ -2839,11 +2839,10 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::empty(),
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     depth_img.subresource_range.clone(),
-                    None,
+                    pre_depth_stage.as_mut(),
                 ) {
                     cmd_buffer.pipeline_barrier(
-                        PipelineStage::EARLY_FRAGMENT_TESTS
-                            .. PipelineStage::LATE_FRAGMENT_TESTS,
+                        pre_depth_stage.unwrap() .. PipelineStage::EARLY_FRAGMENT_TESTS,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
@@ -2879,8 +2878,7 @@ impl<B: hal::Backend> Device<B> {
                     None,
                 ) {
                     cmd_buffer.pipeline_barrier(
-                        PipelineStage::LATE_FRAGMENT_TESTS
-                            .. PipelineStage::EARLY_FRAGMENT_TESTS,
+                        PipelineStage::EARLY_FRAGMENT_TESTS .. pre_depth_stage.unwrap(),
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );

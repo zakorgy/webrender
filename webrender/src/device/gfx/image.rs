@@ -137,9 +137,13 @@ impl<B: hal::Backend> ImageCore<B> {
                 families: None,
                 range,
             };
+            use hal::image::Access;
+            use hal::pso::PipelineStage;
             if let Some(stage) = stage {
                 *stage = match src_state.0 {
-                    hal::image::Access::SHADER_READ => hal::pso::PipelineStage::FRAGMENT_SHADER,
+                    Access::SHADER_READ => PipelineStage::FRAGMENT_SHADER,
+                    state if state.contains(Access::DEPTH_STENCIL_ATTACHMENT_READ)
+                        || state.contains(Access::DEPTH_STENCIL_ATTACHMENT_WRITE) => PipelineStage::LATE_FRAGMENT_TESTS,
                     _ => hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                 };
             }
