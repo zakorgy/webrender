@@ -827,7 +827,7 @@ impl<B: hal::Backend> Device<B> {
             Backbuffer::Framebuffer(fbo) => (vec![], vec![fbo], vec![]),
         };
 
-        println!("Frame images: {:?}\nFrame depths: {:?}", frame_images, frame_depths);
+        info!("Frame images: {:?}\nFrame depths: {:?}", frame_images, frame_depths);
 
         // Rendering setup
         let viewport = hal::pso::Viewport {
