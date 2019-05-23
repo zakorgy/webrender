@@ -1371,21 +1371,16 @@ impl<B: hal::Backend> Device<B> {
                 },
             )
         } else {
-            if self.current_depth_test == DepthTest::Off {
-                (
-                    &self.frame_images[self.current_frame_id],
-                    &self.framebuffers[self.current_frame_id],
-                    self.surface_format,
-                    (None, false)
-                )
-            } else {
-                (
-                    &self.frame_images[self.current_frame_id],
-                    &self.framebuffers_depth[self.current_frame_id],
-                    self.surface_format,
-                    (Some(&self.frame_depths[self.current_frame_id].core), false)
-                )
-            }
+            let (frame_buffer, depth_image) = match self.current_depth_test {
+                DepthTest::Off => (&self.framebuffers[self.current_frame_id], None),
+                _ => (&self.framebuffers_depth[self.current_frame_id], Some(&self.frame_depths[self.current_frame_id].core)),
+            };
+            (
+                &self.frame_images[self.current_frame_id],
+                frame_buffer,
+                self.surface_format,
+                (depth_image, false)
+            )
         };
         let rp = self
             .render_pass
@@ -1417,7 +1412,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::empty(),
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     depth_img.subresource_range.clone(),
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::EARLY_FRAGMENT_TESTS
@@ -1460,7 +1455,7 @@ impl<B: hal::Backend> Device<B> {
                 before_state.0,
                 before_state.1,
                 img.subresource_range.clone(),
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::COLOR_ATTACHMENT_OUTPUT .. pre_stage.unwrap(),
@@ -1473,7 +1468,7 @@ impl<B: hal::Backend> Device<B> {
                     before_depth_state.unwrap().0,
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     depth_img.subresource_range.clone(),
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::LATE_FRAGMENT_TESTS
@@ -1757,7 +1752,7 @@ impl<B: hal::Backend> Device<B> {
                     | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                 hal::image::Layout::ColorAttachmentOptimal,
                 img.core.subresource_range.clone(),
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::COLOR_ATTACHMENT_OUTPUT
@@ -1912,7 +1907,7 @@ impl<B: hal::Backend> Device<B> {
                             | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                         hal::image::Layout::ColorAttachmentOptimal,
                         range.clone(),
-                       None,
+                        None,
                     )
                 );
 
@@ -1966,7 +1961,7 @@ impl<B: hal::Backend> Device<B> {
                         levels: index - 1 .. index,
                         layers: 0 .. 1,
                     },
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
@@ -2015,7 +2010,7 @@ impl<B: hal::Backend> Device<B> {
                         levels: index - 1 .. index,
                         layers: 0 .. 1,
                     },
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
@@ -2038,7 +2033,7 @@ impl<B: hal::Backend> Device<B> {
                     | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                 hal::image::Layout::ColorAttachmentOptimal,
                 image.core.subresource_range.clone(),
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
@@ -2243,7 +2238,7 @@ impl<B: hal::Backend> Device<B> {
                 src_begin_state.0,
                 src_begin_state.1,
                 src_range,
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. pre_src_stage.unwrap(),
@@ -2256,7 +2251,7 @@ impl<B: hal::Backend> Device<B> {
                 dest_begin_state.0,
                 dest_begin_state.1,
                 dest_range,
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. pre_dest_stage.unwrap(),
@@ -2512,7 +2507,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::TRANSFER_READ,
                     hal::image::Layout::TransferSrcOptimal,
                     range.clone(),
-                   None,
+                    None,
                 ));
 
             cmd_buffer.pipeline_barrier(
@@ -2550,7 +2545,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Access::empty(),
                 hal::image::Layout::ColorAttachmentOptimal,
                 range,
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
@@ -2802,21 +2797,16 @@ impl<B: hal::Backend> Device<B> {
                 },
             )
         } else {
-            if self.current_depth_test == DepthTest::Off {
-                (
-                    &self.frame_images[self.current_frame_id],
-                    &self.framebuffers[self.current_frame_id],
-                    self.surface_format,
-                    None,
-                )
-            } else {
-                (
-                    &self.frame_images[self.current_frame_id],
-                    &self.framebuffers_depth[self.current_frame_id],
-                    self.surface_format,
-                    Some(&self.frame_depths[self.current_frame_id].core),
-                )
-            }
+            let (frame_buffer, depth_image) = match self.current_depth_test {
+                DepthTest::Off => (&self.framebuffers[self.current_frame_id], None),
+                _ => (&self.framebuffers_depth[self.current_frame_id], Some(&self.frame_depths[self.current_frame_id].core)),
+            };
+            (
+                &self.frame_images[self.current_frame_id],
+                frame_buffer,
+                self.surface_format,
+                depth_image,
+            )
         };
 
         let render_pass = self
@@ -2849,7 +2839,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::empty(),
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     depth_img.subresource_range.clone(),
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::EARLY_FRAGMENT_TESTS
@@ -2873,7 +2863,7 @@ impl<B: hal::Backend> Device<B> {
                 before_state.0,
                 before_state.1,
                 img.subresource_range.clone(),
-               None,
+                None,
             ) {
                 cmd_buffer.pipeline_barrier(
                     PipelineStage::COLOR_ATTACHMENT_OUTPUT .. pre_stage.unwrap(),
@@ -2886,7 +2876,7 @@ impl<B: hal::Backend> Device<B> {
                     before_depth_state.unwrap().0,
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     depth_img.subresource_range.clone(),
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::LATE_FRAGMENT_TESTS
@@ -2957,7 +2947,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
                     hal::image::Layout::TransferDstOptimal,
                     dimg.subresource_range.clone(),
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::EARLY_FRAGMENT_TESTS .. PipelineStage::LATE_FRAGMENT_TESTS,
@@ -3151,7 +3141,7 @@ impl<B: hal::Backend> Device<B> {
                                     | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                                 hal::image::Layout::ColorAttachmentOptimal,
                                 image.subresource_range.clone(),
-                               None,
+                                None,
                             ) {
                                 cmd_buffer.pipeline_barrier(
                                     PipelineStage::COLOR_ATTACHMENT_OUTPUT
@@ -3166,7 +3156,7 @@ impl<B: hal::Backend> Device<B> {
                                     | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
                                 hal::image::Layout::DepthStencilAttachmentOptimal,
                                 depth_image.subresource_range.clone(),
-                               None,
+                                None,
                             ) {
                                 cmd_buffer.pipeline_barrier(
                                     PipelineStage::EARLY_FRAGMENT_TESTS
@@ -3199,7 +3189,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Access::empty(),
                     hal::image::Layout::Present,
                     image.subresource_range.clone(),
-                   None,
+                    None,
                 ) {
                     cmd_buffer.pipeline_barrier(
                         PipelineStage::COLOR_ATTACHMENT_OUTPUT
