@@ -423,15 +423,12 @@ fn make_window(
             let window = winit::WindowBuilder::new()
                 .with_title("WRench")
                 .with_multitouch()
-                .with_min_dimensions(lsize)
+                .with_dimensions(lsize)
                 .build(events_loop).unwrap();
             WindowWrapper::Window(window)
         },
         None => WindowWrapper::Headless(HeadlessContext::new(size.width, size.height)),
     };
-
-    // Need to resize here else the window will be smaller than the requested size
-    wrapper.resize(size);
 
     let dp_ratio = dp_ratio.unwrap_or(wrapper.hidpi_factor());
     println!(
