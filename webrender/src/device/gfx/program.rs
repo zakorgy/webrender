@@ -12,6 +12,7 @@ use std::borrow::Cow::{Borrowed};
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
 use super::descriptor::DescriptorPools;
+use super::descriptor_set::DescriptorGroup;
 use super::image::ImageCore;
 use super::render_pass::RenderPass;
 use super::vertex_types;
@@ -473,13 +474,13 @@ impl<B: hal::Backend> Program<B> {
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
         program_mode_id: u32,
-        pipeline_layouts: &FastHashMap<ShaderKind, B::PipelineLayout>,
+        pipeline_layouts: &FastHashMap<DescriptorGroup, B::PipelineLayout>,
         pipeline_requirements: &FastHashMap<String, PipelineRequirements>,
         device: &B::Device,
     ) {
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
-        let ref pipeline_layout = pipeline_layouts[&self.shader_kind];
+        let ref pipeline_layout = pipeline_layouts[&self.shader_kind.into()];
         *self.constants.last_mut().unwrap() = program_mode_id;
         unsafe {
             #[cfg(feature = "push_constants")]

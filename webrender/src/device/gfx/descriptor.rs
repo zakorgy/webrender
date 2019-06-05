@@ -77,10 +77,6 @@ impl<B: hal::Backend> DescPool<B> {
         &self.descriptor_set[index]
     }
 
-    pub(super) fn descriptor_set_layout(&self) -> &B::DescriptorSetLayout {
-        &self.descriptor_set_layout
-    }
-
     pub(super) fn next(&mut self) -> bool {
         if !self.free_sets.is_empty() {
             return true;
@@ -205,14 +201,6 @@ impl<B: hal::Backend> DescriptorPools<B> {
         }
     }
 
-    fn get_pool(&self, shader_group: ShaderGroup) -> &DescPool<B> {
-        match shader_group {
-            ShaderGroup::Debug => &self.debug_pool,
-            ShaderGroup::ClipCache => &self.cache_clip_pool[self.cache_clip_pool_idx],
-            ShaderGroup::Brush => &self.brush_pool[self.brush_pool_idx],
-        }
-    }
-
     fn get_pool_mut(&mut self, shader_group: ShaderGroup) -> &mut DescPool<B> {
         match shader_group {
             ShaderGroup::Debug => &mut self.debug_pool,
@@ -261,10 +249,6 @@ impl<B: hal::Backend> DescriptorPools<B> {
             },
         };
         pool.descriptor_set_at_idx(location.set_idx)
-    }
-
-    pub(super) fn get_layout(&self, shader_group: ShaderGroup) -> &B::DescriptorSetLayout {
-        self.get_pool(shader_group).descriptor_set_layout()
     }
 
     pub(super) fn mark_as_free(&mut self, shader_group: ShaderGroup, location: DescriptorSetLocation) {

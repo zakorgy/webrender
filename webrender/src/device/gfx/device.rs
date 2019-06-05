@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+extern crate arrayvec;
+
 use api::{ColorF, ImageFormat, MemoryReport};
 use api::round_to_int;
 use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
@@ -29,6 +31,7 @@ use super::blend_state::*;
 use super::buffer::*;
 use super::command::*;
 use super::descriptor::*;
+use super::descriptor_set::*;
 use super::image::*;
 use super::program::{Program, PUSH_CONSTANT_BLOCK_SIZE};
 use super::render_pass::*;
@@ -78,6 +81,11 @@ const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
 const DESCRIPTOR_SET_LOCALS: usize = 3;
 const PER_DRAW_SAMPLER_COUNT: usize = 5;
+
+#[cfg(feature = "push_constants")]
+const DESCRIPTOR_SET_PER_LAYOUT: usize = 3;
+#[cfg(not(feature = "push_constants"))]
+const DESCRIPTOR_SET_PER_LAYOUT: usize = 4;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
     &["TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"];
@@ -241,6 +249,7 @@ pub struct Device<B: hal::Backend> {
     bound_desc_set_resources: DescriptorSetResources,
     descriptor_pools_per_frame: SmallVec<[DescriptorPools<B>; 1]>,
     descriptor_pools_sampler: SmallVec<[DescriptorPools<B>; 1]>,
+    descriptor_set_layouts: FastHashMap<DescriptorGroup, arrayvec::ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>,
     bound_textures: [u32; 16],
     bound_program: ProgramId,
     bound_sampler: [TextureFilter; 16],
@@ -290,7 +299,7 @@ pub struct Device<B: hal::Backend> {
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: FastHashMap<String, PipelineRequirements>,
-    pipeline_layouts: FastHashMap<ShaderKind, B::PipelineLayout>,
+    pipeline_layouts: FastHashMap<DescriptorGroup, B::PipelineLayout>,
     pipeline_cache: Option<B::PipelineCache>,
     cache_path: Option<PathBuf>,
     save_cache: bool,
@@ -578,6 +587,57 @@ impl<B: hal::Backend> Device<B> {
             Some(FastHashMap::default())
         };
 
+        let mut pipeline_layouts = FastHashMap::default();
+        let descriptor_set_layouts = [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive]
+            .iter()
+            .map(|g| {
+                let descriptor_set_layouts = match g {
+                    DescriptorGroup::Default => [
+                        DEFAULT_SET_0,
+                        DEFAULT_SET_1,
+                        DEFAULT_SET_2,
+                        #[cfg(not(feature = "push_constants"))]
+                        COMMON_SET_3,
+                    ],
+                    DescriptorGroup::Clip => [
+                        CLIP_SET_0,
+                        CLIP_SET_1,
+                        CLIP_SET_2,
+                        #[cfg(not(feature = "push_constants"))]
+                        COMMON_SET_3,
+                    ],
+                    DescriptorGroup::Primitive => [
+                        PRIMITIVE_SET_0,
+                        PRIMITIVE_SET_1,
+                        PRIMITIVE_SET_2,
+                        #[cfg(not(feature = "push_constants"))]
+                        COMMON_SET_3,
+                    ],
+                };
+
+                let layouts = descriptor_set_layouts
+                    .iter()
+                    .map(|set| {
+                        unsafe { device.create_descriptor_set_layout(*set, &[]) }
+                            .expect("create_descriptor_set_layout failed")
+                    }).collect();
+
+                let pipeline_layout = unsafe {
+                    device.create_pipeline_layout(
+                            &layouts,
+                        if cfg!(feature = "push_constants") {
+                            Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32))
+                        } else {
+                            None
+                        },
+                    )
+                }
+                .expect("create_pipeline_layout failed");
+                pipeline_layouts.insert(*g, pipeline_layout);
+
+                (*g, layouts)
+            }).collect();
+
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
@@ -637,6 +697,7 @@ impl<B: hal::Backend> Device<B> {
             bound_desc_set_resources: DescriptorSetResources::default(),
             descriptor_pools_per_frame,
             descriptor_pools_sampler,
+            descriptor_set_layouts,
             bound_textures: [0; 16],
             bound_program: INVALID_PROGRAM_ID,
             bound_sampler: [TextureFilter::Linear; 16],
@@ -656,7 +717,7 @@ impl<B: hal::Backend> Device<B> {
             image_available_semaphore,
             render_finished_semaphore,
             pipeline_requirements,
-            pipeline_layouts: FastHashMap::default(),
+            pipeline_layouts,
             pipeline_cache,
             cache_path,
             save_cache,
@@ -1351,14 +1412,12 @@ impl<B: hal::Backend> Device<B> {
         warn!("link_program is not implemented with gfx backend");
         Ok(())
     }
-
     pub fn create_program(
         &mut self,
         shader_name: &str,
         shader_kind: &ShaderKind,
         features: &[&str],
     ) -> Result<ProgramId, ShaderError> {
-        use std::iter;
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
@@ -1368,31 +1427,14 @@ impl<B: hal::Backend> Device<B> {
             }
         }
 
-        let shader_group = ShaderGroup::from(*shader_kind);
-        if let Entry::Vacant(v) = self.pipeline_layouts.entry(*shader_kind) {
-            let layout = unsafe {
-                self.device.create_pipeline_layout(
-                    iter::once(self.descriptor_pools_per_frame[self.next_id].get_layout(shader_group))
-                        .chain(iter::once(self.descriptor_pools_sampler[self.next_id].get_layout(shader_group)))
-                        .chain(iter::once(self.descriptor_pools_per_draw[self.next_id].get_layout(shader_group)))
-                        .chain(self.desc_pool_locals.as_ref().map(|dp| dp.descriptor_set_layout())),
-                    if cfg!(feature = "push_constants") {
-                        Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32))
-                    } else {
-                        None
-                    },
-                )
-            }
-            .expect("create_pipeline_layout failed");
-            v.insert(layout);
-        };
+        let desc_group = DescriptorGroup::from(*shader_kind);
         let program = Program::create(
             self.pipeline_requirements
                 .get(&name)
                 .expect(&format!("Can't load pipeline data for: {}!", name))
                 .clone(),
             &self.device,
-            &self.pipeline_layouts[shader_kind],
+            &self.pipeline_layouts[&desc_group],
             &mut self.heaps,
             &self.limits,
             &name,
@@ -3658,6 +3700,11 @@ impl<B: hal::Backend> Device<B> {
             }
             if let Some(buffer) = self.locals_buffer {
                 buffer.deinit(&self.device, &mut self.heaps);
+            }
+            for (_, layouts) in self.descriptor_set_layouts {
+                for layout in layouts {
+                    self.device.destroy_descriptor_set_layout(layout);
+                }
             }
             for descriptor_pool in self.descriptor_pools_per_draw {
                 descriptor_pool.deinit(&self.device);
