@@ -31,7 +31,12 @@ const MAX_INPUT_ATTRIBUTES: u32 = 16;
 const DESCRIPTOR_SET_PER_FRAME: usize = 0;
 const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
+#[cfg(not(feature = "push_constants"))]
+const DESCRIPTOR_SET_LOCALS: usize = 3;
+#[cfg(feature = "push_constants")]
 const DESCRIPTOR_SET_COUNT: usize = 3;
+#[cfg(not(feature = "push_constants"))]
+const DESCRIPTOR_SET_COUNT: usize = 4;
 
 const DRAW_UNIFORM_COUNT: usize = 6;
 
@@ -234,6 +239,10 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
+                if write_ron {
+                    #[cfg(not(feature = "push_constants"))]
+                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS], &mut bindings_map);
+                }
             }
 
         // Adding location info for non-uniform variables.
@@ -270,11 +279,14 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 new_data.push_str(&line);
                 new_data.push('\n');
         } else {
+            #[cfg(feature = "push_constants")]
             new_data.push_str(
                 &l
                     .replace("uTransform", "pushConstants.uTransform")
                     .replace("uMode", "pushConstants.uMode")
             );
+            #[cfg(not(feature = "push_constants"))]
+            new_data.push_str(&l);
             new_data.push('\n');
         }
     }
@@ -289,6 +301,8 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_FRAME].len(), DescriptorType::SampledImage),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage),
+                #[cfg(not(feature = "push_constants"))]
+                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS].len(), DescriptorType::UniformBuffer),
             ],
             descriptor_set_layout_bindings,
             vertex_buffer_descriptors,
@@ -396,6 +410,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
     }
 }
 
+#[cfg(feature = "push_constants")]
 fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
         "\tlayout(push_constant) uniform PushConsts {\n\
@@ -404,6 +419,18 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
          \t\t// an operation mode for this batch.\n\
          \t\tint uMode;\n\
          \t} pushConstants;\n",
+    );
+}
+
+#[cfg(not(feature = "push_constants"))]
+fn replace_non_sampler_uniforms(new_data: &mut String) {
+    new_data.push_str(
+        "\tlayout(set = 3, binding = 0) uniform Locals {\n\
+         \t\tuniform mat4 uTransform;       // Orthographic projection\n\
+         \t\t// A generic uniform that shaders can optionally use to configure\n\
+         \t\t// an operation mode for this batch.\n\
+         \t\tuniform int uMode;\n\
+         \t};\n",
     );
 }
 
@@ -423,6 +450,23 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
         "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_FRAME,
         x => unreachable!("Sampler not found: {:?}", x),
     }
+}
+
+#[cfg(not(feature = "push_constants"))]
+fn add_locals_to_descriptor_set_layout(
+    descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
+    bindings_map: &mut HashMap<String, u32>,
+) {
+    descriptor_set_layouts.push(
+        DescriptorSetLayoutBinding {
+            binding: 0,
+            ty: DescriptorType::UniformBuffer,
+            count: 1,
+            stage_flags: ShaderStageFlags::VERTEX,
+            immutable_samplers: false,
+        }
+    );
+    bindings_map.insert("Locals".to_owned(), 0);
 }
 
 fn extend_non_uniform_variables_with_location_info(
