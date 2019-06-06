@@ -465,6 +465,7 @@ impl<B: hal::Backend> Program<B> {
         desc_pools_per_frame: &mut DescriptorPools<B>,
         desc_pools_sampler: &mut DescriptorPools<B>,
         desc_set_per_draw: &B::DescriptorSet,
+        desc_set_locals: Option<&B::DescriptorSet>,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
         blend_color: ColorF,
@@ -481,6 +482,7 @@ impl<B: hal::Backend> Program<B> {
         let ref pipeline_layout = pipeline_layouts[&self.shader_kind];
         *self.constants.last_mut().unwrap() = program_mode_id;
         unsafe {
+            #[cfg(feature = "push_constants")]
             cmd_buffer.push_graphics_constants(
                 pipeline_layout,
                 hal::pso::ShaderStageFlags::VERTEX,
@@ -510,13 +512,16 @@ impl<B: hal::Backend> Program<B> {
                     )),
             );
 
+            #[cfg(not(feature = "push_constants"))]
+            assert!(desc_set_locals.is_some());
             use std::iter;
             cmd_buffer.bind_graphics_descriptor_sets(
                 pipeline_layout,
                 0,
                 iter::once(desc_pools_per_frame.get_set_by_group(self.shader_kind.into()).0)
                     .chain(iter::once(desc_pools_sampler.get_set_by_group(self.shader_kind.into()).0))
-                    .chain(iter::once(desc_set_per_draw)),
+                    .chain(iter::once(desc_set_per_draw))
+                    .chain(desc_set_locals),
                 &[],
             );
             desc_pools_per_frame.next(self.shader_kind.into(), device, pipeline_requirements);

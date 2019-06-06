@@ -26,7 +26,7 @@ pub(super) enum ShaderGroup {
     ClipCache,
 }
 
-struct DescPool<B: hal::Backend> {
+pub(super) struct DescPool<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
     descriptor_set: Vec<B::DescriptorSet>,
     descriptor_set_layout: B::DescriptorSetLayout,
@@ -36,7 +36,7 @@ struct DescPool<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> DescPool<B> {
-    fn new(
+    pub(super) fn new(
         device: &B::Device,
         max_size: usize,
         descriptor_range_descriptors: Vec<DescriptorRangeDesc>,
@@ -65,23 +65,23 @@ impl<B: hal::Backend> DescPool<B> {
         dp
     }
 
-    fn make_descriptor_set(&mut self) -> (&B::DescriptorSet, usize) {
+    pub(super) fn make_descriptor_set(&mut self) -> (&B::DescriptorSet, usize) {
         if let Some(idx) = self.free_sets.pop() {
             return (&self.descriptor_set[idx], idx)
         }
         (&self.descriptor_set[self.current_descriptor_set_idx], self.current_descriptor_set_idx)
     }
 
-    fn descriptor_set_at_idx(&self, index: usize) -> &B::DescriptorSet {
+    pub(super) fn descriptor_set_at_idx(&self, index: usize) -> &B::DescriptorSet {
         assert!(index <= self.current_descriptor_set_idx);
         &self.descriptor_set[index]
     }
 
-    fn descriptor_set_layout(&self) -> &B::DescriptorSetLayout {
+    pub(super) fn descriptor_set_layout(&self) -> &B::DescriptorSetLayout {
         &self.descriptor_set_layout
     }
 
-    fn next(&mut self) -> bool {
+    pub(super) fn next(&mut self) -> bool {
         if !self.free_sets.is_empty() {
             return true;
         }
@@ -118,12 +118,12 @@ impl<B: hal::Backend> DescPool<B> {
         !self.free_sets.is_empty()
     }
 
-    fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         self.current_descriptor_set_idx = 0;
         self.free_sets.clear();
     }
 
-    fn deinit(self, device: &B::Device) {
+    pub(super) fn deinit(self, device: &B::Device) {
         unsafe {
             device.destroy_descriptor_set_layout(self.descriptor_set_layout);
             device.destroy_descriptor_pool(self.descriptor_pool);
@@ -387,7 +387,7 @@ impl<B: hal::Backend> DescriptorPools<B> {
     }
 }
 
-fn get_layout_and_range(
+pub(super) fn get_layout_and_range(
     pipeline_requirements: &FastHashMap<String, PipelineRequirements>,
     shader_name: &'static str,
     descriptor_group_id: usize,

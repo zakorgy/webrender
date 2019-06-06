@@ -18,6 +18,7 @@ use std::cell::Cell;
 use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::fs::{File, OpenOptions};
+use std::hash::{Hash, Hasher};
 use std::io::prelude::*;
 use std::mem;
 use std::path::PathBuf;
@@ -70,10 +71,11 @@ pub struct DeviceInit<B: hal::Backend> {
     pub save_cache: bool,
 }
 
-const DESCRIPTOR_COUNT: usize = 256;
+const DESCRIPTOR_COUNT: usize = 96;
 const DESCRIPTOR_SET_PER_FRAME: usize = 0;
 const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
+const DESCRIPTOR_SET_LOCALS: usize = 3;
 const PER_DRAW_SAMPLER_COUNT: usize = 5;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
@@ -135,6 +137,37 @@ pub struct ProgramId(u32);
 
 pub struct PBO;
 pub struct VAO;
+
+#[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)]
+pub(super) struct Locals {
+    uTransform: [[f32; 4]; 4],
+    uMode: i32,
+}
+
+ impl Locals {
+    fn transform_as_u32_slice(&self) -> &[u32; 16] {
+        unsafe {
+            std::mem::transmute::<&[[f32; 4]; 4], &[u32; 16]>(&self.uTransform)
+        }
+    }
+}
+
+ impl Hash for Locals {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.transform_as_u32_slice().hash(state);
+        self.uMode.hash(state);
+    }
+}
+
+ impl PartialEq for Locals {
+    fn eq(&self, other: &Locals) -> bool {
+        self.transform_as_u32_slice() == other.transform_as_u32_slice() &&
+        self.uMode == other.uMode
+    }
+}
+
+impl Eq for Locals {}
 
 struct Fence<B: hal::Backend> {
     inner: B::Fence,
@@ -207,7 +240,6 @@ pub struct Device<B: hal::Backend> {
     bound_desc_set_resources: DescriptorSetResources,
     descriptor_pools_per_frame: SmallVec<[DescriptorPools<B>; 1]>,
     descriptor_pools_sampler: SmallVec<[DescriptorPools<B>; 1]>,
-    // device state
     bound_textures: [u32; 16],
     bound_program: ProgramId,
     bound_sampler: [TextureFilter; 16],
@@ -221,6 +253,11 @@ pub struct Device<B: hal::Backend> {
     device_pixel_ratio: f32,
     depth_available: bool,
     upload_method: UploadMethod,
+
+    desc_pool_locals: Option<DescPool<B>>,
+    locals: Option<FastHashMap<Locals, usize>>,
+    bound_locals: usize,
+    locals_buffer: Option<UniformBufferHandler<B>>,
 
     // HW or API capabilities
     capabilities: Capabilities,
@@ -498,6 +535,41 @@ impl<B: hal::Backend> Device<B> {
             ));
             per_draw_descriptor_bindings.push(FastHashMap::default());
         }
+
+        let desc_pool_locals = if cfg!(feature = "push_constants") {
+            None
+        } else {
+            let (layout, range) = get_layout_and_range(
+                &pipeline_requirements,
+                "brush_solid",
+                DESCRIPTOR_SET_LOCALS,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT)
+            );
+            Some(DescPool::new(
+                &device,
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                range,
+                layout,
+            ))
+        };
+
+        let locals_buffer = if cfg!(feature = "push_constants") {
+            None
+        } else {
+            Some(UniformBufferHandler::new(
+                hal::buffer::Usage::UNIFORM,
+                mem::size_of::<Locals>(),
+                (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+                (limits.non_coherent_atom_size - 1) as usize,
+            ))
+        };
+
+        let locals = if cfg!(feature = "push_constants") {
+            None
+        } else {
+            Some(FastHashMap::default())
+        };
+
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
 
@@ -580,6 +652,11 @@ impl<B: hal::Backend> Device<B> {
             pipeline_cache,
             cache_path,
             save_cache,
+
+            desc_pool_locals,
+            locals,
+            bound_locals: 0,
+            locals_buffer,
         }
     }
 
@@ -640,6 +717,20 @@ impl<B: hal::Backend> Device<B> {
         for map in self.per_draw_descriptor_bindings.iter_mut() {
             map.clear();
         }
+
+        if let Some(ref mut desc_pool_locals) = self.desc_pool_locals {
+            desc_pool_locals.reset();
+        }
+
+        if let Some(ref mut locals_buffer) = self.locals_buffer {
+            locals_buffer.reset()
+        }
+
+        if let Some(ref mut locals) = self.locals {
+            locals.clear()
+        }
+
+        self.bound_locals = 0;
 
         for pools in self.descriptor_pools_per_frame.iter_mut() {
             pools.reset(&self.device)
@@ -1167,6 +1258,11 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    #[cfg(not(feature = "push_constants"))]
+    pub(crate) fn bound_program(&self) -> ProgramId {
+        self.bound_program
+    }
+
     pub(crate) fn viewport_size(&self) -> DeviceIntSize {
         DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _)
     }
@@ -1266,8 +1362,13 @@ impl<B: hal::Backend> Device<B> {
                 self.device.create_pipeline_layout(
                     iter::once(self.descriptor_pools_per_frame[self.next_id].get_layout(shader_group))
                         .chain(iter::once(self.descriptor_pools_sampler[self.next_id].get_layout(shader_group)))
-                        .chain(iter::once(self.descriptor_pools_per_draw[self.next_id].get_layout(shader_group))),
-                    Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32)),
+                        .chain(iter::once(self.descriptor_pools_per_draw[self.next_id].get_layout(shader_group)))
+                        .chain(self.desc_pool_locals.as_ref().map(|dp| dp.descriptor_set_layout())),
+                    if cfg!(feature = "push_constants") {
+                        Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32))
+                    } else {
+                        None
+                    },
                 )
             }
             .expect("create_pipeline_layout failed");
@@ -1319,7 +1420,9 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         assert_eq!(*program_id, self.bound_program);
-        self.programs
+
+        if cfg!(feature = "push_constants") {
+            self.programs
             .get_mut(program_id)
             .expect(&format!("No program with id {:?}", program_id))
             .constants[0..16].copy_from_slice(
@@ -1327,6 +1430,35 @@ impl<B: hal::Backend> Device<B> {
                     std::mem::transmute::<_, &[u32; 16]>(&projection.to_row_arrays())
                 }
             );
+            return;
+        }
+
+        let locals = Locals {
+            uTransform: projection.to_row_arrays(),
+            uMode: self.program_mode_id,
+        };
+
+        let bound_locals = if self.locals.as_ref().unwrap().contains_key(&locals) {
+            *self.locals.as_ref().unwrap().get(&locals).unwrap()
+        } else {
+            assert!(self.desc_pool_locals.as_mut().unwrap().next());
+            let (descriptor_set, idx) = self.desc_pool_locals.as_mut().unwrap().make_descriptor_set();
+            self.locals_buffer.as_mut().unwrap().add(&self.device, &[locals], &mut self.heaps);
+            unsafe {
+                self.device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
+                    set: descriptor_set,
+                    binding: 0,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Buffer(
+                        &self.locals_buffer.as_ref().unwrap().buffer().buffer,
+                        Some(0) .. None,
+                    )),
+                }));
+            }
+            self.locals.as_mut().unwrap().insert(locals, idx);
+            idx
+        };
+        self.bound_locals = bound_locals;
     }
 
     pub fn bind_textures(&mut self) {
@@ -1545,6 +1677,7 @@ impl<B: hal::Backend> Device<B> {
                 .shader_kind.into();
             self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, location)
         };
+        let bound_locals = self.bound_locals;
 
         self.programs
             .get_mut(&self.bound_program)
@@ -1557,6 +1690,7 @@ impl<B: hal::Backend> Device<B> {
                 &mut self.descriptor_pools_per_frame[self.next_id],
                 &mut self.descriptor_pools_sampler[self.next_id],
                 desc_set_per_draw,
+                self.desc_pool_locals.as_mut().map(|dp| dp.descriptor_set_at_idx(bound_locals)),
                 &vec![],
                 self.current_blend_state.get(),
                 self.blend_color.get(),
@@ -3498,6 +3632,12 @@ impl<B: hal::Backend> Device<B> {
             }
             self.device.destroy_sampler(self.sampler_linear);
             self.device.destroy_sampler(self.sampler_nearest);
+            if let Some(dp) = self.desc_pool_locals {
+                dp.deinit(&self.device);
+            }
+            if let Some(buffer) = self.locals_buffer {
+                buffer.deinit(&self.device, &mut self.heaps);
+            }
             for descriptor_pool in self.descriptor_pools_per_draw {
                 descriptor_pool.deinit(&self.device);
             }
