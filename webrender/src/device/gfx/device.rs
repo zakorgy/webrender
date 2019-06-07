@@ -235,8 +235,8 @@ pub struct Device<B: hal::Backend> {
     retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
-    descriptor_pools_per_draw: SmallVec<[DescriptorPools<B>; 1]>,
-    per_draw_descriptor_bindings: SmallVec<[FastHashMap<DescriptorSetResources, DescriptorSetLocation>; 1]>,
+    descriptor_pools_per_draw: DescriptorPools<B>,
+    per_draw_descriptor_bindings: FastHashMap<DescriptorSetResources, SmallVec<[DescriptorSetInfo; 1]>>,
     bound_desc_set_resources: DescriptorSetResources,
     descriptor_pools_per_frame: SmallVec<[DescriptorPools<B>; 1]>,
     descriptor_pools_sampler: SmallVec<[DescriptorPools<B>; 1]>,
@@ -479,21 +479,19 @@ impl<B: hal::Backend> Device<B> {
         let pipeline_requirements: FastHashMap<String, PipelineRequirements> =
             from_str(&shader_source::PIPELINES).expect("Failed to load pipeline requirements");
 
-        let mut descriptor_pools_per_draw = SmallVec::new();
+        let descriptor_pools_per_draw = DescriptorPools::new(
+            &device,
+            descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+            &pipeline_requirements,
+            DESCRIPTOR_SET_PER_DRAW,
+        );
         let mut descriptor_pools_per_frame = SmallVec::new();
         let mut descriptor_pools_sampler = SmallVec::new();
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
-        let mut per_draw_descriptor_bindings = SmallVec::new();
+        let per_draw_descriptor_bindings = FastHashMap::default();
         for _ in 0 .. frame_count {
-            descriptor_pools_per_draw.push(DescriptorPools::new(
-                &device,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                &pipeline_requirements,
-                DESCRIPTOR_SET_PER_DRAW,
-            ));
-
             descriptor_pools_per_frame.push(DescriptorPools::new(
                 &device,
                 8,
@@ -533,7 +531,6 @@ impl<B: hal::Backend> Device<B> {
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                 (limits.optimal_buffer_copy_offset_alignment - 1) as usize,
             ));
-            per_draw_descriptor_bindings.push(FastHashMap::default());
         }
 
         let desc_pool_locals = if cfg!(feature = "push_constants") {
@@ -709,14 +706,10 @@ impl<B: hal::Backend> Device<B> {
 
         self.render_pass.take().unwrap().deinit(&self.device);
 
-        for pools in self.descriptor_pools_per_draw.iter_mut() {
-            pools.reset(&self.device)
-        }
+        self.descriptor_pools_per_draw.reset(&self.device);
 
         self.bound_desc_set_resources = DescriptorSetResources::default();
-        for map in self.per_draw_descriptor_bindings.iter_mut() {
-            map.clear();
-        }
+        self.per_draw_descriptor_bindings.clear();
 
         if let Some(ref mut desc_pool_locals) = self.desc_pool_locals {
             desc_pool_locals.reset();
@@ -1362,7 +1355,7 @@ impl<B: hal::Backend> Device<B> {
                 self.device.create_pipeline_layout(
                     iter::once(self.descriptor_pools_per_frame[self.next_id].get_layout(shader_group))
                         .chain(iter::once(self.descriptor_pools_sampler[self.next_id].get_layout(shader_group)))
-                        .chain(iter::once(self.descriptor_pools_per_draw[self.next_id].get_layout(shader_group)))
+                        .chain(iter::once(self.descriptor_pools_per_draw.get_layout(shader_group)))
                         .chain(self.desc_pool_locals.as_ref().map(|dp| dp.descriptor_set_layout())),
                     if cfg!(feature = "push_constants") {
                         Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32))
@@ -1464,6 +1457,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+        let (frame_id, frame_count) = (self.frame_id, self.frame_count);
         let program = self
             .programs
             .get_mut(&self.bound_program)
@@ -1472,6 +1466,8 @@ impl<B: hal::Backend> Device<B> {
         unsafe { cmd_buffer.begin() };
         let shader_group = program.shader_kind.into();
         let need_alloc = {
+            // The state of the currently bound textures.
+            // We want to find a descriptor set which is bound to these and not submitted to the GPU.
             let bound_resources = DescriptorSetResources::new(
                 shader_group,
                 [
@@ -1483,13 +1479,28 @@ impl<B: hal::Backend> Device<B> {
                 ],
             );
 
-            let (desc_set, need_alloc) = match self.per_draw_descriptor_bindings[self.next_id].entry(bound_resources) {
-                Entry::Occupied(o) => {
-                    (self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, *o.get()), false)
+            // Check if we have a free to use descriptor set for these bindings, or we need to create a new one
+            let (desc_set, need_bind) = match self.per_draw_descriptor_bindings.entry(bound_resources) {
+                Entry::Occupied(mut info_vec) => {
+                    let has_free_set = info_vec.get().into_iter().any(|i| !i.still_in_flight(frame_id, frame_count));
+                    // If there is one and it's not submitted use it
+                    if has_free_set {
+                        let info = info_vec.get_mut().into_iter().find(|i| !i.still_in_flight(frame_id, frame_count)).unwrap();
+                        info.bound_in_frame = frame_id;
+                        (self.descriptor_pools_per_draw.get_set_at_location(shader_group, *info), false)
+                    // Else create a new one
+                    } else {
+                        let (desc_set, mut info) = self.descriptor_pools_per_draw.get_set_by_group(shader_group);
+                        info.bound_in_frame = frame_id;
+                        info_vec.get_mut().push(info);
+                        (desc_set, true)
+                    }
                 }
+                // If there is no entry for this texture combinaion add a new one
                 Entry::Vacant(v) => {
-                    let (desc_set, set_location) = self.descriptor_pools_per_draw[self.next_id].get_set_by_group(shader_group);
-                    v.insert(set_location);
+                    let (desc_set, mut info) = self.descriptor_pools_per_draw.get_set_by_group(shader_group);
+                    info.bound_in_frame = self.frame_id;
+                    v.insert([info].into());
                     (desc_set, true)
                 }
             };
@@ -1498,7 +1509,8 @@ impl<B: hal::Backend> Device<B> {
 
             for &(index, sampler_name) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
                 let image = &self.images[&self.bound_textures[index]].core;
-                if need_alloc {
+                if need_bind {
+                    // Bind textures to new descriptor
                     program.bind_texture(
                         &self.device,
                         desc_set,
@@ -1507,7 +1519,8 @@ impl<B: hal::Backend> Device<B> {
                         &mut cmd_buffer,
                     );
                 } else {
-                    // We need to transit the image, even though it's bound in the descriptor set
+                    // We need to ensure the image is in the proper layout,
+                    // even though it was bound to the descriptor set eralier
                     let mut src_stage = Some(hal::pso::PipelineStage::empty());
                     if let Some(barrier) = image.transit(
                         hal::image::Access::SHADER_READ,
@@ -1527,11 +1540,10 @@ impl<B: hal::Backend> Device<B> {
                 }
                 program.bound_textures[index] = self.bound_textures[index];
             }
-            need_alloc
+            need_bind
         };
         if need_alloc {
-            self.descriptor_pools_per_draw[self.next_id]
-                .next(shader_group, &self.device, &self.pipeline_requirements);
+            self.descriptor_pools_per_draw.next(shader_group, &self.device, &self.pipeline_requirements);
         }
 
         let (desc_set, _) = self.descriptor_pools_per_frame[self.next_id].get_set_by_group(shader_group);
@@ -1637,6 +1649,7 @@ impl<B: hal::Backend> Device<B> {
         let mut before_depth_state = None;
         let mut pre_stage = Some(PipelineStage::empty());
         let mut pre_depth_stage = Some(PipelineStage::empty());
+        let frame_id = self.frame_id;
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         unsafe {
             cmd_buffer.begin();
@@ -1669,13 +1682,16 @@ impl<B: hal::Backend> Device<B> {
             }
         }
 
-
         let ref desc_set_per_draw = {
-            let location = self.per_draw_descriptor_bindings[self.next_id][&self.bound_desc_set_resources];
+            let location = self
+                .per_draw_descriptor_bindings[&self.bound_desc_set_resources]
+                .iter()
+                .find(|i| i.bound_in_frame == frame_id)
+                .unwrap();
             let shader_group = self.programs
                 .get(&self.bound_program).expect("Program not found")
                 .shader_kind.into();
-            self.descriptor_pools_per_draw[self.next_id].get_set_at_location(shader_group, location)
+            self.descriptor_pools_per_draw.get_set_at_location(shader_group, *location)
         };
         let bound_locals = self.bound_locals;
 
@@ -2586,15 +2602,15 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let ref mut descriptor_pools_per_draw = self.descriptor_pools_per_draw;
-        for (idx, map) in self.per_draw_descriptor_bindings.iter_mut().enumerate() {
-            map.retain(|ref k, v| {
-                if k.has_texture_id(&texture.id) {
-                    descriptor_pools_per_draw[idx].mark_as_free(k.shader_group, *v);
-                    return false;
+        self.per_draw_descriptor_bindings.retain(|ref res, ref mut info_vec| {
+            if res.has_texture_id(&texture.id) {
+                for info in info_vec.iter() {
+                    descriptor_pools_per_draw.mark_as_free(res.shader_group, *info);
                 }
-                true
-            });
-        }
+                return false;
+            }
+            true
+        });
 
         let image = self.images.remove(&texture.id).expect("Texture not found.");
         record_gpu_free(texture.size_in_bytes());
@@ -3638,9 +3654,7 @@ impl<B: hal::Backend> Device<B> {
             if let Some(buffer) = self.locals_buffer {
                 buffer.deinit(&self.device, &mut self.heaps);
             }
-            for descriptor_pool in self.descriptor_pools_per_draw {
-                descriptor_pool.deinit(&self.device);
-            }
+            self.descriptor_pools_per_draw.deinit(&self.device);
             for descriptor_pool in self.descriptor_pools_per_frame {
                 descriptor_pool.deinit(&self.device);
             }

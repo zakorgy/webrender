@@ -9,6 +9,7 @@ use hal::pso::{DescriptorRangeDesc, DescriptorSetLayoutBinding};
 use internal_types::FastHashMap;
 
 use super::PipelineRequirements;
+use super::super::GpuFrameId;
 
 const DEBUG_DESCRIPTOR_COUNT: usize = 16;
 
@@ -132,9 +133,21 @@ impl<B: hal::Backend> DescPool<B> {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(super) struct DescriptorSetLocation {
+pub(super) struct DescriptorSetInfo {
     pool_idx: usize,
     set_idx: usize,
+    pub bound_in_frame: GpuFrameId,
+}
+
+impl DescriptorSetInfo {
+    pub fn still_in_flight(&self, frame_id: GpuFrameId, frame_count: usize) -> bool {
+        for i in 0 .. frame_count {
+            if self.bound_in_frame == GpuFrameId(frame_id.0 - i) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 pub(super) struct DescriptorPools<B: hal::Backend> {
@@ -235,20 +248,21 @@ impl<B: hal::Backend> DescriptorPools<B> {
         }
     }
 
-    pub(super) fn get_set_by_group(&mut self, shader_group: ShaderGroup) -> (&B::DescriptorSet, DescriptorSetLocation) {
+    pub(super) fn get_set_by_group(&mut self, shader_group: ShaderGroup) -> (&B::DescriptorSet, DescriptorSetInfo) {
         let pool_idx = match shader_group {
             ShaderGroup::Debug => 0,
             ShaderGroup::ClipCache => *self.marked_cache_clip_pools.first().unwrap_or(&self.cache_clip_pool_idx),
             ShaderGroup::Brush => *self.marked_brush_pools.first().unwrap_or(&self.brush_pool_idx),
         };
         let (desc_set, set_idx) = self.get_pool_mut(shader_group).make_descriptor_set();
-        (desc_set, DescriptorSetLocation {
+        (desc_set, DescriptorSetInfo {
             pool_idx,
-            set_idx
+            set_idx,
+            bound_in_frame: GpuFrameId(0),
         })
     }
 
-    pub(super) fn get_set_at_location(&self, shader_group: ShaderGroup, location: DescriptorSetLocation) -> &B::DescriptorSet {
+    pub(super) fn get_set_at_location(&self, shader_group: ShaderGroup, location: DescriptorSetInfo) -> &B::DescriptorSet {
         let pool = match shader_group {
             ShaderGroup::Debug => &self.debug_pool,
             ShaderGroup::ClipCache => {
@@ -267,7 +281,7 @@ impl<B: hal::Backend> DescriptorPools<B> {
         self.get_pool(shader_group).descriptor_set_layout()
     }
 
-    pub(super) fn mark_as_free(&mut self, shader_group: ShaderGroup, location: DescriptorSetLocation) {
+    pub(super) fn mark_as_free(&mut self, shader_group: ShaderGroup, location: DescriptorSetInfo) {
         let pool = match shader_group {
             ShaderGroup::Debug => &mut self.debug_pool,
             ShaderGroup::ClipCache => {
