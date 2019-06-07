@@ -599,6 +599,14 @@ fn main() {
             let surface = instance.create_surface(window.get_window().unwrap());
             Some(surface)
         };
+
+        #[cfg(feature = "vulkan")]
+        let backend_api = webrender::BackendApiType::Vulkan;
+        #[cfg(feature = "metal")]
+        let backend_api = webrender::BackendApiType::Metal;
+        #[cfg(feature = "dx12")]
+        let backend_api = webrender::BackendApiType::Dx12;
+
         webrender::DeviceInit {
             instance: Box::new(instance),
             adapter,
@@ -607,6 +615,7 @@ fn main() {
             descriptor_count: args.value_of("descriptor_count").map(|d| d.parse::<u32>().unwrap()),
             cache_path,
             save_cache: true,
+            backend_api,
         }
     };
 
@@ -636,7 +645,7 @@ fn main() {
     );
 
     if let Some(window_title) = wrench.take_title() {
-        if !cfg!(windows) {
+        if cfg!(not(windows)) {
             window.set_title(&window_title);
         }
     }

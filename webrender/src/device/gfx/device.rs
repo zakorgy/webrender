@@ -63,6 +63,13 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     layers: 0 .. 1,
 };
 
+#[derive(PartialEq)]
+pub enum BackendApiType {
+    Vulkan,
+    Dx12,
+    Metal,
+}
+
 pub struct DeviceInit<B: hal::Backend> {
     pub instance: Box<hal::Instance<Backend = B>>,
     pub adapter: hal::Adapter<B>,
@@ -71,6 +78,7 @@ pub struct DeviceInit<B: hal::Backend> {
     pub descriptor_count: Option<u32>,
     pub cache_path: Option<PathBuf>,
     pub save_cache: bool,
+    pub backend_api: BackendApiType,
 }
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
@@ -159,7 +167,7 @@ pub struct Device<B: hal::Backend> {
     bound_per_group_textures: PerGroupBindings,
 
     // Locals related things
-    locals_descriptors: Option<DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>>,
+    locals_descriptors: DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>,
     bound_locals: Locals,
 
     descriptor_data: DescriptorData<B>,
@@ -175,7 +183,7 @@ pub struct Device<B: hal::Backend> {
     device_pixel_ratio: f32,
     depth_available: bool,
     upload_method: UploadMethod,
-    locals_buffer: Option<UniformBufferHandler<B>>,
+    locals_buffer: UniformBufferHandler<B>,
 
     // HW or API capabilities
     capabilities: Capabilities,
@@ -211,6 +219,9 @@ pub struct Device<B: hal::Backend> {
     cache_path: Option<PathBuf>,
     save_cache: bool,
     wait_for_resize: bool,
+
+    // The device supports push constants
+    pub use_push_consts: bool,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -229,6 +240,7 @@ impl<B: hal::Backend> Device<B> {
             descriptor_count,
             cache_path,
             save_cache,
+            backend_api,
         } = init;
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
@@ -309,6 +321,12 @@ impl<B: hal::Backend> Device<B> {
         let surface_format = hal::format::Format::Bgra8Unorm;
         let depth_format = hal::format::Format::D32Sfloat;
         let render_pass = Device::create_render_passes(&device, surface_format, depth_format);
+
+        // Disable push constants for Intel's Vulkan driver on Windows
+        let has_broken_push_const_support = cfg!(target_os = "windows")
+            && backend_api == BackendApiType::Vulkan
+            && adapter.info.vendor == 0x8086;
+        let use_push_consts = !has_broken_push_const_support;
 
         let (
             swap_chain,
@@ -436,16 +454,12 @@ impl<B: hal::Backend> Device<B> {
             ));
         }
 
-        let locals_buffer = if cfg!(feature = "push_constants") {
-            None
-        } else {
-            Some(UniformBufferHandler::new(
-                hal::buffer::Usage::UNIFORM,
-                mem::size_of::<Locals>(),
-                (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-                (limits.non_coherent_atom_size - 1) as usize,
-            ))
-        };
+        let locals_buffer = UniformBufferHandler::new(
+            hal::buffer::Usage::UNIFORM,
+            mem::size_of::<Locals>(),
+            (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+            (limits.non_coherent_atom_size - 1) as usize,
+        );
 
         let mut per_group_descriptor_sets = FastHashMap::default();
         let descriptor_data:
@@ -458,21 +472,18 @@ impl<B: hal::Backend> Device<B> {
                         (EMPTY_SET_0, vec![]),
                         (DEFAULT_SET_1, vec![&sampler_nearest]),
                         (COMMON_SET_2, vec![]),
-                        #[cfg(not(feature = "push_constants"))]
                         (COMMON_SET_3, vec![]),
                     ],
                     DescriptorGroup::Clip => [
                         (EMPTY_SET_0, vec![]),
                         (CLIP_SET_1, vec![&sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest]),
                         (COMMON_SET_2, vec![]),
-                        #[cfg(not(feature = "push_constants"))]
                         (COMMON_SET_3, vec![]),
                     ],
                     DescriptorGroup::Primitive => [
                         (PRIMITIVE_SET_0, vec![&sampler_linear, &sampler_linear]),
                         (PRIMITIVE_SET_1, vec![&sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest]),
                         (COMMON_SET_2, vec![]),
-                        #[cfg(not(feature = "push_constants"))]
                         (COMMON_SET_3, vec![]),
                     ],
                 };
@@ -483,7 +494,7 @@ impl<B: hal::Backend> Device<B> {
                         DescriptorRanges::from_bindings(bindings)
                     }).collect::<ArrayVec<_>>();
 
-                let set_layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]> = layouts_and_samplers
+                let set_layouts: ArrayVec<[B::DescriptorSetLayout; MAX_DESCRIPTOR_SET_COUNT]> = layouts_and_samplers
                     .iter()
                     .enumerate()
                     .map(|(index, (bindings, immutable_samplers))| {
@@ -507,12 +518,8 @@ impl<B: hal::Backend> Device<B> {
 
                 let pipeline_layout = unsafe {
                     device.create_pipeline_layout(
-                            &set_layouts,
-                        if cfg!(feature = "push_constants") {
-                            Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32))
-                        } else {
-                            None
-                        },
+                        &set_layouts,
+                        Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32)),
                     )
                 }
                 .expect("create_pipeline_layout failed");
@@ -545,19 +552,15 @@ impl<B: hal::Backend> Device<B> {
             Vec::new(),
         );
 
-        let locals_descriptors = if cfg!(feature = "push_constants") {
-            None
-        } else {
-            Some(DescriptorSetHandler::new(
-                &device,
-                &mut desc_allocator,
-                &descriptor_data,
-                &DescriptorGroup::Default,
-                DESCRIPTOR_SET_LOCALS,
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                Vec::new(),
-            ))
-        };
+        let locals_descriptors = DescriptorSetHandler::new(
+            &device,
+            &mut desc_allocator,
+            &descriptor_data,
+            &DescriptorGroup::Default,
+            DESCRIPTOR_SET_LOCALS,
+            if use_push_consts { 1 } else { descriptor_count.unwrap_or(DESCRIPTOR_COUNT) },
+            Vec::new(),
+        );
 
         let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
         let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
@@ -624,7 +627,6 @@ impl<B: hal::Backend> Device<B> {
             per_group_descriptors: DescriptorSetHandler::from_existing(per_group_descriptor_sets),
             bound_per_group_textures: PerGroupBindings::default(),
 
-
             locals_descriptors,
             bound_locals: Locals::default(),
             descriptor_data,
@@ -653,6 +655,8 @@ impl<B: hal::Backend> Device<B> {
 
             locals_buffer,
             wait_for_resize: false,
+
+            use_push_consts,
         }
     }
 
@@ -708,17 +712,12 @@ impl<B: hal::Backend> Device<B> {
         self.bound_per_group_textures = PerGroupBindings::default();
         self.per_group_descriptors.reset();
 
-        #[cfg(not(feature = "push_constants"))]
-        {
+        if !self.use_push_consts {
             self.bound_locals = Locals::default();
-            if let Some(ref mut handler) = self.locals_descriptors {
-                handler.reset()
-            }
+            self.locals_descriptors.reset();
         }
 
-        if let Some(ref mut locals_buffer) = self.locals_buffer {
-            locals_buffer.reset()
-        }
+        self.locals_buffer.reset();
 
         unsafe {
             for framebuffer in self.framebuffers.drain(..) {
@@ -1355,6 +1354,7 @@ impl<B: hal::Backend> Device<B> {
             &mut self.shader_modules,
             self.pipeline_cache.as_ref(),
             self.surface_format,
+            self.use_push_consts,
         );
 
         let id = self.generate_program_id();
@@ -1381,7 +1381,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn bind_uniforms(&mut self) {
-        if cfg!(feature = "push_constants") {
+        if self.use_push_consts {
             self.programs
             .get_mut(&self.bound_program)
             .expect("Invalid bound program")
@@ -1390,15 +1390,14 @@ impl<B: hal::Backend> Device<B> {
                     std::mem::transmute::<_, &[u32; 17]>(&self.bound_locals)
                 }
             );
-            return;
         }
 
-        self.locals_descriptors.as_mut().unwrap().bind_locals(
-            self.bound_locals,
+        self.locals_descriptors.bind_locals(
+            if self.use_push_consts { Locals::default() } else { self.bound_locals },
             &self.device,
             &mut self.desc_allocator,
             &self.descriptor_data,
-            self.locals_buffer.as_mut().unwrap(),
+            &mut self.locals_buffer,
             &mut self.heaps,
         );
     }
@@ -1635,8 +1634,8 @@ impl<B: hal::Backend> Device<B> {
             _ => None,
         };
         let ref desc_set_per_draw = self.per_draw_descriptors.descriptor_set(&self.bound_per_draw_bindings);
-        let locals = &self.bound_locals;
-        let ref desc_set_locals = self.locals_descriptors.as_ref().map(|map| map.descriptor_set(locals));
+        let locals = if self.use_push_consts { Locals::default() } else { self.bound_locals };
+        let ref desc_set_locals = self.locals_descriptors.descriptor_set(&locals);
 
         self.programs
             .get_mut(&self.bound_program)
@@ -1649,7 +1648,7 @@ impl<B: hal::Backend> Device<B> {
                 desc_set_per_draw,
                 desc_set_per_pass,
                 desc_set_per_group,
-                *desc_set_locals,
+                Some(*desc_set_locals),
                 &vec![],
                 self.current_blend_state.get(),
                 self.blend_color.get(),
@@ -1657,6 +1656,7 @@ impl<B: hal::Backend> Device<B> {
                 self.scissor_rect,
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
+                self.use_push_consts,
             );
 
         if depth_test_changed {
@@ -3594,15 +3594,10 @@ impl<B: hal::Backend> Device<B> {
             self.per_draw_descriptors.free(&mut self.desc_allocator);
             self.per_group_descriptors.free(&mut self.desc_allocator);
             self.per_pass_descriptors.free(&mut self.desc_allocator);
-            if let Some(handler) = self.locals_descriptors {
-                handler.free(&mut self.desc_allocator);
-            }
+            self.locals_descriptors.free(&mut self.desc_allocator);
 
             self.desc_allocator.dispose(&self.device);
-
-            if let Some(buffer) = self.locals_buffer {
-                buffer.deinit(&self.device, &mut self.heaps);
-            }
+            self.locals_buffer.deinit(&self.device, &mut self.heaps);
             for (_, program) in self.programs {
                 program.deinit(&self.device, &mut self.heaps)
             }

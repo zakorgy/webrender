@@ -192,6 +192,13 @@ pub fn main_wrapper<E: Example>(
             let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
             let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
 
+            #[cfg(feature = "vulkan")]
+            let backend_api = webrender::BackendApiType::Vulkan;
+            #[cfg(feature = "metal")]
+            let backend_api = webrender::BackendApiType::Metal;
+            #[cfg(feature = "dx12")]
+            let backend_api = webrender::BackendApiType::Dx12;
+
             webrender::DeviceInit {
                 instance: Box::new(instance),
                 adapter,
@@ -200,6 +207,7 @@ pub fn main_wrapper<E: Example>(
                 descriptor_count: None,
                 cache_path,
                 save_cache: true,
+                backend_api,
             }
         };
         (window, init)

@@ -24,7 +24,7 @@ const MAX_INDEX_COUNT: usize = 4096;
 // The size of the push constant block is 68 bytes, and we upload it with u32 data (4 bytes).
 pub(super) const PUSH_CONSTANT_BLOCK_SIZE: usize = 17; // 68 / 4
 // The number of specialization constants in each shader.
-const SPECIALIZATION_CONSTANT_COUNT: usize = 5;
+const SPECIALIZATION_CONSTANT_COUNT: usize = 6;
 // Size of a specialization constant variable in bytes.
 const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
 const SPECIALIZATION_FEATURES: &'static [&'static str] = &[
@@ -81,6 +81,7 @@ impl<B: hal::Backend> Program<B> {
         shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
         pipeline_cache: Option<&B::PipelineCache>,
         surface_format: ImageFormat,
+        use_push_consts: bool,
     ) -> Program<B> {
         if !shader_modules.contains_key(shader_name) {
             let vs_file = format!("{}.vert.spv", shader_name);
@@ -108,8 +109,8 @@ impl<B: hal::Backend> Program<B> {
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
         let mut specialization_data =
-            vec![0; SPECIALIZATION_CONSTANT_COUNT * SPECIALIZATION_CONSTANT_SIZE];
-        let constants = SPECIALIZATION_FEATURES
+            vec![0; (SPECIALIZATION_CONSTANT_COUNT - 1) * SPECIALIZATION_CONSTANT_SIZE];
+        let mut constants = SPECIALIZATION_FEATURES
             .iter()
             .zip(specialization_data.chunks_mut(SPECIALIZATION_CONSTANT_SIZE))
             .enumerate()
@@ -122,6 +123,15 @@ impl<B: hal::Backend> Program<B> {
                 }
             })
             .collect::<Vec<_>>();
+        constants.push(hal::pso::SpecializationConstant {
+            id: (SPECIALIZATION_CONSTANT_COUNT - 1) as _,
+            range: {
+                let from = (SPECIALIZATION_CONSTANT_COUNT - 1) * SPECIALIZATION_CONSTANT_SIZE;
+                let to = from + SPECIALIZATION_CONSTANT_SIZE;
+                from as _ .. to as _
+            },
+        });
+        specialization_data.extend_from_slice(&[use_push_consts as u8, 0, 0, 0]);
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
@@ -409,17 +419,19 @@ impl<B: hal::Backend> Program<B> {
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
         pipeline_layout: &B::PipelineLayout,
+        use_push_consts: bool,
     ) {
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
         unsafe {
-            #[cfg(feature = "push_constants")]
-            cmd_buffer.push_graphics_constants(
-                pipeline_layout,
-                hal::pso::ShaderStageFlags::VERTEX,
-                0,
-                &self.constants,
-            );
+            if use_push_consts {
+                cmd_buffer.push_graphics_constants(
+                    pipeline_layout,
+                    hal::pso::ShaderStageFlags::VERTEX,
+                    0,
+                    &self.constants,
+                );
+            }
             cmd_buffer.set_viewports(0, &[viewport.clone()]);
             match scissor_rect {
                 Some(r) => cmd_buffer.set_scissors(
@@ -443,8 +455,9 @@ impl<B: hal::Backend> Program<B> {
                     )),
             );
 
-            #[cfg(not(feature = "push_constants"))]
-            assert!(desc_set_locals.is_some());
+            if !use_push_consts {
+                assert!(desc_set_locals.is_some());
+            }
             use std::iter;
             cmd_buffer.bind_graphics_descriptor_sets(
                 pipeline_layout,

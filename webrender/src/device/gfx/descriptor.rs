@@ -33,10 +33,7 @@ pub(super) const PER_GROUP_RANGE_DEFAULT: std::ops::Range<usize> = 8..9; // Dith
 pub(super) const PER_GROUP_RANGE_CLIP: std::ops::Range<usize> = 5..9; // GpuCache, TransformPalette, RenderTasks, Dither
 pub(super) const PER_GROUP_RANGE_PRIMITIVE: std::ops::Range<usize> = 5..11; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 
-#[cfg(feature = "push_constants")]
-pub(super) const DESCRIPTOR_SET_COUNT: usize = 3;
-#[cfg(not(feature = "push_constants"))]
-pub(super) const DESCRIPTOR_SET_COUNT: usize = 4;
+pub(super) const MAX_DESCRIPTOR_SET_COUNT: usize = 4;
 
 const fn descriptor_set_layout_binding(
     binding: u32,
@@ -67,7 +64,6 @@ pub(super) const COMMON_SET_2: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(2, DT::CombinedImageSampler, SSF::ALL, false),
 ];
 
-#[cfg(not(feature = "push_constants"))]
 pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
     // Locals
     descriptor_set_layout_binding(0, DT::UniformBuffer, SSF::VERTEX, false),
@@ -170,8 +166,8 @@ pub(super) struct PerPassBindings(pub [TextureId; PER_PASS_TEXTURE_COUNT]);
 pub(super) struct PerGroupBindings(pub [TextureId; PER_GROUP_TEXTURE_COUNT]);
 
 pub(super) struct DescriptorGroupData<B: hal::Backend> {
-    pub(super) set_layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]>,
-    pub(super) ranges: ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_COUNT]>,
+    pub(super) set_layouts: ArrayVec<[B::DescriptorSetLayout; MAX_DESCRIPTOR_SET_COUNT]>,
+    pub(super) ranges: ArrayVec<[DescriptorRanges; MAX_DESCRIPTOR_SET_COUNT]>,
     pub(super) pipeline_layout: B::PipelineLayout,
 }
 

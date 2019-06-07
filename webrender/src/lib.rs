@@ -218,3 +218,6 @@ pub use rendy_memory::{DynamicConfig, HeapsConfig, LinearConfig};
 pub use shade::{Shaders, WrShaders};
 pub use webrender_api as api;
 pub use webrender_api::euclid;
+
+#[cfg(not(feature = "gleam"))]
+pub use device::BackendApiType;
