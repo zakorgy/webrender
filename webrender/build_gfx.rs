@@ -31,11 +31,7 @@ const MAX_INPUT_ATTRIBUTES: u32 = 16;
 const DESCRIPTOR_SET_PER_FRAME: usize = 0;
 const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
-#[cfg(not(feature = "push_constants"))]
 const DESCRIPTOR_SET_LOCALS: usize = 3;
-#[cfg(feature = "push_constants")]
-const DESCRIPTOR_SET_COUNT: usize = 3;
-#[cfg(not(feature = "push_constants"))]
 const DESCRIPTOR_SET_COUNT: usize = 4;
 
 const DRAW_UNIFORM_COUNT: usize = 6;
@@ -240,7 +236,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
                 if write_ron {
-                    #[cfg(not(feature = "push_constants"))]
                     add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS], &mut bindings_map);
                 }
             }
@@ -279,14 +274,17 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 new_data.push_str(&line);
                 new_data.push('\n');
         } else {
-            #[cfg(feature = "push_constants")]
+            if l.contains("uTransform") {
+                new_data.push_str("\t\t\tmat4 _transform;\n\t\t\tif (push_constants) { _transform =  pushConstants.uTransform; } else { _transform = uTransform; }\n");
+            }
+            if l.contains("uMode") {
+                new_data.push_str("\t\t\tint _umode;\n\t\t\tif (push_constants) { _umode =  pushConstants.uMode; } else { _umode = uMode; }\n");
+            }
             new_data.push_str(
                 &l
-                    .replace("uTransform", "pushConstants.uTransform")
-                    .replace("uMode", "pushConstants.uMode")
+                    .replace("uTransform", "_transform")
+                    .replace("uMode", "_umode")
             );
-            #[cfg(not(feature = "push_constants"))]
-            new_data.push_str(&l);
             new_data.push('\n');
         }
     }
@@ -301,7 +299,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_FRAME].len(), DescriptorType::SampledImage),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler),
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage),
-                #[cfg(not(feature = "push_constants"))]
                 create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS].len(), DescriptorType::UniformBuffer),
             ],
             descriptor_set_layout_bindings,
@@ -410,7 +407,6 @@ fn replace_sampler_definition_with_texture_and_sampler(
     }
 }
 
-#[cfg(feature = "push_constants")]
 fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
         "\tlayout(push_constant) uniform PushConsts {\n\
@@ -420,10 +416,6 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
          \t\tint uMode;\n\
          \t} pushConstants;\n",
     );
-}
-
-#[cfg(not(feature = "push_constants"))]
-fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
         "\tlayout(set = 3, binding = 0) uniform Locals {\n\
          \t\tuniform mat4 uTransform;       // Orthographic projection\n\
@@ -452,7 +444,6 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
     }
 }
 
-#[cfg(not(feature = "push_constants"))]
 fn add_locals_to_descriptor_set_layout(
     descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
     bindings_map: &mut HashMap<String, u32>,
