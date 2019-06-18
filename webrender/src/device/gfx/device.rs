@@ -81,6 +81,7 @@ const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
 const DESCRIPTOR_SET_LOCALS: usize = 3;
 const PER_DRAW_SAMPLER_COUNT: usize = 5;
+const MUTABLE_SAMPLER_COUNT: usize = 3;
 
 #[cfg(feature = "push_constants")]
 const DESCRIPTOR_SET_PER_LAYOUT: usize = 3;
@@ -250,9 +251,9 @@ pub struct Device<B: hal::Backend> {
     descriptor_pools_per_frame: SmallVec<[DescriptorPools<B>; 1]>,
     descriptor_pools_sampler: SmallVec<[DescriptorPools<B>; 1]>,
     descriptor_set_layouts: FastHashMap<DescriptorGroup, arrayvec::ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>,
-    bound_textures: [u32; 16],
+    bound_textures: [u32; 11],
     bound_program: ProgramId,
-    bound_sampler: [TextureFilter; 16],
+    bound_sampler: [TextureFilter; 11],
     bound_read_texture: (TextureId, i32),
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
@@ -591,34 +592,34 @@ impl<B: hal::Backend> Device<B> {
         let descriptor_set_layouts = [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive]
             .iter()
             .map(|g| {
-                let descriptor_set_layouts = match g {
+                let layouts_and_samplers = match g {
                     DescriptorGroup::Default => [
-                        DEFAULT_SET_0,
-                        DEFAULT_SET_1,
-                        DEFAULT_SET_2,
+                        (DEFAULT_SET_0, vec![&sampler_nearest]),
+                        (COMMON_SET_1, vec![]),
+                        (DEFAULT_SET_2, vec![]),
                         #[cfg(not(feature = "push_constants"))]
-                        COMMON_SET_3,
+                        (COMMON_SET_3, vec![]),
                     ],
                     DescriptorGroup::Clip => [
-                        CLIP_SET_0,
-                        CLIP_SET_1,
-                        CLIP_SET_2,
+                        (CLIP_SET_0, vec![&sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest]),
+                        (COMMON_SET_1, vec![]),
+                        (CLIP_SET_2, vec![]),
                         #[cfg(not(feature = "push_constants"))]
-                        COMMON_SET_3,
+                       (COMMON_SET_3, vec![]),
                     ],
                     DescriptorGroup::Primitive => [
-                        PRIMITIVE_SET_0,
-                        PRIMITIVE_SET_1,
-                        PRIMITIVE_SET_2,
+                        (PRIMITIVE_SET_0, vec![&sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest]),
+                        (COMMON_SET_1, vec![]),
+                        (PRIMITIVE_SET_2, vec![&sampler_linear, &sampler_linear]),
                         #[cfg(not(feature = "push_constants"))]
-                        COMMON_SET_3,
+                        (COMMON_SET_3, vec![]),
                     ],
                 };
 
-                let layouts = descriptor_set_layouts
+                let layouts = layouts_and_samplers
                     .iter()
-                    .map(|set| {
-                        unsafe { device.create_descriptor_set_layout(*set, &[]) }
+                    .map(|(set, immutable_samplers)| {
+                        unsafe { device.create_descriptor_set_layout(*set, immutable_samplers.iter().map(|s| *s)) }
                             .expect("create_descriptor_set_layout failed")
                     }).collect();
 
@@ -698,9 +699,9 @@ impl<B: hal::Backend> Device<B> {
             descriptor_pools_per_frame,
             descriptor_pools_sampler,
             descriptor_set_layouts,
-            bound_textures: [0; 16],
+            bound_textures: [0; 11],
             bound_program: INVALID_PROGRAM_ID,
-            bound_sampler: [TextureFilter::Linear; 16],
+            bound_sampler: [TextureFilter::Linear; 11],
             bound_read_fbo: DEFAULT_READ_FBO,
             bound_read_texture: (INVALID_TEXTURE_ID, 0),
             bound_draw_fbo: DEFAULT_DRAW_FBO,
@@ -1370,9 +1371,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn reset_state(&mut self) {
-        self.bound_textures = [INVALID_TEXTURE_ID; 16];
+        self.bound_textures = [INVALID_TEXTURE_ID; 11];
         self.bound_program = INVALID_PROGRAM_ID;
-        self.bound_sampler = [TextureFilter::Linear; 16];
+        self.bound_sampler = [TextureFilter::Linear; 11];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
     }
@@ -1601,7 +1602,7 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let (desc_set, _) = self.descriptor_pools_sampler[self.next_id].get_set_by_group(shader_group);
-        for &(index, sampler_name) in SAMPLERS.iter() {
+        for &(index, sampler_name) in SAMPLERS[0..MUTABLE_SAMPLER_COUNT].iter() {
             let sampler = match self.bound_sampler[index] {
                 TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
                 TextureFilter::Nearest => &self.sampler_nearest,
@@ -1796,8 +1797,8 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
 
-        self.bound_textures = [INVALID_TEXTURE_ID; 16];
-        self.bound_sampler = [TextureFilter::Linear; 16];
+        self.bound_textures = [INVALID_TEXTURE_ID; 11];
+        self.bound_sampler = [TextureFilter::Linear; 11];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
         self.program_mode_id = 0;
