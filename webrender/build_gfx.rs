@@ -222,17 +222,33 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             if trimmed.contains("sampler") {
                 let code = split_code(trimmed);
                 let set = get_set_from_line(&code) as usize;
-                replace_sampler_definition_with_texture_and_sampler(
-                    set,
-                    &mut binding[set],
-                    code,
-                    &mut descriptor_set_layout_bindings,
-                    &mut bindings_map,
-                    &mut new_data,
-                    &mut sampler_mapping,
-                    write_ron,
-                    color_texture_kind,
-                );
+                let shader_stage_flag = get_shader_stage_flags(&code);
+                if use_combined_sampler(&code) {
+                    extend_sampler_definition(
+                        set,
+                        &mut binding[set],
+                        code,
+                        &mut descriptor_set_layout_bindings,
+                        &mut bindings_map,
+                        &mut new_data,
+                        &mut sampler_mapping,
+                        write_ron,
+                        shader_stage_flag,
+                    );
+                } else {
+                    replace_sampler_definition_with_texture_and_sampler(
+                        set,
+                        &mut binding[set],
+                        code,
+                        &mut descriptor_set_layout_bindings,
+                        &mut bindings_map,
+                        &mut new_data,
+                        &mut sampler_mapping,
+                        write_ron,
+                        color_texture_kind,
+                        shader_stage_flag,
+                    );
+                }
 
                 // Replace non-sampler uniforms with a structure.
                 // We just place a predefined structure to the position of the last non-uniform
@@ -329,6 +345,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
     sampler_mapping: &mut HashMap<String, (String, usize, usize)>,
     write_ron: bool,
     color_texture_kind: &str,
+    shader_stage_flag: ShaderStageFlags,
 ) {
     // Get the name of the sampler.
     let (sampler_name, code) = code.split_last().unwrap();
@@ -375,7 +392,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
                     binding: *binding as u32,
                     ty: DescriptorType::SampledImage,
                     count: 1,
-                    stage_flags: ShaderStageFlags::ALL,
+                    stage_flags: shader_stage_flag,
                     immutable_samplers: false,
                 });
             bindings_map.insert(texture_name.clone(), *binding as u32);
@@ -400,12 +417,73 @@ fn replace_sampler_definition_with_texture_and_sampler(
                     binding: ((set * DRAW_UNIFORM_COUNT) + *binding) as u32,
                     ty: DescriptorType::Sampler,
                     count: 1,
-                    stage_flags: ShaderStageFlags::ALL,
+                    stage_flags: shader_stage_flag,
                     immutable_samplers: false,
                 });
             bindings_map.insert(String::from(*sampler_name), ((set * DRAW_UNIFORM_COUNT) + *binding) as u32);
         }
         new_data.push_str(&layout_str);
+        *binding += 1;
+    }
+}
+
+fn extend_sampler_definition(
+    set: usize,
+    binding: &mut usize,
+    code: Vec<&str>,
+    descriptor_set_layouts: &mut Vec<Vec<DescriptorSetLayoutBinding>>,
+    bindings_map: &mut HashMap<String, u32>,
+    new_data: &mut String,
+    sampler_mapping: &mut HashMap<String, (String, usize, usize)>,
+    write_ron: bool,
+    shader_stage_flag: ShaderStageFlags,
+) {
+    // Get the name of the sampler.
+    let (sampler_name, code) = code.split_last().unwrap();
+
+    // Get the exact type of the sampler.
+    let (sampler_type, code) = code.split_last().unwrap();
+    let sampler_type = String::from(*sampler_type);
+    let mut code_str = String::new();
+    for i in 0 .. code.len() {
+        code_str.push_str(code[i]);
+        code_str.push(' ');
+    }
+
+    // If the sampler is in the map we only update the shader code.
+    if let Some(&(_, set, binding)) = sampler_mapping.get(*sampler_name) {
+        let mut layout_str = format!(
+            "layout(set = {}, binding = {}) {}{} {};\n",
+            set, binding, code_str, sampler_type, sampler_name
+        );
+        new_data.push_str(&layout_str);
+
+    // Replace sampler definition with a texture and a sampler.
+    } else {
+        let mut layout_str = format!(
+            "layout(set = {}, binding = {}) {}{} {};\n",
+            set, binding, code_str, sampler_type, sampler_name
+        );
+        if write_ron {
+            descriptor_set_layouts[set].push(
+                DescriptorSetLayoutBinding {
+                    binding: *binding as u32,
+                    ty: DescriptorType::CombinedImageSampler,
+                    count: 1,
+                    stage_flags: shader_stage_flag,
+                    immutable_samplers: true,
+                });
+            bindings_map.insert(sampler_name.to_string(), *binding as u32);
+        }
+        new_data.push_str(&layout_str);
+        sampler_mapping.insert(
+            String::from(*sampler_name),
+            (
+                String::from(*sampler_name),
+                set,
+                *binding,
+            ),
+        );
         *binding += 1;
     }
 }
@@ -448,6 +526,42 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
         "sTransformPalette" |
         "sPrimitiveHeadersF" |
         "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_FRAME,
+        x => unreachable!("Sampler not found: {:?}", x),
+    }
+}
+
+fn get_shader_stage_flags(code: &Vec<&str>) -> ShaderStageFlags {
+    let (sampler_name, _) = code.split_last().unwrap();
+    match sampler_name.as_ref() {
+        "sRenderTasks" |
+        "sTransformPalette" |
+        "sPrimitiveHeadersF" |
+        "sPrimitiveHeadersI" => ShaderStageFlags::VERTEX,
+        "sColor0" |
+        "sColor1" |
+        "sColor2" |
+        "sPrevPassAlpha" |
+        "sPrevPassColor" |
+        "sDither" |
+        "sGpuCache" => ShaderStageFlags::ALL,
+        x => unreachable!("Sampler not found: {:?}", x),
+    }
+}
+
+fn use_combined_sampler(code: &Vec<&str>) -> bool {
+    let (sampler_name, _) = code.split_last().unwrap();
+    match sampler_name.as_ref() {
+        "sColor0" |
+        "sColor1" |
+        "sColor2"  => false,
+        "sPrevPassAlpha" |
+        "sPrevPassColor" |
+        "sDither" |
+        "sRenderTasks" |
+        "sGpuCache" |
+        "sTransformPalette" |
+        "sPrimitiveHeadersF" |
+        "sPrimitiveHeadersI" => true,
         x => unreachable!("Sampler not found: {:?}", x),
     }
 }
