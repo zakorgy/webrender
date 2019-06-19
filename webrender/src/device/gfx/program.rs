@@ -11,8 +11,6 @@ use std::borrow::Cow::{Borrowed};
 
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
-use super::descriptor::DescriptorPools;
-use super::descriptor_set::DescriptorGroup;
 use super::image::ImageCore;
 use super::render_pass::RenderPass;
 use super::vertex_types;
@@ -435,6 +433,34 @@ impl<B: hal::Backend> Program<B> {
                     )),
                 }));
             }
+            return
+        }
+        if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
+            unsafe {
+                let mut src_stage = Some(hal::pso::PipelineStage::empty());
+                if let Some(barrier) = image.transit(
+                    hal::image::Access::SHADER_READ,
+                    hal::image::Layout::ShaderReadOnlyOptimal,
+                    image.subresource_range.clone(),
+                    src_stage.as_mut(),
+                ) {
+                    cmd_buffer.pipeline_barrier(
+                        src_stage.unwrap()
+                            .. hal::pso::PipelineStage::FRAGMENT_SHADER,
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                }
+                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
+                    set,
+                    binding: *binding,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Image(
+                        &image.view,
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                    )),
+                }));
+            }
         }
     }
 
@@ -463,8 +489,8 @@ impl<B: hal::Backend> Program<B> {
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
-        desc_pools_per_frame: &mut DescriptorPools<B>,
-        desc_pools_sampler: &mut DescriptorPools<B>,
+        desc_set_per_frame: &B::DescriptorSet,
+        desc_set_sampler: &B::DescriptorSet,
         desc_set_per_draw: &B::DescriptorSet,
         desc_set_locals: Option<&B::DescriptorSet>,
         clear_values: &[hal::command::ClearValue],
@@ -474,13 +500,10 @@ impl<B: hal::Backend> Program<B> {
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
         program_mode_id: u32,
-        pipeline_layouts: &FastHashMap<DescriptorGroup, B::PipelineLayout>,
-        pipeline_requirements: &FastHashMap<String, PipelineRequirements>,
-        device: &B::Device,
+        pipeline_layout: &B::PipelineLayout,
     ) {
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
-        let ref pipeline_layout = pipeline_layouts[&self.shader_kind.into()];
         *self.constants.last_mut().unwrap() = program_mode_id;
         unsafe {
             #[cfg(feature = "push_constants")]
@@ -519,14 +542,12 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_descriptor_sets(
                 pipeline_layout,
                 0,
-                iter::once(desc_pools_per_frame.get_set_by_group(self.shader_kind.into()).0)
-                    .chain(iter::once(desc_pools_sampler.get_set_by_group(self.shader_kind.into()).0))
+                iter::once(desc_set_per_frame)
+                    .chain(iter::once(desc_set_sampler))
                     .chain(iter::once(desc_set_per_draw))
                     .chain(desc_set_locals),
                 &[],
             );
-            desc_pools_per_frame.next(self.shader_kind.into(), device, pipeline_requirements);
-            desc_pools_sampler.next(self.shader_kind.into(), device, pipeline_requirements);
 
             if blend_state == SUBPIXEL_CONSTANT_TEXT_COLOR {
                 cmd_buffer.set_blend_constants(blend_color.to_array());

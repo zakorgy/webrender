@@ -62,6 +62,7 @@ pub(super) const DEFAULT_SET_2: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(2, DT::SampledImage, SSF::ALL, false),
 ];
 
+#[cfg(not(feature = "push_constants"))]
 pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
     // Locals
     descriptor_set_layout_binding(0, DT::UniformBuffer, SSF::VERTEX, false),
