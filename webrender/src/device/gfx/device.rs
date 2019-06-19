@@ -864,7 +864,7 @@ impl<B: hal::Backend> Device<B> {
             self.sampler_descriptor_sets.push(desc_set);
         }
 
-        #[cfg(not(fetaure = "push_constant"))]
+        #[cfg(not(feature = "push_constants"))]
         {
             self.bound_locals = Locals::default();
             for (_, desc_set) in self.locals_descriptor_bindings.as_mut().unwrap().drain() {
