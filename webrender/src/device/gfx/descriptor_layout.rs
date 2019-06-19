@@ -46,11 +46,11 @@ pub(super) const DEFAULT_SET_0: &'static [DescriptorSetLayoutBinding] = &[
 
 pub(super) const COMMON_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // Color0 sampler
-    descriptor_set_layout_binding(12, DT::Sampler, SSF::ALL, false),
+    descriptor_set_layout_binding(0, DT::Sampler, SSF::ALL, false),
     // Color1 sampler
-    descriptor_set_layout_binding(13, DT::Sampler, SSF::ALL, false),
+    descriptor_set_layout_binding(1, DT::Sampler, SSF::ALL, false),
     // Color2 sampler
-    descriptor_set_layout_binding(14, DT::Sampler, SSF::ALL, false),
+    descriptor_set_layout_binding(2, DT::Sampler, SSF::ALL, false),
 ];
 
 pub(super) const DEFAULT_SET_2: &'static [DescriptorSetLayoutBinding] = &[

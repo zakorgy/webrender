@@ -38,8 +38,6 @@ const DESCRIPTOR_SET_COUNT: usize = 3;
 #[cfg(not(feature = "push_constants"))]
 const DESCRIPTOR_SET_COUNT: usize = 4;
 
-const DRAW_UNIFORM_COUNT: usize = 6;
-
 #[derive(Deserialize)]
 struct Shader {
     name: String,
@@ -372,7 +370,7 @@ fn replace_sampler_definition_with_texture_and_sampler(
 
         layout_str = format!(
             "layout(set = {}, binding = {}) {}sampler {};\n",
-            DESCRIPTOR_SET_SAMPLER, (set * DRAW_UNIFORM_COUNT) + binding, code_str, sampler_name
+            DESCRIPTOR_SET_SAMPLER, binding, code_str, sampler_name
         );
         new_data.push_str(&layout_str);
 
@@ -409,18 +407,18 @@ fn replace_sampler_definition_with_texture_and_sampler(
 
         layout_str = format!(
             "layout(set = {}, binding = {}) {}sampler {};\n",
-            DESCRIPTOR_SET_SAMPLER, (set * DRAW_UNIFORM_COUNT) + *binding, code_str, sampler_name
+            DESCRIPTOR_SET_SAMPLER, binding, code_str, sampler_name
         );
         if write_ron {
             descriptor_set_layouts[DESCRIPTOR_SET_SAMPLER].push(
                 DescriptorSetLayoutBinding {
-                    binding: ((set * DRAW_UNIFORM_COUNT) + *binding) as u32,
+                    binding: *binding as u32,
                     ty: DescriptorType::Sampler,
                     count: 1,
                     stage_flags: shader_stage_flag,
                     immutable_samplers: false,
                 });
-            bindings_map.insert(String::from(*sampler_name), ((set * DRAW_UNIFORM_COUNT) + *binding) as u32);
+            bindings_map.insert(String::from(*sampler_name), *binding as u32);
         }
         new_data.push_str(&layout_str);
         *binding += 1;
