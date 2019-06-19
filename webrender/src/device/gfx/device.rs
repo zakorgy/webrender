@@ -1603,7 +1603,6 @@ impl<B: hal::Backend> Device<B> {
         let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         unsafe { cmd_buffer.begin() };
         let descriptor_group = program.shader_kind.into();
-
         // Per draw textures
         let bound_resources = PerDrawResources::new(
             [
@@ -1662,6 +1661,11 @@ impl<B: hal::Backend> Device<B> {
                         &image,
                         sampler_name,
                         &mut cmd_buffer,
+                        if index < MUTABLE_SAMPLER_COUNT {
+                            None
+                        } else {
+                            Some(&self.sampler_linear)
+                        },
                     );
                 }
             },
@@ -1728,6 +1732,7 @@ impl<B: hal::Backend> Device<B> {
                         &image,
                         sampler_name,
                         &mut cmd_buffer,
+                        Some(&self.sampler_nearest),
                     );
                 }
             },
