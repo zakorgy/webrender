@@ -50,6 +50,7 @@ rayon = "1"
 rendy-memory = "0.2.0"
 relevant = { version = "0.4", features = ["std"] }
 ron = "0.1.7"
+rendy-descriptor = "0.2"
 serde = { version = "1.0", features = ["serde_derive"] }
 serde_json = { optional = true, version = "1.0" }
 sha2 = "0.8"
