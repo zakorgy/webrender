@@ -406,6 +406,7 @@ impl<B: hal::Backend> Program<B> {
         image: &ImageCore<B>,
         binding: &'static str,
         cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
+        sampler: Option<&B::Sampler>,
     ) {
         if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
             unsafe {
@@ -455,9 +456,10 @@ impl<B: hal::Backend> Program<B> {
                     set,
                     binding: *binding,
                     array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Image(
+                    descriptors: Some(hal::pso::Descriptor::CombinedImageSampler(
                         &image.view,
                         hal::image::Layout::ShaderReadOnlyOptimal,
+                        sampler.unwrap(),
                     )),
                 }));
             }
