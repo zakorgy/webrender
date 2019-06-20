@@ -2,8 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use gfx_hal::pso::{AttributeDesc, DescriptorRangeDesc, DescriptorSetLayoutBinding};
-use gfx_hal::pso::{DescriptorType, Element, ShaderStageFlags, VertexInputRate, VertexBufferDesc};
+use gfx_hal::pso::{AttributeDesc, Element, VertexInputRate, VertexBufferDesc};
 use gfx_hal::format::Format;
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
@@ -31,12 +30,7 @@ const MAX_INPUT_ATTRIBUTES: u32 = 16;
 const DESCRIPTOR_SET_PER_FRAME: usize = 0;
 const DESCRIPTOR_SET_SAMPLER: usize = 1;
 const DESCRIPTOR_SET_PER_DRAW: usize = 2;
-#[cfg(not(feature = "push_constants"))]
-const DESCRIPTOR_SET_LOCALS: usize = 3;
-#[cfg(feature = "push_constants")]
 const DESCRIPTOR_SET_COUNT: usize = 3;
-#[cfg(not(feature = "push_constants"))]
-const DESCRIPTOR_SET_COUNT: usize = 4;
 
 #[derive(Deserialize)]
 struct Shader {
@@ -49,8 +43,6 @@ struct Shader {
 struct PipelineRequirements {
     attribute_descriptors: Vec<AttributeDesc>,
     bindings_map: HashMap<String, u32>,
-    descriptor_range_descriptors: Vec<Vec<DescriptorRangeDesc>>,
-    descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>>,
     vertex_buffer_descriptors: Vec<VertexBufferDesc>,
 }
 
@@ -181,7 +173,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let mut new_data = String::new();
     let mut binding = [0; DESCRIPTOR_SET_COUNT];
     let mut bindings_map: HashMap<String, u32> = HashMap::new();
-    let mut descriptor_set_layout_bindings: Vec<Vec<DescriptorSetLayoutBinding>> = vec![Vec::new(); DESCRIPTOR_SET_COUNT];
     let mut in_location = 0;
     let mut out_location = 0;
     let mut varying_location = 0;
@@ -220,31 +211,26 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             if trimmed.contains("sampler") {
                 let code = split_code(trimmed);
                 let set = get_set_from_line(&code) as usize;
-                let shader_stage_flag = get_shader_stage_flags(&code);
                 if use_combined_sampler(&code) {
                     extend_sampler_definition(
                         set,
                         &mut binding[set],
                         code,
-                        &mut descriptor_set_layout_bindings,
                         &mut bindings_map,
                         &mut new_data,
                         &mut sampler_mapping,
                         write_ron,
-                        shader_stage_flag,
                     );
                 } else {
                     replace_sampler_definition_with_texture_and_sampler(
                         set,
                         &mut binding[set],
                         code,
-                        &mut descriptor_set_layout_bindings,
                         &mut bindings_map,
                         &mut new_data,
                         &mut sampler_mapping,
                         write_ron,
                         color_texture_kind,
-                        shader_stage_flag,
                     );
                 }
 
@@ -253,10 +239,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 // variable (uDevicePixelRatio), since all shader uses the same variables.
             } else if trimmed.starts_with("uniform mat4 uTransform") {
                 replace_non_sampler_uniforms(&mut new_data);
-                if write_ron {
-                    #[cfg(not(feature = "push_constants"))]
-                    add_locals_to_descriptor_set_layout(&mut descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS], &mut bindings_map);
-                }
             }
 
         // Adding location info for non-uniform variables.
@@ -311,14 +293,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
         let pipeline_requirements = PipelineRequirements {
             attribute_descriptors,
             bindings_map,
-            descriptor_range_descriptors: vec![
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_FRAME].len(), DescriptorType::SampledImage),
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_SAMPLER].len(), DescriptorType::Sampler),
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_PER_DRAW].len(), DescriptorType::SampledImage),
-                #[cfg(not(feature = "push_constants"))]
-                create_descriptor_range_descriptors(descriptor_set_layout_bindings[DESCRIPTOR_SET_LOCALS].len(), DescriptorType::UniformBuffer),
-            ],
-            descriptor_set_layout_bindings,
             vertex_buffer_descriptors,
         };
         return Some(pipeline_requirements);
@@ -337,13 +311,11 @@ fn replace_sampler_definition_with_texture_and_sampler(
     set: usize,
     binding: &mut usize,
     code: Vec<&str>,
-    descriptor_set_layouts: &mut Vec<Vec<DescriptorSetLayoutBinding>>,
     bindings_map: &mut HashMap<String, u32>,
     new_data: &mut String,
     sampler_mapping: &mut HashMap<String, (String, usize, usize)>,
     write_ron: bool,
     color_texture_kind: &str,
-    shader_stage_flag: ShaderStageFlags,
 ) {
     // Get the name of the sampler.
     let (sampler_name, code) = code.split_last().unwrap();
@@ -385,14 +357,6 @@ fn replace_sampler_definition_with_texture_and_sampler(
             set, binding, code_str, texture_type, texture_name
         );
         if write_ron {
-            descriptor_set_layouts[set].push(
-                DescriptorSetLayoutBinding {
-                    binding: *binding as u32,
-                    ty: DescriptorType::SampledImage,
-                    count: 1,
-                    stage_flags: shader_stage_flag,
-                    immutable_samplers: false,
-                });
             bindings_map.insert(texture_name.clone(), *binding as u32);
         }
         new_data.push_str(&layout_str);
@@ -410,14 +374,6 @@ fn replace_sampler_definition_with_texture_and_sampler(
             DESCRIPTOR_SET_SAMPLER, binding, code_str, sampler_name
         );
         if write_ron {
-            descriptor_set_layouts[DESCRIPTOR_SET_SAMPLER].push(
-                DescriptorSetLayoutBinding {
-                    binding: *binding as u32,
-                    ty: DescriptorType::Sampler,
-                    count: 1,
-                    stage_flags: shader_stage_flag,
-                    immutable_samplers: false,
-                });
             bindings_map.insert(String::from(*sampler_name), *binding as u32);
         }
         new_data.push_str(&layout_str);
@@ -429,12 +385,10 @@ fn extend_sampler_definition(
     set: usize,
     binding: &mut usize,
     code: Vec<&str>,
-    descriptor_set_layouts: &mut Vec<Vec<DescriptorSetLayoutBinding>>,
     bindings_map: &mut HashMap<String, u32>,
     new_data: &mut String,
     sampler_mapping: &mut HashMap<String, (String, usize, usize)>,
     write_ron: bool,
-    shader_stage_flag: ShaderStageFlags,
 ) {
     // Get the name of the sampler.
     let (sampler_name, code) = code.split_last().unwrap();
@@ -463,14 +417,6 @@ fn extend_sampler_definition(
             set, binding, code_str, sampler_type, sampler_name
         );
         if write_ron {
-            descriptor_set_layouts[set].push(
-                DescriptorSetLayoutBinding {
-                    binding: *binding as u32,
-                    ty: DescriptorType::CombinedImageSampler,
-                    count: 1,
-                    stage_flags: shader_stage_flag,
-                    immutable_samplers: true,
-                });
             bindings_map.insert(sampler_name.to_string(), *binding as u32);
         }
         new_data.push_str(&layout_str);
@@ -528,24 +474,6 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
     }
 }
 
-fn get_shader_stage_flags(code: &Vec<&str>) -> ShaderStageFlags {
-    let (sampler_name, _) = code.split_last().unwrap();
-    match sampler_name.as_ref() {
-        "sRenderTasks" |
-        "sTransformPalette" |
-        "sPrimitiveHeadersF" |
-        "sPrimitiveHeadersI" => ShaderStageFlags::VERTEX,
-        "sColor0" |
-        "sColor1" |
-        "sColor2" |
-        "sPrevPassAlpha" |
-        "sPrevPassColor" |
-        "sDither" |
-        "sGpuCache" => ShaderStageFlags::ALL,
-        x => unreachable!("Sampler not found: {:?}", x),
-    }
-}
-
 fn use_combined_sampler(code: &Vec<&str>) -> bool {
     let (sampler_name, _) = code.split_last().unwrap();
     match sampler_name.as_ref() {
@@ -562,23 +490,6 @@ fn use_combined_sampler(code: &Vec<&str>) -> bool {
         "sPrimitiveHeadersI" => true,
         x => unreachable!("Sampler not found: {:?}", x),
     }
-}
-
-#[cfg(not(feature = "push_constants"))]
-fn add_locals_to_descriptor_set_layout(
-    descriptor_set_layouts: &mut Vec<DescriptorSetLayoutBinding>,
-    bindings_map: &mut HashMap<String, u32>,
-) {
-    descriptor_set_layouts.push(
-        DescriptorSetLayoutBinding {
-            binding: 0,
-            ty: DescriptorType::UniformBuffer,
-            count: 1,
-            stage_flags: ShaderStageFlags::VERTEX,
-            immutable_samplers: false,
-        }
-    );
-    bindings_map.insert("Locals".to_owned(), 0);
 }
 
 fn extend_non_uniform_variables_with_location_info(
@@ -676,14 +587,6 @@ fn add_attribute_descriptors(
             *instance_offset += offset;
         }
     };
-}
-
-fn create_descriptor_range_descriptors(count: usize, ty: DescriptorType) -> Vec<DescriptorRangeDesc> {
-    vec![
-        DescriptorRangeDesc {
-            ty,
-            count,
-        }]
 }
 
 fn create_vertex_buffer_descriptors(file_name: &str) -> Vec<VertexBufferDesc> {
