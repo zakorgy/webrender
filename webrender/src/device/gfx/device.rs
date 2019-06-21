@@ -284,8 +284,8 @@ pub struct Device<B: hal::Backend> {
 
     desc_allocator: DescriptorAllocator<B>,
     // Per draw things
-    per_draw_descriptor_sets: FastHashMap<DescriptorGroup, Vec<DescriptorSet<B>>>,
-    per_draw_descriptor_bindings: FastHashMap<(DescriptorGroup, PerDrawResources), DescriptorSet<B>>,
+    per_draw_descriptor_sets: Vec<DescriptorSet<B>>,
+    per_draw_descriptor_bindings: FastHashMap<PerDrawResources, DescriptorSet<B>>,
     bound_per_draw_resources: PerDrawResources,
     // Per pass things
     per_pass_descriptor_sets: Vec<DescriptorSet<B>>,
@@ -598,8 +598,6 @@ impl<B: hal::Backend> Device<B> {
             FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_PER_LAYOUT]>>
              = FastHashMap::default();
         let mut per_frame_descriptor_sets = FastHashMap::default();
-        let mut per_pass_descriptor_sets = Vec::new();
-        let mut per_draw_descriptor_sets = FastHashMap::default();
         let descriptor_set_layouts:
             FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>
              = [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive]
@@ -645,10 +643,7 @@ impl<B: hal::Backend> Device<B> {
                     .map(|(index, (bindings, immutable_samplers))| {
                         let layout = unsafe { device.create_descriptor_set_layout(*bindings, immutable_samplers.iter().map(|s| *s)) }
                             .expect("create_descriptor_set_layout failed");
-                        if index == DESCRIPTOR_SET_PER_FRAME ||
-                            index == DESCRIPTOR_SET_PER_DRAW ||
-                            (index == DESCRIPTOR_SET_PER_PASS && *g == DescriptorGroup::Primitive)
-                            {
+                        if index == DESCRIPTOR_SET_PER_FRAME {
                             let mut descriptor_sets = Vec::new();
                             unsafe {
                                 desc_allocator.allocate(
@@ -659,13 +654,7 @@ impl<B: hal::Backend> Device<B> {
                                     &mut descriptor_sets,
                                 )
                             }.expect("Allocate descriptor sets failed");
-                            if index == DESCRIPTOR_SET_PER_FRAME {
-                                per_frame_descriptor_sets.insert(*g, descriptor_sets);
-                            } else if index == DESCRIPTOR_SET_PER_DRAW {
-                                per_draw_descriptor_sets.insert(*g, descriptor_sets);
-                            } else {
-                                per_pass_descriptor_sets = descriptor_sets;
-                            }
+                            per_frame_descriptor_sets.insert(*g, descriptor_sets);
                         }
                         layout
                     }).collect();
@@ -685,6 +674,28 @@ impl<B: hal::Backend> Device<B> {
 
                 (*g, layouts)
             }).collect();
+
+        let mut per_pass_descriptor_sets = Vec::new();
+        unsafe {
+            desc_allocator.allocate(
+                &device,
+                &descriptor_set_layouts[&DescriptorGroup::Primitive][DESCRIPTOR_SET_PER_PASS],
+                descriptor_set_ranges[&DescriptorGroup::Primitive][DESCRIPTOR_SET_PER_PASS],
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                &mut per_pass_descriptor_sets,
+            )
+        }.expect("Allocate descriptor sets failed");
+
+        let mut per_draw_descriptor_sets = Vec::new();
+        unsafe {
+            desc_allocator.allocate(
+                &device,
+                &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_PER_DRAW],
+                descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_PER_DRAW],
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+                &mut per_draw_descriptor_sets,
+            )
+        }.expect("Allocate descriptor sets failed");
 
         let mut sampler_descriptor_sets = Vec::new();
         unsafe {
@@ -870,8 +881,8 @@ impl<B: hal::Backend> Device<B> {
         }
 
         self.bound_per_draw_resources = PerDrawResources::default();
-        for ((descriptor_group, _), desc_set) in self.per_draw_descriptor_bindings.drain() {
-            self.per_draw_descriptor_sets.get_mut(&descriptor_group).unwrap().push(desc_set);
+        for (_, desc_set) in self.per_draw_descriptor_bindings.drain() {
+            self.per_draw_descriptor_sets.push(desc_set);
         }
 
         self.bound_per_pass_resources = PerPassResources::default();
@@ -1637,7 +1648,7 @@ impl<B: hal::Backend> Device<B> {
             ],
         );
 
-        match self.per_draw_descriptor_bindings.entry((descriptor_group, bound_resources)) {
+        match self.per_draw_descriptor_bindings.entry(bound_resources) {
             Entry::Occupied(_) => {
                 for &(index, _) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
                     program.bound_textures[index] = self.bound_textures[index];
@@ -1662,7 +1673,7 @@ impl<B: hal::Backend> Device<B> {
                 }
             },
             Entry::Vacant(v) => {
-                let per_draw_descriptor_sets = self.per_draw_descriptor_sets.get_mut(&descriptor_group).unwrap();
+                let per_draw_descriptor_sets = &mut self.per_draw_descriptor_sets;
                 if per_draw_descriptor_sets.is_empty() {
                     unsafe {
                         self.desc_allocator.allocate(
@@ -1972,7 +1983,7 @@ impl<B: hal::Backend> Device<B> {
             DescriptorGroup::Primitive => Some(self.per_pass_descriptor_bindings[&self.bound_per_pass_resources].raw()),
             _ => None,
         };
-        let ref desc_set_per_draw = self.per_draw_descriptor_bindings[&(descriptor_group, self.bound_per_draw_resources)].raw();
+        let ref desc_set_per_draw = self.per_draw_descriptor_bindings[&self.bound_per_draw_resources].raw();
         let ref desc_set_sampler = self.sampler_descriptor_bindings[&self.bound_mutable_samplers].raw();
         let locals = &self.bound_locals;
         let ref desc_set_locals = self.locals_descriptor_bindings.as_ref().map(|map| map[locals].raw());
@@ -2884,10 +2895,10 @@ impl<B: hal::Backend> Device<B> {
 
         let keys_to_remove: Vec<_> = self.per_draw_descriptor_bindings
             .keys()
-            .filter(|(_ , res)| res.has_texture_id(&texture.id)).cloned().collect();
+            .filter(|res| res.has_texture_id(&texture.id)).cloned().collect();
         for key in keys_to_remove {
             let desc_set =self.per_draw_descriptor_bindings.remove(&key);
-            self.per_draw_descriptor_sets.get_mut(&key.0).unwrap().push(desc_set.unwrap());
+            self.per_draw_descriptor_sets.push(desc_set.unwrap());
         }
 
         let keys_to_remove: Vec<_> = self.per_pass_descriptor_bindings
@@ -3953,7 +3964,7 @@ impl<B: hal::Backend> Device<B> {
             self.device.destroy_sampler(self.sampler_linear);
             self.device.destroy_sampler(self.sampler_nearest);
 
-            self.desc_allocator.free(self.per_draw_descriptor_sets.into_iter().flat_map(|(_, sets)| sets.into_iter())
+            self.desc_allocator.free(self.per_draw_descriptor_sets.into_iter()
                 .chain(self.per_draw_descriptor_bindings.into_iter().map(|(_, set)| set))
                 .chain(self.per_pass_descriptor_sets.into_iter().map(|set| set))
                 .chain(self.per_pass_descriptor_bindings.into_iter().map(|(_, set)| set))
