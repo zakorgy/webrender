@@ -39,12 +39,12 @@ impl From<ShaderKind> for DescriptorGroup {
     }
 }
 
-pub(super) const DEFAULT_SET_0: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const DEFAULT_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // Dither
     descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
 ];
 
-pub(super) const COMMON_SET_1: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const COMMON_SET_2: &'static [DescriptorSetLayoutBinding] = &[
     // Color0 sampler
     descriptor_set_layout_binding(0, DT::Sampler, SSF::ALL, false),
     // Color1 sampler
@@ -53,7 +53,7 @@ pub(super) const COMMON_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(2, DT::Sampler, SSF::ALL, false),
 ];
 
-pub(super) const DEFAULT_SET_2: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
     // Color0
     descriptor_set_layout_binding(0, DT::SampledImage, SSF::ALL, false),
     // Color1
@@ -63,12 +63,12 @@ pub(super) const DEFAULT_SET_2: &'static [DescriptorSetLayoutBinding] = &[
 ];
 
 #[cfg(not(feature = "push_constants"))]
-pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const COMMON_SET_4: &'static [DescriptorSetLayoutBinding] = &[
     // Locals
     descriptor_set_layout_binding(0, DT::UniformBuffer, SSF::VERTEX, false),
 ];
 
-pub(super) const CLIP_SET_0: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // Dither
     descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
     // RenderTasks
@@ -79,9 +79,7 @@ pub(super) const CLIP_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(3, DT::CombinedImageSampler, SSF::VERTEX, true),
 ];
 
-pub(super) const CLIP_SET_2: &'static [DescriptorSetLayoutBinding] = DEFAULT_SET_2;
-
-pub(super) const PRIMITIVE_SET_0: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const PRIMITIVE_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // Dither
     descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
     // RenderTasks
@@ -96,15 +94,11 @@ pub(super) const PRIMITIVE_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(5, DT::CombinedImageSampler, SSF::VERTEX, true),
 ];
 
-pub(super) const PRIMITIVE_SET_2: &'static [DescriptorSetLayoutBinding] = &[
-    // Color0
-    descriptor_set_layout_binding(0, DT::SampledImage, SSF::ALL, false),
-    // Color1
-    descriptor_set_layout_binding(1, DT::SampledImage, SSF::ALL, false),
-    // Color2
-    descriptor_set_layout_binding(2, DT::SampledImage, SSF::ALL, false),
+pub(super) const PRIMITIVE_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     // PrevPassAlpha
-    descriptor_set_layout_binding(3, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
     // PrevPassColor
-    descriptor_set_layout_binding(4, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(1, DT::CombinedImageSampler, SSF::ALL, true),
 ];
+
+pub(super) const EMPTY_SET_0: &'static [DescriptorSetLayoutBinding] = &[];

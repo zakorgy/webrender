@@ -27,10 +27,11 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
-const DESCRIPTOR_SET_PER_FRAME: usize = 0;
-const DESCRIPTOR_SET_SAMPLER: usize = 1;
-const DESCRIPTOR_SET_PER_DRAW: usize = 2;
-const DESCRIPTOR_SET_COUNT: usize = 3;
+const DESCRIPTOR_SET_PER_PASS: usize = 0;
+const DESCRIPTOR_SET_PER_FRAME: usize = 1;
+const DESCRIPTOR_SET_SAMPLER: usize = 2;
+const DESCRIPTOR_SET_PER_DRAW: usize = 3;
+const DESCRIPTOR_SET_COUNT: usize = 4;
 
 #[derive(Deserialize)]
 struct Shader {
@@ -447,7 +448,7 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
 #[cfg(not(feature = "push_constants"))]
 fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(
-        "\tlayout(set = 3, binding = 0) uniform Locals {\n\
+        "\tlayout(set = 4, binding = 0) uniform Locals {\n\
          \t\tuniform mat4 uTransform;       // Orthographic projection\n\
          \t\t// A generic uniform that shaders can optionally use to configure\n\
          \t\t// an operation mode for this batch.\n\
@@ -461,9 +462,9 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
     match sampler_name.as_ref() {
         "sColor0" |
         "sColor1" |
-        "sColor2" |
+        "sColor2" => DESCRIPTOR_SET_PER_DRAW,
         "sPrevPassAlpha" |
-        "sPrevPassColor"  => return DESCRIPTOR_SET_PER_DRAW,
+        "sPrevPassColor"  => return DESCRIPTOR_SET_PER_PASS,
         "sDither" |
         "sRenderTasks" |
         "sGpuCache" |
