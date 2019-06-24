@@ -177,74 +177,38 @@ struct Fence<B: hal::Backend> {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerDrawResources {
-    bound_textures: [TextureId; PER_DRAW_SAMPLER_COUNT],
-}
+struct PerDrawBindings([TextureId; PER_DRAW_SAMPLER_COUNT]);
 
-impl PerDrawResources {
-    fn new(bound_textures: [TextureId; PER_DRAW_SAMPLER_COUNT]) -> Self {
-        PerDrawResources {
-            bound_textures,
-        }
-    }
-
+impl PerDrawBindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
-        self.bound_textures.contains(id)
+        self.0.contains(id)
     }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerPassResources {
-    bound_textures: [TextureId; PER_PASS_SAMPLER_COUNT],
-}
+struct PerPassbindings([TextureId; PER_PASS_SAMPLER_COUNT]);
 
-impl PerPassResources {
-    fn new(bound_textures: [TextureId; PER_PASS_SAMPLER_COUNT]) -> Self {
-        PerPassResources {
-            bound_textures,
-        }
-    }
-
+impl PerPassbindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
-        self.bound_textures.contains(id)
+        self.0.contains(id)
     }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerFrameResources {
-    bound_textures: [TextureId; PER_FRAME_SAMPLER_COUNT],
-}
+struct PerFrameBindings([TextureId; PER_FRAME_SAMPLER_COUNT]);
 
-impl PerFrameResources {
-    fn new(bound_textures: [TextureId; PER_FRAME_SAMPLER_COUNT]) -> Self {
-        PerFrameResources {
-            bound_textures,
-        }
-    }
-
+impl PerFrameBindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
-        self.bound_textures.contains(id)
+        self.0.contains(id)
     }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-struct SamplerResources {
-    bound_samplers: [TextureFilter; MUTABLE_SAMPLER_COUNT],
-}
+struct SamplerBindings([TextureFilter; MUTABLE_SAMPLER_COUNT]);
 
-impl Default for SamplerResources {
+impl Default for SamplerBindings {
     fn default() -> Self {
-        SamplerResources {
-            bound_samplers: [TextureFilter::Linear; MUTABLE_SAMPLER_COUNT],
-        }
-    }
-}
-
-impl SamplerResources {
-    fn new(bound_samplers: [TextureFilter; MUTABLE_SAMPLER_COUNT]) -> Self {
-        SamplerResources {
-            bound_samplers,
-        }
+        SamplerBindings([TextureFilter::Linear; MUTABLE_SAMPLER_COUNT])
     }
 }
 
@@ -285,20 +249,20 @@ pub struct Device<B: hal::Backend> {
     desc_allocator: DescriptorAllocator<B>,
     // Per draw things
     per_draw_descriptor_sets: Vec<DescriptorSet<B>>,
-    per_draw_descriptor_bindings: FastHashMap<PerDrawResources, DescriptorSet<B>>,
-    bound_per_draw_resources: PerDrawResources,
+    per_draw_descriptor_bindings: FastHashMap<PerDrawBindings, DescriptorSet<B>>,
+    bound_per_draw_textures: PerDrawBindings,
     // Per pass things
     per_pass_descriptor_sets: Vec<DescriptorSet<B>>,
-    per_pass_descriptor_bindings: FastHashMap<PerPassResources, DescriptorSet<B>>,
-    bound_per_pass_resources: PerPassResources,
+    per_pass_descriptor_bindings: FastHashMap<PerPassbindings, DescriptorSet<B>>,
+    bound_per_pass_textures: PerPassbindings,
     // Per frame things
     per_frame_descriptor_sets: FastHashMap<DescriptorGroup, Vec<DescriptorSet<B>>>,
-    per_frame_descriptor_bindings: FastHashMap<(DescriptorGroup, PerFrameResources), DescriptorSet<B>>,
-    bound_per_frame_resources: PerFrameResources,
+    per_frame_descriptor_bindings: FastHashMap<(DescriptorGroup, PerFrameBindings), DescriptorSet<B>>,
+    bound_per_frame_textures: PerFrameBindings,
     // Sampler related things
     sampler_descriptor_sets: Vec<DescriptorSet<B>>,
-    sampler_descriptor_bindings: FastHashMap<SamplerResources, DescriptorSet<B>>,
-    bound_mutable_samplers: SamplerResources,
+    sampler_descriptor_bindings: FastHashMap<SamplerBindings, DescriptorSet<B>>,
+    bound_mutable_samplers: SamplerBindings,
     // Locals related things
     locals_descriptor_sets: Option<Vec<DescriptorSet<B>>>,
     locals_descriptor_bindings: Option<FastHashMap<Locals, DescriptorSet<B>>>,
@@ -675,52 +639,40 @@ impl<B: hal::Backend> Device<B> {
                 (*g, layouts)
             }).collect();
 
-        let mut per_pass_descriptor_sets = Vec::new();
-        unsafe {
-            desc_allocator.allocate(
-                &device,
-                &descriptor_set_layouts[&DescriptorGroup::Primitive][DESCRIPTOR_SET_PER_PASS],
-                descriptor_set_ranges[&DescriptorGroup::Primitive][DESCRIPTOR_SET_PER_PASS],
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                &mut per_pass_descriptor_sets,
-            )
-        }.expect("Allocate descriptor sets failed");
+        let per_pass_descriptor_sets = Self::allocate_new_descriptor_sets(
+            &device,
+            &mut desc_allocator,
+            &descriptor_set_layouts[&DescriptorGroup::Primitive][DESCRIPTOR_SET_PER_PASS],
+            descriptor_set_ranges[&DescriptorGroup::Primitive][DESCRIPTOR_SET_PER_PASS],
+            descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+        );
 
-        let mut per_draw_descriptor_sets = Vec::new();
-        unsafe {
-            desc_allocator.allocate(
-                &device,
-                &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_PER_DRAW],
-                descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_PER_DRAW],
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                &mut per_draw_descriptor_sets,
-            )
-        }.expect("Allocate descriptor sets failed");
+        let per_draw_descriptor_sets = Self::allocate_new_descriptor_sets(
+            &device,
+            &mut desc_allocator,
+            &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_PER_DRAW],
+            descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_PER_DRAW],
+            descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+        );
 
-        let mut sampler_descriptor_sets = Vec::new();
-        unsafe {
-            desc_allocator.allocate(
-                &device,
-                &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_SAMPLER],
-                descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_SAMPLER],
-                27, // 3 * 3 * 3 is the maximum possible combination of samplers for the three mutable samplers
-                &mut sampler_descriptor_sets,
-            )
-        }.expect("Allocate descriptor sets failed");
+        let sampler_descriptor_sets = Self::allocate_new_descriptor_sets(
+            &device,
+            &mut desc_allocator,
+            &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_SAMPLER],
+            descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_SAMPLER],
+            27, // 3 * 3 * 3 is the maximum possible combination of filtering for the three mutable samplers
+        );
 
         let locals_descriptor_sets = if cfg!(feature = "push_constants") {
             None
         } else {
-            let mut descriptor_sets = Vec::new();
-            unsafe {
-                desc_allocator.allocate(
-                    &device,
-                    &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_LOCALS],
-                    descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_LOCALS],
-                    descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-                    &mut descriptor_sets,
-                )
-            }.expect("Allocate descriptor sets failed");
+            let descriptor_sets = Self::allocate_new_descriptor_sets(
+                &device,
+                &mut desc_allocator,
+                &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_LOCALS],
+                descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_LOCALS],
+                descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
+            );
             Some(descriptor_sets)
         };
 
@@ -788,19 +740,19 @@ impl<B: hal::Backend> Device<B> {
 
             per_draw_descriptor_sets,
             per_draw_descriptor_bindings: FastHashMap::default(),
-            bound_per_draw_resources: PerDrawResources::default(),
+            bound_per_draw_textures: PerDrawBindings::default(),
 
             per_pass_descriptor_sets,
             per_pass_descriptor_bindings: FastHashMap::default(),
-            bound_per_pass_resources: PerPassResources::default(),
+            bound_per_pass_textures: PerPassbindings::default(),
 
             per_frame_descriptor_sets,
             per_frame_descriptor_bindings: FastHashMap::default(),
-            bound_per_frame_resources: PerFrameResources::default(),
+            bound_per_frame_textures: PerFrameBindings::default(),
 
             sampler_descriptor_sets,
             sampler_descriptor_bindings:  FastHashMap::default(),
-            bound_mutable_samplers: SamplerResources::default(),
+            bound_mutable_samplers: SamplerBindings::default(),
 
             locals_descriptor_sets,
             locals_descriptor_bindings,
@@ -835,6 +787,26 @@ impl<B: hal::Backend> Device<B> {
             locals_buffer,
             wait_for_resize: false,
         }
+    }
+
+    fn allocate_new_descriptor_sets(
+        device: &B::Device,
+        descriptor_allocator: &mut DescriptorAllocator<B>,
+        layout: &B::DescriptorSetLayout,
+        layout_ranges: DescriptorRanges,
+        descriptor_count: u32,
+    ) -> Vec<DescriptorSet<B>> {
+        let mut descriptor_sets = Vec::new();
+        unsafe {
+            descriptor_allocator.allocate(
+                device,
+                layout,
+                layout_ranges,
+                descriptor_count,
+                &mut descriptor_sets
+            )
+        }.expect("Allocate descriptor sets failed");
+        descriptor_sets
     }
 
     fn load_pipeline_cache(
@@ -880,22 +852,22 @@ impl<B: hal::Backend> Device<B> {
             depth.deinit(&self.device, &mut self.heaps);
         }
 
-        self.bound_per_draw_resources = PerDrawResources::default();
+        self.bound_per_draw_textures = PerDrawBindings::default();
         for (_, desc_set) in self.per_draw_descriptor_bindings.drain() {
             self.per_draw_descriptor_sets.push(desc_set);
         }
 
-        self.bound_per_pass_resources = PerPassResources::default();
+        self.bound_per_pass_textures = PerPassbindings::default();
         for (_, desc_set) in self.per_pass_descriptor_bindings.drain() {
             self.per_pass_descriptor_sets.push(desc_set);
         }
 
-        self.bound_per_frame_resources = PerFrameResources::default();
+        self.bound_per_frame_textures = PerFrameBindings::default();
         for ((descriptor_group, _), desc_set) in self.per_frame_descriptor_bindings.drain() {
             self.per_frame_descriptor_sets.get_mut(&descriptor_group).unwrap().push(desc_set);
         }
 
-        self.bound_mutable_samplers = SamplerResources::default();
+        self.bound_mutable_samplers = SamplerBindings::default();
         for (_, desc_set) in self.sampler_descriptor_bindings.drain() {
             self.sampler_descriptor_sets.push(desc_set);
         }
@@ -1640,138 +1612,60 @@ impl<B: hal::Backend> Device<B> {
         unsafe { cmd_buffer.begin() };
         let descriptor_group = program.shader_kind.into();
         // Per draw textures
-        let bound_resources = PerDrawResources::new(
+        let per_draw_bindings = PerDrawBindings(
             [
                 self.bound_textures[SAMPLERS[0].0],
                 self.bound_textures[SAMPLERS[1].0],
                 self.bound_textures[SAMPLERS[2].0],
-            ],
+            ]
         );
 
-        match self.per_draw_descriptor_bindings.entry(bound_resources) {
-            Entry::Occupied(_) => {
-                for &(index, _) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
-                    program.bound_textures[index] = self.bound_textures[index];
-                    let image = &self.images[&self.bound_textures[index]].core;
-                    // We need to transit the image, even though it's bound in the descriptor set
-                    let mut src_stage = Some(hal::pso::PipelineStage::empty());
-                    if let Some(barrier) = image.transit(
-                        hal::image::Access::SHADER_READ,
-                        hal::image::Layout::ShaderReadOnlyOptimal,
-                        image.subresource_range.clone(),
-                        src_stage.as_mut(),
-                    ) {
-                        unsafe {
-                            cmd_buffer.pipeline_barrier(
-                                src_stage.unwrap()
-                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER,
-                                hal::memory::Dependencies::empty(),
-                                &[barrier],
-                            );
-                        }
-                    }
-                }
-            },
-            Entry::Vacant(v) => {
-                let per_draw_descriptor_sets = &mut self.per_draw_descriptor_sets;
-                if per_draw_descriptor_sets.is_empty() {
-                    unsafe {
-                        self.desc_allocator.allocate(
-                            &self.device,
-                            &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_DRAW],
-                            self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_DRAW],
-                            DESCRIPTOR_COUNT,
-                            per_draw_descriptor_sets,
-                        )
-                    }.expect("Allocate descriptor sets failed");
-                }
-                let desc_set = v.insert(per_draw_descriptor_sets.pop().unwrap());
-                for &(index, sampler_name) in SAMPLERS[0..PER_DRAW_SAMPLER_COUNT].iter() {
-                    program.bound_textures[index] = self.bound_textures[index];
-                    let image = &self.images[&self.bound_textures[index]].core;
-                    program.bind_texture(
-                        &self.device,
-                        desc_set.raw(),
-                        &image,
-                        sampler_name,
-                        &mut cmd_buffer,
-                        if index < MUTABLE_SAMPLER_COUNT {
-                            None
-                        } else {
-                            Some(&self.sampler_linear)
-                        },
-                    );
-                }
-            },
-        };
-        self.bound_per_draw_resources = bound_resources;
+        Self::bind_textures_to_descriptor(
+            program,
+            &self.bound_textures,
+            &mut cmd_buffer,
+            per_draw_bindings,
+            &mut self.per_draw_descriptor_bindings,
+            &mut self.per_draw_descriptor_sets,
+            &self.images,
+            &mut self.desc_allocator,
+            &self.device,
+            &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_DRAW],
+            self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_DRAW],
+            0..PER_DRAW_SAMPLER_COUNT,
+            None,
+        );
+        self.bound_per_draw_textures = per_draw_bindings;
 
         // Per pass textures
         if descriptor_group == DescriptorGroup::Primitive {
-            let bound_resources = PerPassResources::new(
+            let per_pass_bindings = PerPassbindings(
                 [
                     self.bound_textures[SAMPLERS[3].0],
                     self.bound_textures[SAMPLERS[4].0],
                 ],
             );
 
-            match self.per_pass_descriptor_bindings.entry(bound_resources) {
-                Entry::Occupied(_) => {
-                    for &(index, _) in SAMPLERS[PER_DRAW_SAMPLER_COUNT..PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT].iter() {
-                        program.bound_textures[index] = self.bound_textures[index];
-                        let image = &self.images[&self.bound_textures[index]].core;
-                        // We need to transit the image, even though it's bound in the descriptor set
-                        let mut src_stage = Some(hal::pso::PipelineStage::empty());
-                        if let Some(barrier) = image.transit(
-                            hal::image::Access::SHADER_READ,
-                            hal::image::Layout::ShaderReadOnlyOptimal,
-                            image.subresource_range.clone(),
-                            src_stage.as_mut(),
-                        ) {
-                            unsafe {
-                                cmd_buffer.pipeline_barrier(
-                                    src_stage.unwrap()
-                                        .. hal::pso::PipelineStage::FRAGMENT_SHADER,
-                                    hal::memory::Dependencies::empty(),
-                                    &[barrier],
-                                );
-                            }
-                        }
-                    }
-                },
-                Entry::Vacant(v) => {
-                    let per_pass_descriptor_sets = &mut self.per_pass_descriptor_sets;
-                    if per_pass_descriptor_sets.is_empty() {
-                        unsafe {
-                            self.desc_allocator.allocate(
-                                &self.device,
-                                &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_PASS],
-                                self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_PASS],
-                                DESCRIPTOR_COUNT,
-                                per_pass_descriptor_sets,
-                            )
-                        }.expect("Allocate descriptor sets failed");
-                    }
-                    let desc_set = v.insert(per_pass_descriptor_sets.pop().unwrap());
-                    for &(index, sampler_name) in SAMPLERS[PER_DRAW_SAMPLER_COUNT..PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT].iter() {
-                        program.bound_textures[index] = self.bound_textures[index];
-                        let image = &self.images[&self.bound_textures[index]].core;
-                        program.bind_texture(
-                            &self.device,
-                            desc_set.raw(),
-                            &image,
-                            sampler_name,
-                            &mut cmd_buffer,
-                            Some(&self.sampler_linear),
-                        );
-                    }
-                },
-            };
-            self.bound_per_pass_resources = bound_resources;
+            Self::bind_textures_to_descriptor(
+                program,
+                &self.bound_textures,
+                &mut cmd_buffer,
+                per_pass_bindings,
+                &mut self.per_pass_descriptor_bindings,
+                &mut self.per_pass_descriptor_sets,
+                &self.images,
+                &mut self.desc_allocator,
+                &self.device,
+                &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_PASS],
+                self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_PASS],
+                PER_DRAW_SAMPLER_COUNT..PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT,
+                Some(&self.sampler_linear),
+            );
+            self.bound_per_pass_textures = per_pass_bindings;
         }
 
         // Per frame textures
-        let bound_resources = PerFrameResources::new(
+        let per_frame_bindings = PerFrameBindings(
             [
                 self.bound_textures[SAMPLERS[5].0],
                 self.bound_textures[SAMPLERS[6].0],
@@ -1782,63 +1676,25 @@ impl<B: hal::Backend> Device<B> {
             ],
         );
 
-        match self.per_frame_descriptor_bindings.entry((descriptor_group, bound_resources)) {
-            Entry::Occupied(_) => {
-                for &(index, _) in SAMPLERS[PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT..].iter() {
-                    program.bound_textures[index] = self.bound_textures[index];
-                    let image = &self.images[&self.bound_textures[index]].core;
-                    // We need to transit the image, even though it's bound in the descriptor set
-                    let mut src_stage = Some(hal::pso::PipelineStage::empty());
-                    if let Some(barrier) = image.transit(
-                        hal::image::Access::SHADER_READ,
-                        hal::image::Layout::ShaderReadOnlyOptimal,
-                        image.subresource_range.clone(),
-                        src_stage.as_mut(),
-                    ) {
-                        unsafe {
-                            cmd_buffer.pipeline_barrier(
-                                src_stage.unwrap()
-                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER,
-                                hal::memory::Dependencies::empty(),
-                                &[barrier],
-                            );
-                        }
-                    }
-                }
-            },
-            Entry::Vacant(v) => {
-                let per_frame_descriptor_sets = self.per_frame_descriptor_sets.get_mut(&descriptor_group).unwrap();
-                if per_frame_descriptor_sets.is_empty() {
-                    unsafe {
-                        self.desc_allocator.allocate(
-                            &self.device,
-                            &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
-                            self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
-                            DESCRIPTOR_COUNT,
-                            per_frame_descriptor_sets,
-                        )
-                    }.expect("Allocate descriptor sets failed");
-                }
-                let desc_set = v.insert(per_frame_descriptor_sets.pop().unwrap());
-                for &(index, sampler_name) in SAMPLERS[PER_DRAW_SAMPLER_COUNT..].iter() {
-                    program.bound_textures[index] = self.bound_textures[index];
-                    let image = &self.images[&self.bound_textures[index]].core;
-                    program.bind_texture(
-                        &self.device,
-                        desc_set.raw(),
-                        &image,
-                        sampler_name,
-                        &mut cmd_buffer,
-                        Some(&self.sampler_nearest),
-                    );
-                }
-            },
-        };
-
-        self.bound_per_frame_resources = bound_resources;
+        Self::bind_textures_to_descriptor(
+            program,
+            &self.bound_textures,
+            &mut cmd_buffer,
+            (descriptor_group, per_frame_bindings),
+            &mut self.per_frame_descriptor_bindings,
+            self.per_frame_descriptor_sets.get_mut(&descriptor_group).unwrap(),
+            &self.images,
+            &mut self.desc_allocator,
+            &self.device,
+            &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
+            self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
+            PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT.. SAMPLERS.len(),
+            Some(&self.sampler_nearest),
+        );
+        self.bound_per_frame_textures = per_frame_bindings;
 
         // Immutable samplers
-        let bound_samplers = SamplerResources::new(
+        let bound_samplers = SamplerBindings(
             [
                 self.bound_sampler[SAMPLERS[0].0],
                 self.bound_sampler[SAMPLERS[1].0],
@@ -1859,6 +1715,74 @@ impl<B: hal::Backend> Device<B> {
         self.bound_mutable_samplers = bound_samplers;
 
         unsafe { cmd_buffer.finish() };
+    }
+
+    fn bind_textures_to_descriptor<T: std::cmp::Eq + std::hash::Hash>(
+        program: &mut Program<B>,
+        bound_textures: &[u32; 11],
+        cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
+        bindings: T,
+        descriptor_map: &mut FastHashMap<T, DescriptorSet<B>>,
+        descriptor_sets: &mut Vec<DescriptorSet<B>>,
+        images: &FastHashMap<TextureId, Image<B>>,
+        desc_allocator: &mut DescriptorAllocator<B>,
+        device: &B::Device,
+        descriptor_layout: &B::DescriptorSetLayout,
+        descriptor_ranges: DescriptorRanges,
+        range: std::ops::Range<usize>,
+        sampler: Option<&B::Sampler>,
+    ) {
+        match descriptor_map.entry(bindings) {
+            Entry::Occupied(_) => {
+                for &(index, _) in SAMPLERS[range].iter() {
+                    program.bound_textures[index] = bound_textures[index];
+                    let image = &images[&bound_textures[index]].core;
+                    // We need to transit the image, even though it's bound in the descriptor set
+                    let mut src_stage = Some(hal::pso::PipelineStage::empty());
+                    if let Some(barrier) = image.transit(
+                        hal::image::Access::SHADER_READ,
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                        image.subresource_range.clone(),
+                        src_stage.as_mut(),
+                    ) {
+                        unsafe {
+                            cmd_buffer.pipeline_barrier(
+                                src_stage.unwrap()
+                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER,
+                                hal::memory::Dependencies::empty(),
+                                &[barrier],
+                            );
+                        }
+                    }
+                }
+            },
+            Entry::Vacant(v) => {
+                if descriptor_sets.is_empty() {
+                    unsafe {
+                        desc_allocator.allocate(
+                            device,
+                            descriptor_layout,
+                            descriptor_ranges,
+                            DESCRIPTOR_COUNT,
+                            descriptor_sets,
+                        )
+                    }.expect("Allocate descriptor sets failed");
+                }
+                let desc_set = v.insert(descriptor_sets.pop().unwrap());
+                for &(index, sampler_name) in SAMPLERS[range].iter() {
+                    program.bound_textures[index] = bound_textures[index];
+                    let image = &images[&bound_textures[index]].core;
+                    program.bind_texture(
+                        &device,
+                        desc_set.raw(),
+                        &image,
+                        sampler_name,
+                        cmd_buffer,
+                        sampler,
+                    );
+                }
+            },
+        };
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
@@ -1978,12 +1902,12 @@ impl<B: hal::Backend> Device<B> {
             .expect("Program not found")
             .shader_kind.into();
 
-        let ref desc_set_per_frame = self.per_frame_descriptor_bindings[&(descriptor_group, self.bound_per_frame_resources)].raw();
+        let ref desc_set_per_frame = self.per_frame_descriptor_bindings[&(descriptor_group, self.bound_per_frame_textures)].raw();
         let desc_set_per_pass = match descriptor_group {
-            DescriptorGroup::Primitive => Some(self.per_pass_descriptor_bindings[&self.bound_per_pass_resources].raw()),
+            DescriptorGroup::Primitive => Some(self.per_pass_descriptor_bindings[&self.bound_per_pass_textures].raw()),
             _ => None,
         };
-        let ref desc_set_per_draw = self.per_draw_descriptor_bindings[&self.bound_per_draw_resources].raw();
+        let ref desc_set_per_draw = self.per_draw_descriptor_bindings[&self.bound_per_draw_textures].raw();
         let ref desc_set_sampler = self.sampler_descriptor_bindings[&self.bound_mutable_samplers].raw();
         let locals = &self.bound_locals;
         let ref desc_set_locals = self.locals_descriptor_bindings.as_ref().map(|map| map[locals].raw());
