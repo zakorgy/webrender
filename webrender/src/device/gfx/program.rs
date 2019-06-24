@@ -29,12 +29,12 @@ pub(super) const PUSH_CONSTANT_BLOCK_SIZE: usize = 17; // 68 / 4
 const SPECIALIZATION_CONSTANT_COUNT: usize = 5;
 // Size of a specialization constant variable in bytes.
 const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
-const SPECIALIZATION_FEATURES: &'static [&'static [&'static str]] = &[
-    &["ALPHA_PASS"],
-    &["COLOR_TARGET"],
-    &["GLYPH_TRANSFORM"],
-    &["DITHERING"],
-    &["DEBUG_OVERDRAW"],
+const SPECIALIZATION_FEATURES: &'static [&'static str] = &[
+    "ALPHA_PASS",
+    "COLOR_TARGET",
+    "GLYPH_TRANSFORM",
+    "DITHERING",
+    "DEBUG_OVERDRAW",
 ];
 const QUAD: [vertex_types::Vertex; 6] = [
     vertex_types::Vertex {
@@ -111,21 +111,21 @@ impl<B: hal::Backend> Program<B> {
 
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
-        let mut constants = Vec::with_capacity(SPECIALIZATION_CONSTANT_COUNT);
         let mut specialization_data =
             vec![0; SPECIALIZATION_CONSTANT_COUNT * SPECIALIZATION_CONSTANT_SIZE];
-        for i in 0 .. SPECIALIZATION_CONSTANT_COUNT {
-            constants.push(hal::pso::SpecializationConstant {
-                id: i as _,
-                range: (SPECIALIZATION_CONSTANT_SIZE * i) as _
-                    .. (SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
-            });
-            for (index, feature) in SPECIALIZATION_FEATURES[i].iter().enumerate() {
-                if features.contains(feature) {
-                    specialization_data[SPECIALIZATION_CONSTANT_SIZE * i] = (index + 1) as u8;
+        let constants = SPECIALIZATION_FEATURES
+            .iter()
+            .zip(specialization_data.chunks_mut(SPECIALIZATION_CONSTANT_SIZE))
+            .enumerate()
+            .map(|(i, (feature, out_data))| {
+                out_data[0] = features.contains(feature) as u8;
+                hal::pso::SpecializationConstant {
+                    id: i as _,
+                    range: (SPECIALIZATION_CONSTANT_SIZE * i) as _
+                        .. (SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
                 }
-            }
-        }
+            })
+            .collect::<Vec<_>>();
 
         let pipelines = {
             let (vs_entry, fs_entry) = (
