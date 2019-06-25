@@ -80,11 +80,28 @@ const DESCRIPTOR_SET_PER_FRAME: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
 const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 const DESCRIPTOR_SET_LOCALS: usize = 4;
-
-const PER_DRAW_SAMPLER_COUNT: usize = 3;
-const PER_PASS_SAMPLER_COUNT: usize = 2;
-const PER_FRAME_SAMPLER_COUNT: usize = 6;
-const MUTABLE_SAMPLER_COUNT: usize = 3;
+const RENDERER_TEXTURE_COUNT: usize = 11;
+const PER_DRAW_TEXTURE_COUNT: usize = 3; // Color0, Color1, Color2
+const PER_PASS_TEXTURE_COUNT: usize = 2; // PrevPassAlpha, PrevPassColor
+const PER_FRAME_TEXTURE_COUNT: usize = 6; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
+const MUTABLE_SAMPLER_COUNT: usize = 3; // Color0, Color1, Color2 samplers
+const TEXTURE_FILTER_COUNT: usize = 3; // Nearest, Linear, Trilinear
+const RENDERER_TEXTURE_BINDINGS: [u32; RENDERER_TEXTURE_COUNT] = [
+    0, // Color0
+    1, // Color1
+    2, // Color2
+    0, // PrevPassAlpha
+    1, // PrevPassColor
+    2, // GpuCache
+    3, // TransformPalette
+    1, // RenderTasks
+    0, // Dither
+    4, // PrimitiveHeadersF
+    5, // PrimitiveHeadersI
+];
+const PER_FRAME_RANGE_DEFAULT: std::ops::Range<usize> = 8..9; // Dither
+const PER_FRAME_RANGE_CLIP: std::ops::Range<usize> = 5..9; // GpuCache, TransformPalette, RenderTasks, Dither
+const PER_FRAME_RANGE_PRIMITIVE: std::ops::Range<usize> = 5..11; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 
 #[cfg(feature = "push_constants")]
 const DESCRIPTOR_SET_PER_LAYOUT: usize = 4;
@@ -93,20 +110,6 @@ const DESCRIPTOR_SET_PER_LAYOUT: usize = 5;
 
 const NON_SPECIALIZATION_FEATURES: &'static [&'static str] =
     &["TEXTURE_RECT", "TEXTURE_2D", "DUAL_SOURCE_BLENDING"];
-
-const SAMPLERS: [(usize, &'static str); 11] = [
-    (0, "Color0"),
-    (1, "Color1"),
-    (2, "Color2"),
-    (3, "PrevPassAlpha"),
-    (4, "PrevPassColor"),
-    (5, "GpuCache"),
-    (6, "TransformPalette"),
-    (7, "RenderTasks"),
-    (8, "Dither"),
-    (9, "PrimitiveHeadersF"),
-    (10, "PrimitiveHeadersI"),
-];
 
 #[repr(u32)]
 pub enum DepthFunction {
@@ -177,7 +180,7 @@ struct Fence<B: hal::Backend> {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerDrawBindings([TextureId; PER_DRAW_SAMPLER_COUNT]);
+struct PerDrawBindings([TextureId; PER_DRAW_TEXTURE_COUNT]);
 
 impl PerDrawBindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
@@ -186,7 +189,7 @@ impl PerDrawBindings {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerPassbindings([TextureId; PER_PASS_SAMPLER_COUNT]);
+struct PerPassbindings([TextureId; PER_PASS_TEXTURE_COUNT]);
 
 impl PerPassbindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
@@ -195,7 +198,7 @@ impl PerPassbindings {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerFrameBindings([TextureId; PER_FRAME_SAMPLER_COUNT]);
+struct PerFrameBindings([TextureId; PER_FRAME_TEXTURE_COUNT]);
 
 impl PerFrameBindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
@@ -271,9 +274,9 @@ pub struct Device<B: hal::Backend> {
     descriptor_set_layouts: FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>,
     descriptor_set_ranges: FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_PER_LAYOUT]>>,
 
-    bound_textures: [u32; 11],
+    bound_textures: [u32; RENDERER_TEXTURE_COUNT],
     bound_program: ProgramId,
-    bound_sampler: [TextureFilter; 11],
+    bound_sampler: [TextureFilter; RENDERER_TEXTURE_COUNT],
     bound_read_texture: (TextureId, i32),
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
@@ -660,7 +663,7 @@ impl<B: hal::Backend> Device<B> {
             &mut desc_allocator,
             &descriptor_set_layouts[&DescriptorGroup::Default][DESCRIPTOR_SET_SAMPLER],
             descriptor_set_ranges[&DescriptorGroup::Default][DESCRIPTOR_SET_SAMPLER],
-            27, // 3 * 3 * 3 is the maximum possible combination of filtering for the three mutable samplers
+            (MUTABLE_SAMPLER_COUNT * TEXTURE_FILTER_COUNT) as _,
         );
 
         let locals_descriptor_sets = if cfg!(feature = "push_constants") {
@@ -760,9 +763,9 @@ impl<B: hal::Backend> Device<B> {
 
             descriptor_set_layouts,
             descriptor_set_ranges,
-            bound_textures: [0; 11],
+            bound_textures: [0; RENDERER_TEXTURE_COUNT],
             bound_program: INVALID_PROGRAM_ID,
-            bound_sampler: [TextureFilter::Linear; 11],
+            bound_sampler: [TextureFilter::Linear; RENDERER_TEXTURE_COUNT],
             bound_read_fbo: DEFAULT_READ_FBO,
             bound_read_texture: (INVALID_TEXTURE_ID, 0),
             bound_draw_fbo: DEFAULT_DRAW_FBO,
@@ -1449,9 +1452,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn reset_state(&mut self) {
-        self.bound_textures = [INVALID_TEXTURE_ID; 11];
+        self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
         self.bound_program = INVALID_PROGRAM_ID;
-        self.bound_sampler = [TextureFilter::Linear; 11];
+        self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
     }
@@ -1614,14 +1617,13 @@ impl<B: hal::Backend> Device<B> {
         // Per draw textures
         let per_draw_bindings = PerDrawBindings(
             [
-                self.bound_textures[SAMPLERS[0].0],
-                self.bound_textures[SAMPLERS[1].0],
-                self.bound_textures[SAMPLERS[2].0],
+                self.bound_textures[0],
+                self.bound_textures[1],
+                self.bound_textures[2],
             ]
         );
 
         Self::bind_textures_to_descriptor(
-            program,
             &self.bound_textures,
             &mut cmd_buffer,
             per_draw_bindings,
@@ -1632,7 +1634,7 @@ impl<B: hal::Backend> Device<B> {
             &self.device,
             &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_DRAW],
             self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_DRAW],
-            0..PER_DRAW_SAMPLER_COUNT,
+            0..PER_DRAW_TEXTURE_COUNT,
             None,
         );
         self.bound_per_draw_textures = per_draw_bindings;
@@ -1641,13 +1643,12 @@ impl<B: hal::Backend> Device<B> {
         if descriptor_group == DescriptorGroup::Primitive {
             let per_pass_bindings = PerPassbindings(
                 [
-                    self.bound_textures[SAMPLERS[3].0],
-                    self.bound_textures[SAMPLERS[4].0],
+                    self.bound_textures[3],
+                    self.bound_textures[4],
                 ],
             );
 
             Self::bind_textures_to_descriptor(
-                program,
                 &self.bound_textures,
                 &mut cmd_buffer,
                 per_pass_bindings,
@@ -1658,7 +1659,7 @@ impl<B: hal::Backend> Device<B> {
                 &self.device,
                 &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_PASS],
                 self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_PASS],
-                PER_DRAW_SAMPLER_COUNT..PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT,
+                PER_DRAW_TEXTURE_COUNT..PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT,
                 Some(&self.sampler_linear),
             );
             self.bound_per_pass_textures = per_pass_bindings;
@@ -1667,17 +1668,16 @@ impl<B: hal::Backend> Device<B> {
         // Per frame textures
         let per_frame_bindings = PerFrameBindings(
             [
-                self.bound_textures[SAMPLERS[5].0],
-                self.bound_textures[SAMPLERS[6].0],
-                self.bound_textures[SAMPLERS[7].0],
-                self.bound_textures[SAMPLERS[8].0],
-                self.bound_textures[SAMPLERS[9].0],
-                self.bound_textures[SAMPLERS[10].0],
+                self.bound_textures[5],
+                self.bound_textures[6],
+                self.bound_textures[7],
+                self.bound_textures[8],
+                self.bound_textures[9],
+                self.bound_textures[10],
             ],
         );
 
         Self::bind_textures_to_descriptor(
-            program,
             &self.bound_textures,
             &mut cmd_buffer,
             (descriptor_group, per_frame_bindings),
@@ -1688,7 +1688,11 @@ impl<B: hal::Backend> Device<B> {
             &self.device,
             &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
             self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
-            PER_DRAW_SAMPLER_COUNT + PER_PASS_SAMPLER_COUNT.. SAMPLERS.len(),
+            match descriptor_group {
+                DescriptorGroup::Default => PER_FRAME_RANGE_DEFAULT,
+                DescriptorGroup::Clip => PER_FRAME_RANGE_CLIP,
+                DescriptorGroup::Primitive => PER_FRAME_RANGE_PRIMITIVE,
+            },
             Some(&self.sampler_nearest),
         );
         self.bound_per_frame_textures = per_frame_bindings;
@@ -1696,21 +1700,30 @@ impl<B: hal::Backend> Device<B> {
         // Immutable samplers
         let bound_samplers = SamplerBindings(
             [
-                self.bound_sampler[SAMPLERS[0].0],
-                self.bound_sampler[SAMPLERS[1].0],
-                self.bound_sampler[SAMPLERS[2].0],
+                self.bound_sampler[0],
+                self.bound_sampler[1],
+                self.bound_sampler[2],
             ],
         );
 
         if let Entry::Vacant(v) = self.sampler_descriptor_bindings.entry(bound_samplers) {
             let desc_set = v.insert(self.sampler_descriptor_sets.pop().expect("Out of sampler descriptor set!"));
-            for &(index, sampler_name) in SAMPLERS[0..MUTABLE_SAMPLER_COUNT].iter() {
-                let sampler = match self.bound_sampler[index] {
-                    TextureFilter::Linear | TextureFilter::Trilinear => &self.sampler_linear,
-                    TextureFilter::Nearest => &self.sampler_nearest,
+            let ref bound_sampler = self.bound_sampler;
+            let ref sampler_linear = self.sampler_linear;
+            let ref sampler_nearest = self.sampler_nearest;
+            let descriptor_writes = (0..MUTABLE_SAMPLER_COUNT).into_iter().map(|index| {
+                let sampler = match bound_sampler[index] {
+                    TextureFilter::Linear | TextureFilter::Trilinear => sampler_linear,
+                    TextureFilter::Nearest => sampler_nearest,
                 };
-                program.bind_sampler(&self.device, desc_set, &sampler, sampler_name);
-            }
+                hal::pso::DescriptorSetWrite {
+                    set: desc_set.raw(),
+                    binding: index as _,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Sampler(sampler)),
+                }
+            });
+            unsafe { self.device.write_descriptor_sets(descriptor_writes) };
         };
         self.bound_mutable_samplers = bound_samplers;
 
@@ -1718,8 +1731,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn bind_textures_to_descriptor<T: std::cmp::Eq + std::hash::Hash>(
-        program: &mut Program<B>,
-        bound_textures: &[u32; 11],
+        bound_textures: &[u32; RENDERER_TEXTURE_COUNT],
         cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
         bindings: T,
         descriptor_map: &mut FastHashMap<T, DescriptorSet<B>>,
@@ -1734,8 +1746,7 @@ impl<B: hal::Backend> Device<B> {
     ) {
         match descriptor_map.entry(bindings) {
             Entry::Occupied(_) => {
-                for &(index, _) in SAMPLERS[range].iter() {
-                    program.bound_textures[index] = bound_textures[index];
+                for index in range {
                     let image = &images[&bound_textures[index]].core;
                     // We need to transit the image, even though it's bound in the descriptor set
                     let mut src_stage = Some(hal::pso::PipelineStage::empty());
@@ -1757,30 +1768,58 @@ impl<B: hal::Backend> Device<B> {
                 }
             },
             Entry::Vacant(v) => {
-                if descriptor_sets.is_empty() {
-                    unsafe {
-                        desc_allocator.allocate(
-                            device,
-                            descriptor_layout,
-                            descriptor_ranges,
-                            DESCRIPTOR_COUNT,
-                            descriptor_sets,
-                        )
-                    }.expect("Allocate descriptor sets failed");
-                }
-                let desc_set = v.insert(descriptor_sets.pop().unwrap());
-                for &(index, sampler_name) in SAMPLERS[range].iter() {
-                    program.bound_textures[index] = bound_textures[index];
+                let desc_set = match descriptor_sets.pop() {
+                    Some(ds) => ds,
+                    None => {
+                        unsafe {
+                            desc_allocator.allocate(
+                                device,
+                                descriptor_layout,
+                                descriptor_ranges,
+                                DESCRIPTOR_COUNT,
+                                descriptor_sets,
+                            )
+                        }.expect("Allocate descriptor sets failed");
+                        descriptor_sets.pop().unwrap()
+                    }
+                };
+                let desc_set = v.insert(desc_set);
+                let descriptor_writes = RENDERER_TEXTURE_BINDINGS[range.clone()].iter().zip(range.into_iter()).map(|(binding, index)| {
                     let image = &images[&bound_textures[index]].core;
-                    program.bind_texture(
-                        &device,
-                        desc_set.raw(),
-                        &image,
-                        sampler_name,
-                        cmd_buffer,
-                        sampler,
-                    );
-                }
+                    let mut src_stage = Some(hal::pso::PipelineStage::empty());
+                    if let Some(barrier) = image.transit(
+                        hal::image::Access::SHADER_READ,
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                        image.subresource_range.clone(),
+                        src_stage.as_mut(),
+                    ) {
+                        unsafe {
+                            cmd_buffer.pipeline_barrier(
+                                src_stage.unwrap()
+                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER,
+                                hal::memory::Dependencies::empty(),
+                                &[barrier],
+                            );
+                        }
+                    }
+                    hal::pso::DescriptorSetWrite {
+                        set: desc_set.raw(),
+                        binding: *binding,
+                        array_offset: 0,
+                        descriptors: match sampler {
+                            Some(sampler) => Some(hal::pso::Descriptor::CombinedImageSampler(
+                                &image.view,
+                                hal::image::Layout::ShaderReadOnlyOptimal,
+                                sampler,
+                            )),
+                            None => Some(hal::pso::Descriptor::Image(
+                                &image.view,
+                                hal::image::Layout::ShaderReadOnlyOptimal,
+                            )),
+                        }
+                    }
+                });
+                unsafe { device.write_descriptor_sets(descriptor_writes) };
             },
         };
     }
@@ -1974,8 +2013,8 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
 
-        self.bound_textures = [INVALID_TEXTURE_ID; 11];
-        self.bound_sampler = [TextureFilter::Linear; 11];
+        self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
+        self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
         self.program_mode_id = 0;

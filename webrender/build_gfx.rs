@@ -457,7 +457,7 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
     );
 }
 
-fn get_set_from_line(code: &Vec<&str>) -> usize {
+fn get_set_from_line(code: &[&str]) -> usize {
     let (sampler_name, _) = code.split_last().unwrap();
     match sampler_name.as_ref() {
         "sColor0" |
@@ -475,7 +475,7 @@ fn get_set_from_line(code: &Vec<&str>) -> usize {
     }
 }
 
-fn use_combined_sampler(code: &Vec<&str>) -> bool {
+fn use_combined_sampler(code: &[&str]) -> bool {
     let (sampler_name, _) = code.split_last().unwrap();
     match sampler_name.as_ref() {
         "sColor0" |

@@ -11,7 +11,6 @@ use std::borrow::Cow::{Borrowed};
 
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
-use super::image::ImageCore;
 use super::render_pass::RenderPass;
 use super::vertex_types;
 use super::PipelineRequirements;
@@ -58,14 +57,12 @@ const QUAD: [vertex_types::Vertex; 6] = [
 
 
 pub(crate) struct Program<B: hal::Backend> {
-    bindings_map: FastHashMap<String, u32>,
     pipelines: FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>,
     pub(super) vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
-    pub(super) bound_textures: [u32; 16],
     pub(super) constants: [u32; PUSH_CONSTANT_BLOCK_SIZE],
 }
 
@@ -373,17 +370,13 @@ impl<B: hal::Backend> Program<B> {
             }
         }
 
-        let bindings_map = pipeline_requirements.bindings_map;
-
         Program {
-            bindings_map,
             pipelines,
             vertex_buffer,
             index_buffer,
             instance_buffer,
             shader_name: String::from(shader_name),
             shader_kind,
-            bound_textures: [0; 16],
             constants: [0; PUSH_CONSTANT_BLOCK_SIZE],
         }
     }
@@ -397,92 +390,6 @@ impl<B: hal::Backend> Program<B> {
     ) {
         assert!(!instances.is_empty());
         self.instance_buffer[buffer_id].add(device, instances, heaps);
-    }
-
-    pub(super) fn bind_texture(
-        &self,
-        device: &B::Device,
-        set: &B::DescriptorSet,
-        image: &ImageCore<B>,
-        binding: &'static str,
-        cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
-        sampler: Option<&B::Sampler>,
-    ) {
-        if let Some(binding) = self.bindings_map.get(&("t".to_owned() + binding)) {
-            unsafe {
-                let mut src_stage = Some(hal::pso::PipelineStage::empty());
-                if let Some(barrier) = image.transit(
-                    hal::image::Access::SHADER_READ,
-                    hal::image::Layout::ShaderReadOnlyOptimal,
-                    image.subresource_range.clone(),
-                    src_stage.as_mut(),
-                ) {
-                    cmd_buffer.pipeline_barrier(
-                        src_stage.unwrap()
-                            .. hal::pso::PipelineStage::FRAGMENT_SHADER,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                }
-                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                    set,
-                    binding: *binding,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Image(
-                        &image.view,
-                        hal::image::Layout::ShaderReadOnlyOptimal,
-                    )),
-                }));
-            }
-            return
-        }
-        if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
-            unsafe {
-                let mut src_stage = Some(hal::pso::PipelineStage::empty());
-                if let Some(barrier) = image.transit(
-                    hal::image::Access::SHADER_READ,
-                    hal::image::Layout::ShaderReadOnlyOptimal,
-                    image.subresource_range.clone(),
-                    src_stage.as_mut(),
-                ) {
-                    cmd_buffer.pipeline_barrier(
-                        src_stage.unwrap()
-                            .. hal::pso::PipelineStage::FRAGMENT_SHADER,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                }
-                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                    set,
-                    binding: *binding,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::CombinedImageSampler(
-                        &image.view,
-                        hal::image::Layout::ShaderReadOnlyOptimal,
-                        sampler.unwrap(),
-                    )),
-                }));
-            }
-        }
-    }
-
-    pub(super) fn bind_sampler(
-        &self,
-        device: &B::Device,
-        set: &B::DescriptorSet,
-        sampler: &B::Sampler,
-        binding: &'static str,
-    ) {
-        if let Some(binding) = self.bindings_map.get(&("s".to_owned() + binding)) {
-            unsafe {
-                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                    set,
-                    binding: *binding,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Sampler(sampler)),
-                }));
-            }
-        }
     }
 
     pub(super) fn submit(
