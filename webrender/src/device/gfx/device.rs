@@ -76,14 +76,14 @@ pub struct DeviceInit<B: hal::Backend> {
 
 const DESCRIPTOR_COUNT: u32 = 96;
 const DESCRIPTOR_SET_PER_PASS: usize = 0;
-const DESCRIPTOR_SET_PER_FRAME: usize = 1;
+const DESCRIPTOR_SET_PER_GROUP: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
 const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 const DESCRIPTOR_SET_LOCALS: usize = 4;
 const RENDERER_TEXTURE_COUNT: usize = 11;
 const PER_DRAW_TEXTURE_COUNT: usize = 3; // Color0, Color1, Color2
 const PER_PASS_TEXTURE_COUNT: usize = 2; // PrevPassAlpha, PrevPassColor
-const PER_FRAME_TEXTURE_COUNT: usize = 6; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
+const PER_GROUP_TEXTURE_COUNT: usize = 6; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 const MUTABLE_SAMPLER_COUNT: usize = 3; // Color0, Color1, Color2 samplers
 const TEXTURE_FILTER_COUNT: usize = 3; // Nearest, Linear, Trilinear
 const RENDERER_TEXTURE_BINDINGS: [u32; RENDERER_TEXTURE_COUNT] = [
@@ -99,9 +99,9 @@ const RENDERER_TEXTURE_BINDINGS: [u32; RENDERER_TEXTURE_COUNT] = [
     4, // PrimitiveHeadersF
     5, // PrimitiveHeadersI
 ];
-const PER_FRAME_RANGE_DEFAULT: std::ops::Range<usize> = 8..9; // Dither
-const PER_FRAME_RANGE_CLIP: std::ops::Range<usize> = 5..9; // GpuCache, TransformPalette, RenderTasks, Dither
-const PER_FRAME_RANGE_PRIMITIVE: std::ops::Range<usize> = 5..11; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
+const PER_GROUP_RANGE_DEFAULT: std::ops::Range<usize> = 8..9; // Dither
+const PER_GROUP_RANGE_CLIP: std::ops::Range<usize> = 5..9; // GpuCache, TransformPalette, RenderTasks, Dither
+const PER_GROUP_RANGE_PRIMITIVE: std::ops::Range<usize> = 5..11; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 
 #[cfg(feature = "push_constants")]
 const DESCRIPTOR_SET_PER_LAYOUT: usize = 4;
@@ -198,7 +198,7 @@ impl PerPassbindings {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-struct PerFrameBindings([TextureId; PER_FRAME_TEXTURE_COUNT]);
+struct PerFrameBindings([TextureId; PER_GROUP_TEXTURE_COUNT]);
 
 impl PerFrameBindings {
     fn has_texture_id(&self, id: &TextureId) -> bool {
@@ -259,9 +259,9 @@ pub struct Device<B: hal::Backend> {
     per_pass_descriptor_bindings: FastHashMap<PerPassbindings, DescriptorSet<B>>,
     bound_per_pass_textures: PerPassbindings,
     // Per frame things
-    per_frame_descriptor_sets: FastHashMap<DescriptorGroup, Vec<DescriptorSet<B>>>,
-    per_frame_descriptor_bindings: FastHashMap<(DescriptorGroup, PerFrameBindings), DescriptorSet<B>>,
-    bound_per_frame_textures: PerFrameBindings,
+    per_group_descriptor_sets: FastHashMap<DescriptorGroup, Vec<DescriptorSet<B>>>,
+    per_group_descriptor_bindings: FastHashMap<(DescriptorGroup, PerFrameBindings), DescriptorSet<B>>,
+    bound_per_group_textures: PerFrameBindings,
     // Sampler related things
     sampler_descriptor_sets: Vec<DescriptorSet<B>>,
     sampler_descriptor_bindings: FastHashMap<SamplerBindings, DescriptorSet<B>>,
@@ -564,7 +564,7 @@ impl<B: hal::Backend> Device<B> {
         let mut descriptor_set_ranges:
             FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_PER_LAYOUT]>>
              = FastHashMap::default();
-        let mut per_frame_descriptor_sets = FastHashMap::default();
+        let mut per_group_descriptor_sets = FastHashMap::default();
         let descriptor_set_layouts:
             FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>
              = [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive]
@@ -610,7 +610,7 @@ impl<B: hal::Backend> Device<B> {
                     .map(|(index, (bindings, immutable_samplers))| {
                         let layout = unsafe { device.create_descriptor_set_layout(*bindings, immutable_samplers.iter().map(|s| *s)) }
                             .expect("create_descriptor_set_layout failed");
-                        if index == DESCRIPTOR_SET_PER_FRAME {
+                        if index == DESCRIPTOR_SET_PER_GROUP {
                             let mut descriptor_sets = Vec::new();
                             unsafe {
                                 desc_allocator.allocate(
@@ -621,7 +621,7 @@ impl<B: hal::Backend> Device<B> {
                                     &mut descriptor_sets,
                                 )
                             }.expect("Allocate descriptor sets failed");
-                            per_frame_descriptor_sets.insert(*g, descriptor_sets);
+                            per_group_descriptor_sets.insert(*g, descriptor_sets);
                         }
                         layout
                     }).collect();
@@ -749,9 +749,9 @@ impl<B: hal::Backend> Device<B> {
             per_pass_descriptor_bindings: FastHashMap::default(),
             bound_per_pass_textures: PerPassbindings::default(),
 
-            per_frame_descriptor_sets,
-            per_frame_descriptor_bindings: FastHashMap::default(),
-            bound_per_frame_textures: PerFrameBindings::default(),
+            per_group_descriptor_sets,
+            per_group_descriptor_bindings: FastHashMap::default(),
+            bound_per_group_textures: PerFrameBindings::default(),
 
             sampler_descriptor_sets,
             sampler_descriptor_bindings:  FastHashMap::default(),
@@ -865,9 +865,9 @@ impl<B: hal::Backend> Device<B> {
             self.per_pass_descriptor_sets.push(desc_set);
         }
 
-        self.bound_per_frame_textures = PerFrameBindings::default();
-        for ((descriptor_group, _), desc_set) in self.per_frame_descriptor_bindings.drain() {
-            self.per_frame_descriptor_sets.get_mut(&descriptor_group).unwrap().push(desc_set);
+        self.bound_per_group_textures = PerFrameBindings::default();
+        for ((descriptor_group, _), desc_set) in self.per_group_descriptor_bindings.drain() {
+            self.per_group_descriptor_sets.get_mut(&descriptor_group).unwrap().push(desc_set);
         }
 
         self.bound_mutable_samplers = SamplerBindings::default();
@@ -1666,7 +1666,7 @@ impl<B: hal::Backend> Device<B> {
         }
 
         // Per frame textures
-        let per_frame_bindings = PerFrameBindings(
+        let per_group_bindings = PerFrameBindings(
             [
                 self.bound_textures[5],
                 self.bound_textures[6],
@@ -1680,22 +1680,22 @@ impl<B: hal::Backend> Device<B> {
         Self::bind_textures_to_descriptor(
             &self.bound_textures,
             &mut cmd_buffer,
-            (descriptor_group, per_frame_bindings),
-            &mut self.per_frame_descriptor_bindings,
-            self.per_frame_descriptor_sets.get_mut(&descriptor_group).unwrap(),
+            (descriptor_group, per_group_bindings),
+            &mut self.per_group_descriptor_bindings,
+            self.per_group_descriptor_sets.get_mut(&descriptor_group).unwrap(),
             &self.images,
             &mut self.desc_allocator,
             &self.device,
-            &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
-            self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_FRAME],
+            &self.descriptor_set_layouts[&descriptor_group][DESCRIPTOR_SET_PER_GROUP],
+            self.descriptor_set_ranges[&descriptor_group][DESCRIPTOR_SET_PER_GROUP],
             match descriptor_group {
-                DescriptorGroup::Default => PER_FRAME_RANGE_DEFAULT,
-                DescriptorGroup::Clip => PER_FRAME_RANGE_CLIP,
-                DescriptorGroup::Primitive => PER_FRAME_RANGE_PRIMITIVE,
+                DescriptorGroup::Default => PER_GROUP_RANGE_DEFAULT,
+                DescriptorGroup::Clip => PER_GROUP_RANGE_CLIP,
+                DescriptorGroup::Primitive => PER_GROUP_RANGE_PRIMITIVE,
             },
             Some(&self.sampler_nearest),
         );
-        self.bound_per_frame_textures = per_frame_bindings;
+        self.bound_per_group_textures = per_group_bindings;
 
         // Immutable samplers
         let bound_samplers = SamplerBindings(
@@ -1941,7 +1941,7 @@ impl<B: hal::Backend> Device<B> {
             .expect("Program not found")
             .shader_kind.into();
 
-        let ref desc_set_per_frame = self.per_frame_descriptor_bindings[&(descriptor_group, self.bound_per_frame_textures)].raw();
+        let ref desc_set_per_group = self.per_group_descriptor_bindings[&(descriptor_group, self.bound_per_group_textures)].raw();
         let desc_set_per_pass = match descriptor_group {
             DescriptorGroup::Primitive => Some(self.per_pass_descriptor_bindings[&self.bound_per_pass_textures].raw()),
             _ => None,
@@ -1961,7 +1961,7 @@ impl<B: hal::Backend> Device<B> {
                 &frame_buffer,
                 desc_set_per_draw,
                 desc_set_per_pass,
-                desc_set_per_frame,
+                desc_set_per_group,
                 desc_set_sampler,
                 *desc_set_locals,
                 &vec![],
@@ -2872,12 +2872,12 @@ impl<B: hal::Backend> Device<B> {
             self.per_pass_descriptor_sets.push(desc_set.unwrap());
         }
 
-        let keys_to_remove: Vec<_> = self.per_frame_descriptor_bindings
+        let keys_to_remove: Vec<_> = self.per_group_descriptor_bindings
             .keys()
             .filter(|(_ , res)| res.has_texture_id(&texture.id)).cloned().collect();
         for key in keys_to_remove {
-            let desc_set =self.per_frame_descriptor_bindings.remove(&key);
-            self.per_frame_descriptor_sets.get_mut(&key.0).unwrap().push(desc_set.unwrap());
+            let desc_set =self.per_group_descriptor_bindings.remove(&key);
+            self.per_group_descriptor_sets.get_mut(&key.0).unwrap().push(desc_set.unwrap());
         }
 
 
@@ -3931,8 +3931,8 @@ impl<B: hal::Backend> Device<B> {
                 .chain(self.per_draw_descriptor_bindings.into_iter().map(|(_, set)| set))
                 .chain(self.per_pass_descriptor_sets.into_iter().map(|set| set))
                 .chain(self.per_pass_descriptor_bindings.into_iter().map(|(_, set)| set))
-                .chain(self.per_frame_descriptor_sets.into_iter().flat_map(|(_, sets)| sets.into_iter()))
-                .chain(self.per_frame_descriptor_bindings.into_iter().map(|(_, set)| set))
+                .chain(self.per_group_descriptor_sets.into_iter().flat_map(|(_, sets)| sets.into_iter()))
+                .chain(self.per_group_descriptor_bindings.into_iter().map(|(_, set)| set))
                 .chain(self.sampler_descriptor_sets)
                 .chain(self.sampler_descriptor_bindings.into_iter().map(|(_, set)| set))
                 .chain(self.locals_descriptor_sets.unwrap_or(vec![]))
