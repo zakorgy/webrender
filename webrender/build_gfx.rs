@@ -28,7 +28,7 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
 const DESCRIPTOR_SET_PER_PASS: usize = 0;
-const DESCRIPTOR_SET_PER_FRAME: usize = 1;
+const DESCRIPTOR_SET_PER_GROUP: usize = 1;
 const DESCRIPTOR_SET_SAMPLER: usize = 2;
 const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 const DESCRIPTOR_SET_COUNT: usize = 4;
@@ -470,7 +470,7 @@ fn get_set_from_line(code: &[&str]) -> usize {
         "sGpuCache" |
         "sTransformPalette" |
         "sPrimitiveHeadersF" |
-        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_FRAME,
+        "sPrimitiveHeadersI" => return DESCRIPTOR_SET_PER_GROUP,
         x => unreachable!("Sampler not found: {:?}", x),
     }
 }
