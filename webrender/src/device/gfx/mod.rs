@@ -5,7 +5,7 @@
 mod blend_state;
 mod buffer;
 mod command;
-mod descriptor_layout;
+mod descriptor;
 mod device;
 mod image;
 mod program;
