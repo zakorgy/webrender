@@ -409,12 +409,10 @@ impl<B: hal::Backend> Program<B> {
         depth_test: hal::pso::DepthTest,
         scissor_rect: Option<DeviceIntRect>,
         next_id: usize,
-        program_mode_id: u32,
         pipeline_layout: &B::PipelineLayout,
     ) {
         let vertex_buffer = &self.vertex_buffer[next_id];
         let instance_buffer = &self.instance_buffer[next_id];
-        *self.constants.last_mut().unwrap() = program_mode_id;
         unsafe {
             #[cfg(feature = "push_constants")]
             cmd_buffer.push_graphics_constants(

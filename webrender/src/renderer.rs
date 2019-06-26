@@ -2671,9 +2671,6 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.bind_texture(TextureSampler::Dither, texture);
         }
 
-        #[cfg(not(feature = "gleam"))]
-        self.device.bind_textures();
-
         self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
     }
 
@@ -3040,11 +3037,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.device.set_scissor_rect(scissor_rect);
                             }
 
-                            #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                            let program = self.device.bound_program();
-                            #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                            self.device.set_uniforms(&program, projection);
-
                             self.draw_instanced_batch(
                                 &batch.instances,
                                 VertexArrayKind::Primitive,
@@ -3137,11 +3129,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.device.set_scissor_rect(scissor_rect);
                             }
 
-                            #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                            let program = self.device.bound_program();
-                            #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                            self.device.set_uniforms(&program, projection);
-
                             self.draw_instanced_batch(
                                 &batch.instances,
                                 VertexArrayKind::Primitive,
@@ -3153,14 +3140,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 self.set_blend_mode_subpixel_with_bg_color_pass1(framebuffer_kind);
                                 self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
 
-                                #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                                let program = self.device.bound_program();
-                                #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                                self.device.set_uniforms(&program, projection);
-
-                                #[cfg(not(feature = "gleam"))]
-                                self.device.bind_textures();
-
                                 // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
                                 // are all set up from the previous draw_instanced_batch call,
                                 // so just issue a draw call here to avoid re-uploading the
@@ -3170,14 +3149,6 @@ impl<B: hal::Backend> Renderer<B> {
 
                                 self.set_blend_mode_subpixel_with_bg_color_pass2(framebuffer_kind);
                                 self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
-
-                                // In case of gfx we can't avoid re-uploading and re-binding,
-                                // since we have a new pipeline for the new draw.
-                                #[cfg(all(not(feature = "gleam"), not(feature = "push_constants")))]
-                                self.device.set_uniforms(&program, projection);
-                                #[cfg(not(feature = "gleam"))]
-                                self.device.bind_textures();
-
                                 self.device
                                     .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                             }

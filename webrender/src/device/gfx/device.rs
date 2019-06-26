@@ -171,7 +171,6 @@ pub struct Device<B: hal::Backend> {
     bound_read_texture: (TextureId, i32),
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
-    program_mode_id: i32,
     scissor_rect: Option<DeviceIntRect>,
     //default_read_fbo: FBOId,
     //default_draw_fbo: FBOId,
@@ -660,7 +659,6 @@ impl<B: hal::Backend> Device<B> {
             bound_read_fbo: DEFAULT_READ_FBO,
             bound_read_texture: (INVALID_TEXTURE_ID, 0),
             bound_draw_fbo: DEFAULT_DRAW_FBO,
-            program_mode_id: 0,
             scissor_rect: None,
 
             max_texture_size,
@@ -1255,11 +1253,6 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    #[cfg(not(feature = "push_constants"))]
-    pub(crate) fn bound_program(&self) -> ProgramId {
-        self.bound_program
-    }
-
     pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
         self.device_pixel_ratio = ratio;
     }
@@ -1414,40 +1407,34 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn set_uniforms(&mut self, program_id: &ProgramId, projection: &Transform3D<f32>) {
-        debug_assert!(self.inside_frame);
-        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        assert_eq!(*program_id, self.bound_program);
-
+    fn bind_uniforms(&mut self) {
         if cfg!(feature = "push_constants") {
             self.programs
-            .get_mut(program_id)
-            .expect(&format!("No program with id {:?}", program_id))
-            .constants[0..16].copy_from_slice(
+            .get_mut(&self.bound_program)
+            .expect("Invalid bound program")
+            .constants[..].copy_from_slice(
                 unsafe {
-                    std::mem::transmute::<_, &[u32; 16]>(&projection.to_row_arrays())
+                    std::mem::transmute::<_, &[u32; 17]>(&self.bound_locals)
                 }
             );
             return;
         }
 
-        let locals = Locals {
-            uTransform: projection.to_row_arrays(),
-            uMode: self.program_mode_id,
-        };
-
         self.locals_descriptors.as_mut().unwrap().bind_locals(
-            locals,
+            self.bound_locals,
             &self.device,
             &mut self.desc_allocator,
             &self.desc_group_data,
             self.locals_buffer.as_mut().unwrap(),
             &mut self.heaps,
         );
-        self.bound_locals = locals;
     }
 
-    pub fn bind_textures(&mut self) {
+    pub fn set_uniforms(&mut self, _program_id: &ProgramId, projection: &Transform3D<f32>) {
+        self.bound_locals.uTransform = projection.to_row_arrays();
+    }
+
+    fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
         let program = self
@@ -1597,6 +1584,8 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn draw(&mut self) {
+        self.bind_textures();
+        self.bind_uniforms();
         let (img, frame_buffer, format, (depth_img, depth_test_changed)) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let texture_id = self.fbos[&self.bound_draw_fbo].texture_id;
             let rbo_id = self.fbos[&self.bound_draw_fbo].rbo;
@@ -1704,7 +1693,6 @@ impl<B: hal::Backend> Device<B> {
                 self.current_depth_test,
                 self.scissor_rect,
                 self.next_id,
-                self.program_mode_id as u32,
                 self.desc_group_data.pipeline_layout(&descriptor_group),
             );
 
@@ -1751,7 +1739,7 @@ impl<B: hal::Backend> Device<B> {
         self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
-        self.program_mode_id = 0;
+        self.bound_locals.uMode = 0;
 
         self.frame_id
     }
@@ -2629,7 +2617,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn switch_mode(&mut self, mode: i32) {
         debug_assert!(self.inside_frame);
-        self.program_mode_id = mode;
+        self.bound_locals.uMode = mode;
     }
 
     pub fn create_pbo(&mut self) -> PBO {
@@ -2990,7 +2978,6 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn draw_triangles_u32(&mut self, _first_vertex: i32, _index_count: i32) {
         debug_assert!(self.inside_frame);
-        self.bind_textures();
         self.draw();
     }
 
