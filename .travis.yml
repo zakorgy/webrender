@@ -43,9 +43,9 @@ script:
 #  - servo-tidy
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender_api && cargo test --verbose --features "ipc"); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features); fi
-  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features capture,serde); fi
-  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --features profiler,capture,serde); fi
-  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --features replay,serde); fi
+  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features capture); fi
+  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --features profiler,capture); fi
+  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --features replay); fi
 #  - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features pathfinder); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd webrender && cargo check --verbose --no-default-features --features serialize_program); fi
   - if [ $BUILD_KIND = DEBUG ]; then (cd wrench && cargo check --verbose --features env_logger); fi

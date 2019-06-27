@@ -102,7 +102,7 @@ impl Notifier {
 }
 
 impl RenderNotifier for Notifier {
-    fn clone(&self) -> Box<RenderNotifier> {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
         Box::new(Notifier(self.0.clone()))
     }
 
@@ -184,7 +184,7 @@ impl Wrench {
         disable_dual_source_blending: bool,
         zoom_factor: f32,
         chase_primitive: webrender::ChasePrimitive,
-        notifier: Option<Box<RenderNotifier>>,
+        notifier: Option<Box<dyn RenderNotifier>>,
         init: webrender::DeviceInit<back::Backend>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
@@ -192,14 +192,14 @@ impl Wrench {
         let recorder = save_type.map(|save_type| match save_type {
             SaveType::Yaml => Box::new(
                 YamlFrameWriterReceiver::new(&PathBuf::from("yaml_frames")),
-            ) as Box<webrender::ApiRecordingReceiver>,
+            ) as Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Json => Box::new(JsonFrameWriter::new(&PathBuf::from("json_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Ron => Box::new(RonFrameWriter::new(&PathBuf::from("ron_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Binary => Box::new(webrender::BinaryRecorder::new(
                 &PathBuf::from("wr-record.bin"),
-            )) as Box<webrender::ApiRecordingReceiver>,
+            )) as Box<dyn webrender::ApiRecordingReceiver>,
         });
 
         let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES;

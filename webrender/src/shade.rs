@@ -707,12 +707,12 @@ impl<B: hal::Backend> Shaders<B> {
         self.cs_line_decoration.reset();
         self.ps_text_run.reset();
         self.ps_text_run_dual_source.reset();
-        for mut shader in &mut self.brush_image {
+        for shader in &mut self.brush_image {
             if let Some(ref mut shader) = shader {
                 shader.reset();
             }
         }
-        for mut shader in &mut self.brush_yuv_image {
+        for shader in &mut self.brush_yuv_image {
             if let Some(ref mut shader) = shader {
                 shader.reset();
             }
