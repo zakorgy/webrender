@@ -451,11 +451,11 @@ impl<B: hal::Backend> Device<B> {
 
         let mut pipeline_layouts = FastHashMap::default();
         let mut descriptor_set_ranges:
-            FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_PER_LAYOUT]>>
+            FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_COUNT]>>
              = FastHashMap::default();
         let mut per_group_descriptor_sets = FastHashMap::default();
         let descriptor_set_layouts:
-            FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>
+            FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]>>
              = [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive]
             .iter()
             .map(|g| {
@@ -493,7 +493,7 @@ impl<B: hal::Backend> Device<B> {
                     }).collect();
                 descriptor_set_ranges.insert(*g, ranges);
 
-                let layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]> = layouts_and_samplers
+                let layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]> = layouts_and_samplers
                     .iter()
                     .enumerate()
                     .map(|(index, (bindings, immutable_samplers))| {

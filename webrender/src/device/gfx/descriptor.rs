@@ -31,27 +31,14 @@ pub(super) const PER_PASS_TEXTURE_COUNT: usize = 2; // PrevPassAlpha, PrevPassCo
 pub(super) const PER_GROUP_TEXTURE_COUNT: usize = 6; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 pub(super) const RENDERER_TEXTURE_COUNT: usize = 11;
 pub(super) const MUTABLE_SAMPLER_COUNT: usize = 3; // Color0, Color1, Color2 samplers
-pub(super) const RENDERER_TEXTURE_BINDINGS: [u32; RENDERER_TEXTURE_COUNT] = [
-    0, // Color0
-    1, // Color1
-    2, // Color2
-    0, // PrevPassAlpha
-    1, // PrevPassColor
-    2, // GpuCache
-    3, // TransformPalette
-    1, // RenderTasks
-    0, // Dither
-    4, // PrimitiveHeadersF
-    5, // PrimitiveHeadersI
-];
 pub(super) const PER_GROUP_RANGE_DEFAULT: std::ops::Range<usize> = 8..9; // Dither
 pub(super) const PER_GROUP_RANGE_CLIP: std::ops::Range<usize> = 5..9; // GpuCache, TransformPalette, RenderTasks, Dither
 pub(super) const PER_GROUP_RANGE_PRIMITIVE: std::ops::Range<usize> = 5..11; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 
 #[cfg(feature = "push_constants")]
-pub(super) const DESCRIPTOR_SET_PER_LAYOUT: usize = 4;
+pub(super) const DESCRIPTOR_SET_COUNT: usize = 4;
 #[cfg(not(feature = "push_constants"))]
-pub(super) const DESCRIPTOR_SET_PER_LAYOUT: usize = 5;
+pub(super) const DESCRIPTOR_SET_COUNT: usize = 5;
 
 const fn descriptor_set_layout_binding(
     binding: u32,
@@ -70,7 +57,7 @@ const fn descriptor_set_layout_binding(
 
 pub(super) const DEFAULT_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // Dither
-    descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(8, DT::CombinedImageSampler, SSF::ALL, true),
 ];
 
 pub(super) const COMMON_SET_2: &'static [DescriptorSetLayoutBinding] = &[
@@ -98,36 +85,36 @@ pub(super) const COMMON_SET_4: &'static [DescriptorSetLayoutBinding] = &[
 ];
 
 pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
-    // Dither
-    descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
-    // RenderTasks
-    descriptor_set_layout_binding(1, DT::CombinedImageSampler, SSF::VERTEX, true),
     // GpuCache
-    descriptor_set_layout_binding(2, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(5, DT::CombinedImageSampler, SSF::ALL, true),
     // TransformPalette
-    descriptor_set_layout_binding(3, DT::CombinedImageSampler, SSF::VERTEX, true),
+    descriptor_set_layout_binding(6, DT::CombinedImageSampler, SSF::VERTEX, true),
+    // RenderTasks
+    descriptor_set_layout_binding(7, DT::CombinedImageSampler, SSF::VERTEX, true),
+    // Dither
+    descriptor_set_layout_binding(8, DT::CombinedImageSampler, SSF::ALL, true),
 ];
 
 pub(super) const PRIMITIVE_SET_1: &'static [DescriptorSetLayoutBinding] = &[
-    // Dither
-    descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
-    // RenderTasks
-    descriptor_set_layout_binding(1, DT::CombinedImageSampler, SSF::VERTEX, true),
     // GpuCache
-    descriptor_set_layout_binding(2, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(5, DT::CombinedImageSampler, SSF::ALL, true),
     // TransformPalette
-    descriptor_set_layout_binding(3, DT::CombinedImageSampler, SSF::VERTEX, true),
+    descriptor_set_layout_binding(6, DT::CombinedImageSampler, SSF::VERTEX, true),
+    // RenderTasks
+    descriptor_set_layout_binding(7, DT::CombinedImageSampler, SSF::VERTEX, true),
+    // Dither
+    descriptor_set_layout_binding(8, DT::CombinedImageSampler, SSF::ALL, true),
     // PrimitiveHeadersF
-    descriptor_set_layout_binding(4, DT::CombinedImageSampler, SSF::VERTEX, true),
+    descriptor_set_layout_binding(9, DT::CombinedImageSampler, SSF::VERTEX, true),
     // PrimitiveHeadersI
-    descriptor_set_layout_binding(5, DT::CombinedImageSampler, SSF::VERTEX, true),
+    descriptor_set_layout_binding(10, DT::CombinedImageSampler, SSF::VERTEX, true),
 ];
 
 pub(super) const PRIMITIVE_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     // PrevPassAlpha
-    descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(3, DT::CombinedImageSampler, SSF::ALL, true),
     // PrevPassColor
-    descriptor_set_layout_binding(1, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(4, DT::CombinedImageSampler, SSF::ALL, true),
 ];
 
 pub(super) const EMPTY_SET_0: &'static [DescriptorSetLayoutBinding] = &[];
@@ -201,8 +188,8 @@ impl Default for SamplerBindings {
 }
 
 pub(super) struct DescriptorGroupData<B: hal::Backend> {
-    pub(super) descriptor_set_layouts: FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_PER_LAYOUT]>>,
-    pub(super) descriptor_set_ranges: FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_PER_LAYOUT]>>,
+    pub(super) descriptor_set_layouts: FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]>>,
+    pub(super) descriptor_set_ranges: FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_COUNT]>>,
     pub(super) pipeline_layouts: FastHashMap<DescriptorGroup, B::PipelineLayout>,
 }
 
@@ -410,8 +397,8 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                     }
                 };
                 let desc_set = v.insert(desc_set);
-                let descriptor_writes = RENDERER_TEXTURE_BINDINGS[range.clone()].iter().zip(range.into_iter()).map(|(binding, index)| {
-                    let image = &images[&bound_textures[index]].core;
+                let descriptor_writes = range.into_iter().map(|binding| {
+                    let image = &images[&bound_textures[binding]].core;
                     let mut src_stage = Some(hal::pso::PipelineStage::empty());
                     if let Some(barrier) = image.transit(
                         hal::image::Access::SHADER_READ,
@@ -430,7 +417,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                     }
                     hal::pso::DescriptorSetWrite {
                         set: desc_set.raw(),
-                        binding: *binding,
+                        binding: binding as _,
                         array_offset: 0,
                         descriptors: match sampler {
                             Some(sampler) => Some(hal::pso::Descriptor::CombinedImageSampler(
@@ -472,6 +459,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                     descriptors: Some(hal::pso::Descriptor::Sampler(sampler)),
                 }
             });
+            // TODO(zakorgy): we could probably prepare these descriptors ahead of time of recording
             unsafe { device.write_descriptor_sets(descriptor_writes) };
         };
     }
