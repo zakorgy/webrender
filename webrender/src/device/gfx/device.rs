@@ -150,7 +150,7 @@ pub struct Device<B: hal::Backend> {
     desc_allocator: DescriptorAllocator<B>,
 
     per_draw_descriptors: DescriptorSetHandler<PerDrawBindings, B, Vec<DescriptorSet<B>>>,
-    bound_per_draw_textures: PerDrawBindings,
+    bound_per_draw_bindings: PerDrawBindings,
 
     per_pass_descriptors: DescriptorSetHandler<PerPassBindings, B, Vec<DescriptorSet<B>>>,
     bound_per_pass_textures: PerPassBindings,
@@ -158,8 +158,6 @@ pub struct Device<B: hal::Backend> {
     per_group_descriptors: DescriptorSetHandler<(DescriptorGroup, PerGroupBindings), B, FastHashMap<DescriptorGroup, Vec<DescriptorSet<B>>>>,
     bound_per_group_textures: PerGroupBindings,
 
-    sampler_descriptors: DescriptorSetHandler<SamplerBindings, B, Vec<DescriptorSet<B>>>,
-    bound_mutable_samplers: SamplerBindings,
     // Locals related things
     locals_descriptors: Option<DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>>,
     bound_locals: Locals,
@@ -460,25 +458,22 @@ impl<B: hal::Backend> Device<B> {
                         (EMPTY_SET_0, vec![]),
                         (DEFAULT_SET_1, vec![&sampler_nearest]),
                         (COMMON_SET_2, vec![]),
-                        (COMMON_SET_3, vec![]),
                         #[cfg(not(feature = "push_constants"))]
-                        (COMMON_SET_4, vec![]),
+                        (COMMON_SET_3, vec![]),
                     ],
                     DescriptorGroup::Clip => [
                         (EMPTY_SET_0, vec![]),
                         (CLIP_SET_1, vec![&sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest]),
                         (COMMON_SET_2, vec![]),
-                        (COMMON_SET_3, vec![]),
                         #[cfg(not(feature = "push_constants"))]
-                        (COMMON_SET_4, vec![]),
+                        (COMMON_SET_3, vec![]),
                     ],
                     DescriptorGroup::Primitive => [
                         (PRIMITIVE_SET_0, vec![&sampler_linear, &sampler_linear]),
                         (PRIMITIVE_SET_1, vec![&sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest, &sampler_nearest]),
                         (COMMON_SET_2, vec![]),
-                        (COMMON_SET_3, vec![]),
                         #[cfg(not(feature = "push_constants"))]
-                        (COMMON_SET_4, vec![]),
+                        (COMMON_SET_3, vec![]),
                     ],
                 };
 
@@ -547,16 +542,6 @@ impl<B: hal::Backend> Device<B> {
             &DescriptorGroup::Default,
             DESCRIPTOR_SET_PER_DRAW,
             descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-            Vec::new(),
-        );
-
-        let sampler_descriptors = DescriptorSetHandler::new(
-            &device,
-            &mut desc_allocator,
-            &descriptor_data,
-            &DescriptorGroup::Default,
-            DESCRIPTOR_SET_SAMPLER,
-            (MUTABLE_SAMPLER_COUNT * TEXTURE_FILTER_COUNT) as _,
             Vec::new(),
         );
 
@@ -631,7 +616,7 @@ impl<B: hal::Backend> Device<B> {
             desc_allocator,
 
             per_draw_descriptors,
-            bound_per_draw_textures: PerDrawBindings::default(),
+            bound_per_draw_bindings: PerDrawBindings::default(),
 
             per_pass_descriptors,
             bound_per_pass_textures: PerPassBindings::default(),
@@ -639,8 +624,6 @@ impl<B: hal::Backend> Device<B> {
             per_group_descriptors: DescriptorSetHandler::from_existing(per_group_descriptor_sets),
             bound_per_group_textures: PerGroupBindings::default(),
 
-            sampler_descriptors,
-            bound_mutable_samplers: SamplerBindings::default(),
 
             locals_descriptors,
             bound_locals: Locals::default(),
@@ -716,7 +699,7 @@ impl<B: hal::Backend> Device<B> {
             depth.deinit(&self.device, &mut self.heaps);
         }
 
-        self.bound_per_draw_textures = PerDrawBindings::default();
+        self.bound_per_draw_bindings = PerDrawBindings::default();
         self.per_draw_descriptors.reset();
 
         self.bound_per_pass_textures = PerPassBindings::default();
@@ -724,9 +707,6 @@ impl<B: hal::Backend> Device<B> {
 
         self.bound_per_group_textures = PerGroupBindings::default();
         self.per_group_descriptors.reset();
-
-        self.bound_mutable_samplers = SamplerBindings::default();
-        self.sampler_descriptors.reset();
 
         #[cfg(not(feature = "push_constants"))]
         {
@@ -1437,17 +1417,23 @@ impl<B: hal::Backend> Device<B> {
         let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         unsafe { cmd_buffer.begin() };
         let descriptor_group = program.shader_kind.into();
-        // Per draw textures
+        // Per draw textures and samplers
         let per_draw_bindings = PerDrawBindings(
             [
                 self.bound_textures[0],
                 self.bound_textures[1],
                 self.bound_textures[2],
-            ]
+            ],
+            [
+                self.bound_sampler[0],
+                self.bound_sampler[1],
+                self.bound_sampler[2],
+            ],
         );
 
         self.per_draw_descriptors.bind_textures(
             &self.bound_textures,
+            &self.bound_sampler,
             &mut cmd_buffer,
             per_draw_bindings,
             &self.images,
@@ -1457,9 +1443,10 @@ impl<B: hal::Backend> Device<B> {
             &descriptor_group,
             DESCRIPTOR_SET_PER_DRAW,
             0..PER_DRAW_TEXTURE_COUNT,
-            None,
+            &self.sampler_linear,
+            &self.sampler_nearest,
         );
-        self.bound_per_draw_textures = per_draw_bindings;
+        self.bound_per_draw_bindings = per_draw_bindings;
 
         // Per pass textures
         if descriptor_group == DescriptorGroup::Primitive {
@@ -1472,6 +1459,7 @@ impl<B: hal::Backend> Device<B> {
 
             self.per_pass_descriptors.bind_textures(
                 &self.bound_textures,
+                &self.bound_sampler,
                 &mut cmd_buffer,
                 per_pass_bindings,
                 &self.images,
@@ -1481,7 +1469,8 @@ impl<B: hal::Backend> Device<B> {
                 &descriptor_group,
                 DESCRIPTOR_SET_PER_PASS,
                 PER_DRAW_TEXTURE_COUNT..PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT,
-                Some(&self.sampler_linear),
+                &self.sampler_linear,
+                &self.sampler_nearest,
             );
             self.bound_per_pass_textures = per_pass_bindings;
         }
@@ -1500,6 +1489,7 @@ impl<B: hal::Backend> Device<B> {
 
         self.per_group_descriptors.bind_textures(
             &self.bound_textures,
+            &self.bound_sampler,
             &mut cmd_buffer,
             (descriptor_group, per_group_bindings),
             &self.images,
@@ -1513,28 +1503,10 @@ impl<B: hal::Backend> Device<B> {
                 DescriptorGroup::Clip => PER_GROUP_RANGE_CLIP,
                 DescriptorGroup::Primitive => PER_GROUP_RANGE_PRIMITIVE,
             },
-            Some(&self.sampler_nearest),
-        );
-        self.bound_per_group_textures = per_group_bindings;
-
-        // Immutable samplers
-        let bound_samplers = SamplerBindings(
-            [
-                self.bound_sampler[0],
-                self.bound_sampler[1],
-                self.bound_sampler[2],
-            ],
-        );
-
-        self.sampler_descriptors.bind_samplers(
-            &self.bound_sampler,
-            bound_samplers,
-            &self.device,
             &self.sampler_linear,
             &self.sampler_nearest,
         );
-        self.bound_mutable_samplers = bound_samplers;
-
+        self.bound_per_group_textures = per_group_bindings;
         unsafe { cmd_buffer.finish() };
     }
 
@@ -1662,8 +1634,7 @@ impl<B: hal::Backend> Device<B> {
             DescriptorGroup::Primitive => Some(self.per_pass_descriptors.descriptor_set(&self.bound_per_pass_textures)),
             _ => None,
         };
-        let ref desc_set_per_draw = self.per_draw_descriptors.descriptor_set(&self.bound_per_draw_textures);
-        let ref desc_set_sampler = self.sampler_descriptors.descriptor_set(&self.bound_mutable_samplers);
+        let ref desc_set_per_draw = self.per_draw_descriptors.descriptor_set(&self.bound_per_draw_bindings);
         let locals = &self.bound_locals;
         let ref desc_set_locals = self.locals_descriptors.as_ref().map(|map| map.descriptor_set(locals));
 
@@ -1678,7 +1649,6 @@ impl<B: hal::Backend> Device<B> {
                 desc_set_per_draw,
                 desc_set_per_pass,
                 desc_set_per_group,
-                desc_set_sampler,
                 *desc_set_locals,
                 &vec![],
                 self.current_blend_state.get(),
@@ -3624,7 +3594,6 @@ impl<B: hal::Backend> Device<B> {
             self.per_draw_descriptors.free(&mut self.desc_allocator);
             self.per_group_descriptors.free(&mut self.desc_allocator);
             self.per_pass_descriptors.free(&mut self.desc_allocator);
-            self.sampler_descriptors.free(&mut self.desc_allocator);
             if let Some(handler) = self.locals_descriptors {
                 handler.free(&mut self.desc_allocator);
             }
