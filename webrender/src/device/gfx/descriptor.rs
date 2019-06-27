@@ -133,12 +133,14 @@ impl From<ShaderKind> for DescriptorGroup {
                 | ShaderKind::DebugColor | ShaderKind::DebugFont
                 | ShaderKind::VectorStencil | ShaderKind::VectorCover => DescriptorGroup::Default,
             ShaderKind::ClipCache => DescriptorGroup::Clip,
-            _ => DescriptorGroup::Primitive,
+            ShaderKind::Brush | ShaderKind::Cache(VertexArrayKind::Blur) | ShaderKind::Cache(VertexArrayKind::Scale)
+                | ShaderKind::Primitive | ShaderKind::Text => DescriptorGroup::Primitive,
+            _ => unimplemented!("No descriptor group for kind {:?}", kind),
         }
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Clone, Copy, Debug, Default)]
 #[allow(non_snake_case)]
 pub(super) struct Locals {
     pub(super) uTransform: [[f32; 4]; 4],
@@ -162,7 +164,7 @@ pub(super) struct Locals {
 
  impl PartialEq for Locals {
     fn eq(&self, other: &Locals) -> bool {
-        self.transform_as_u32_slice() == other.transform_as_u32_slice() &&
+        self.uTransform == other.uTransform &&
         self.uMode == other.uMode
     }
 }
@@ -188,32 +190,32 @@ impl Default for SamplerBindings {
 }
 
 pub(super) struct DescriptorGroupData<B: hal::Backend> {
-    pub(super) descriptor_set_layouts: FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]>>,
-    pub(super) descriptor_set_ranges: FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_COUNT]>>,
-    pub(super) pipeline_layouts: FastHashMap<DescriptorGroup, B::PipelineLayout>,
+    pub(super) set_layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]>,
+    pub(super) ranges: ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_COUNT]>,
+    pub(super) pipeline_layout: B::PipelineLayout,
 }
 
-impl<B: hal::Backend> DescriptorGroupData<B> {
-    pub(super) fn descriptor_layout(&self, group: &DescriptorGroup, group_idx: usize) -> &B::DescriptorSetLayout {
-        &self.descriptor_set_layouts[group][group_idx]
+pub(super) struct DescriptorData<B: hal::Backend>(pub(super) FastHashMap<DescriptorGroup, DescriptorGroupData<B>>);
+
+impl<B: hal::Backend> DescriptorData<B> {
+    fn descriptor_layout(&self, group: &DescriptorGroup, group_idx: usize) -> &B::DescriptorSetLayout {
+        &self.0[group].set_layouts[group_idx]
     }
 
-    pub(super) fn ranges(&self, group: &DescriptorGroup, group_idx: usize) -> DescriptorRanges {
-        self.descriptor_set_ranges[group][group_idx]
+    fn ranges(&self, group: &DescriptorGroup, group_idx: usize) -> DescriptorRanges {
+        self.0[group].ranges[group_idx]
     }
 
     pub(super) fn pipeline_layout(&self, group: &DescriptorGroup) -> &B::PipelineLayout {
-        &self.pipeline_layouts[group]
+        &self.0[group].pipeline_layout
     }
 
     pub(super) unsafe fn deinit(self, device: &B::Device) {
-        for (_, layouts) in self.descriptor_set_layouts {
-            for layout in layouts {
+        for (_, group_data) in self.0 {
+            for layout in group_data.set_layouts {
                 device.destroy_descriptor_set_layout(layout);
             }
-        }
-        for (_, layout) in self.pipeline_layouts {
-            device.destroy_pipeline_layout(layout);
+            device.destroy_pipeline_layout(group_data.pipeline_layout);
         }
     }
 }
@@ -286,7 +288,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
     pub(super) fn new(
         device: &B::Device,
         descriptor_allocator: &mut DescriptorAllocator<B>,
-        group_data: &DescriptorGroupData<B>,
+        group_data: &DescriptorData<B>,
         group: &DescriptorGroup,
         set_index: usize,
         descriptor_count: u32,
@@ -350,7 +352,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         images: &FastHashMap<TextureId, Image<B>>,
         desc_allocator: &mut DescriptorAllocator<B>,
         device: &B::Device,
-        group_data: &DescriptorGroupData<B>,
+        group_data: &DescriptorData<B>,
         group: &DescriptorGroup,
         set_index: usize,
         range: std::ops::Range<usize>,
@@ -369,9 +371,10 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                         src_stage.as_mut(),
                     ) {
                         unsafe {
+                            // TODO(zakorgy): combine these barriers into a single one
                             cmd_buffer.pipeline_barrier(
                                 src_stage.unwrap()
-                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER,
+                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
                                 hal::memory::Dependencies::empty(),
                                 &[barrier],
                             );
@@ -407,9 +410,10 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                         src_stage.as_mut(),
                     ) {
                         unsafe {
+                            // TODO(zakorgy): combine these barriers into a single one
                             cmd_buffer.pipeline_barrier(
                                 src_stage.unwrap()
-                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER,
+                                    .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
                                 hal::memory::Dependencies::empty(),
                                 &[barrier],
                             );
@@ -469,7 +473,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         bindings: K,
         device: &B::Device,
         desc_allocator: &mut DescriptorAllocator<B>,
-        group_data: &DescriptorGroupData<B>,
+        group_data: &DescriptorData<B>,
         locals_buffer: &mut UniformBufferHandler<B>,
         heaps: &mut Heaps<B>,
     ) {

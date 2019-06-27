@@ -164,7 +164,7 @@ pub struct Device<B: hal::Backend> {
     locals_descriptors: Option<DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>>,
     bound_locals: Locals,
 
-    desc_group_data: DescriptorGroupData<B>,
+    descriptor_data: DescriptorData<B>,
     bound_textures: [u32; RENDERER_TEXTURE_COUNT],
     bound_program: ProgramId,
     bound_sampler: [TextureFilter; RENDERER_TEXTURE_COUNT],
@@ -449,13 +449,9 @@ impl<B: hal::Backend> Device<B> {
             ))
         };
 
-        let mut pipeline_layouts = FastHashMap::default();
-        let mut descriptor_set_ranges:
-            FastHashMap<DescriptorGroup, ArrayVec<[DescriptorRanges; DESCRIPTOR_SET_COUNT]>>
-             = FastHashMap::default();
         let mut per_group_descriptor_sets = FastHashMap::default();
-        let descriptor_set_layouts:
-            FastHashMap<DescriptorGroup, ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]>>
+        let descriptor_data:
+            FastHashMap<DescriptorGroup, DescriptorGroupData<B>>
              = [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive]
             .iter()
             .map(|g| {
@@ -490,10 +486,9 @@ impl<B: hal::Backend> Device<B> {
                     .iter()
                     .map(|(bindings, _)| {
                         DescriptorRanges::from_bindings(bindings)
-                    }).collect();
-                descriptor_set_ranges.insert(*g, ranges);
+                    }).collect::<ArrayVec<_>>();
 
-                let layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]> = layouts_and_samplers
+                let set_layouts: ArrayVec<[B::DescriptorSetLayout; DESCRIPTOR_SET_COUNT]> = layouts_and_samplers
                     .iter()
                     .enumerate()
                     .map(|(index, (bindings, immutable_samplers))| {
@@ -505,7 +500,7 @@ impl<B: hal::Backend> Device<B> {
                                 desc_allocator.allocate(
                                     &device,
                                     &layout,
-                                    descriptor_set_ranges[g][index],
+                                    ranges[index],
                                     descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
                                     &mut descriptor_sets,
                                 )
@@ -517,7 +512,7 @@ impl<B: hal::Backend> Device<B> {
 
                 let pipeline_layout = unsafe {
                     device.create_pipeline_layout(
-                            &layouts,
+                            &set_layouts,
                         if cfg!(feature = "push_constants") {
                             Some((hal::pso::ShaderStageFlags::VERTEX, 0..PUSH_CONSTANT_BLOCK_SIZE as u32))
                         } else {
@@ -526,21 +521,19 @@ impl<B: hal::Backend> Device<B> {
                     )
                 }
                 .expect("create_pipeline_layout failed");
-                pipeline_layouts.insert(*g, pipeline_layout);
-
-                (*g, layouts)
+                (*g, DescriptorGroupData {
+                    set_layouts,
+                    ranges,
+                    pipeline_layout,
+                })
             }).collect();
 
-        let desc_group_data = DescriptorGroupData {
-            descriptor_set_layouts,
-            descriptor_set_ranges,
-            pipeline_layouts,
-        };
+        let descriptor_data = DescriptorData(descriptor_data);
 
         let per_pass_descriptors = DescriptorSetHandler::new(
             &device,
             &mut desc_allocator,
-            &desc_group_data,
+            &descriptor_data,
             &DescriptorGroup::Primitive,
             DESCRIPTOR_SET_PER_PASS,
             descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
@@ -550,7 +543,7 @@ impl<B: hal::Backend> Device<B> {
         let per_draw_descriptors = DescriptorSetHandler::new(
             &device,
             &mut desc_allocator,
-            &desc_group_data,
+            &descriptor_data,
             &DescriptorGroup::Default,
             DESCRIPTOR_SET_PER_DRAW,
             descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
@@ -560,7 +553,7 @@ impl<B: hal::Backend> Device<B> {
         let sampler_descriptors = DescriptorSetHandler::new(
             &device,
             &mut desc_allocator,
-            &desc_group_data,
+            &descriptor_data,
             &DescriptorGroup::Default,
             DESCRIPTOR_SET_SAMPLER,
             (MUTABLE_SAMPLER_COUNT * TEXTURE_FILTER_COUNT) as _,
@@ -573,7 +566,7 @@ impl<B: hal::Backend> Device<B> {
             Some(DescriptorSetHandler::new(
                 &device,
                 &mut desc_allocator,
-                &desc_group_data,
+                &descriptor_data,
                 &DescriptorGroup::Default,
                 DESCRIPTOR_SET_LOCALS,
                 descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
@@ -651,7 +644,7 @@ impl<B: hal::Backend> Device<B> {
 
             locals_descriptors,
             bound_locals: Locals::default(),
-            desc_group_data,
+            descriptor_data,
 
             bound_textures: [0; RENDERER_TEXTURE_COUNT],
             bound_program: INVALID_PROGRAM_ID,
@@ -1371,7 +1364,7 @@ impl<B: hal::Backend> Device<B> {
                 .expect(&format!("Can't load pipeline data for: {}!", name))
                 .clone(),
             &self.device,
-            self.desc_group_data.pipeline_layout(&desc_group),
+            self.descriptor_data.pipeline_layout(&desc_group),
             &mut self.heaps,
             &self.limits,
             &name,
@@ -1424,7 +1417,7 @@ impl<B: hal::Backend> Device<B> {
             self.bound_locals,
             &self.device,
             &mut self.desc_allocator,
-            &self.desc_group_data,
+            &self.descriptor_data,
             self.locals_buffer.as_mut().unwrap(),
             &mut self.heaps,
         );
@@ -1460,7 +1453,7 @@ impl<B: hal::Backend> Device<B> {
             &self.images,
             &mut self.desc_allocator,
             &self.device,
-            &self.desc_group_data,
+            &self.descriptor_data,
             &descriptor_group,
             DESCRIPTOR_SET_PER_DRAW,
             0..PER_DRAW_TEXTURE_COUNT,
@@ -1484,7 +1477,7 @@ impl<B: hal::Backend> Device<B> {
                 &self.images,
                 &mut self.desc_allocator,
                 &self.device,
-                &self.desc_group_data,
+                &self.descriptor_data,
                 &descriptor_group,
                 DESCRIPTOR_SET_PER_PASS,
                 PER_DRAW_TEXTURE_COUNT..PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT,
@@ -1512,7 +1505,7 @@ impl<B: hal::Backend> Device<B> {
             &self.images,
             &mut self.desc_allocator,
             &self.device,
-            &self.desc_group_data,
+            &self.descriptor_data,
             &descriptor_group,
             DESCRIPTOR_SET_PER_GROUP,
             match descriptor_group {
@@ -1693,7 +1686,7 @@ impl<B: hal::Backend> Device<B> {
                 self.current_depth_test,
                 self.scissor_rect,
                 self.next_id,
-                self.desc_group_data.pipeline_layout(&descriptor_group),
+                self.descriptor_data.pipeline_layout(&descriptor_group),
             );
 
         if depth_test_changed {
@@ -3649,7 +3642,7 @@ impl<B: hal::Backend> Device<B> {
                 self.device.destroy_shader_module(vs_module);
                 self.device.destroy_shader_module(fs_module);
             }
-            self.desc_group_data.deinit(&self.device);
+            self.descriptor_data.deinit(&self.device);
             self.render_pass.unwrap().deinit(&self.device);
             for fence in self.frame_fence {
                 self.device.destroy_fence(fence.inner);
