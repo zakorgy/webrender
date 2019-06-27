@@ -200,8 +200,13 @@ impl<B: hal::Backend> DescriptorData<B> {
     }
 }
 
+// Trait for managing the container type of the free descriptor sets in the `DescriptorSetHandler` struct
+// which could be a `Vec` or a `FastHashMap`
 pub(super) trait FreeSets<B: hal::Backend> {
+    // Mutable reference of the free descriptor sets, `group` is only used for `FastHashMap`
     fn get_mut(&mut self, group: &DescriptorGroup) -> &mut Vec<DescriptorSet<B>>;
+
+    // Free the underlying descriptor sets of the container
     unsafe fn free(self, allocator: &mut DescriptorAllocator<B>);
 }
 
@@ -225,8 +230,16 @@ impl<B: hal::Backend> FreeSets<B> for FastHashMap<DescriptorGroup, Vec<Descripto
     }
 }
 
+
+// Trait for managing the key of the `descriptor_bindings` `FastHashMap` in the `DescriptorSetHandler` struct
 pub(super) trait DescGroupKey {
+    // Get the corresponding `DescriptorGroup` of the key structure.
+    // There are cases where we don't care the exact group that's the `DescriptorGroup::Default` for.
     fn desc_group(&self) -> &DescriptorGroup { &DescriptorGroup::Default }
+
+    // Check if the key contains the requested `TextureId`.
+    // This is used to decide if we can recycle a `DescriptorSet` after a texture is freed.
+    // There are keys which are not texture related, in this case we return false.
     fn has_texture_id(&self, _id: &TextureId) -> bool { false }
 }
 
