@@ -401,7 +401,6 @@ impl<B: hal::Backend> Program<B> {
         desc_set_per_draw: &B::DescriptorSet,
         desc_set_per_pass: Option<&B::DescriptorSet>,
         desc_set_per_frame: &B::DescriptorSet,
-        desc_set_sampler: &B::DescriptorSet,
         desc_set_locals: Option<&B::DescriptorSet>,
         clear_values: &[hal::command::ClearValue],
         blend_state: hal::pso::BlendState,
@@ -452,7 +451,6 @@ impl<B: hal::Backend> Program<B> {
                 if desc_set_per_pass.is_some() { 0 } else { 1 },
                 desc_set_per_pass.into_iter()
                     .chain(iter::once(desc_set_per_frame))
-                    .chain(iter::once(desc_set_sampler))
                     .chain(iter::once(desc_set_per_draw))
                     .chain(desc_set_locals),
                 &[],

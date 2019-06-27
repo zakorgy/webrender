@@ -102,6 +102,12 @@ pub enum TextureFilter {
     Trilinear,
 }
 
+impl Default for TextureFilter {
+    fn default() -> Self {
+        TextureFilter::Nearest
+    }
+}
+
 #[derive(Debug)]
 pub enum VertexAttributeKind {
     F32,

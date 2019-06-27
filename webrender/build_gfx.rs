@@ -29,9 +29,8 @@ const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
 const DESCRIPTOR_SET_PER_PASS: u32 = 0;
 const DESCRIPTOR_SET_PER_GROUP: u32 = 1;
-const DESCRIPTOR_SET_SAMPLER: u32 = 2;
-const DESCRIPTOR_SET_PER_DRAW: u32 = 3;
-const DESCRIPTOR_SET_LOCALS: u32 = 4;
+const DESCRIPTOR_SET_PER_DRAW: u32 = 2;
+const DESCRIPTOR_SET_LOCALS: u32 = 3;
 
 #[derive(Deserialize)]
 struct Shader {
@@ -179,7 +178,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
     let mut attribute_descriptors: Vec<AttributeDesc> = Vec::new();
     let mut vertex_offset = 0;
     let mut instance_offset = 0;
-    let mut color_texture_kind = "texture2DArray";
     // Since the .vert and .frag files for the same shader use the same layout qualifiers
     // we extract layout datas from .vert files only.
     let write_ron = file_name.ends_with(".vert");
@@ -196,14 +194,6 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
         let l = line.unwrap();
         let trimmed = l.trim_start();
 
-        if trimmed.contains("#define WR_FEATURE_TEXTURE_2D") {
-            color_texture_kind = "texture2D";
-        }
-
-        if trimmed.contains("#define WR_FEATURE_TEXTURE_RECT") {
-            color_texture_kind = "texture2DRect";
-        }
-
         // Replace uniforms in shader:
         //      Sampler uniforms are splitted to texture + sampler.
         //      Other types occur in a group. These are replaced with a static string for now.
@@ -211,28 +201,15 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
             if trimmed.contains("sampler") {
                 let code = split_code(trimmed);
                 let info = texture_info_from_line(&code);
-                if info.combined_sampler {
-                    extend_sampler_definition(
-                        info.set,
-                        info.binding,
-                        code,
-                        &mut bindings_map,
-                        &mut new_data,
-                        &mut sampler_mapping,
-                        write_ron,
-                    );
-                } else {
-                    replace_sampler_definition_with_texture_and_sampler(
-                        info.set,
-                        info.binding,
-                        code,
-                        &mut bindings_map,
-                        &mut new_data,
-                        &mut sampler_mapping,
-                        write_ron,
-                        color_texture_kind,
-                    );
-                }
+                extend_sampler_definition(
+                    info.set,
+                    info.binding,
+                    code,
+                    &mut bindings_map,
+                    &mut new_data,
+                    &mut sampler_mapping,
+                    write_ron,
+                );
 
                 // Replace non-sampler uniforms with a structure.
                 // We just place a predefined structure to the position of the last non-uniform
@@ -305,79 +282,6 @@ fn split_code(line: &str) -> Vec<&str> {
         .collect::<Vec<&str>>()[0]
         .split(' ')
         .collect::<Vec<&str>>()
-}
-
-fn replace_sampler_definition_with_texture_and_sampler(
-    set: u32,
-    binding: u32,
-    code: Vec<&str>,
-    bindings_map: &mut HashMap<String, u32>,
-    new_data: &mut String,
-    sampler_mapping: &mut HashMap<String, (String, u32, u32)>,
-    write_ron: bool,
-    color_texture_kind: &str,
-) {
-    // Get the name of the sampler.
-    let (sampler_name, code) = code.split_last().unwrap();
-
-    // Get the exact type of the sampler.
-    let (sampler_type, code) = code.split_last().unwrap();
-    let mut sampler_type = String::from(*sampler_type);
-    let mut code_str = String::new();
-    for i in 0 .. code.len() {
-        code_str.push_str(code[i]);
-        code_str.push(' ');
-    }
-
-    let mut texture_type = sampler_type.replace("sampler", "texture");
-    let texture_name = sampler_name.replacen('s', "t", 1);
-
-    // If the sampler is in the map we only update the shader code.
-    if let Some(&(_, set, binding)) = sampler_mapping.get(*sampler_name) {
-        let mut layout_str = format!(
-            "layout(set = {}, binding = {}) {}{} {};\n",
-            set, binding, code_str, texture_type, texture_name
-        );
-        new_data.push_str(&layout_str);
-
-        layout_str = format!(
-            "layout(set = {}, binding = {}) {}sampler {};\n",
-            DESCRIPTOR_SET_SAMPLER, binding, code_str, sampler_name
-        );
-        new_data.push_str(&layout_str);
-
-    // Replace sampler definition with a texture and a sampler.
-    } else {
-        if texture_name.contains("tColor") {
-            texture_type = String::from(color_texture_kind);
-            sampler_type = color_texture_kind.replace("texture", "sampler");
-        }
-        let mut layout_str = format!(
-            "layout(set = {}, binding = {}) {}{} {};\n",
-            set, binding, code_str, texture_type, texture_name
-        );
-        if write_ron {
-            bindings_map.insert(texture_name.clone(), binding);
-        }
-        new_data.push_str(&layout_str);
-        sampler_mapping.insert(
-            String::from(*sampler_name),
-            (
-                format!("{}({}, {})", sampler_type, texture_name, sampler_name),
-                set,
-                binding,
-            ),
-        );
-
-        layout_str = format!(
-            "layout(set = {}, binding = {}) {}sampler {};\n",
-            DESCRIPTOR_SET_SAMPLER, binding, code_str, sampler_name
-        );
-        if write_ron {
-            bindings_map.insert(String::from(*sampler_name), binding);
-        }
-        new_data.push_str(&layout_str);
-    }
 }
 
 fn extend_sampler_definition(
@@ -458,14 +362,12 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
 struct TextureInfo {
     set: u32,
     binding: u32,
-    combined_sampler: bool,
 }
 impl TextureInfo {
-    fn new(set: u32, binding: u32, combined_sampler: bool) -> Self {
+    fn new(set: u32, binding: u32) -> Self {
         TextureInfo {
             set,
             binding,
-            combined_sampler,
         }
     }
 }
@@ -473,17 +375,17 @@ impl TextureInfo {
 fn texture_info_from_line(code: &[&str]) -> TextureInfo {
     let (sampler_name, _) = code.split_last().unwrap();
     match sampler_name.as_ref() {
-        "sColor0" => TextureInfo::new(DESCRIPTOR_SET_PER_DRAW, 0, false),
-        "sColor1" => TextureInfo::new(DESCRIPTOR_SET_PER_DRAW, 1, false),
-        "sColor2" => TextureInfo::new(DESCRIPTOR_SET_PER_DRAW, 2, false),
-        "sPrevPassAlpha" => TextureInfo::new(DESCRIPTOR_SET_PER_PASS, 3, true),
-        "sPrevPassColor" => TextureInfo::new(DESCRIPTOR_SET_PER_PASS, 4, true),
-        "sGpuCache" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 5, true),
-        "sTransformPalette" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 6, true),
-        "sRenderTasks" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 7, true),
-        "sDither" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 8, true),
-        "sPrimitiveHeadersF" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 9, true),
-        "sPrimitiveHeadersI" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 10, true),
+        "sColor0" => TextureInfo::new(DESCRIPTOR_SET_PER_DRAW, 0),
+        "sColor1" => TextureInfo::new(DESCRIPTOR_SET_PER_DRAW, 1),
+        "sColor2" => TextureInfo::new(DESCRIPTOR_SET_PER_DRAW, 2),
+        "sPrevPassAlpha" => TextureInfo::new(DESCRIPTOR_SET_PER_PASS, 3),
+        "sPrevPassColor" => TextureInfo::new(DESCRIPTOR_SET_PER_PASS, 4),
+        "sGpuCache" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 5),
+        "sTransformPalette" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 6),
+        "sRenderTasks" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 7),
+        "sDither" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 8),
+        "sPrimitiveHeadersF" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 9),
+        "sPrimitiveHeadersI" => TextureInfo::new(DESCRIPTOR_SET_PER_GROUP, 10),
         x => unreachable!("Sampler not found: {:?}", x),
     }
 }
