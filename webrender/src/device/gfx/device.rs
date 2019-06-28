@@ -1414,9 +1414,35 @@ impl<B: hal::Backend> Device<B> {
             .programs
             .get_mut(&self.bound_program)
             .expect("Program not found.");
-        let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
-        unsafe { cmd_buffer.begin() };
         let descriptor_group = program.shader_kind.into();
+
+        let mut barriers: SmallVec<[hal::memory::Barrier<B>; RENDERER_TEXTURE_COUNT]> = SmallVec::new();
+        for index in &self.bound_textures {
+            let image = &self.images[index].core;
+            if let Some(barrier) = image.transit(
+                hal::image::Access::SHADER_READ,
+                hal::image::Layout::ShaderReadOnlyOptimal,
+                image.subresource_range.clone(),
+                None,
+            ) {
+                barriers.push(barrier)
+            }
+        };
+        if !barriers.is_empty() {
+            let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
+            unsafe {
+                cmd_buffer.begin();
+                cmd_buffer.pipeline_barrier(
+                    //TODO(zakorgy): If the texture was not a render target this should be `PipelineStage::TRANSFER`
+                    hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                        .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
+                    hal::memory::Dependencies::empty(),
+                    barriers,
+                );
+                cmd_buffer.finish();
+            }
+        }
+
         // Per draw textures and samplers
         let per_draw_bindings = PerDrawBindings(
             [
@@ -1434,7 +1460,6 @@ impl<B: hal::Backend> Device<B> {
         self.per_draw_descriptors.bind_textures(
             &self.bound_textures,
             &self.bound_sampler,
-            &mut cmd_buffer,
             per_draw_bindings,
             &self.images,
             &mut self.desc_allocator,
@@ -1460,7 +1485,6 @@ impl<B: hal::Backend> Device<B> {
             self.per_pass_descriptors.bind_textures(
                 &self.bound_textures,
                 &self.bound_sampler,
-                &mut cmd_buffer,
                 per_pass_bindings,
                 &self.images,
                 &mut self.desc_allocator,
@@ -1490,7 +1514,6 @@ impl<B: hal::Backend> Device<B> {
         self.per_group_descriptors.bind_textures(
             &self.bound_textures,
             &self.bound_sampler,
-            &mut cmd_buffer,
             (descriptor_group, per_group_bindings),
             &self.images,
             &mut self.desc_allocator,
@@ -1507,7 +1530,6 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_nearest,
         );
         self.bound_per_group_textures = per_group_bindings;
-        unsafe { cmd_buffer.finish() };
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {

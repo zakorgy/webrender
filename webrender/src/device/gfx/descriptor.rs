@@ -8,7 +8,6 @@ use hal::pso::{DescriptorSetLayoutBinding, DescriptorType as DT, ShaderStageFlag
 use internal_types::FastHashMap;
 use rendy_descriptor::{DescriptorAllocator, DescriptorRanges, DescriptorSet};
 use rendy_memory::Heaps;
-use smallvec::SmallVec;
 use std::clone::Clone;
 use std::cmp::Eq;
 use std::collections::hash_map::Entry;
@@ -340,7 +339,6 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         &mut self,
         bound_textures: &[u32; RENDERER_TEXTURE_COUNT],
         bound_samplers: &[TextureFilter; RENDERER_TEXTURE_COUNT],
-        cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
         bindings: K,
         images: &FastHashMap<TextureId, Image<B>>,
         desc_allocator: &mut DescriptorAllocator<B>,
@@ -374,28 +372,9 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                 Some(v.insert(desc_set))
             }
         };
-        let mut descriptor_writes: SmallVec<[hal::pso::DescriptorSetWrite<_, _>; RENDERER_TEXTURE_COUNT]> = SmallVec::new();
-        for index in range {
-            let image = &images[&bound_textures[index]].core;
-            // We need to transit the image, even though it's bound in the descriptor set
-            let mut src_stage = Some(hal::pso::PipelineStage::empty());
-            if let Some(barrier) = image.transit(
-                hal::image::Access::SHADER_READ,
-                hal::image::Layout::ShaderReadOnlyOptimal,
-                image.subresource_range.clone(),
-                src_stage.as_mut(),
-            ) {
-                unsafe {
-                    // TODO(zakorgy): combine these barriers into a single one
-                    cmd_buffer.pipeline_barrier(
-                        src_stage.unwrap()
-                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                }
-            }
-            if let Some(ref set) = new_set {
+        if let Some(set) = new_set {
+            let descriptor_writes = range.into_iter().map(|index| {
+                let image = &images[&bound_textures[index]].core;
                 let sampler = if index < PER_DRAW_TEXTURE_COUNT {
                     match bound_samplers[index] {
                         TextureFilter::Linear | TextureFilter::Trilinear => sampler_linear,
@@ -406,7 +385,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                 } else {
                     sampler_nearest
                 };
-                descriptor_writes.push(hal::pso::DescriptorSetWrite {
+                hal::pso::DescriptorSetWrite {
                     set: set.raw(),
                     binding: index as _,
                     array_offset: 0,
@@ -415,10 +394,10 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                         hal::image::Layout::ShaderReadOnlyOptimal,
                         sampler,
                     )),
-                });
-            }
+                }
+            });
+            unsafe { device.write_descriptor_sets(descriptor_writes) };
         }
-        unsafe { device.write_descriptor_sets(descriptor_writes) };
     }
 
     pub(super) fn bind_locals(
