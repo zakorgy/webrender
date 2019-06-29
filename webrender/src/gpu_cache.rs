@@ -77,11 +77,13 @@ struct CacheLocation {
 #[cfg_attr(any(feature = "capture", feature = "serialize_program"), derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct GpuBlockData {
-    data: [f32; 4],
+    pub data: [f32; 4],
 }
 
 impl GpuBlockData {
     pub const EMPTY: Self = GpuBlockData { data: [0.0; 4] };
+    #[cfg(not(feature= "gleam"))]
+    pub const SIZE: u64 = 16;
 }
 
 /// Conversion helpers for GpuBlockData

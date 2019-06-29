@@ -9,8 +9,59 @@ use smallvec::SmallVec;
 
 use std::cell::Cell;
 use std::mem;
+use std::slice;
 
 pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
+
+pub struct PMBuffer<B: hal::Backend> {
+    pub buffer: B::Buffer,
+    pub memory: B::Memory,
+    pub ptr: *mut u8,
+    pub coherent: bool,
+    pub height: u64,
+    pub size: u64,
+    pub state: Cell<hal::buffer::State>,
+}
+
+impl<B: hal::Backend> PMBuffer<B> {
+    pub unsafe fn acquire_host_visible_slice(&mut self, size: Option<u64>) -> &mut [[f32; 4]] {
+        let count = size.unwrap_or(self.size) as usize / mem::size_of::<[f32; 4]>();
+        slice::from_raw_parts_mut(self.ptr as *mut _, count)
+    }
+
+    pub unsafe fn flush_mapped_ranges(
+        &self,
+        device: &B::Device,
+        ranges: impl Iterator<Item=std::ops::Range<u64>>,
+    ) {
+        if !self.coherent {
+            device.flush_mapped_memory_ranges(ranges.into_iter().map(|r| (&self.memory, r))).expect("Flush mapped memory range sfailed for PMBuffer");
+        }
+    }
+
+    pub fn deinit(self, device: &B::Device) {
+        unsafe {
+            device.unmap_memory(&self.memory);
+            device.destroy_buffer(self.buffer);
+            device.free_memory(self.memory);
+        }
+    }
+
+    pub(super) fn transit(&self, access: hal::buffer::Access) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == access {
+            None
+        } else {
+            self.state.set(access);
+            Some(hal::memory::Barrier::Buffer {
+                states: src_state .. access,
+                target: &self.buffer,
+                families: None,
+                range: None .. None,
+            })
+        }
+    }
+}
 
 pub(super) struct Buffer<B: hal::Backend> {
     pub(super) memory_block: MemoryBlock<B>,
