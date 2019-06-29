@@ -699,6 +699,12 @@ impl CacheRow {
 /// The bus over which CPU and GPU versions of the GPU cache
 /// get synchronized.
 enum GpuCacheBus {
+    PMbuffer {
+        /*writer: Option<hal::mapping::Writer<'a, B, [f32; 4]>>,
+        mapped_ranges: Vec<std::ops::Range<u64>>,
+        coherent: bool,*/
+        height: u64,
+    },
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
@@ -736,6 +742,13 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     /// Ensures that we have an appropriately-sized texture. Returns true if a
     /// new texture was created.
     fn ensure_texture(&mut self, device: &mut Device<B>, height: i32) {
+        if let GpuCacheBus::PMbuffer {height: ref mut h,} = self.bus {
+            *h = height as u64;
+            //TODO: relese old writer and use height
+            /*let (w, c) = device.create_writer(MAX_VERTEX_TEXTURE_WIDTH as _, 256);
+            *writer = Some(w);
+            *coherent = c;*/
+        }
         // If we already have a texture that works, we're done.
         if self.texture.as_ref().map_or(false, |t| t.get_dimensions().height >= height) {
             if GPU_CACHE_RESIZE_TEST {
@@ -774,7 +787,8 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         self.texture = Some(texture);
     }
 
-    fn new(device: &mut Device<B>, use_scatter: bool) -> Result<Self, RendererError> {
+    fn new(device: &mut Device<B>, use_scatter: bool, use_pmb: bool) -> Result<Self, RendererError> {
+        assert_ne!(use_scatter, use_pmb);
         if use_scatter && cfg!(not(feature = "gleam")) {
             warn!("GpuCacheBus::Scatter is not supported with gfx backend");
         }
@@ -812,10 +826,16 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         }
         #[cfg(not(feature = "gleam"))]
         {
-            let buffer = device.create_pbo();
-            bus = GpuCacheBus::PixelBuffer {
-                buffer,
-                rows: Vec::new(),
+            if use_pmb {
+                bus = GpuCacheBus::PMbuffer {
+                    height: 0,
+                }
+            } else {
+                let buffer = device.create_pbo();
+                bus = GpuCacheBus::PixelBuffer {
+                    buffer,
+                    rows: Vec::new(),
+                }
             }
         };
 
@@ -831,6 +851,8 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             device.delete_texture(t);
         }
         match self.bus {
+            GpuCacheBus::PMbuffer { .. } => {
+            }
             GpuCacheBus::PixelBuffer { buffer, ..} => {
                 device.delete_pbo(buffer);
             }
@@ -857,6 +879,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         self.ensure_texture(device, max_height);
         match self.bus {
             GpuCacheBus::PixelBuffer { .. } => {},
+            GpuCacheBus::PMbuffer { .. } => {},
             #[cfg(feature = "gleam")]
             GpuCacheBus::Scatter {
                 ref mut buf_position,
@@ -873,8 +896,29 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         }
     }
 
-    fn update(&mut self, _device: &mut Device<B>, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
+            GpuCacheBus::PMbuffer { height } => {
+                println!("### Update buffer");
+                device.create_pmb(MAX_VERTEX_TEXTURE_WIDTH as _, 64 as _);
+                let mut writer = device.create_writer();
+                for update in &updates.updates {
+                    match *update {
+                        GpuCacheUpdate::Copy {
+                            block_index,
+                            block_count,
+                            address,
+                        } => {
+                            let address = address.v as usize * MAX_VERTEX_TEXTURE_WIDTH + address.u as usize;
+                            //mapped_ranges.push(address as u64 * 4 .. (address + block_count) as u64 * 4);
+                            for i in 0 .. block_count {
+                                writer[address + i] = updates.blocks[block_index + i].data;
+                            }
+                        }
+                    }
+                }
+                device.release_writer(writer);
+            }
             GpuCacheBus::PixelBuffer { ref mut rows, .. } => {
                 for update in &updates.updates {
                     match *update {
@@ -935,8 +979,8 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                     }
                 }
 
-                _device.fill_vbo(buf_value, &updates.blocks, *count);
-                _device.fill_vbo(buf_position, &position_data, *count);
+                device.fill_vbo(buf_value, &updates.blocks, *count);
+                device.fill_vbo(buf_position, &position_data, *count);
                 *count += position_data.len();
             }
         }
@@ -945,6 +989,12 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     fn flush(&mut self, device: &mut Device<B>) -> usize {
         let texture = self.texture.as_ref().unwrap();
         match self.bus {
+            GpuCacheBus::PMbuffer {..} => {
+                /*if !coherent {
+                    device.flush_mapped_memory_ranges(mapped_ranges.drain(..));
+                }*/
+                0
+            }
             GpuCacheBus::PixelBuffer { ref buffer, ref mut rows } => {
                 let rows_dirty = rows
                     .iter()
@@ -1500,6 +1550,7 @@ impl<B: hal::Backend> Renderer<B> {
         let gpu_cache_texture = GpuCacheTexture::new(
             &mut device,
             options.scatter_gpu_cache_updates,
+            true,
         )?;
 
         device.end_frame();
@@ -2128,6 +2179,9 @@ impl<B: hal::Backend> Renderer<B> {
                             row.is_dirty = true;
                         }
                     }
+                    GpuCacheBus::PMbuffer { .. } => {
+                        info!("Invalidating GPU caches");
+                    }
                     #[cfg(feature = "gleam")]
                     GpuCacheBus::Scatter { .. } => {
                         warn!("Unable to invalidate scattered GPU cache");
@@ -2501,7 +2555,7 @@ impl<B: hal::Backend> Renderer<B> {
             #[cfg(not(feature="gleam"))]
             let use_scatter = false;
 
-            let new_cache = GpuCacheTexture::new(&mut self.device, use_scatter).unwrap();
+            let new_cache = GpuCacheTexture::new(&mut self.device, use_scatter, true).unwrap();
             let old_cache = mem::replace(&mut self.gpu_cache_texture, new_cache);
             old_cache.deinit(&mut self.device);
             self.pending_gpu_cache_clear = false;
@@ -2514,10 +2568,12 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Note: the texture might have changed during the `update`,
         // so we need to bind it here.
-        self.device.bind_texture(
-            TextureSampler::GpuCache,
-            self.gpu_cache_texture.texture.as_ref().unwrap(),
-        );
+        if self.gpu_cache_texture.texture.is_some() {
+            self.device.bind_texture(
+                TextureSampler::GpuCache,
+                self.gpu_cache_texture.texture.as_ref().unwrap(),
+            );
+        }
     }
 
     fn update_texture_cache(&mut self) {
@@ -4255,6 +4311,9 @@ impl<B: hal::Backend> Renderer<B> {
     }
 
     pub fn read_gpu_cache(&mut self) -> (DeviceIntSize, Vec<u8>) {
+        if self.gpu_cache_texture.texture.is_none() {
+            return (DeviceIntSize::zero(), Vec::new());
+        }
         let texture = self.gpu_cache_texture.texture.as_ref().unwrap();
         let size = texture.get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
@@ -4328,7 +4387,6 @@ impl<B: hal::Backend> Renderer<B> {
                     report.gpu_cache_cpu_mirror += self.size_of(&*row.cpu_blocks as *const _);
                 }
             }
-            #[cfg(feature = "gleam")]
             _ => {}
         }
 
@@ -4898,7 +4956,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.update_gpu_cache(); // flush pending updates
             let mut plain_self = PlainRenderer {
                 gpu_cache: Self::save_texture(
-                    &self.gpu_cache_texture.texture.as_ref().unwrap(),
+                    &self.gpu_cache_texture.texture.as_ref().expect("No gpu cache texture exist"),
                     "gpu", &config.root, &mut self.device,
                 ),
                 gpu_cache_frame_id: self.gpu_cache_frame_id,
@@ -5006,8 +5064,7 @@ impl<B: hal::Backend> Renderer<B> {
                         row.cpu_blocks.copy_from_slice(chunk);
                     }
                 }
-                #[cfg(feature = "gleam")]
-                GpuCacheBus::Scatter { .. } => {}
+                _ => {}
             }
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 

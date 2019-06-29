@@ -16,10 +16,12 @@ struct SplitGeometry {
 };
 
 SplitGeometry fetch_split_geometry(int address) {
-    ivec2 uv = get_gpu_cache_uv(address);
+    //ivec2 uv = get_gpu_cache_uv(address);
 
-    vec4 data0 = TEXEL_FETCH(sGpuCache, uv, 0, ivec2(0, 0));
-    vec4 data1 = TEXEL_FETCH(sGpuCache, uv, 0, ivec2(1, 0));
+    //vec4 data0 = TEXEL_FETCH(sGpuCache, uv, 0, ivec2(0, 0));
+    //vec4 data1 = TEXEL_FETCH(sGpuCache, uv, 0, ivec2(1, 0));
+    vec4 data0 = fetch_from_gpu_cache_1(address);
+    vec4 data1 = fetch_from_gpu_cache_1(address + 1);
 
     SplitGeometry geo;
     geo.local = vec2[4](
