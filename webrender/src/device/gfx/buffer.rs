@@ -12,6 +12,45 @@ use std::mem;
 pub const MAX_INSTANCE_COUNT: usize = 8192;
 pub const TEXTURE_CACHE_SIZE: usize = 128 << 20; // 128MB
 
+pub struct PMBuffer<B: hal::Backend> {
+    pub buffer: B::Buffer,
+    pub memory: B::Memory,
+    pub coherent: bool,
+    pub height: u64,
+    pub size: u64,
+    pub state: Cell<hal::buffer::State>,
+}
+
+impl<B: hal::Backend> PMBuffer<B> {
+    pub unsafe fn acquire_writer(&self, device: &B::Device) -> hal::mapping::Writer<B, [f32; 4]> {
+        device.acquire_mapping_writer::<[f32; 4]>(&self.memory, 0..self.size).unwrap()
+    }
+
+    pub unsafe fn release_writer(&self, device: &B::Device, writer: hal::mapping::Writer<B, [f32; 4]>) {
+        device.release_mapping_writer(writer).unwrap();
+    }
+
+    pub unsafe fn deinit(self, device: &B::Device) {
+        device.destroy_buffer(self.buffer);
+        device.free_memory(self.memory);
+    }
+
+    pub(super) fn transit(&self, access: hal::buffer::Access) -> Option<hal::memory::Barrier<B>> {
+        let src_state = self.state.get();
+        if src_state == access {
+            None
+        } else {
+            self.state.set(access);
+            Some(hal::memory::Barrier::Buffer {
+                states: src_state .. access,
+                target: &self.buffer,
+                families: None,
+                range: None .. None,
+            })
+        }
+    }
+}
+
 pub(super) struct Buffer<B: hal::Backend> {
     pub(super) memory_block: MemoryBlock<B>,
     pub(super) buffer: B::Buffer,
