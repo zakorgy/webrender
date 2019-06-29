@@ -74,7 +74,7 @@ pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
 
 pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // GpuCache
-    descriptor_set_layout_binding(5, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(5, DT::StorageBuffer, SSF::ALL, false),
     // TransformPalette
     descriptor_set_layout_binding(6, DT::CombinedImageSampler, SSF::VERTEX, true),
     // RenderTasks
@@ -85,7 +85,7 @@ pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
 
 pub(super) const PRIMITIVE_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // GpuCache
-    descriptor_set_layout_binding(5, DT::CombinedImageSampler, SSF::ALL, true),
+    descriptor_set_layout_binding(5, DT::StorageBuffer, SSF::ALL, false),
     // TransformPalette
     descriptor_set_layout_binding(6, DT::CombinedImageSampler, SSF::VERTEX, true),
     // RenderTasks

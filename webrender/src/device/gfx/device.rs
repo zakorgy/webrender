@@ -113,6 +113,20 @@ struct Fence<B: hal::Backend> {
     is_submitted: bool,
 }
 
+pub struct PMBuffer<B: hal::Backend> {
+    buffer: B::Buffer,
+    memory: B::Memory,
+    coherent: bool,
+    pub height: u64,
+    size: u64,
+}
+
+impl<B: hal::Backend> PMBuffer<B> {
+    unsafe fn acquire_writer(&self, device: &B::Device) -> hal::mapping::Writer<B, [f32; 4]> {
+        device.acquire_mapping_writer::<[f32; 4]>(&self.memory, 0..self.size).unwrap()
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: B::Device,
     heaps: Heaps<B>,
@@ -125,6 +139,7 @@ pub struct Device<B: hal::Backend> {
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[CommandPool<B>; 1]>,
     staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
+    pub gpu_cache_buffer: Option<PMBuffer<B>>,
     pub swap_chain: Option<B::Swapchain>,
     render_pass: Option<RenderPass<B>>,
     pub framebuffers: Vec<B::Framebuffer>,
@@ -580,6 +595,7 @@ impl<B: hal::Backend> Device<B> {
             queue_group,
             command_pool,
             staging_buffer_pool,
+            gpu_cache_buffer: None,
             swap_chain: swap_chain,
             render_pass: Some(render_pass),
             framebuffers,
@@ -1902,6 +1918,76 @@ impl<B: hal::Backend> Device<B> {
             rbo_id = RBOId(rng.gen_range::<u32>(1, u32::max_value()));
         }
         rbo_id
+    }
+
+    pub fn create_writer(
+        &mut self,
+        width: u64,
+        height: u64,
+    ) -> (hal::mapping::Writer<B, [f32; 4]>, bool) {
+        let buffer_stride = std::mem::size_of::<[f32; 4]>() as u64;
+        let buffer_len = height * width * buffer_stride;
+
+        assert_ne!(buffer_len, 0);
+        let mut storage_buffer =
+            unsafe { self.device.create_buffer(buffer_len, hal::buffer::Usage::STORAGE) }.unwrap();
+
+        let buffer_req = unsafe { self.device.get_buffer_requirements(&storage_buffer) };
+        let mut coherent = false;
+
+        use hal::memory::Properties;
+        let memory_types = self.adapter.physical_device.memory_properties().memory_types;
+        let upload_type = memory_types
+            .iter()
+            .enumerate()
+            .position(|(id, mem_type)| {
+                // type_mask is a bit field where each bit represents a memory type. If the bit is set
+                // to 1 it means we can use that type for our buffer. So this code finds the first
+                // memory type that has a `1` (or, is allowed), and is visible to the CPU.
+                buffer_req.type_mask & (1 << id) != 0
+                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::CPU_VISIBLE)
+            });
+
+        let upload_type = match upload_type {
+            Some(ty) => {
+                coherent = true;
+                ty
+            },
+            None => {
+                memory_types
+                    .iter()
+                    .enumerate()
+                    .position(|(id, mem_type)| {
+                        // type_mask is a bit field where each bit represents a memory type. If the bit is set
+                        // to 1 it means we can use that type for our buffer. So this code finds the first
+                        // memory type that has a `1` (or, is allowed), and is visible to the CPU.
+                        buffer_req.type_mask & (1 << id) != 0
+                            && mem_type.properties.contains(Properties::CPU_VISIBLE)
+                    })
+                    .unwrap()
+            }
+        };
+
+        let buffer_memory = unsafe { self.device.allocate_memory(upload_type.into(), buffer_req.size) }.unwrap();
+
+        unsafe { self.device.bind_buffer_memory(&buffer_memory, 0, &mut storage_buffer) }.unwrap();
+
+        self.gpu_cache_buffer = Some(PMBuffer {
+            buffer: storage_buffer,
+            memory: buffer_memory,
+            coherent,
+            height,
+            size: buffer_req.size,
+        });
+        //TODO destroy old buffer and memory, copy the content of the old buffer to the new one
+        (unsafe { self.gpu_cache_buffer.as_ref().unwrap().acquire_writer(&self.device) }, coherent)
+    }
+
+    pub fn flush_mapped_memory_ranges(&self, ranges: std::vec::Drain<std::ops::Range<u64>>) {
+        let ranges = ranges.into_iter().map(|r| {
+            (&self.gpu_cache_buffer.as_ref().unwrap().memory, r)
+        });
+        unsafe { &self.device.flush_mapped_memory_ranges(ranges) };
     }
 
     pub fn create_texture(
