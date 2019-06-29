@@ -740,7 +740,8 @@ impl<'a, B: hal::Backend> GpuCacheTexture<'a, B> {
 
     /// Ensures that we have an appropriately-sized texture. Returns true if a
     /// new texture was created.
-    fn ensure_texture(&mut self, device: &mut Device<B>, height: i32) {
+    fn ensure_texture<'b>(&mut self, device: &'b mut Device<B>, height: i32)
+        where 'b : 'a {
         if let GpuCacheBus::PMbuffer {ref mut writer, ref mut coherent, ..} = self.bus {
             if device.gpu_cache_buffer.as_ref().map_or(false, |b| b.height as i32 >= height) {
                 if GPU_CACHE_RESIZE_TEST {
@@ -753,6 +754,7 @@ impl<'a, B: hal::Backend> GpuCacheTexture<'a, B> {
             let (w, c) = device.create_writer(MAX_VERTEX_TEXTURE_WIDTH as _, 256);
             *writer = Some(w);
             *coherent = c;
+            return;
         }
         // If we already have a texture that works, we're done.
         if self.texture.as_ref().map_or(false, |t| t.get_dimensions().height >= height) {
@@ -880,11 +882,13 @@ impl<'a, B: hal::Backend> GpuCacheTexture<'a, B> {
 
     fn prepare_for_updates(
         &mut self,
-        device: &mut Device<B>,
+        device: &'a mut Device<B>,
         _total_block_count: usize,
         max_height: i32,
     ) {
-        self.ensure_texture(device, max_height);
+        {
+            self.ensure_texture(device, max_height);
+        }
         match self.bus {
             GpuCacheBus::PixelBuffer { .. } => {},
             GpuCacheBus::PMbuffer { .. } => {},
@@ -1821,16 +1825,22 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
     /// Processes the result queue.
     ///
     /// Should be called before `render()`, as texture cache updates are done here.
-    pub fn update(&mut self) {
+    pub fn update(&'a mut self) {
         profile_scope!("update");
         // Pull any pending results and return the most recent.
-        while let Ok(msg) = self.result_rx.try_recv() {
+        let result_rx = &self.result_rx;
+        let epochs = &mut self.pipeline_info.epochs;
+        let removed_pipelines = &mut self.pipeline_info.removed_pipelines;
+        let new_scene_indicator = &mut self.new_scene_indicator;
+        let active_documents = &mut self.active_documents;
+        let framebuffer_size = self.framebuffer_size;
+        while let Ok(msg) = result_rx.try_recv() {
             match msg {
                 ResultMsg::PublishPipelineInfo(mut pipeline_info) => {
                     for (pipeline_id, epoch) in pipeline_info.epochs {
-                        self.pipeline_info.epochs.insert(pipeline_id, epoch);
+                        epochs.insert(pipeline_id, epoch);
                     }
-                    self.pipeline_info.removed_pipelines.extend(pipeline_info.removed_pipelines.drain(..));
+                    removed_pipelines.extend(pipeline_info.removed_pipelines.drain(..));
                 }
                 ResultMsg::PublishDocument(
                     document_id,
@@ -1839,23 +1849,24 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
                     profile_counters,
                 ) => {
                     if doc.is_new_scene {
-                        self.new_scene_indicator.changed();
+                        new_scene_indicator.changed();
                     }
 
                     // Add a new document to the active set, expressed as a `Vec` in order
                     // to re-order based on `DocumentLayer` during rendering.
-                    match self.active_documents.iter().position(|&(id, _)| id == document_id) {
+                    match active_documents.iter().position(|&(id, _)| id == document_id) {
                         Some(pos) => {
                             // If the document we are replacing must be drawn
                             // (in order to update the texture cache), issue
                             // a render just to off-screen targets.
-                            if self.active_documents[pos].1.frame.must_be_drawn() {
-                                let framebuffer_size = self.framebuffer_size;
-                                self.render_impl(framebuffer_size).ok();
+                            if active_documents[pos].1.frame.must_be_drawn() {
+                                {
+                                    self.render_impl(framebuffer_size).ok();
+                                }
                             }
-                            self.active_documents[pos].1 = doc;
+                            active_documents[pos].1 = doc;
                         }
-                        None => self.active_documents.push((document_id, doc)),
+                        None => active_documents.push((document_id, doc)),
                     }
 
                     // IMPORTANT: The pending texture cache updates must be applied
@@ -1922,7 +1933,7 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
                     // might have deleted the resources in use in the frame due to a
                     // memory pressure event.
                     if memory_pressure {
-                        self.active_documents.clear();
+                        active_documents.clear();
                     }
                 }
                 ResultMsg::AppendNotificationRequests(mut notifications) => {
@@ -1949,7 +1960,7 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
                     }
                     #[cfg(feature = "replay")]
                     DebugOutput::LoadCapture(root, plain_externals) => {
-                        self.active_documents.clear();
+                        active_documents.clear();
                         self.load_capture(root, plain_externals);
                     }
                 },
@@ -2246,7 +2257,7 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
     ///
     /// A Frame is supplied by calling [`generate_frame()`][webrender_api::Transaction::generate_frame].
     pub fn render(
-        &mut self,
+        &'a mut self,
         framebuffer_size: DeviceIntSize,
     ) -> Result<RendererStats, Vec<RendererError>> {
         self.framebuffer_size = Some(framebuffer_size);
@@ -2272,7 +2283,7 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
     // to update texture cache render tasks but
     // avoid doing a full frame render.
     fn render_impl(
-        &mut self,
+        &'a mut self,
         framebuffer_size: Option<DeviceIntSize>,
     ) -> Result<RendererStats, Vec<RendererError>> {
         profile_scope!("render");
@@ -2362,7 +2373,9 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
 
             for &mut (_, RenderedDocument { ref mut frame, .. }) in &mut active_documents {
                 frame.profile_counters.reset_targets();
-                self.prepare_gpu_cache(frame);
+                {
+                    self.prepare_gpu_cache(frame);
+                }
                 assert!(frame.gpu_cache_frame_id <= self.gpu_cache_frame_id,
                     "Received frame depends on a later GPU cache epoch ({:?}) than one we received last via `UpdateGpuCache` ({:?})",
                     frame.gpu_cache_frame_id, self.gpu_cache_frame_id);
@@ -2491,7 +2504,7 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
         }
     }
 
-    fn update_gpu_cache(&mut self) {
+    fn update_gpu_cache(&'a mut self) {
         let _gm = self.gpu_profile.start_marker("gpu cache update");
 
         // For an artificial stress test of GPU cache resizing,
@@ -2523,11 +2536,13 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
         // Note: if we decide to switch to scatter-style GPU cache update
         // permanently, we can have this code nicer with `BufferUploader` kind
         // of helper, similarly to how `TextureUploader` API is used.
-        self.gpu_cache_texture.prepare_for_updates(
-            &mut self.device,
-            updated_blocks,
-            max_requested_height,
-        );
+        {
+            self.gpu_cache_texture.prepare_for_updates(
+                &mut self.device,
+                updated_blocks,
+                max_requested_height,
+            );
+        }
 
         for update_list in self.pending_gpu_cache_updates.drain(..) {
             assert!(update_list.height <= max_requested_height);
@@ -2549,7 +2564,7 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
         counters.updated_blocks.set(updated_blocks);
     }
 
-    fn prepare_gpu_cache(&mut self, frame: &Frame) {
+    fn prepare_gpu_cache(&'a mut self, frame: &Frame) {
         if self.pending_gpu_cache_clear {
             #[cfg(feature="gleam")]
             let use_scatter = matches!(self.gpu_cache_texture.bus, GpuCacheBus::Scatter { .. });
@@ -2565,7 +2580,9 @@ impl<'a, B: hal::Backend> Renderer<'a, B> {
         let deferred_update_list = self.update_deferred_resolves(&frame.deferred_resolves);
         self.pending_gpu_cache_updates.extend(deferred_update_list);
 
-        self.update_gpu_cache();
+        {
+            self.update_gpu_cache();
+        }
 
         // Note: the texture might have changed during the `update`,
         // so we need to bind it here.
