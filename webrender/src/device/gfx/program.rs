@@ -34,31 +34,11 @@ const SPECIALIZATION_FEATURES: &'static [&'static str] = &[
     "DITHERING",
     "DEBUG_OVERDRAW",
 ];
-const QUAD: [vertex_types::Vertex; 6] = [
-    vertex_types::Vertex {
-        aPosition: [0.0, 0.0, 0.0],
-    },
-    vertex_types::Vertex {
-        aPosition: [1.0, 0.0, 0.0],
-    },
-    vertex_types::Vertex {
-        aPosition: [0.0, 1.0, 0.0],
-    },
-    vertex_types::Vertex {
-        aPosition: [0.0, 1.0, 0.0],
-    },
-    vertex_types::Vertex {
-        aPosition: [1.0, 0.0, 0.0],
-    },
-    vertex_types::Vertex {
-        aPosition: [1.0, 1.0, 0.0],
-    },
-];
 
 
 pub(crate) struct Program<B: hal::Backend> {
     pipelines: FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>,
-    pub(super) vertex_buffer: SmallVec<[VertexBufferHandler<B>; 1]>,
+    pub(super) vertex_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
     pub(super) shader_name: String,
@@ -343,23 +323,13 @@ impl<B: hal::Backend> Program<B> {
             _ => unreachable!(),
         };
 
-        let mut vertex_buffer = SmallVec::new();
         let mut instance_buffer = SmallVec::new();
-        let mut index_buffer = if shader_kind.is_debug() {
-            Some(SmallVec::new())
+        let (mut vertex_buffer, mut index_buffer) = if shader_kind.is_debug() {
+            (Some(SmallVec::new()), Some(SmallVec::new()))
         } else {
-            None
+            (None, None)
         };
         for _ in 0 .. frame_count {
-            vertex_buffer.push(VertexBufferHandler::new(
-                device,
-                heaps,
-                hal::buffer::Usage::VERTEX,
-                &QUAD,
-                vertex_buffer_stride,
-                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
-                (limits.non_coherent_atom_size - 1) as usize,
-            ));
             instance_buffer.push(InstanceBufferHandler::new(
                 device,
                 heaps,
@@ -367,6 +337,17 @@ impl<B: hal::Backend> Program<B> {
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             ));
+            if let Some(ref mut vertex_buffer) = vertex_buffer {
+                vertex_buffer.push(VertexBufferHandler::new(
+                    device,
+                    heaps,
+                    hal::buffer::Usage::VERTEX,
+                    &[0],
+                    vertex_buffer_stride,
+                    (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+                    (limits.non_coherent_atom_size - 1) as usize,
+                ));
+            }
             if let Some(ref mut index_buffer) = index_buffer {
                 index_buffer.push(VertexBufferHandler::new(
                     device,
@@ -420,8 +401,12 @@ impl<B: hal::Backend> Program<B> {
         next_id: usize,
         pipeline_layout: &B::PipelineLayout,
         use_push_consts: bool,
+        vertex_buffer: &VertexBufferHandler<B>,
     ) {
-        let vertex_buffer = &self.vertex_buffer[next_id];
+        let vertex_buffer = match &self.vertex_buffer {
+            Some(ref vb) => vb.get(next_id).unwrap(),
+            None => vertex_buffer
+        };
         let instance_buffer = &self.instance_buffer[next_id];
         unsafe {
             if use_push_consts {
@@ -524,8 +509,10 @@ impl<B: hal::Backend> Program<B> {
     }
 
     pub(super) fn deinit(mut self, device: &B::Device, heaps: &mut Heaps<B>) {
-        for mut vertex_buffer in self.vertex_buffer {
-            vertex_buffer.deinit(device, heaps);
+        if let Some(vertex_buffer) = self.vertex_buffer {
+            for mut vertex_buffer in vertex_buffer {
+                vertex_buffer.deinit(device, heaps);
+            }
         }
         if let Some(index_buffer) = self.index_buffer {
             for mut index_buffer in index_buffer {
