@@ -35,6 +35,7 @@ use super::program::{Program, PUSH_CONSTANT_BLOCK_SIZE};
 use super::render_pass::*;
 use super::{PipelineRequirements, PrimitiveType, TextureId};
 use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
+use super::vertex_types;
 
 use super::super::Capabilities;
 use super::super::{ShaderKind, ExternalTexture, GpuFrameId, TextureSlot, TextureFilter};
@@ -69,6 +70,27 @@ pub enum BackendApiType {
     Dx12,
     Metal,
 }
+
+const QUAD: [vertex_types::Vertex; 6] = [
+    vertex_types::Vertex {
+        aPosition: [0.0, 0.0, 0.0],
+    },
+    vertex_types::Vertex {
+        aPosition: [1.0, 0.0, 0.0],
+    },
+    vertex_types::Vertex {
+        aPosition: [0.0, 1.0, 0.0],
+    },
+    vertex_types::Vertex {
+        aPosition: [0.0, 1.0, 0.0],
+    },
+    vertex_types::Vertex {
+        aPosition: [1.0, 0.0, 0.0],
+    },
+    vertex_types::Vertex {
+        aPosition: [1.0, 1.0, 0.0],
+    },
+];
 
 pub struct DeviceInit<B: hal::Backend> {
     pub instance: Box<hal::Instance<Backend = B>>,
@@ -184,6 +206,7 @@ pub struct Device<B: hal::Backend> {
     depth_available: bool,
     upload_method: UploadMethod,
     locals_buffer: UniformBufferHandler<B>,
+    quad_buffer: VertexBufferHandler<B>,
 
     // HW or API capabilities
     capabilities: Capabilities,
@@ -461,6 +484,16 @@ impl<B: hal::Backend> Device<B> {
             (limits.non_coherent_atom_size - 1) as usize,
         );
 
+        let quad_buffer = VertexBufferHandler::new(
+            &device,
+            &mut heaps,
+            hal::buffer::Usage::VERTEX,
+            &QUAD,
+            mem::size_of::<vertex_types::Vertex>(),
+            (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+            (limits.non_coherent_atom_size - 1) as usize,
+        );
+
         let mut per_group_descriptor_sets = FastHashMap::default();
         let descriptor_data:
             FastHashMap<DescriptorGroup, DescriptorGroupData<B>>
@@ -654,6 +687,7 @@ impl<B: hal::Backend> Device<B> {
             save_cache,
 
             locals_buffer,
+            quad_buffer,
             wait_for_resize: false,
 
             use_push_consts,
@@ -1291,7 +1325,7 @@ impl<B: hal::Backend> Device<B> {
             program.instance_buffer[self.next_id].reset();
             if let Some(ref mut index_buffer) = program.index_buffer {
                 index_buffer[self.next_id].reset();
-                program.vertex_buffer[self.next_id].reset();
+                program.vertex_buffer.as_mut().unwrap()[self.next_id].reset();
             }
         }
     }
@@ -1533,7 +1567,7 @@ impl<B: hal::Backend> Device<B> {
             .expect("Program not found.");
 
         if program.shader_kind.is_debug() {
-            program.vertex_buffer[self.next_id].update(&self.device, vertices, &mut self.heaps);
+            program.vertex_buffer.as_mut().unwrap()[self.next_id].update(&self.device, vertices, &mut self.heaps);
         } else {
             warn!("This function is for debug shaders only!");
         }
@@ -1657,6 +1691,7 @@ impl<B: hal::Backend> Device<B> {
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 self.use_push_consts,
+                &self.quad_buffer,
             );
 
         if depth_test_changed {
@@ -3567,6 +3602,7 @@ impl<B: hal::Backend> Device<B> {
             for mut staging_buffer_pool in self.staging_buffer_pool {
                 staging_buffer_pool.deinit(&self.device, &mut self.heaps);
             }
+            self.quad_buffer.deinit(&self.device, &mut self.heaps);
             for image in self.frame_images {
                 image.deinit(&self.device, &mut self.heaps);
             }
