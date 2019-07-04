@@ -75,7 +75,7 @@ impl<B: hal::Backend> Buffer<B> {
         non_coherent_atom_size_mask: u64,
     ) {
         let size = (data.len() * std::mem::size_of::<T>()) as u64;
-        let range = 0 .. ((size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask);
+        let range = 0 .. ((size + non_coherent_atom_size_mask) & !non_coherent_atom_size_mask).min(self.buffer_size as u64);
         unsafe {
             let mut mapped = self
                 .memory_block
