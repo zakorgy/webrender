@@ -5,12 +5,14 @@
 use hal;
 use hal::Device as BackendDevice;
 use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue, Write};
+use smallvec::SmallVec;
 
 use std::cell::Cell;
 use std::mem;
 
-pub const MAX_INSTANCE_COUNT: usize = 8192;
-pub const TEXTURE_CACHE_SIZE: usize = 128 << 20; // 128MB
+pub const INSTANCE_BUFFER_SIZE: usize = 1 << 20; // 1MB
+pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
+pub const TEXTURE_CACHE_SIZE: usize = 16 << 20; // 16MB
 
 pub(super) struct Buffer<B: hal::Backend> {
     pub(super) memory_block: MemoryBlock<B>,
@@ -223,6 +225,7 @@ pub(super) struct InstancePoolBuffer<B: hal::Backend> {
     pub(super) buffer: Buffer<B>,
     pub(super) offset: usize,
     pub(super) last_update_size: usize,
+    pub(super) last_data_stride: usize,
     non_coherent_atom_size_mask: usize,
 }
 
@@ -231,7 +234,6 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         device: &B::Device,
         heaps: &mut Heaps<B>,
         buffer_usage: hal::buffer::Usage,
-        data_stride: usize,
         alignment_mask: usize,
         non_coherent_atom_size_mask: usize,
     ) -> Self {
@@ -241,24 +243,26 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
             MemoryUsageValue::Dynamic,
             buffer_usage,
             alignment_mask,
-            MAX_INSTANCE_COUNT,
-            data_stride,
+            INSTANCE_BUFFER_SIZE,
+            mem::size_of::<u8>(),
         );
         InstancePoolBuffer {
             buffer,
             offset: 0,
             last_update_size: 0,
+            last_data_stride: 0,
             non_coherent_atom_size_mask,
         }
     }
 
-    fn update<T: Copy>(&mut self, device: &B::Device, data: &[T]) {
+    fn update(&mut self, device: &B::Device, data: &[u8], last_data_stride: usize) {
         self.buffer.update(
             device,
             data,
             self.offset,
             self.non_coherent_atom_size_mask as u64,
         );
+        self.last_data_stride = last_data_stride;
         self.last_update_size = data.len();
         self.offset += self.last_update_size;
     }
@@ -268,93 +272,120 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         self.last_update_size = 0;
     }
 
-    fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
+    pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         self.buffer.deinit(device, heaps);
+    }
+
+    fn free(&self) -> usize {
+        self.buffer.buffer_size - self.offset
+    }
+
+    fn can_store_data(&self, stride: usize) -> bool {
+        if self.offset_aligned_to(stride) {
+            self.free() >= stride
+        } else {
+            let offset = self.offset + (stride - (self.offset % stride));
+            if offset > self.buffer.buffer_size {
+                false
+            } else {
+                self.buffer.buffer_size - offset >= stride
+            }
+        }
+    }
+
+    fn offset_aligned_to(&self, stride: usize) -> bool {
+        self.offset % stride == 0
+    }
+
+    fn align_offset_to(&mut self, stride: usize) {
+        if !self.offset_aligned_to(stride) {
+            self.offset += stride - (self.offset % stride);
+        }
     }
 }
 
 pub(super) struct InstanceBufferHandler<B: hal::Backend> {
     pub(super) buffers: Vec<InstancePoolBuffer<B>>,
-    data_stride: usize,
     alignment_mask: usize,
     non_coherent_atom_size_mask: usize,
-    pub(super) current_buffer_index: usize,
+    pub(super) next_buffer_index: usize,
 }
 
 impl<B: hal::Backend> InstanceBufferHandler<B> {
     pub(super) fn new(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        data_stride: usize,
         non_coherent_atom_size_mask: usize,
         alignment_mask: usize,
     ) -> Self {
-        let buffers = vec![InstancePoolBuffer::new(
-            device,
-            heaps,
-            hal::buffer::Usage::VERTEX,
-            data_stride,
-            alignment_mask,
-            non_coherent_atom_size_mask,
-        )];
-
         InstanceBufferHandler {
-            buffers,
-            data_stride,
+            buffers: Vec::new(),
             alignment_mask,
             non_coherent_atom_size_mask,
-            current_buffer_index: 0,
+            next_buffer_index: 0,
         }
     }
 
     pub(super) fn add<T: Copy>(
         &mut self,
         device: &B::Device,
-        mut data: &[T],
+        mut instance_data: &[T],
         heaps: &mut Heaps<B>,
-    ) {
-        assert_eq!(self.data_stride, mem::size_of::<T>());
-        while !data.is_empty() {
-            if self.current_buffer().buffer.buffer_size
-                == self.current_buffer().offset * self.data_stride
-            {
-                self.current_buffer_index += 1;
-                if self.buffers.len() <= self.current_buffer_index {
-                    self.buffers.push(InstancePoolBuffer::new(
+        free_buffers: &mut SmallVec<[InstancePoolBuffer<B>; 16]>,
+    ) -> std::ops::Range<usize> {
+        fn instance_data_to_u8_slice<T: Copy>(data: &[T]) -> &[u8] {
+            unsafe {
+                std::slice::from_raw_parts(
+                    data.as_ptr() as *const u8,
+                    data.len() * mem::size_of::<T>(),
+                )
+            }
+        }
+
+        let data_stride = mem::size_of::<T>();
+        let mut range = 0..0;
+        let mut first_iteration = true;
+        while !instance_data.is_empty() {
+            let need_new_buffer = self.buffers.is_empty()
+                || !self.current_buffer().can_store_data(data_stride);
+            if need_new_buffer {
+                let buffer = match free_buffers.pop() {
+                    Some(b) => b,
+                    None => InstancePoolBuffer::new(
                         device,
                         heaps,
                         hal::buffer::Usage::VERTEX,
-                        self.data_stride,
                         self.alignment_mask,
                         self.non_coherent_atom_size_mask,
-                    ))
-                }
-            }
-
-            let update_size = if (self.current_buffer().offset + data.len()) * self.data_stride
-                > self.current_buffer().buffer.buffer_size
-            {
-                self.current_buffer().buffer.buffer_size / self.data_stride
-                    - self.current_buffer().offset
+                    ),
+                };
+                self.buffers.push(buffer);
+                self.next_buffer_index += 1;
             } else {
-                data.len()
-            };
-
-            self.buffers[self.current_buffer_index].update(device, &data[0 .. update_size]);
-
-            data = &data[update_size ..]
+                self.buffers[self.next_buffer_index - 1].align_offset_to(data_stride);
+            }
+            if first_iteration {
+                range.start = self.next_buffer_index - 1;
+                first_iteration = false;
+            }
+            let update_size = (self.current_buffer().free() / data_stride).min(instance_data.len());
+            self.buffers[self.next_buffer_index - 1].update(device, instance_data_to_u8_slice(&instance_data[0 .. update_size]), data_stride);
+            instance_data = &instance_data[update_size ..];
         }
+        range.end = self.next_buffer_index;
+        range
     }
 
     fn current_buffer(&self) -> &InstancePoolBuffer<B> {
-        &self.buffers[self.current_buffer_index]
+        &self.buffers[self.next_buffer_index - 1]
     }
 
-    pub(super) fn reset(&mut self) {
-        for buffer in &mut self.buffers {
+    pub(super) fn reset(&mut self, free_buffers: &mut SmallVec<[InstancePoolBuffer<B>; 16]>) {
+        // Keep one buffer and move the others back to the free set pool.
+        while self.buffers.len() > 1 {
+            let mut buffer = self.buffers.pop().unwrap();
             buffer.reset();
+            free_buffers.push(buffer);
         }
-        self.current_buffer_index = 0;
+        self.next_buffer_index = self.buffers.len();
     }
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
@@ -494,3 +525,4 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
         }
     }
 }
+

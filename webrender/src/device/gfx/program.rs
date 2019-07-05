@@ -40,7 +40,6 @@ pub(crate) struct Program<B: hal::Backend> {
     pipelines: FastHashMap<(hal::pso::BlendState, hal::pso::DepthTest), B::GraphicsPipeline>,
     pub(super) vertex_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
-    pub(super) instance_buffer: SmallVec<[InstanceBufferHandler<B>; 1]>,
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
     pub(super) constants: [u32; PUSH_CONSTANT_BLOCK_SIZE],
@@ -296,47 +295,12 @@ impl<B: hal::Backend> Program<B> {
             ShaderKind::DebugFont => mem::size_of::<vertex_types::DebugFontVertex>(),
             _ => mem::size_of::<vertex_types::Vertex>(),
         };
-
-        let instance_buffer_stride = match shader_kind {
-            ShaderKind::Primitive
-            | ShaderKind::Brush
-            | ShaderKind::Text
-            | ShaderKind::Cache(VertexArrayKind::Primitive) => {
-                mem::size_of::<vertex_types::PrimitiveInstanceData>()
-            }
-            ShaderKind::ClipCache | ShaderKind::Cache(VertexArrayKind::Clip) => {
-                mem::size_of::<vertex_types::ClipMaskInstance>()
-            }
-            ShaderKind::Cache(VertexArrayKind::Blur) => {
-                mem::size_of::<vertex_types::BlurInstance>()
-            }
-            ShaderKind::Cache(VertexArrayKind::Border) => {
-                mem::size_of::<vertex_types::BorderInstance>()
-            }
-            ShaderKind::Cache(VertexArrayKind::Scale) => {
-                mem::size_of::<vertex_types::ScalingInstance>()
-            }
-            ShaderKind::Cache(VertexArrayKind::LineDecoration) => {
-                mem::size_of::<vertex_types::LineDecorationInstance>()
-            }
-            sk if sk.is_debug() => 1,
-            _ => unreachable!(),
-        };
-
-        let mut instance_buffer = SmallVec::new();
         let (mut vertex_buffer, mut index_buffer) = if shader_kind.is_debug() {
             (Some(SmallVec::new()), Some(SmallVec::new()))
         } else {
             (None, None)
         };
         for _ in 0 .. frame_count {
-            instance_buffer.push(InstanceBufferHandler::new(
-                device,
-                heaps,
-                instance_buffer_stride,
-                (limits.non_coherent_atom_size - 1) as usize,
-                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
-            ));
             if let Some(ref mut vertex_buffer) = vertex_buffer {
                 vertex_buffer.push(VertexBufferHandler::new(
                     device,
@@ -365,22 +329,10 @@ impl<B: hal::Backend> Program<B> {
             pipelines,
             vertex_buffer,
             index_buffer,
-            instance_buffer,
             shader_name: String::from(shader_name),
             shader_kind,
             constants: [0; PUSH_CONSTANT_BLOCK_SIZE],
         }
-    }
-
-    pub(super) fn bind_instances<T: Copy>(
-        &mut self,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        instances: &[T],
-        buffer_id: usize,
-    ) {
-        assert!(!instances.is_empty());
-        self.instance_buffer[buffer_id].add(device, instances, heaps);
     }
 
     pub(super) fn submit(
@@ -402,12 +354,13 @@ impl<B: hal::Backend> Program<B> {
         pipeline_layout: &B::PipelineLayout,
         use_push_consts: bool,
         vertex_buffer: &VertexBufferHandler<B>,
+        instance_buffer: &InstanceBufferHandler<B>,
+        instance_range: std::ops::Range<usize>,
     ) {
         let vertex_buffer = match &self.vertex_buffer {
             Some(ref vb) => vb.get(next_id).unwrap(),
             None => vertex_buffer
         };
-        let instance_buffer = &self.instance_buffer[next_id];
         unsafe {
             if use_push_consts {
                 cmd_buffer.push_graphics_constants(
@@ -481,7 +434,7 @@ impl<B: hal::Backend> Program<B> {
                     );
                 }
             } else {
-                for i in 0 ..= instance_buffer.current_buffer_index {
+                for i in instance_range.into_iter() {
                     cmd_buffer.bind_vertex_buffers(
                         0,
                         Some((&vertex_buffer.buffer().buffer, 0))
@@ -496,11 +449,12 @@ impl<B: hal::Backend> Program<B> {
                             viewport.rect,
                             clear_values,
                         );
-                        let offset = instance_buffer.buffers[i].offset;
-                        let size = instance_buffer.buffers[i].last_update_size;
+                        let data_stride = instance_buffer.buffers[i].last_data_stride;
+                        let end = instance_buffer.buffers[i].offset / data_stride;
+                        let start = end - instance_buffer.buffers[i].last_update_size / data_stride;
                         encoder.draw(
                             0 .. vertex_buffer.buffer_len as _,
-                            (offset - size) as u32 .. offset as u32,
+                            start as u32 .. end as u32,
                         );
                     }
                 }
@@ -518,9 +472,6 @@ impl<B: hal::Backend> Program<B> {
             for mut index_buffer in index_buffer {
                 index_buffer.deinit(device, heaps);
             }
-        }
-        for mut instance_buffer in self.instance_buffer {
-            instance_buffer.deinit(device, heaps);
         }
         for pipeline in self.pipelines.drain() {
             unsafe { device.destroy_graphics_pipeline(pipeline.1) };
