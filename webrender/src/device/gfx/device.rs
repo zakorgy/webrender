@@ -207,6 +207,9 @@ pub struct Device<B: hal::Backend> {
     upload_method: UploadMethod,
     locals_buffer: UniformBufferHandler<B>,
     quad_buffer: VertexBufferHandler<B>,
+    instance_buffers: SmallVec<[InstanceBufferHandler<B>; 1]>,
+    free_instance_buffers: SmallVec<[InstancePoolBuffer<B>; 16]>,
+    instance_range: std::ops::Range<usize>,
 
     // HW or API capabilities
     capabilities: Capabilities,
@@ -449,6 +452,7 @@ impl<B: hal::Backend> Device<B> {
         let mut frame_fence = SmallVec::new();
         let mut command_pool = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
+        let mut instance_buffers = SmallVec::new();
         for _ in 0 .. frame_count {
             let fence = device.create_fence(false).expect("create_fence failed");
             frame_fence.push(Fence {
@@ -474,6 +478,10 @@ impl<B: hal::Backend> Device<B> {
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                 (limits.optimal_buffer_copy_offset_alignment - 1) as usize,
+            ));
+            instance_buffers.push(InstanceBufferHandler::new(
+                (limits.non_coherent_atom_size - 1) as usize,
+                (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             ));
         }
 
@@ -688,6 +696,9 @@ impl<B: hal::Backend> Device<B> {
 
             locals_buffer,
             quad_buffer,
+            instance_buffers,
+            free_instance_buffers: SmallVec::new(),
+            instance_range: 0..0,
             wait_for_resize: false,
 
             use_push_consts,
@@ -1309,6 +1320,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.reset_program_buffer_offsets();
+        self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
     }
 
@@ -1322,7 +1334,6 @@ impl<B: hal::Backend> Device<B> {
 
     fn reset_program_buffer_offsets(&mut self) {
         for program in self.programs.values_mut() {
-            program.instance_buffer[self.next_id].reset();
             if let Some(ref mut index_buffer) = program.index_buffer {
                 index_buffer[self.next_id].reset();
                 program.vertex_buffer.as_mut().unwrap()[self.next_id].reset();
@@ -1574,11 +1585,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn update_instances<T: Copy>(&mut self, instances: &[T]) {
-        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        self.programs
-            .get_mut(&self.bound_program)
-            .expect("Program not found.")
-            .bind_instances(&self.device, &mut self.heaps, instances, self.next_id);
+        self.instance_range = self.instance_buffers[self.next_id].add(&self.device, instances, &mut self.heaps, &mut self.free_instance_buffers);
     }
 
     fn draw(&mut self) {
@@ -1692,6 +1699,8 @@ impl<B: hal::Backend> Device<B> {
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 self.use_push_consts,
                 &self.quad_buffer,
+                &self.instance_buffers[self.next_id],
+                self.instance_range.clone(),
             );
 
         if depth_test_changed {
@@ -3603,6 +3612,12 @@ impl<B: hal::Backend> Device<B> {
                 staging_buffer_pool.deinit(&self.device, &mut self.heaps);
             }
             self.quad_buffer.deinit(&self.device, &mut self.heaps);
+            for mut instance_buffer in self.instance_buffers {
+                instance_buffer.deinit(&self.device, &mut self.heaps);
+            }
+            for buffer in self.free_instance_buffers {
+                buffer.deinit(&self.device, &mut self.heaps);
+            }
             for image in self.frame_images {
                 image.deinit(&self.device, &mut self.heaps);
             }
