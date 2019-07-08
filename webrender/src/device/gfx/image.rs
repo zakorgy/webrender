@@ -4,6 +4,7 @@
 
 use api::{DeviceIntRect, ImageFormat};
 use hal::{self, Device as BackendDevice};
+use hal::command::{RawCommandBuffer, CommandBufferFlags, CommandBufferInheritanceInfo};
 use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
 
 use std::cell::Cell;
@@ -224,7 +225,8 @@ impl<B: hal::Backend> Image<B> {
         let cmd_buffer = cmd_pool.acquire_command_buffer();
 
         unsafe {
-            cmd_buffer.begin();
+            let flags = CommandBufferFlags::ONE_TIME_SUBMIT;
+            cmd_buffer.begin(flags, CommandBufferInheritanceInfo::default());;
 
             let begin_state = self.core.state.get();
             let mut pre_stage = Some(PipelineStage::COLOR_ATTACHMENT_OUTPUT);

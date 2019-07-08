@@ -4,6 +4,7 @@
 
 use api::{ColorF, DeviceIntRect, ImageFormat};
 use hal::{self, Device as BackendDevice};
+use hal::command::{RawCommandBuffer, SubpassContents};
 use internal_types::FastHashMap;
 use smallvec::SmallVec;
 use rendy_memory::Heaps;
@@ -326,7 +327,7 @@ impl<B: hal::Backend> Program<B> {
 
     pub(super) fn submit(
         &mut self,
-        cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
+        cmd_buffer: &mut B::CommandBuffer,
         viewport: hal::pso::Viewport,
         render_pass: &B::RenderPass,
         frame_buffer: &B::Framebuffer,
@@ -334,7 +335,7 @@ impl<B: hal::Backend> Program<B> {
         desc_set_per_pass: Option<&B::DescriptorSet>,
         desc_set_per_frame: &B::DescriptorSet,
         desc_set_locals: Option<&B::DescriptorSet>,
-        clear_values: &[hal::command::ClearValue],
+        clear_values: &[hal::command::ClearValueRaw],
         blend_state: hal::pso::BlendState,
         blend_color: ColorF,
         depth_test: hal::pso::DepthTest,
@@ -408,20 +409,21 @@ impl<B: hal::Backend> Program<B> {
                     index_type: hal::IndexType::U32,
                 });
 
-                {
-                    let mut encoder = cmd_buffer.begin_render_pass_inline(
-                        render_pass,
-                        frame_buffer,
-                        viewport.rect,
-                        clear_values,
-                    );
+                cmd_buffer.begin_render_pass(
+                    render_pass,
+                    frame_buffer,
+                    viewport.rect,
+                    clear_values,
+                    SubpassContents::Inline,
+                );
 
-                    encoder.draw_indexed(
-                        0 .. index_buffer[next_id].buffer().buffer_len as u32,
-                        0,
-                        0 .. 1,
-                    );
-                }
+                cmd_buffer.draw_indexed(
+                    0 .. index_buffer[next_id].buffer().buffer_len as u32,
+                    0,
+                    0 .. 1,
+                );
+
+                cmd_buffer.end_render_pass();
             } else {
                 for i in instance_range.into_iter() {
                     cmd_buffer.bind_vertex_buffers(
@@ -431,21 +433,23 @@ impl<B: hal::Backend> Program<B> {
                             .chain(Some((&instance_buffer.buffers[i].buffer.buffer, 0))),
                     );
 
-                    {
-                        let mut encoder = cmd_buffer.begin_render_pass_inline(
-                            render_pass,
-                            frame_buffer,
-                            viewport.rect,
-                            clear_values,
-                        );
-                        let data_stride = instance_buffer.buffers[i].last_data_stride;
-                        let end = instance_buffer.buffers[i].offset / data_stride;
-                        let start = end - instance_buffer.buffers[i].last_update_size / data_stride;
-                        encoder.draw(
-                            0 .. vertex_buffer.buffer_len as _,
-                            start as u32 .. end as u32,
-                        );
-                    }
+                    cmd_buffer.begin_render_pass(
+                        render_pass,
+                        frame_buffer,
+                        viewport.rect,
+                        clear_values,
+                        SubpassContents::Inline,
+                    );
+
+                    let data_stride = instance_buffer.buffers[i].last_data_stride;
+                    let end = instance_buffer.buffers[i].offset / data_stride;
+                    let start = end - instance_buffer.buffers[i].last_update_size / data_stride;
+                    cmd_buffer.draw(
+                        0 .. vertex_buffer.buffer_len as _,
+                        start as u32 .. end as u32,
+                    );
+
+                    cmd_buffer.end_render_pass();
                 }
             }
         }

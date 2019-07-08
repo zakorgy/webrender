@@ -49,8 +49,11 @@ use hal::pso::{BlendState, DepthTest};
 use hal::{Device as BackendDevice, PhysicalDevice, Surface, Swapchain};
 use hal::{SwapchainConfig, AcquireError};
 use hal::pso::PipelineStage;
-use hal::queue::Submission;
+use hal::queue::RawCommandQueue;
 use hal::window::PresentError;
+use hal::command::{CommandBufferFlags, CommandBufferInheritanceInfo, RawCommandBuffer, RawLevel};
+use hal::pool::{RawCommandPool};
+use hal::queue::{QueueFamilyId};
 
 pub const INVALID_TEXTURE_ID: TextureId = 0;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
@@ -152,7 +155,8 @@ pub struct Device<B: hal::Backend> {
     _instance: Box<hal::Instance<Backend = B>>,
     pub surface_format: ImageFormat,
     pub depth_format: hal::format::Format,
-    pub queue_group: hal::QueueGroup<B, hal::Graphics>,
+    pub queue_group_family: QueueFamilyId,
+    pub queue_group_queues: Vec<B::CommandQueue>,
     pub command_pool: SmallVec<[CommandPool<B>; 1]>,
     staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
@@ -315,7 +319,7 @@ impl<B: hal::Backend> Device<B> {
         let limits = adapter.physical_device.limits();
         let max_texture_size = 4400i32; // TODO use limits after it points to the correct texture size
 
-        let (device, queue_group) = {
+        let (device, queue_group_family, queue_group_queues) = {
             use hal::Capability;
             use hal::queue::QueueFamily;
 
@@ -344,7 +348,7 @@ impl<B: hal::Backend> Device<B> {
                             .unwrap()
                     })
             };
-            (device, queues.take(id).unwrap())
+            (device, id, queues.take_raw(id).unwrap())
         };
 
         let surface_format = hal::format::Format::Bgra8Unorm;
@@ -464,12 +468,12 @@ impl<B: hal::Backend> Device<B> {
             });
 
             let mut hal_cp = unsafe {
-                device.create_command_pool_typed(
-                    &queue_group,
+                device.create_command_pool(
+                    queue_group_family,
                     hal::pool::CommandPoolCreateFlags::empty(),
                 )
             }
-            .expect("create_command_pool_typed failed");
+            .expect("create_command_pool failed");
             unsafe { hal_cp.reset() };
             let cp = CommandPool::new(hal_cp);
             command_pool.push(cp);
@@ -624,7 +628,8 @@ impl<B: hal::Backend> Device<B> {
             surface,
             _instance: instance,
             depth_format,
-            queue_group,
+            queue_group_family,
+            queue_group_queues,
             command_pool,
             staging_buffer_pool,
             swap_chain: swap_chain,
@@ -1455,6 +1460,11 @@ impl<B: hal::Backend> Device<B> {
         self.bound_locals.uTransform = projection.to_row_arrays();
     }
 
+    unsafe fn begin_cmd_buffer(cmd_buffer: &mut B::CommandBuffer) {
+        let flags = CommandBufferFlags::ONE_TIME_SUBMIT;
+        cmd_buffer.begin(flags, CommandBufferInheritanceInfo::default());
+    }
+
     fn bind_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
@@ -1462,9 +1472,9 @@ impl<B: hal::Backend> Device<B> {
             .programs
             .get_mut(&self.bound_program)
             .expect("Program not found.");
-        let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
-        unsafe { cmd_buffer.begin() };
         let descriptor_group = program.shader_kind.into();
+        let mut cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
+        unsafe { Self::begin_cmd_buffer(cmd_buffer); }
         // Per draw textures and samplers
         let per_draw_bindings = PerDrawBindings(
             [
@@ -1638,7 +1648,7 @@ impl<B: hal::Backend> Device<B> {
         let mut pre_depth_stage = Some(PipelineStage::empty());
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         unsafe {
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
             if let Some(barrier) = img.transit(
                 hal::image::Access::empty(),
                 hal::image::Layout::ColorAttachmentOptimal,
@@ -1836,7 +1846,7 @@ impl<B: hal::Backend> Device<B> {
 
                 let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
                 unsafe {
-                    cmd_buffer.begin();
+                    Self::begin_cmd_buffer(cmd_buffer);
                     let mut src_stage = Some(PipelineStage::empty());
                     if let Some(barrier) = self.images[&texture.id].core.transit(
                         hal::image::Access::COLOR_ATTACHMENT_READ
@@ -2005,7 +2015,7 @@ impl<B: hal::Backend> Device<B> {
 
         unsafe {
             let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
 
             if let Some(barrier) = img.core.transit(
                 hal::image::Access::COLOR_ATTACHMENT_READ
@@ -2089,7 +2099,7 @@ impl<B: hal::Backend> Device<B> {
         };
 
         unsafe {
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
             let mut src_stage = Some(PipelineStage::empty());
             if let Some(barrier) = src_img.transit(
                 hal::image::Access::TRANSFER_READ,
@@ -2197,7 +2207,7 @@ impl<B: hal::Backend> Device<B> {
         let mut half_mip_height = mip_height / 2;
 
         unsafe {
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
             let mut src_stage = Some(PipelineStage::empty());
             if let Some(barrier) = image.core.transit(
                 hal::image::Access::TRANSFER_WRITE,
@@ -2387,7 +2397,7 @@ impl<B: hal::Backend> Device<B> {
         };
 
         unsafe {
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
             let src_begin_state = src_img.state.get();
             let mut pre_src_stage = Some(PipelineStage::empty());
             if let Some(barrier) = src_img.transit(
@@ -2750,17 +2760,18 @@ impl<B: hal::Backend> Device<B> {
         }
         let download_buffer = self.download_buffer.as_mut().unwrap();
         let mut command_pool = unsafe {
-            self.device.create_command_pool_typed(
-                &self.queue_group,
+            self.device.create_command_pool(
+                self.queue_group_family,
                 hal::pool::CommandPoolCreateFlags::empty(),
             )
         }
-        .expect("create_command_pool_typed failed");
+        .expect("create_command_pool failed");
         unsafe { command_pool.reset() };
 
-        let mut cmd_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
+        let mut cmd_buffer = command_pool.allocate_one(RawLevel::Primary);
         unsafe {
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(&mut cmd_buffer);
+
             let range = hal::image::SubresourceRange {
                 aspects: hal::format::Aspects::COLOR,
                 levels: 0 .. 1,
@@ -2832,8 +2843,15 @@ impl<B: hal::Backend> Device<B> {
             self.device
                 .reset_fence(&copy_fence)
                 .expect("reset_fence failed");
-            self.queue_group.queues[0]
-                .submit_nosemaphores(Some(&cmd_buffer), Some(&mut copy_fence));
+            let submission = hal::queue::Submission {
+                command_buffers: Some(&cmd_buffer),
+                wait_semaphores: None,
+                signal_semaphores: None,
+            };
+            self.queue_group_queues[0].submit::<_, _, B::Semaphore, _, _>(
+                submission,
+                Some(&mut copy_fence),
+            );
             self.device
                 .wait_for_fence(&copy_fence, !0)
                 .expect("wait_for_fence failed");
@@ -2889,7 +2907,7 @@ impl<B: hal::Backend> Device<B> {
 
         unsafe {
             command_pool.reset();
-            self.device.destroy_command_pool(command_pool.into_raw());
+            self.device.destroy_command_pool(command_pool);
         }
     }
 
@@ -3086,7 +3104,7 @@ impl<B: hal::Backend> Device<B> {
             let mut before_depth_state = None;
             let mut pre_stage = Some(PipelineStage::empty());
             let mut pre_depth_stage = Some(PipelineStage::empty());
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
             if let Some(barrier) = img.transit(
                 hal::image::Access::empty(),
                 hal::image::Layout::ColorAttachmentOptimal,
@@ -3114,16 +3132,17 @@ impl<B: hal::Backend> Device<B> {
                     );
                 }
             }
-            {
-                let mut encoder = cmd_buffer.begin_render_pass_inline(
-                    render_pass,
-                    frame_buffer,
-                    self.viewport.rect,
-                    &[],
-                );
 
-                encoder.clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
-            }
+            cmd_buffer.begin_render_pass(
+                render_pass,
+                frame_buffer,
+                self.viewport.rect,
+                &[],
+                hal::command::SubpassContents::Inline,
+            );
+            cmd_buffer.clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
+            cmd_buffer.end_render_pass();
+
             if let Some(barrier) = img.transit(
                 before_state.0,
                 before_state.1,
@@ -3176,7 +3195,7 @@ impl<B: hal::Backend> Device<B> {
         // thus, we bring back the targets into renderable state
         let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
         unsafe {
-            cmd_buffer.begin();
+            Self::begin_cmd_buffer(cmd_buffer);
             if let Some(color) = color {
                 let mut src_stage = Some(PipelineStage::empty());
                 if let Some(barrier) = img.transit(
@@ -3195,8 +3214,11 @@ impl<B: hal::Backend> Device<B> {
                 cmd_buffer.clear_image(
                     &img.image,
                     hal::image::Layout::TransferDstOptimal,
-                    hal::command::ClearColor::Float([color[0], color[1], color[2], color[3]]),
-                    hal::command::ClearDepthStencil(0.0, 0),
+                    hal::command::ClearColorRaw { float32: [color[0], color[1], color[2], color[3]] },
+                    hal::command::ClearDepthStencilRaw {
+                        depth: 0.0,
+                        stencil: 0,
+                    },
                     Some(hal::image::SubresourceRange {
                         aspects: hal::format::Aspects::COLOR,
                         levels: 0 .. 1,
@@ -3222,8 +3244,8 @@ impl<B: hal::Backend> Device<B> {
                 cmd_buffer.clear_image(
                     &dimg.image,
                     hal::image::Layout::TransferDstOptimal,
-                    hal::command::ClearColor::Float([0.0; 4]),
-                    hal::command::ClearDepthStencil(depth, 0),
+                    hal::command::ClearColorRaw { float32: [0.0; 4] },
+                    hal::command::ClearDepthStencilRaw { depth, stencil: 0 },
                     Some(dimg.subresource_range.clone()),
                 );
             }
@@ -3403,7 +3425,7 @@ impl<B: hal::Backend> Device<B> {
                             self.current_frame_id = id as _;
                             let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
                             let image = &self.frame_images[self.current_frame_id];
-                            cmd_buffer.begin();
+                            Self::begin_cmd_buffer(cmd_buffer);
                             if let Some(barrier) = image.transit(
                                 hal::image::Access::COLOR_ATTACHMENT_READ
                                     | hal::image::Access::COLOR_ATTACHMENT_WRITE,
@@ -3464,7 +3486,7 @@ impl<B: hal::Backend> Device<B> {
             let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
             let image = &self.frame_images[self.current_frame_id];
             unsafe {
-                cmd_buffer.begin();
+                Self::begin_cmd_buffer(cmd_buffer);
                 if let Some(barrier) = image.transit(
                     hal::image::Access::empty(),
                     hal::image::Layout::Present,
@@ -3484,7 +3506,7 @@ impl<B: hal::Backend> Device<B> {
         unsafe {
             match self.swap_chain.as_mut() {
                 Some(swap_chain) => {
-                    let submission = Submission {
+                    let submission = hal::queue::Submission {
                         command_buffers: self.command_pool[self.next_id].command_buffers(),
                         wait_semaphores: Some((
                             &self.image_available_semaphore,
@@ -3492,15 +3514,14 @@ impl<B: hal::Backend> Device<B> {
                         )),
                         signal_semaphores: Some(&self.render_finished_semaphore),
                     };
-                    self.queue_group.queues[0]
+                    self.queue_group_queues[0]
                         .submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
                     self.frame_fence[self.next_id].is_submitted = true;
 
                     // present frame
-                    match swap_chain
+                    match self.queue_group_queues[0]
                         .present(
-                            &mut self.queue_group.queues[0],
-                            self.current_frame_id as _,
+                            std::iter::once((&swap_chain, self.current_frame_id as _)),
                             Some(&self.render_finished_semaphore),
                         ) {
                             Ok(suboptimal) => {
@@ -3524,8 +3545,13 @@ impl<B: hal::Backend> Device<B> {
                         }
                 }
                 None => {
-                    self.queue_group.queues[0].submit_nosemaphores(
-                        self.command_pool[self.next_id].command_buffers(),
+                    let submission = hal::queue::Submission {
+                        command_buffers: self.command_pool[self.next_id].command_buffers(),
+                        wait_semaphores: None,
+                        signal_semaphores: None,
+                    };
+                    self.queue_group_queues[0].submit::<_, _, B::Semaphore, _, _>(
+                        submission,
                         Some(&mut self.frame_fence[self.next_id].inner),
                     );
                     self.frame_fence[self.next_id].is_submitted = true;
@@ -3681,7 +3707,7 @@ impl<B: hal::Backend> Device<B> {
         }
         // We must ensure these are dropped before `self._instance` or we segfault with Vulkan
         mem::drop(self.device);
-        mem::drop(self.queue_group);
+        mem::drop(self.queue_group_queues);
     }
 }
 
