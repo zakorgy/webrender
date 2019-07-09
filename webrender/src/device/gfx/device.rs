@@ -209,6 +209,7 @@ pub struct Device<B: hal::Backend> {
     quad_buffer: VertexBufferHandler<B>,
     instance_buffers: SmallVec<[InstanceBufferHandler<B>; 1]>,
     free_instance_buffers: SmallVec<[InstancePoolBuffer<B>; 16]>,
+    download_buffer: Option<Buffer<B>>,
     instance_range: std::ops::Range<usize>,
 
     // HW or API capabilities
@@ -698,6 +699,7 @@ impl<B: hal::Backend> Device<B> {
             quad_buffer,
             instance_buffers,
             free_instance_buffers: SmallVec::new(),
+            download_buffer: None,
             instance_range: 0..0,
             wait_for_resize: false,
 
@@ -2732,16 +2734,19 @@ impl<B: hal::Backend> Device<B> {
             (false, 1)
         };
 
-        let mut download_buffer: Buffer<B> = Buffer::new(
-            &self.device,
-            &mut self.heaps,
-            MemoryUsageValue::Download,
-            hal::buffer::Usage::TRANSFER_DST,
-            (self.limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
-            output.len(),
-            stride,
-        );
-
+        assert!(output.len() <= DOWNLOAD_BUFFER_SIZE, "output len {:?} buffer size {:?}", output.len(), DOWNLOAD_BUFFER_SIZE);
+        if self.download_buffer.is_none() {
+            self.download_buffer = Some(Buffer::new(
+                &self.device,
+                &mut self.heaps,
+                MemoryUsageValue::Download,
+                hal::buffer::Usage::TRANSFER_DST,
+                (self.limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+                DOWNLOAD_BUFFER_SIZE / stride,
+                stride,
+            ));
+        }
+        let download_buffer = self.download_buffer.as_mut().unwrap();
         let mut command_pool = unsafe {
             self.device.create_command_pool_typed(
                 &self.queue_group,
@@ -2880,7 +2885,6 @@ impl<B: hal::Backend> Device<B> {
             output.swap_with_slice(&mut data);
         }
 
-        download_buffer.deinit(&self.device, &mut self.heaps);
         unsafe {
             command_pool.reset();
             self.device.destroy_command_pool(command_pool.into_raw());
@@ -3616,6 +3620,9 @@ impl<B: hal::Backend> Device<B> {
                 instance_buffer.deinit(&self.device, &mut self.heaps);
             }
             for buffer in self.free_instance_buffers {
+                buffer.deinit(&self.device, &mut self.heaps);
+            }
+            if let Some(buffer) = self.download_buffer {
                 buffer.deinit(&self.device, &mut self.heaps);
             }
             for image in self.frame_images {
