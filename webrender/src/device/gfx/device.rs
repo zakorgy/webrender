@@ -494,7 +494,6 @@ impl<B: hal::Backend> Device<B> {
             hal::buffer::Usage::UNIFORM,
             mem::size_of::<Locals>(),
             (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-            (limits.non_coherent_atom_size - 1) as usize,
         );
 
         let quad_buffer = VertexBufferHandler::new(

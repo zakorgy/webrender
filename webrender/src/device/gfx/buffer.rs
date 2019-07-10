@@ -479,7 +479,6 @@ pub(super) struct UniformBufferHandler<B: hal::Backend> {
     buffer_usage: hal::buffer::Usage,
     data_stride: usize,
     pitch_alignment_mask: usize,
-    non_coherent_atom_size_mask: usize,
 }
 
 impl<B: hal::Backend> UniformBufferHandler<B> {
@@ -487,7 +486,6 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
         buffer_usage: hal::buffer::Usage,
         data_stride: usize,
         pitch_alignment_mask: usize,
-        non_coherent_atom_size_mask: usize,
     ) -> Self {
         UniformBufferHandler {
             buffers: vec![],
@@ -495,7 +493,6 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
             buffer_usage,
             data_stride,
             pitch_alignment_mask,
-            non_coherent_atom_size_mask,
         }
     }
 
@@ -511,7 +508,7 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
                 self.data_stride,
             ));
         }
-        self.buffers[self.offset].update_all(device, data, self.non_coherent_atom_size_mask as u64);
+        self.buffers[self.offset].update_all(device, data, self.pitch_alignment_mask as u64);
         self.offset += 1;
     }
 
