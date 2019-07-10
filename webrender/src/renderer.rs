@@ -1333,6 +1333,10 @@ impl<B: hal::Backend> Renderer<B> {
             options.cached_programs.take(),
             #[cfg(not(feature = "gleam"))]
             options.heaps_config,
+            #[cfg(not(feature = "gleam"))]
+            options.instance_buffer_size,
+            #[cfg(not(feature = "gleam"))]
+            options.texture_cahce_size,
         );
 
         #[cfg(feature = "gleam")]
@@ -4544,6 +4548,10 @@ pub struct RendererOptions {
     pub enable_picture_caching: bool,
     #[cfg(not(feature = "gleam"))]
     pub heaps_config: HeapsConfig,
+    // The size of an instance buffer in bytes
+    pub instance_buffer_size: usize,
+    // The size of a staging buffer for image data upload in bytes
+    pub texture_cahce_size: usize,
 }
 
 impl Default for RendererOptions {
@@ -4585,7 +4593,9 @@ impl Default for RendererOptions {
             heaps_config: HeapsConfig {
                 linear: None,
                 dynamic: None,
-            }
+            },
+            instance_buffer_size: 1 << 20,
+            texture_cahce_size: 16 << 20,
         }
     }
 }
