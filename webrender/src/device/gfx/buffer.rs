@@ -10,9 +10,7 @@ use smallvec::SmallVec;
 use std::cell::Cell;
 use std::mem;
 
-pub const INSTANCE_BUFFER_SIZE: usize = 1 << 20; // 1MB
 pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
-pub const TEXTURE_CACHE_SIZE: usize = 16 << 20; // 16MB
 
 pub(super) struct Buffer<B: hal::Backend> {
     pub(super) memory_block: MemoryBlock<B>,
@@ -158,6 +156,7 @@ impl<B: hal::Backend> BufferPool<B> {
         non_coherent_atom_size_mask: usize,
         pitch_alignment_mask: usize,
         copy_alignment_mask: usize,
+        texture_cache_size: usize,
     ) -> Self {
         let buffer = Buffer::new(
             device,
@@ -165,7 +164,7 @@ impl<B: hal::Backend> BufferPool<B> {
             MemoryUsageValue::Upload,
             buffer_usage,
             pitch_alignment_mask | non_coherent_atom_size_mask,
-            TEXTURE_CACHE_SIZE,
+            texture_cache_size,
             data_stride,
         );
         BufferPool {
@@ -236,6 +235,7 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         buffer_usage: hal::buffer::Usage,
         alignment_mask: usize,
         non_coherent_atom_size_mask: usize,
+        size: usize,
     ) -> Self {
         let buffer = Buffer::new(
             device,
@@ -243,7 +243,7 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
             MemoryUsageValue::Dynamic,
             buffer_usage,
             alignment_mask,
-            INSTANCE_BUFFER_SIZE,
+            size,
             mem::size_of::<u8>(),
         );
         InstancePoolBuffer {
@@ -303,18 +303,21 @@ pub(super) struct InstanceBufferHandler<B: hal::Backend> {
     alignment_mask: usize,
     non_coherent_atom_size_mask: usize,
     pub(super) next_buffer_index: usize,
+    buffer_size: usize,
 }
 
 impl<B: hal::Backend> InstanceBufferHandler<B> {
     pub(super) fn new(
         non_coherent_atom_size_mask: usize,
         alignment_mask: usize,
+        buffer_size: usize,
     ) -> Self {
         InstanceBufferHandler {
             buffers: Vec::new(),
             alignment_mask,
             non_coherent_atom_size_mask,
             next_buffer_index: 0,
+            buffer_size,
         }
     }
 
@@ -349,6 +352,7 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
                         hal::buffer::Usage::VERTEX,
                         self.alignment_mask,
                         self.non_coherent_atom_size_mask,
+                        self.buffer_size,
                     ),
                 };
                 self.buffers.push(buffer);

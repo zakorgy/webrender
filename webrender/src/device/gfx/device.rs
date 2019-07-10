@@ -258,6 +258,8 @@ impl<B: hal::Backend> Device<B> {
         upload_method: UploadMethod,
         _cached_programs: Option<Rc<ProgramCache>>,
         heaps_config: HeapsConfig,
+        instance_buffer_size: usize,
+        texture_cache_size: usize,
     ) -> Self {
         let DeviceInit {
             instance,
@@ -479,10 +481,12 @@ impl<B: hal::Backend> Device<B> {
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                 (limits.optimal_buffer_copy_offset_alignment - 1) as usize,
+                texture_cache_size,
             ));
             instance_buffers.push(InstanceBufferHandler::new(
                 (limits.non_coherent_atom_size - 1) as usize,
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
+                instance_buffer_size,
             ));
         }
 
