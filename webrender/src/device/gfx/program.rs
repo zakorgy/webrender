@@ -12,12 +12,9 @@ use std::borrow::Cow::{Borrowed};
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
 use super::render_pass::RenderPass;
-use super::vertex_types;
 use super::PipelineRequirements;
 use super::super::{ShaderKind, VertexArrayKind};
 use super::super::super::shader_source;
-
-use std::mem;
 
 const ENTRY_NAME: &str = "main";
 // The size of the push constant block is 68 bytes, and we upload it with u32 data (4 bytes).
