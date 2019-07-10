@@ -20,7 +20,6 @@ use super::super::super::shader_source;
 use std::mem;
 
 const ENTRY_NAME: &str = "main";
-const MAX_INDEX_COUNT: usize = 4096;
 // The size of the push constant block is 68 bytes, and we upload it with u32 data (4 bytes).
 pub(super) const PUSH_CONSTANT_BLOCK_SIZE: usize = 17; // 68 / 4
 // The number of specialization constants in each shader.
@@ -290,11 +289,6 @@ impl<B: hal::Backend> Program<B> {
             states
         };
 
-        let vertex_buffer_stride = match shader_kind {
-            ShaderKind::DebugColor => mem::size_of::<vertex_types::DebugColorVertex>(),
-            ShaderKind::DebugFont => mem::size_of::<vertex_types::DebugFontVertex>(),
-            _ => mem::size_of::<vertex_types::Vertex>(),
-        };
         let (mut vertex_buffer, mut index_buffer) = if shader_kind.is_debug() {
             (Some(SmallVec::new()), Some(SmallVec::new()))
         } else {
@@ -306,8 +300,7 @@ impl<B: hal::Backend> Program<B> {
                     device,
                     heaps,
                     hal::buffer::Usage::VERTEX,
-                    &[0],
-                    vertex_buffer_stride,
+                    &[0u8],
                     (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                     (limits.non_coherent_atom_size - 1) as usize,
                 ));
@@ -317,8 +310,7 @@ impl<B: hal::Backend> Program<B> {
                     device,
                     heaps,
                     hal::buffer::Usage::INDEX,
-                    &vec![0u32; MAX_INDEX_COUNT],
-                    mem::size_of::<u32>(),
+                    &[0u8],
                     (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                     (limits.non_coherent_atom_size - 1) as usize,
                 ));

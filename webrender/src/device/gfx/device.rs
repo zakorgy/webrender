@@ -502,7 +502,6 @@ impl<B: hal::Backend> Device<B> {
             &mut heaps,
             hal::buffer::Usage::VERTEX,
             &QUAD,
-            mem::size_of::<vertex_types::Vertex>(),
             (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
             (limits.non_coherent_atom_size - 1) as usize,
         );

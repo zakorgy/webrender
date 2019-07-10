@@ -413,10 +413,10 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
         heaps: &mut Heaps<B>,
         buffer_usage: hal::buffer::Usage,
         data: &[T],
-        data_stride: usize,
         pitch_alignment_mask: usize,
         non_coherent_atom_size_mask: usize,
     ) -> Self {
+        let data_stride = mem::size_of::<T>();
         let mut buffer = Buffer::new(
             device,
             heaps,
@@ -438,6 +438,7 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
     }
 
     pub(super) fn update<T: Copy>(&mut self, device: &B::Device, data: &[T], heaps: &mut Heaps<B>) {
+        self.data_stride = mem::size_of::<T>();
         let buffer_len = data.len() * self.data_stride;
         if self.buffer.buffer_len != buffer_len {
             let old_buffer = mem::replace(
