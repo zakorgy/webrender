@@ -276,30 +276,24 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         self.buffer.deinit(device, heaps);
     }
 
-    fn free(&self) -> usize {
+    fn space_left(&self) -> usize {
         self.buffer.buffer_size - self.offset
     }
 
     fn can_store_data(&self, stride: usize) -> bool {
-        if self.offset_aligned_to(stride) {
-            self.free() >= stride
-        } else {
-            let offset = self.offset + (stride - (self.offset % stride));
-            if offset > self.buffer.buffer_size {
-                false
-            } else {
-                self.buffer.buffer_size - offset >= stride
-            }
-        }
-    }
-
-    fn offset_aligned_to(&self, stride: usize) -> bool {
-        self.offset % stride == 0
+        let next_offset = self.next_aligned_offset(stride);
+        next_offset < self.buffer.buffer_size && self.buffer.buffer_size - next_offset >= stride
     }
 
     fn align_offset_to(&mut self, stride: usize) {
-        if !self.offset_aligned_to(stride) {
-            self.offset += stride - (self.offset % stride);
+        self.offset = self.next_aligned_offset(stride);
+    }
+
+    fn next_aligned_offset(&self, stride: usize) -> usize {
+        let remainder = self.offset % stride;
+        match remainder {
+            0 => self.offset,
+            _ => self.offset + stride - remainder,
         }
     }
 }
@@ -360,14 +354,14 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
                 self.buffers.push(buffer);
                 self.next_buffer_index += 1;
             } else {
-                self.buffers[self.next_buffer_index - 1].align_offset_to(data_stride);
+                self.current_buffer_mut().align_offset_to(data_stride);
             }
             if first_iteration {
                 range.start = self.next_buffer_index - 1;
                 first_iteration = false;
             }
-            let update_size = (self.current_buffer().free() / data_stride).min(instance_data.len());
-            self.buffers[self.next_buffer_index - 1].update(device, instance_data_to_u8_slice(&instance_data[0 .. update_size]), data_stride);
+            let update_size = (self.current_buffer().space_left() / data_stride).min(instance_data.len());
+            self.current_buffer_mut().update(device, instance_data_to_u8_slice(&instance_data[0 .. update_size]), data_stride);
             instance_data = &instance_data[update_size ..];
         }
         range.end = self.next_buffer_index;
@@ -378,14 +372,19 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
         &self.buffers[self.next_buffer_index - 1]
     }
 
+    fn current_buffer_mut(&mut self) -> &mut InstancePoolBuffer<B> {
+        &mut self.buffers[self.next_buffer_index - 1]
+    }
+
     pub(super) fn reset(&mut self, free_buffers: &mut SmallVec<[InstancePoolBuffer<B>; 16]>) {
-        // Keep one buffer and move the others back to the free set pool.
-        while self.buffers.len() > 1 {
-            let mut buffer = self.buffers.pop().unwrap();
-            buffer.reset();
-            free_buffers.push(buffer);
+        if !self.buffers.is_empty() {
+            // Keep one buffer and move the others back to the free set pool.
+            for mut buffer in self.buffers.drain(1 .. ) {
+                buffer.reset();
+                free_buffers.push(buffer);
+            }
+            self.next_buffer_index = self.buffers.len();
         }
-        self.next_buffer_index = self.buffers.len();
     }
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
