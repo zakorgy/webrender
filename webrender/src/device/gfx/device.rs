@@ -1938,9 +1938,11 @@ impl<B: hal::Backend> Device<B> {
         let buffer_memory = unsafe { self.device.allocate_memory(upload_type.into(), buffer_req.size) }.unwrap();
 
         unsafe { self.device.bind_buffer_memory(&buffer_memory, 0, &mut storage_buffer) }.unwrap();
+        let ptr = unsafe { self.device.map_memory(&buffer_memory, 0..buffer_req.size) }.unwrap();
         PMBuffer {
             buffer: storage_buffer,
             memory: buffer_memory,
+            ptr,
             coherent,
             height,
             size: buffer_req.size,
@@ -1948,7 +1950,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn create_pmb(
+    pub fn ensure_pmb(
         &mut self,
         width: u64,
         height: u64,
@@ -1957,10 +1959,66 @@ impl<B: hal::Backend> Device<B> {
             if self.gpu_cache_buffer.as_ref().unwrap().height < height {
                 let old_buffer = self.gpu_cache_buffer.take().unwrap();
                 let new_buffer = self.create_buffer(width, height);
-                //TODO copy old memory content into new buffer
+
+                unsafe {
+                    let old_slice = old_buffer.acquire_host_visible_slice(None);
+                    let new_slice = new_buffer.acquire_host_visible_slice(Some(old_buffer.size));
+                    new_slice.copy_from_slice(old_slice);
+                }
+                println!("## Copy finished");
+
+                // TODO copy data between mapped slices instead
+                /*unsafe {
+                    let mut command_pool =
+                        self.device.create_command_pool_typed(
+                            &self.queue_group,
+                            hal::pool::CommandPoolCreateFlags::empty(),
+                        ).expect("create_command_pool_typed failed");
+                    //command_pool.reset();
+
+                    let mut cmd_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
+                    cmd_buffer.begin();
+                    let barriers = old_buffer
+                        .transit(hal::buffer::Access::TRANSFER_READ)
+                        .into_iter()
+                        .chain(new_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
+
+                    cmd_buffer.pipeline_barrier(
+                        PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
+                        hal::memory::Dependencies::empty(),
+                        barriers,
+                    );
+
+                    cmd_buffer.copy_buffer(
+                        &old_buffer.buffer,
+                        &new_buffer.buffer,
+                        &[hal::command::BufferCopy {
+                            src: 0,
+                            dst: 0,
+                            size: old_buffer.size,
+                        }],
+                    );
+
+                    cmd_buffer.finish();
+                    let mut copy_fence = self
+                        .device
+                        .create_fence(false)
+                        .expect("create_fence failed");
+
+                    self.device
+                        .reset_fence(&copy_fence)
+                        .expect("reset_fence failed");
+                    self.queue_group.queues[0]
+                        .submit_nosemaphores(Some(&cmd_buffer), Some(&mut copy_fence));
+                    self.device
+                        .wait_for_fence(&copy_fence, !0)
+                        .expect("wait_for_fence failed");
+                    self.device.destroy_fence(copy_fence);
+                    // command_pool.reset();
+                    self.device.destroy_command_pool(command_pool.into_raw());
+                }*/
                 unsafe { old_buffer.deinit(&self.device) };
                 self.gpu_cache_buffer = Some(new_buffer);
-                panic!("We should not update the gpu cache buffer yet")
             }
             return;
         }
@@ -1969,22 +2027,22 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn create_writer(
         &self
-    ) -> hal::mapping::Writer<B, [f32; 4]> {
-        unsafe { self.gpu_cache_buffer.as_ref().unwrap().acquire_writer(&self.device) }
+    ) -> &mut [[f32; 4]] {
+        unsafe { self.gpu_cache_buffer.as_ref().unwrap().acquire_host_visible_slice(None) }
     }
 
-    pub fn release_writer(
+    pub fn flush_mapped_ranges(
+        &self,
+        ranges: std::vec::Drain<std::ops::Range<u64>>
+    ) {
+        unsafe { self.gpu_cache_buffer.as_ref().unwrap().flush_mapped_ranges(&self.device, ranges) }
+    }
+
+    /*pub fn release_writer(
         &self,
         writer: hal::mapping::Writer<B, [f32; 4]>
     ) {
         unsafe { self.gpu_cache_buffer.as_ref().unwrap().release_writer(&self.device, writer) };
-    }
-
-    /*pub fn flush_mapped_memory_ranges(&self, ranges: std::vec::Drain<std::ops::Range<u64>>) {
-        let ranges = ranges.into_iter().map(|r| {
-            (&self.gpu_cache_buffer.as_ref().unwrap().memory, r)
-        });
-        unsafe { &self.device.flush_mapped_memory_ranges(ranges) };
     }*/
 
     pub fn create_texture(
