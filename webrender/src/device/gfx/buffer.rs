@@ -9,12 +9,14 @@ use smallvec::SmallVec;
 
 use std::cell::Cell;
 use std::mem;
+use std::slice;
 
 pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
 
 pub struct PMBuffer<B: hal::Backend> {
     pub buffer: B::Buffer,
     pub memory: B::Memory,
+    pub ptr: *mut u8,
     pub coherent: bool,
     pub height: u64,
     pub size: u64,
@@ -22,12 +24,19 @@ pub struct PMBuffer<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> PMBuffer<B> {
-    pub unsafe fn acquire_writer(&self, device: &B::Device) -> hal::mapping::Writer<B, [f32; 4]> {
-        device.acquire_mapping_writer::<[f32; 4]>(&self.memory, 0..self.size).unwrap()
+    pub unsafe fn acquire_host_visible_slice(&self, size: Option<u64>) -> &mut [[f32; 4]] {
+        let count = size.unwrap_or(self.size) as usize / mem::size_of::<[f32; 4]>();
+        slice::from_raw_parts_mut(self.ptr as *mut _, count)
     }
 
-    pub unsafe fn release_writer(&self, device: &B::Device, writer: hal::mapping::Writer<B, [f32; 4]>) {
-        device.release_mapping_writer(writer).unwrap();
+    pub unsafe fn flush_mapped_ranges(&self, device: &B::Device, ranges: std::vec::Drain<std::ops::Range<u64>>) {
+        if !self.coherent {
+            device.flush_mapped_memory_ranges(ranges.into_iter().map(|r| (&self.memory, r))).expect("Flush mapped memory range sfailed for PMBuffer");
+        }
+    }
+
+    pub unsafe fn unmap_memory(&self, device: &B::Device) {
+        device.unmap_memory(&self.memory);
     }
 
     pub unsafe fn deinit(self, device: &B::Device) {

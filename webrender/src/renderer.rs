@@ -701,9 +701,8 @@ impl CacheRow {
 enum GpuCacheBus {
     PMbuffer {
         /*writer: Option<hal::mapping::Writer<'a, B, [f32; 4]>>,
-        mapped_ranges: Vec<std::ops::Range<u64>>,
         coherent: bool,*/
-        height: u64,
+        mapped_ranges: Vec<std::ops::Range<u64>>,
     },
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
@@ -742,12 +741,13 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     /// Ensures that we have an appropriately-sized texture. Returns true if a
     /// new texture was created.
     fn ensure_texture(&mut self, device: &mut Device<B>, height: i32) {
-        if let GpuCacheBus::PMbuffer {height: ref mut h,} = self.bus {
-            *h = height as u64;
+        if let GpuCacheBus::PMbuffer { .. } = self.bus {
+            device.ensure_pmb(MAX_VERTEX_TEXTURE_WIDTH as _, height as _);
             //TODO: relese old writer and use height
             /*let (w, c) = device.create_writer(MAX_VERTEX_TEXTURE_WIDTH as _, 256);
             *writer = Some(w);
             *coherent = c;*/
+            return;
         }
         // If we already have a texture that works, we're done.
         if self.texture.as_ref().map_or(false, |t| t.get_dimensions().height >= height) {
@@ -828,7 +828,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         {
             if use_pmb {
                 bus = GpuCacheBus::PMbuffer {
-                    height: 0,
+                    mapped_ranges: Vec::new(),
                 }
             } else {
                 let buffer = device.create_pbo();
@@ -898,9 +898,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
 
     fn update(&mut self, device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
-            GpuCacheBus::PMbuffer { height } => {
-                println!("### Update buffer");
-                device.create_pmb(MAX_VERTEX_TEXTURE_WIDTH as _, 64 as _);
+            GpuCacheBus::PMbuffer { ref mut mapped_ranges } => {
                 let mut writer = device.create_writer();
                 for update in &updates.updates {
                     match *update {
@@ -910,14 +908,14 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                             address,
                         } => {
                             let address = address.v as usize * MAX_VERTEX_TEXTURE_WIDTH + address.u as usize;
-                            //mapped_ranges.push(address as u64 * 4 .. (address + block_count) as u64 * 4);
+                            mapped_ranges.push(address as u64 * 4 .. (address + block_count) as u64 * 4);
                             for i in 0 .. block_count {
                                 writer[address + i] = updates.blocks[block_index + i].data;
                             }
                         }
                     }
                 }
-                device.release_writer(writer);
+                //device.release_writer(writer);
             }
             GpuCacheBus::PixelBuffer { ref mut rows, .. } => {
                 for update in &updates.updates {
@@ -987,14 +985,12 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     }
 
     fn flush(&mut self, device: &mut Device<B>) -> usize {
+        if let GpuCacheBus::PMbuffer { ref mut mapped_ranges } = self.bus {
+            device.flush_mapped_ranges(mapped_ranges.drain(..));
+            return 0
+        }
         let texture = self.texture.as_ref().unwrap();
         match self.bus {
-            GpuCacheBus::PMbuffer {..} => {
-                /*if !coherent {
-                    device.flush_mapped_memory_ranges(mapped_ranges.drain(..));
-                }*/
-                0
-            }
             GpuCacheBus::PixelBuffer { ref buffer, ref mut rows } => {
                 let rows_dirty = rows
                     .iter()
@@ -1043,6 +1039,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                 device.draw_nonindexed_points(0, count as _);
                 0
             }
+            _ => 0,
         }
     }
 }
