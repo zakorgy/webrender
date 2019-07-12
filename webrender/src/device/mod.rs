@@ -342,6 +342,8 @@ pub struct Texture {
     last_frame_used: GpuFrameId,
     #[cfg(not(feature = "gleam"))]
     pub bound_in_frame: Cell<GpuFrameId>,
+    #[cfg(not(feature = "gleam"))]
+    is_buffer: bool,
 }
 
 impl Texture {

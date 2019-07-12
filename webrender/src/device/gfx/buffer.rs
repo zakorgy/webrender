@@ -35,13 +35,12 @@ impl<B: hal::Backend> PMBuffer<B> {
         }
     }
 
-    pub unsafe fn unmap_memory(&self, device: &B::Device) {
-        device.unmap_memory(&self.memory);
-    }
-
-    pub unsafe fn deinit(self, device: &B::Device) {
-        device.destroy_buffer(self.buffer);
-        device.free_memory(self.memory);
+    pub fn deinit(self, device: &B::Device) {
+        unsafe {
+            device.unmap_memory(&self.memory);
+            device.destroy_buffer(self.buffer);
+            device.free_memory(self.memory);
+        }
     }
 
     pub(super) fn transit(&self, access: hal::buffer::Access) -> Option<hal::memory::Barrier<B>> {

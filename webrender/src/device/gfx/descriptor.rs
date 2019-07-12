@@ -343,6 +343,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         cmd_buffer: &mut hal::command::CommandBuffer<B, hal::Graphics>,
         bindings: K,
         images: &FastHashMap<TextureId, Image<B>>,
+        cache_buffer: &PMBuffer<B>,
         desc_allocator: &mut DescriptorAllocator<B>,
         device: &B::Device,
         group_data: &DescriptorData<B>,
@@ -351,7 +352,6 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         range: std::ops::Range<usize>,
         sampler_linear: &B::Sampler,
         sampler_nearest: &B::Sampler,
-        buffer: Option<&PMBuffer<B>>,
     ) {
         let new_set = match self.descriptor_bindings.entry(bindings) {
             Entry::Occupied(_) => None,
@@ -378,8 +378,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         let mut descriptor_writes: SmallVec<[hal::pso::DescriptorSetWrite<_, _>; RENDERER_TEXTURE_COUNT]> = SmallVec::new();
         for index in range {
             if index == 5 {
-                let buffer = buffer.unwrap();
-                if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
+                if let Some(barrier) = cache_buffer.transit(hal::buffer::Access::SHADER_READ) {
                     unsafe {
                         cmd_buffer.pipeline_barrier(
                             hal::pso::PipelineStage::TRANSFER
@@ -395,7 +394,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
                         binding: index as _,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Buffer(
-                            &buffer.buffer,
+                            &cache_buffer.buffer,
                             None .. None,
                         )),
                     });

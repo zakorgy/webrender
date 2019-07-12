@@ -125,7 +125,6 @@ pub struct Device<B: hal::Backend> {
     pub queue_group: hal::QueueGroup<B, hal::Graphics>,
     pub command_pool: SmallVec<[CommandPool<B>; 1]>,
     staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
-    pub gpu_cache_buffer: Option<PMBuffer<B>>,
     pub swap_chain: Option<B::Swapchain>,
     render_pass: Option<RenderPass<B>>,
     pub framebuffers: Vec<B::Framebuffer>,
@@ -144,6 +143,7 @@ pub struct Device<B: hal::Backend> {
     programs: FastHashMap<ProgramId, Program<B>>,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
+    gpu_cache_buffers: FastHashMap<TextureId, PMBuffer<B>>,
     retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
@@ -581,7 +581,6 @@ impl<B: hal::Backend> Device<B> {
             queue_group,
             command_pool,
             staging_buffer_pool,
-            gpu_cache_buffer: None,
             swap_chain: swap_chain,
             render_pass: Some(render_pass),
             framebuffers,
@@ -612,6 +611,7 @@ impl<B: hal::Backend> Device<B> {
             programs: FastHashMap::default(),
             shader_modules: FastHashMap::default(),
             images: FastHashMap::default(),
+            gpu_cache_buffers: FastHashMap::default(),
             retained_textures: Vec::new(),
             fbos: FastHashMap::default(),
             rbos: FastHashMap::default(),
@@ -1439,6 +1439,7 @@ impl<B: hal::Backend> Device<B> {
             &mut cmd_buffer,
             per_draw_bindings,
             &self.images,
+            &self.gpu_cache_buffers[&self.bound_textures[5]],
             &mut self.desc_allocator,
             &self.device,
             &self.descriptor_data,
@@ -1447,7 +1448,6 @@ impl<B: hal::Backend> Device<B> {
             0..PER_DRAW_TEXTURE_COUNT,
             &self.sampler_linear,
             &self.sampler_nearest,
-            None,
         );
         self.bound_per_draw_bindings = per_draw_bindings;
 
@@ -1466,6 +1466,7 @@ impl<B: hal::Backend> Device<B> {
                 &mut cmd_buffer,
                 per_pass_bindings,
                 &self.images,
+                &self.gpu_cache_buffers[&self.bound_textures[5]],
                 &mut self.desc_allocator,
                 &self.device,
                 &self.descriptor_data,
@@ -1474,7 +1475,6 @@ impl<B: hal::Backend> Device<B> {
                 PER_DRAW_TEXTURE_COUNT..PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT,
                 &self.sampler_linear,
                 &self.sampler_nearest,
-                None,
             );
             self.bound_per_pass_textures = per_pass_bindings;
         }
@@ -1497,6 +1497,7 @@ impl<B: hal::Backend> Device<B> {
             &mut cmd_buffer,
             (descriptor_group, per_group_bindings),
             &self.images,
+            &self.gpu_cache_buffers[&self.bound_textures[5]],
             &mut self.desc_allocator,
             &self.device,
             &self.descriptor_data,
@@ -1509,7 +1510,6 @@ impl<B: hal::Backend> Device<B> {
             },
             &self.sampler_linear,
             &self.sampler_nearest,
-            self.gpu_cache_buffer.as_ref(),
         );
         self.bound_per_group_textures = per_group_bindings;
         unsafe { cmd_buffer.finish() };
@@ -1887,7 +1887,7 @@ impl<B: hal::Backend> Device<B> {
         rbo_id
     }
 
-    fn create_buffer(
+    fn create_cache_buffer(
         &mut self,
         width: u64,
         height: u64,
@@ -1950,100 +1950,65 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn ensure_pmb(
-        &mut self,
-        width: u64,
-        height: u64,
-    ) {
-        if self.gpu_cache_buffer.is_some() {
-            if self.gpu_cache_buffer.as_ref().unwrap().height < height {
-                let old_buffer = self.gpu_cache_buffer.take().unwrap();
-                let new_buffer = self.create_buffer(width, height);
-
-                unsafe {
-                    let old_slice = old_buffer.acquire_host_visible_slice(None);
-                    let new_slice = new_buffer.acquire_host_visible_slice(Some(old_buffer.size));
-                    new_slice.copy_from_slice(old_slice);
-                }
-                println!("## Copy finished");
-
-                // TODO copy data between mapped slices instead
-                /*unsafe {
-                    let mut command_pool =
-                        self.device.create_command_pool_typed(
-                            &self.queue_group,
-                            hal::pool::CommandPoolCreateFlags::empty(),
-                        ).expect("create_command_pool_typed failed");
-                    //command_pool.reset();
-
-                    let mut cmd_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
-                    cmd_buffer.begin();
-                    let barriers = old_buffer
-                        .transit(hal::buffer::Access::TRANSFER_READ)
-                        .into_iter()
-                        .chain(new_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
-
-                    cmd_buffer.pipeline_barrier(
-                        PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
-                        hal::memory::Dependencies::empty(),
-                        barriers,
-                    );
-
-                    cmd_buffer.copy_buffer(
-                        &old_buffer.buffer,
-                        &new_buffer.buffer,
-                        &[hal::command::BufferCopy {
-                            src: 0,
-                            dst: 0,
-                            size: old_buffer.size,
-                        }],
-                    );
-
-                    cmd_buffer.finish();
-                    let mut copy_fence = self
-                        .device
-                        .create_fence(false)
-                        .expect("create_fence failed");
-
-                    self.device
-                        .reset_fence(&copy_fence)
-                        .expect("reset_fence failed");
-                    self.queue_group.queues[0]
-                        .submit_nosemaphores(Some(&cmd_buffer), Some(&mut copy_fence));
-                    self.device
-                        .wait_for_fence(&copy_fence, !0)
-                        .expect("wait_for_fence failed");
-                    self.device.destroy_fence(copy_fence);
-                    // command_pool.reset();
-                    self.device.destroy_command_pool(command_pool.into_raw());
-                }*/
-                unsafe { old_buffer.deinit(&self.device) };
-                self.gpu_cache_buffer = Some(new_buffer);
-            }
-            return;
-        }
-        self.gpu_cache_buffer = Some(self.create_buffer(width, height));
-    }
-
     pub fn create_writer(
         &self
     ) -> &mut [[f32; 4]] {
-        unsafe { self.gpu_cache_buffer.as_ref().unwrap().acquire_host_visible_slice(None) }
+        let ref gpu_cache_buffer = self.gpu_cache_buffers[&self.bound_textures[5]];
+        unsafe { gpu_cache_buffer.acquire_host_visible_slice(None) }
     }
 
     pub fn flush_mapped_ranges(
         &self,
         ranges: std::vec::Drain<std::ops::Range<u64>>
     ) {
-        unsafe { self.gpu_cache_buffer.as_ref().unwrap().flush_mapped_ranges(&self.device, ranges) }
+        let ref gpu_cache_buffer = self.gpu_cache_buffers[&self.bound_textures[5]];
+        unsafe { gpu_cache_buffer.flush_mapped_ranges(&self.device, ranges) }
     }
 
-    /*pub fn release_writer(
-        &self,
-        writer: hal::mapping::Writer<B, [f32; 4]>
-    ) {
-        unsafe { self.gpu_cache_buffer.as_ref().unwrap().release_writer(&self.device, writer) };
-    }*/
+    pub fn create_gpu_cache_texture(
+        &mut self,
+        target: TextureTarget,
+        format: ImageFormat,
+        mut width: i32,
+        mut height: i32,
+        filter: TextureFilter,
+        _render_target: Option<RenderTargetInfo>,
+        layer_count: i32,
+    ) -> Texture {
+        debug_assert!(self.inside_frame);
+        assert!(!(width == 0 || height == 0 || layer_count == 0));
+
+        if width > self.max_texture_size || height > self.max_texture_size {
+            error!(
+                "Attempting to allocate a texture of size {}x{} above the limit, trimming",
+                width, height
+            );
+            width = width.min(self.max_texture_size);
+            height = height.min(self.max_texture_size);
+        }
+
+        // Set up the texture book-keeping.
+        let texture = Texture {
+            id: self.generate_texture_id(),
+            target: target as _,
+            size: DeviceIntSize::new(width, height),
+            layer_count,
+            format,
+            filter,
+            fbos: vec![],
+            fbos_with_depth: vec![],
+            last_frame_used: self.frame_id,
+            bound_in_frame: Cell::new(GpuFrameId(0)),
+            flags: TextureFlags::default(),
+            is_buffer: true,
+        };
+
+        let buffer = self.create_cache_buffer(width as u64, height as u64);
+        self.gpu_cache_buffers.insert(texture.id, buffer);
+        record_gpu_alloc(texture.size_in_bytes());
+
+        texture
+    }
 
     pub fn create_texture(
         &mut self,
@@ -2080,6 +2045,7 @@ impl<B: hal::Backend> Device<B> {
             last_frame_used: self.frame_id,
             bound_in_frame: Cell::new(GpuFrameId(0)),
             flags: TextureFlags::default(),
+            is_buffer: false,
         };
 
         assert!(!self.images.contains_key(&texture.id));
@@ -2183,8 +2149,21 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    fn copy_cache_buffer(&self, dst: TextureId, src: TextureId) {
+        let ref src_buffer = self.gpu_cache_buffers[&src];
+        let ref dst_buffer = self.gpu_cache_buffers[&dst];
+        unsafe {
+            let src_slice = src_buffer.acquire_host_visible_slice(None);
+            let dst_slice = dst_buffer.acquire_host_visible_slice(Some(src_buffer.size));
+            dst_slice.copy_from_slice(src_slice);
+        }
+    }
+
     /// Copies the contents from one renderable texture to another.
     pub fn blit_renderable_texture(&mut self, dst: &mut Texture, src: &Texture) {
+        if dst.is_buffer {
+            return self.copy_cache_buffer(dst.id, src.id);
+        }
         dst.bound_in_frame.set(self.frame_id);
         src.bound_in_frame.set(self.frame_id);
         debug_assert!(self.inside_frame);
@@ -2674,9 +2653,9 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn free_image(&mut self, texture: &mut Texture) {
+    fn free_texture(&mut self, mut texture: Texture) {
         if texture.bound_in_frame.get() == self.frame_id {
-            self.retained_textures.push(texture.clone());
+            self.retained_textures.push(texture);
             return;
         }
 
@@ -2709,30 +2688,31 @@ impl<B: hal::Backend> Device<B> {
         self.per_group_descriptors.retain(&texture.id);
 
 
-        let image = self.images.remove(&texture.id).expect("Texture not found.");
+        if texture.is_buffer {
+            let buffer = self.gpu_cache_buffers.remove(&texture.id).expect("Texture not found.");
+            buffer.deinit(&self.device);
+        } else {
+            let image = self.images.remove(&texture.id).expect("Texture not found.");
+            image.deinit(&self.device, &mut self.heaps);
+        }
         record_gpu_free(texture.size_in_bytes());
-        image.deinit(&self.device, &mut self.heaps);
+        texture.id = 0;
     }
 
     fn delete_retained_textures(&mut self) {
         let textures: Vec<_> = self.retained_textures.drain(..).collect();
-        for ref mut texture in textures {
-            self.free_image(texture);
-            texture.id = 0;
+        for mut texture in textures {
+            self.free_texture(texture);
         }
     }
 
-    pub fn delete_texture(&mut self, mut texture: Texture) {
+    pub fn delete_texture(&mut self, texture: Texture) {
         //debug_assert!(self.inside_frame);
         if texture.size.width + texture.size.height == 0 {
             return;
         }
 
-        self.free_image(&mut texture);
-
-        texture.size = DeviceIntSize::zero();
-        texture.layer_count = 0;
-        texture.id = 0;
+        self.free_texture(texture);
     }
 
     #[cfg(feature = "replay")]
@@ -3751,7 +3731,8 @@ impl<B: hal::Backend> Device<B> {
             for framebuffer_depth in self.framebuffers_depth {
                 self.device.destroy_framebuffer(framebuffer_depth);
             }
-            if let Some(buffer) = self.gpu_cache_buffer {
+
+            for (_ , buffer) in self.gpu_cache_buffers {
                 buffer.deinit(&self.device);
             }
             self.device.destroy_sampler(self.sampler_linear);
