@@ -70,6 +70,8 @@ fn create_shaders(out_dir: &str, shaders: &HashMap<String, String>) -> Vec<Strin
                 for mut import in imports {
                     if import == "base" {
                         import = "base_gfx";
+                    } else if import == "gpu_cache" {
+                        import = "gpu_cache_gfx";
                     }
                     if let Some(include) = get_shader_source(import, shaders) {
                         parse_shader_source(&include, shaders, output);
