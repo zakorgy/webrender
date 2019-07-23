@@ -1342,7 +1342,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn reset_state(&mut self) {
+        let gpu_cache_texture = self.bound_textures[5];
         self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
+        self.bound_textures[5] = gpu_cache_texture;
         self.bound_program = INVALID_PROGRAM_ID;
         self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
@@ -1762,8 +1764,9 @@ impl<B: hal::Backend> Device<B> {
     pub fn begin_frame(&mut self) -> GpuFrameId {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
-
+        let gpu_cache_texture = self.bound_textures[5];
         self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
+        self.bound_textures[5] = gpu_cache_texture;
         self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;

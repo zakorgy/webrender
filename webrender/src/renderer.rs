@@ -2580,18 +2580,15 @@ impl<B: hal::Backend> Renderer<B> {
 
         let deferred_update_list = self.update_deferred_resolves(&frame.deferred_resolves);
         self.pending_gpu_cache_updates.extend(deferred_update_list);
-
+        self.update_gpu_cache();
 
         // Note: the texture might have changed during the `update`,
         // so we need to bind it here.
-        if self.gpu_cache_texture.texture.is_some() {
-            self.device.bind_texture(
-                TextureSampler::GpuCache,
-                self.gpu_cache_texture.texture.as_ref().unwrap(),
-            );
-        }
+        self.device.bind_texture(
+            TextureSampler::GpuCache,
+            self.gpu_cache_texture.texture.as_ref().unwrap(),
+        );
 
-        self.update_gpu_cache();
     }
 
     fn update_texture_cache(&mut self) {
@@ -4329,9 +4326,6 @@ impl<B: hal::Backend> Renderer<B> {
     }
 
     pub fn read_gpu_cache(&mut self) -> (DeviceIntSize, Vec<u8>) {
-        if self.gpu_cache_texture.texture.is_none() {
-            return (DeviceIntSize::zero(), Vec::new());
-        }
         let texture = self.gpu_cache_texture.texture.as_ref().unwrap();
         let size = texture.get_dimensions();
         let mut texels = vec![0; (size.width * size.height * 16) as usize];
