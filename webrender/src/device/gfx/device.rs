@@ -1794,7 +1794,23 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn bind_cache_buffer(&mut self, texture: &Texture) {
-        self.bound_gpu_cache = texture.id;
+        if self.bound_gpu_cache != texture.id {
+            self.bound_gpu_cache = texture.id;
+            let buffer = &self.gpu_cache_buffers[&self.bound_gpu_cache];
+            if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
+                unsafe {
+                    let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
+                    cmd_buffer.begin();
+                    cmd_buffer.pipeline_barrier(
+                        hal::pso::PipelineStage::TRANSFER
+                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                    cmd_buffer.finish();
+                }
+            }
+        }
     }
 
     pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)

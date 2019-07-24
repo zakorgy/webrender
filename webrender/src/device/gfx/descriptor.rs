@@ -375,16 +375,6 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         };
         let mut descriptor_writes: SmallVec<[hal::pso::DescriptorSetWrite<_, _>; RENDERER_TEXTURE_COUNT]> = SmallVec::new();
         if let Some(buffer) = storage_buffer {
-            if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
-                unsafe {
-                    cmd_buffer.pipeline_barrier(
-                        hal::pso::PipelineStage::TRANSFER
-                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                }
-            }
             if let Some(ref set) = new_set {
                 descriptor_writes.push(hal::pso::DescriptorSetWrite {
                     set: set.raw(),
