@@ -9,9 +9,14 @@ layout(set = 1, binding = 5, std430)readonly buffer sGpuCache
 
 #define VECS_PER_IMAGE_RESOURCE     2
 
+
+
 int get_gpu_cache_address(ivec2 address) {
     return int(address.y * WR_MAX_VERTEX_TEXTURE_WIDTH + address.x);
 }
+
+// TODO(zakorgy): Until we need to adopt to the GL shaders we need these helper `fetch_from_xxx` functions.
+// Later we can leave these methods and acces `gpu_cache` directly using the address as index.
 
 vec4[2] fetch_from_gpu_cache_2_direct(ivec2 addr) {
     int address = get_gpu_cache_address(addr);
