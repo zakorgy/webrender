@@ -31,8 +31,9 @@ pub(super) const PER_PASS_TEXTURE_COUNT: usize = 2; // PrevPassAlpha, PrevPassCo
 pub(super) const PER_GROUP_TEXTURE_COUNT: usize = 6; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
 pub(super) const RENDERER_TEXTURE_COUNT: usize = 11;
 pub(super) const PER_GROUP_RANGE_DEFAULT: std::ops::Range<usize> = 8..9; // Dither
-pub(super) const PER_GROUP_RANGE_CLIP: std::ops::Range<usize> = 5..9; // GpuCache, TransformPalette, RenderTasks, Dither
-pub(super) const PER_GROUP_RANGE_PRIMITIVE: std::ops::Range<usize> = 5..11; // GpuCache, TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
+pub(super) const PER_GROUP_RANGE_CLIP: std::ops::Range<usize> = 6..9; //TransformPalette, RenderTasks, Dither
+pub(super) const PER_GROUP_RANGE_PRIMITIVE: std::ops::Range<usize> = 6..11; // TransformPalette, RenderTasks, Dither, PrimitiveHeadersF, PrimitiveHeadersI
+const GPU_CACHE_BINDING: u32 = 5;
 
 pub(super) const MAX_DESCRIPTOR_SET_COUNT: usize = 4;
 
@@ -340,7 +341,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         cmd_buffer: &mut B::CommandBuffer,
         bindings: K,
         images: &FastHashMap<TextureId, Image<B>>,
-        cache_buffer: &PMBuffer<B>,
+        storage_buffer: Option<&PMBuffer<B>>,
         desc_allocator: &mut DescriptorAllocator<B>,
         device: &B::Device,
         group_data: &DescriptorData<B>,
@@ -373,71 +374,70 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
             }
         };
         let mut descriptor_writes: SmallVec<[hal::pso::DescriptorSetWrite<_, _>; RENDERER_TEXTURE_COUNT]> = SmallVec::new();
+        if let Some(buffer) = storage_buffer {
+            if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
+                unsafe {
+                    cmd_buffer.pipeline_barrier(
+                        hal::pso::PipelineStage::TRANSFER
+                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                }
+            }
+            if let Some(ref set) = new_set {
+                descriptor_writes.push(hal::pso::DescriptorSetWrite {
+                    set: set.raw(),
+                    binding: GPU_CACHE_BINDING,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Buffer(
+                        &buffer.buffer,
+                        None .. None,
+                    )),
+                });
+            }
+        }
         for index in range {
-            if index == 5 {
-                if let Some(barrier) = cache_buffer.transit(hal::buffer::Access::SHADER_READ) {
-                    unsafe {
-                        cmd_buffer.pipeline_barrier(
-                            hal::pso::PipelineStage::TRANSFER
-                                .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
-                            hal::memory::Dependencies::empty(),
-                            &[barrier],
-                        );
+            let image = &images[&bound_textures[index]].core;
+            // We need to transit the image, even though it's bound in the descriptor set
+            let mut src_stage = Some(hal::pso::PipelineStage::empty());
+            if let Some(barrier) = image.transit(
+                hal::image::Access::SHADER_READ,
+                hal::image::Layout::ShaderReadOnlyOptimal,
+                image.subresource_range.clone(),
+                src_stage.as_mut(),
+            ) {
+                unsafe {
+                    // TODO(zakorgy): combine these barriers into a single one
+                    cmd_buffer.pipeline_barrier(
+                        src_stage.unwrap()
+                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
+                        hal::memory::Dependencies::empty(),
+                        &[barrier],
+                    );
+                }
+            }
+            if let Some(ref set) = new_set {
+                let sampler = if index < PER_DRAW_TEXTURE_COUNT {
+                    match bound_samplers[index] {
+                        TextureFilter::Linear | TextureFilter::Trilinear => sampler_linear,
+                        TextureFilter::Nearest => sampler_nearest,
                     }
-                }
-                if let Some(ref set) = new_set {
-                    descriptor_writes.push(hal::pso::DescriptorSetWrite {
-                        set: set.raw(),
-                        binding: index as _,
-                        array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::Buffer(
-                            &cache_buffer.buffer,
-                            None .. None,
-                        )),
-                    });
-                }
-            } else {
-                let image = &images[&bound_textures[index]].core;
-                // We need to transit the image, even though it's bound in the descriptor set
-                let mut src_stage = Some(hal::pso::PipelineStage::empty());
-                if let Some(barrier) = image.transit(
-                    hal::image::Access::SHADER_READ,
-                    hal::image::Layout::ShaderReadOnlyOptimal,
-                    image.subresource_range.clone(),
-                    src_stage.as_mut(),
-                ) {
-                    unsafe {
-                        // TODO(zakorgy): combine these barriers into a single one
-                        cmd_buffer.pipeline_barrier(
-                            src_stage.unwrap()
-                                .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
-                            hal::memory::Dependencies::empty(),
-                            &[barrier],
-                        );
-                    }
-                }
-                if let Some(ref set) = new_set {
-                    let sampler = if index < PER_DRAW_TEXTURE_COUNT {
-                        match bound_samplers[index] {
-                            TextureFilter::Linear | TextureFilter::Trilinear => sampler_linear,
-                            TextureFilter::Nearest => sampler_nearest,
-                        }
-                    } else if index < PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT {
-                        sampler_linear
-                    } else {
-                        sampler_nearest
-                    };
-                    descriptor_writes.push(hal::pso::DescriptorSetWrite {
-                        set: set.raw(),
-                        binding: index as _,
-                        array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::CombinedImageSampler(
-                            &image.view,
-                            hal::image::Layout::ShaderReadOnlyOptimal,
-                            sampler,
-                        )),
-                    });
-                }
+                } else if index < PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT {
+                    sampler_linear
+                } else {
+                    sampler_nearest
+                };
+                descriptor_writes.push(hal::pso::DescriptorSetWrite {
+                    set: set.raw(),
+                    binding: index as _,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::CombinedImageSampler(
+                        &image.view,
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                        sampler,
+                    )),
+                });
             }
         }
         unsafe { device.write_descriptor_sets(descriptor_writes) };

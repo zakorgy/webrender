@@ -177,6 +177,7 @@ pub struct Device<B: hal::Backend> {
     programs: FastHashMap<ProgramId, Program<B>>,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
+    bound_gpu_cache: TextureId,
     gpu_cache_buffers: FastHashMap<TextureId, PMBuffer<B>>,
     retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
@@ -668,6 +669,7 @@ impl<B: hal::Backend> Device<B> {
             programs: FastHashMap::default(),
             shader_modules: FastHashMap::default(),
             images: FastHashMap::default(),
+            bound_gpu_cache: INVALID_TEXTURE_ID,
             gpu_cache_buffers: FastHashMap::default(),
             retained_textures: Vec::new(),
             fbos: FastHashMap::default(),
@@ -1342,9 +1344,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn reset_state(&mut self) {
-        let gpu_cache_texture = self.bound_textures[5];
         self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
-        self.bound_textures[5] = gpu_cache_texture;
         self.bound_program = INVALID_PROGRAM_ID;
         self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
@@ -1504,7 +1504,7 @@ impl<B: hal::Backend> Device<B> {
             cmd_buffer,
             per_draw_bindings,
             &self.images,
-            &self.gpu_cache_buffers[&self.bound_textures[5]],
+            None,
             &mut self.desc_allocator,
             &self.device,
             &self.descriptor_data,
@@ -1531,7 +1531,7 @@ impl<B: hal::Backend> Device<B> {
                 &mut cmd_buffer,
                 per_pass_bindings,
                 &self.images,
-                &self.gpu_cache_buffers[&self.bound_textures[5]],
+                None,
                 &mut self.desc_allocator,
                 &self.device,
                 &self.descriptor_data,
@@ -1547,7 +1547,7 @@ impl<B: hal::Backend> Device<B> {
         // Per frame textures
         let per_group_bindings = PerGroupBindings(
             [
-                self.bound_textures[5],
+                self.bound_gpu_cache,
                 self.bound_textures[6],
                 self.bound_textures[7],
                 self.bound_textures[8],
@@ -1562,7 +1562,10 @@ impl<B: hal::Backend> Device<B> {
             &mut cmd_buffer,
             (descriptor_group, per_group_bindings),
             &self.images,
-            &self.gpu_cache_buffers[&self.bound_textures[5]],
+            match descriptor_group {
+                DescriptorGroup::Default => None,
+                _ => Some(&self.gpu_cache_buffers[&self.bound_gpu_cache]),
+            },
             &mut self.desc_allocator,
             &self.device,
             &self.descriptor_data,
@@ -1764,9 +1767,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn begin_frame(&mut self) -> GpuFrameId {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
-        let gpu_cache_texture = self.bound_textures[5];
         self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
-        self.bound_textures[5] = gpu_cache_texture;
         self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
@@ -1790,6 +1791,10 @@ impl<B: hal::Backend> Device<B> {
     {
         self.bind_texture_impl(sampler.into(), texture.id, texture.filter);
         texture.bound_in_frame.set(self.frame_id);
+    }
+
+    pub fn bind_cache_buffer(&mut self, texture: &Texture) {
+        self.bound_gpu_cache = texture.id;
     }
 
     pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
@@ -2014,39 +2019,32 @@ impl<B: hal::Backend> Device<B> {
     pub fn create_writer(
         &self
     ) -> &mut [[f32; 4]] {
-        let ref gpu_cache_buffer = self.gpu_cache_buffers[&self.bound_textures[5]];
-        unsafe { gpu_cache_buffer.acquire_host_visible_slice(None) }
+        unsafe { self.gpu_cache_buffers[&self.bound_gpu_cache].acquire_host_visible_slice(None) }
     }
 
     pub fn flush_mapped_ranges(
         &self,
         ranges: impl Iterator<Item = std::ops::Range<u64>>,
     ) {
-        let ref gpu_cache_buffer = self.gpu_cache_buffers[&self.bound_textures[5]];
-        unsafe { gpu_cache_buffer.flush_mapped_ranges(&self.device, ranges) }
+        unsafe { self.gpu_cache_buffers[&self.bound_gpu_cache].flush_mapped_ranges(&self.device, ranges) };
     }
 
     pub fn create_gpu_cache_texture(
         &mut self,
-        target: TextureTarget,
-        format: ImageFormat,
         width: i32,
         height: i32,
-        filter: TextureFilter,
-        _render_target: Option<RenderTargetInfo>,
-        layer_count: i32,
     ) -> Texture {
         debug_assert!(self.inside_frame);
-        assert!(!(width == 0 || height == 0 || layer_count == 0));
+        assert!(!(width == 0 || height == 0));
 
         // Set up the texture book-keeping.
         let texture = Texture {
             id: self.generate_texture_id(),
-            target: target as _,
+            target: TextureTarget::Default as _,
             size: DeviceIntSize::new(width, height),
-            layer_count,
-            format,
-            filter,
+            layer_count: 1,
+            format: ImageFormat::RGBAF32,
+            filter: Default::default(),
             fbos: vec![],
             fbos_with_depth: vec![],
             last_frame_used: self.frame_id,
@@ -2199,9 +2197,9 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn copy_cache_buffer(&self, dst: TextureId, src: TextureId) {
-        let ref src_buffer = self.gpu_cache_buffers[&src];
-        let ref dst_buffer = self.gpu_cache_buffers[&dst];
+    pub fn copy_cache_buffer(&self, dst: &Texture, src: &Texture) {
+        let ref src_buffer = self.gpu_cache_buffers[&src.id];
+        let ref dst_buffer = self.gpu_cache_buffers[&dst.id];
         unsafe {
             let src_slice = src_buffer.acquire_host_visible_slice(None);
             let dst_slice = dst_buffer.acquire_host_visible_slice(Some(src_buffer.size));
@@ -2211,9 +2209,6 @@ impl<B: hal::Backend> Device<B> {
 
     /// Copies the contents from one renderable texture to another.
     pub fn blit_renderable_texture(&mut self, dst: &mut Texture, src: &Texture) {
-        if dst.is_buffer {
-            return self.copy_cache_buffer(dst.id, src.id);
-        }
         dst.bound_in_frame.set(self.frame_id);
         src.bound_in_frame.set(self.frame_id);
         debug_assert!(self.inside_frame);
@@ -2757,6 +2752,10 @@ impl<B: hal::Backend> Device<B> {
         }
 
         self.free_texture(texture);
+    }
+
+    pub fn retain_cache_buffer(&mut self, texture: Texture) {
+        self.retained_textures.push(texture);
     }
 
     #[cfg(feature = "replay")]

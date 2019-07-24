@@ -756,35 +756,27 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         // Create the new texture.
         assert!(height >= 2, "Height is too small for ANGLE");
         let new_size = DeviceIntSize::new(MAX_VERTEX_TEXTURE_WIDTH as _, height);
-        let rt_info = Some(RenderTargetInfo { has_depth: false });
 
         #[cfg(not(feature = "gleam"))]
         {
-            let mut texture = device.create_gpu_cache_texture(
-                TextureTarget::Default,
-                ImageFormat::RGBAF32,
+            let texture = device.create_gpu_cache_texture(
                 new_size.width,
                 new_size.height,
-                TextureFilter::Nearest,
-                rt_info,
-                1,
             );
 
             // Blit the contents of the previous texture, if applicable.
             if let Some(blit_source) = blit_source {
-                device.blit_renderable_texture(&mut texture, &blit_source);
-                device.delete_texture(blit_source);
+                device.copy_cache_buffer(&texture, &blit_source);
+                device.retain_cache_buffer(blit_source);
             }
 
-            device.bind_texture(
-                TextureSampler::GpuCache,
-                &texture,
-            );
+            device.bind_cache_buffer(&texture);
             self.texture = Some(texture);
         }
 
         #[cfg(feature = "gleam")]
         {
+            let rt_info = Some(RenderTargetInfo { has_depth: false });
             let mut texture = device.create_texture(
                 TextureTarget::Default,
                 ImageFormat::RGBAF32,
@@ -865,17 +857,24 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     }
 
     fn deinit(mut self, device: &mut Device<B>) {
-        if let Some(t) = self.texture.take() {
-            device.delete_texture(t);
-        }
         match self.bus {
             #[cfg(not(feature = "gleam"))]
-            GpuCacheBus::PMbuffer { .. } => {}
+            GpuCacheBus::PMbuffer { .. } => {
+                if let Some(t) = self.texture.take() {
+                    device.retain_cache_buffer(t);
+                }
+            }
             GpuCacheBus::PixelBuffer { buffer, ..} => {
                 device.delete_pbo(buffer);
+                if let Some(t) = self.texture.take() {
+                    device.delete_texture(t);
+                }
             }
             #[cfg(feature = "gleam")]
             GpuCacheBus::Scatter { program, vao, buf_position, buf_value, ..} => {
+                if let Some(t) = self.texture.take() {
+                    device.delete_texture(t);
+                }
                 device.delete_program(program);
                 device.delete_custom_vao(vao);
                 device.delete_vbo(buf_position);
@@ -2569,10 +2568,15 @@ impl<B: hal::Backend> Renderer<B> {
         if self.pending_gpu_cache_clear {
             #[cfg(feature="gleam")]
             let use_scatter = matches!(self.gpu_cache_texture.bus, GpuCacheBus::Scatter { .. });
+            #[cfg(feature="gleam")]
+            let use_pmb = false;
+
             #[cfg(not(feature="gleam"))]
             let use_scatter = false;
+            #[cfg(not(feature="gleam"))]
+            let use_pmb = true;
 
-            let new_cache = GpuCacheTexture::new(&mut self.device, use_scatter, true).unwrap();
+            let new_cache = GpuCacheTexture::new(&mut self.device, use_scatter, use_pmb).unwrap();
             let old_cache = mem::replace(&mut self.gpu_cache_texture, new_cache);
             old_cache.deinit(&mut self.device);
             self.pending_gpu_cache_clear = false;
@@ -2589,6 +2593,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.gpu_cache_texture.texture.as_ref().unwrap(),
         );
 
+        #[cfg(not(feature = "gleam"))]
+        self.device.bind_cache_buffer(self.gpu_cache_texture.texture.as_ref().unwrap());
     }
 
     fn update_texture_cache(&mut self) {
