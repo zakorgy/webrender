@@ -29,7 +29,11 @@ impl<B: hal::Backend> PMBuffer<B> {
         slice::from_raw_parts_mut(self.ptr as *mut _, count)
     }
 
-    pub unsafe fn flush_mapped_ranges(&self, device: &B::Device, ranges: std::vec::Drain<std::ops::Range<u64>>) {
+    pub unsafe fn flush_mapped_ranges(
+        &self,
+        device: &B::Device,
+        ranges: impl Iterator<Item = std::ops::Range<u64>>,
+    ) {
         if !self.coherent {
             device.flush_mapped_memory_ranges(ranges.into_iter().map(|r| (&self.memory, r))).expect("Flush mapped memory range sfailed for PMBuffer");
         }

@@ -1973,7 +1973,7 @@ impl<B: hal::Backend> Device<B> {
                 // to 1 it means we can use that type for our buffer. So this code finds the first
                 // memory type that has a `1` (or, is allowed), and is visible to the CPU.
                 buffer_req.type_mask & (1 << id) != 0
-                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::CPU_VISIBLE)
+                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT)
             });
 
         let upload_type = match upload_type {
@@ -2020,7 +2020,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn flush_mapped_ranges(
         &self,
-        ranges: std::vec::Drain<std::ops::Range<u64>>
+        ranges: impl Iterator<Item = std::ops::Range<u64>>,
     ) {
         let ref gpu_cache_buffer = self.gpu_cache_buffers[&self.bound_textures[5]];
         unsafe { gpu_cache_buffer.flush_mapped_ranges(&self.device, ranges) }
@@ -2030,23 +2030,14 @@ impl<B: hal::Backend> Device<B> {
         &mut self,
         target: TextureTarget,
         format: ImageFormat,
-        mut width: i32,
-        mut height: i32,
+        width: i32,
+        height: i32,
         filter: TextureFilter,
         _render_target: Option<RenderTargetInfo>,
         layer_count: i32,
     ) -> Texture {
         debug_assert!(self.inside_frame);
         assert!(!(width == 0 || height == 0 || layer_count == 0));
-
-        if width > self.max_texture_size || height > self.max_texture_size {
-            error!(
-                "Attempting to allocate a texture of size {}x{} above the limit, trimming",
-                width, height
-            );
-            width = width.min(self.max_texture_size);
-            height = height.min(self.max_texture_size);
-        }
 
         // Set up the texture book-keeping.
         let texture = Texture {

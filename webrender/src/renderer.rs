@@ -928,7 +928,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                             address,
                         } => {
                             let address = address.v as usize * MAX_VERTEX_TEXTURE_WIDTH + address.u as usize;
-                            mapped_ranges.push(address as u64 * 4 .. (address + block_count) as u64 * 4);
+                            mapped_ranges.push(address as u64 * GpuBlockData::SIZE .. (address + block_count) as u64 * GpuBlockData::SIZE);
                             for i in 0 .. block_count {
                                 writer[address + i] = updates.blocks[block_index + i].data;
                             }
@@ -1009,7 +1009,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             #[cfg(not(feature = "gleam"))]
             GpuCacheBus::PMbuffer { ref mut mapped_ranges } => {
                 device.flush_mapped_ranges(mapped_ranges.drain(..));
-                return 0
+                0
             }
             GpuCacheBus::PixelBuffer { ref buffer, ref mut rows } => {
                 let rows_dirty = rows
