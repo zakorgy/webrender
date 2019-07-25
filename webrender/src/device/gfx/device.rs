@@ -1793,26 +1793,6 @@ impl<B: hal::Backend> Device<B> {
         texture.bound_in_frame.set(self.frame_id);
     }
 
-    pub fn bind_cache_buffer(&mut self, texture: &Texture) {
-        if self.bound_gpu_cache != texture.id {
-            self.bound_gpu_cache = texture.id;
-            let buffer = &self.gpu_cache_buffers[&self.bound_gpu_cache];
-            if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
-                unsafe {
-                    let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
-                    cmd_buffer.begin();
-                    cmd_buffer.pipeline_barrier(
-                        hal::pso::PipelineStage::TRANSFER
-                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                    cmd_buffer.finish();
-                }
-            }
-        }
-    }
-
     pub fn bind_external_texture<S>(&mut self, sampler: S, external_texture: &ExternalTexture)
     where
         S: Into<TextureSlot>,
@@ -1969,6 +1949,12 @@ impl<B: hal::Backend> Device<B> {
         rbo_id
     }
 
+    pub fn bind_cache_buffer(&mut self, texture: &Texture) {
+        if self.bound_gpu_cache != texture.id {
+            self.bound_gpu_cache = texture.id;
+        }
+    }
+
     fn create_cache_buffer(
         &mut self,
         width: u64,
@@ -1978,11 +1964,11 @@ impl<B: hal::Backend> Device<B> {
         let buffer_len = height * width * buffer_stride;
 
         assert_ne!(buffer_len, 0);
+        use hal::buffer::Usage as BU;
         let mut storage_buffer =
-            unsafe { self.device.create_buffer(buffer_len, hal::buffer::Usage::STORAGE) }.unwrap();
+            unsafe { self.device.create_buffer(buffer_len, BU::STORAGE | BU::TRANSFER_SRC | BU::TRANSFER_DST) }.unwrap();
 
         let buffer_req = unsafe { self.device.get_buffer_requirements(&storage_buffer) };
-        let mut coherent = false;
 
         use hal::memory::Properties;
         let memory_types = self.adapter.physical_device.memory_properties().memory_types;
@@ -1990,16 +1976,12 @@ impl<B: hal::Backend> Device<B> {
             .iter()
             .enumerate()
             .position(|(id, mem_type)| {
-                // type_mask is a bit field where each bit represents a memory type. If the bit is set
-                // to 1 it means we can use that type for our buffer. So this code finds the first
-                // memory type that has a `1` (or, is allowed), and is visible to the CPU.
                 buffer_req.type_mask & (1 << id) != 0
-                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT)
+                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT | Properties::CPU_CACHED)
             });
 
         let upload_type = match upload_type {
             Some(ty) => {
-                coherent = true;
                 ty
             },
             None => {
@@ -2007,13 +1989,10 @@ impl<B: hal::Backend> Device<B> {
                     .iter()
                     .enumerate()
                     .position(|(id, mem_type)| {
-                        // type_mask is a bit field where each bit represents a memory type. If the bit is set
-                        // to 1 it means we can use that type for our buffer. So this code finds the first
-                        // memory type that has a `1` (or, is allowed), and is visible to the CPU.
                         buffer_req.type_mask & (1 << id) != 0
-                            && mem_type.properties.contains(Properties::CPU_VISIBLE)
+                            && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT)
                     })
-                    .unwrap()
+                    .expect("No suitable memory type found for GPU cache buffer")
             }
         };
 
@@ -2025,7 +2004,6 @@ impl<B: hal::Backend> Device<B> {
             buffer: storage_buffer,
             memory: buffer_memory,
             ptr,
-            coherent,
             height,
             size: buffer_req.size,
             state: Cell::new(hal::buffer::Access::empty()),
@@ -2033,16 +2011,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn create_writer(
-        &self
+        &mut self
     ) -> &mut [[f32; 4]] {
-        unsafe { self.gpu_cache_buffers[&self.bound_gpu_cache].acquire_host_visible_slice(None) }
-    }
-
-    pub fn flush_mapped_ranges(
-        &self,
-        ranges: impl Iterator<Item = std::ops::Range<u64>>,
-    ) {
-        unsafe { self.gpu_cache_buffers[&self.bound_gpu_cache].flush_mapped_ranges(&self.device, ranges) };
+        unsafe { self.gpu_cache_buffers.get_mut(&self.bound_gpu_cache).unwrap().acquire_host_visible_slice() }
     }
 
     pub fn create_gpu_cache_texture(
@@ -2213,13 +2184,57 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn copy_cache_buffer(&self, dst: &Texture, src: &Texture) {
+    pub fn copy_cache_buffer(&mut self, dst: &Texture, src: &Texture) {
+        assert!(src.is_buffer && dst.is_buffer);
         let ref src_buffer = self.gpu_cache_buffers[&src.id];
         let ref dst_buffer = self.gpu_cache_buffers[&dst.id];
         unsafe {
-            let src_slice = src_buffer.acquire_host_visible_slice(None);
-            let dst_slice = dst_buffer.acquire_host_visible_slice(Some(src_buffer.size));
-            dst_slice.copy_from_slice(src_slice);
+            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
+
+            let barriers = src_buffer
+                .transit(hal::buffer::Access::TRANSFER_READ)
+                .into_iter()
+                .chain(dst_buffer.transit(hal::buffer::Access::TRANSFER_WRITE));
+
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER
+                    .. hal::pso::PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                barriers,
+            );
+
+            cmd_buffer.copy_buffer(
+                &src_buffer.buffer,
+                &dst_buffer.buffer,
+                &[hal::command::BufferCopy {
+                    src: 0,
+                    dst: 0,
+                    size: src_buffer.size,
+                }],
+            );
+            if let Some(barrier) = dst_buffer.transit(hal::buffer::Access::HOST_WRITE) {
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::TRANSFER
+                        .. hal::pso::PipelineStage::HOST,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+        }
+    }
+
+    pub fn prepare_cache_buffer_for_read(&mut self) {
+        unsafe {
+            let ref buffer = &self.gpu_cache_buffers[&self.bound_gpu_cache];
+            if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
+                let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
+                cmd_buffer.pipeline_barrier(
+                    hal::pso::PipelineStage::HOST
+                        .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
         }
     }
 

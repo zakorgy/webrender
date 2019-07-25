@@ -119,7 +119,7 @@ pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 /// Enabling this toggle would force the GPU cache scattered texture to
 /// be resized every frame, which enables GPU debuggers to see if this
 /// is performed correctly.
-const GPU_CACHE_RESIZE_TEST: bool = false;
+const GPU_CACHE_RESIZE_TEST: bool = true;
 
 /// Number of GPU blocks per UV rectangle provided for an image.
 pub const BLOCKS_PER_UV_RECT: usize = 2;
@@ -701,9 +701,7 @@ impl CacheRow {
 enum GpuCacheBus {
     /// Persistently mapped buffer-based updates
     #[cfg(not(feature = "gleam"))]
-    PMbuffer {
-        mapped_ranges: Vec<std::ops::Range<u64>>,
-    },
+    PMbuffer,
     /// PBO-based updates, currently operate on a row granularity.
     /// Therefore, are subject to fragmentation issues.
     PixelBuffer {
@@ -798,7 +796,6 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     }
 
     fn new(device: &mut Device<B>, use_scatter: bool, use_pmb: bool) -> Result<Self, RendererError> {
-        assert_ne!(use_scatter, use_pmb);
         if use_scatter && cfg!(not(feature = "gleam")) {
             warn!("GpuCacheBus::Scatter is not supported with gfx backend");
         }
@@ -837,9 +834,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         #[cfg(not(feature = "gleam"))]
         {
             if use_pmb {
-                bus = GpuCacheBus::PMbuffer {
-                    mapped_ranges: Vec::new(),
-                }
+                bus = GpuCacheBus::PMbuffer
             } else {
                 let buffer = device.create_pbo();
                 bus = GpuCacheBus::PixelBuffer {
@@ -859,7 +854,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     fn deinit(mut self, device: &mut Device<B>) {
         match self.bus {
             #[cfg(not(feature = "gleam"))]
-            GpuCacheBus::PMbuffer { .. } => {
+            GpuCacheBus::PMbuffer => {
                 if let Some(t) = self.texture.take() {
                     device.retain_cache_buffer(t);
                 }
@@ -896,7 +891,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         self.ensure_texture(device, max_height);
         match self.bus {
             #[cfg(not(feature = "gleam"))]
-            GpuCacheBus::PMbuffer { .. } => {},
+            GpuCacheBus::PMbuffer => {},
             GpuCacheBus::PixelBuffer { .. } => {},
             #[cfg(feature = "gleam")]
             GpuCacheBus::Scatter {
@@ -917,7 +912,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     fn update(&mut self, device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
             #[cfg(not(feature = "gleam"))]
-            GpuCacheBus::PMbuffer { ref mut mapped_ranges } => {
+            GpuCacheBus::PMbuffer => {
                 let mut writer = device.create_writer();
                 for update in &updates.updates {
                     match *update {
@@ -927,7 +922,6 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                             address,
                         } => {
                             let address = address.v as usize * MAX_VERTEX_TEXTURE_WIDTH + address.u as usize;
-                            mapped_ranges.push(address as u64 * GpuBlockData::SIZE .. (address + block_count) as u64 * GpuBlockData::SIZE);
                             for i in 0 .. block_count {
                                 writer[address + i] = updates.blocks[block_index + i].data;
                             }
@@ -1006,8 +1000,8 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         let texture = self.texture.as_ref().unwrap();
         match self.bus {
             #[cfg(not(feature = "gleam"))]
-            GpuCacheBus::PMbuffer { ref mut mapped_ranges } => {
-                device.flush_mapped_ranges(mapped_ranges.drain(..));
+            GpuCacheBus::PMbuffer => {
+                device.prepare_cache_buffer_for_read();
                 0
             }
             GpuCacheBus::PixelBuffer { ref buffer, ref mut rows } => {
@@ -2195,7 +2189,7 @@ impl<B: hal::Backend> Renderer<B> {
                         }
                     }
                     #[cfg(not(feature = "gleam"))]
-                    GpuCacheBus::PMbuffer { .. } => {
+                    GpuCacheBus::PMbuffer => {
                         info!("Invalidating GPU caches");
                     }
                     #[cfg(feature = "gleam")]
