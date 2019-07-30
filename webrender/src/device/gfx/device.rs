@@ -1987,44 +1987,36 @@ impl<B: hal::Backend> Device<B> {
             unsafe { self.device.create_buffer(buffer_len, hal::buffer::Usage::STORAGE) }.unwrap();
 
         let buffer_req = unsafe { self.device.get_buffer_requirements(&storage_buffer) };
-        let mut coherent = false;
+        let memory_block = self.heaps
+            .allocate(
+                &self.device,
+                buffer_req.type_mask as u32,
+                // The best suitable type from rendy-memory with CPU_CACHED property according to
+                // https://github.com/amethyst/rendy/blob/release-0.2/memory/src/usage.rs#L145
+                MemoryUsageValue::Download,
+                buffer_req.size,
+                buffer_req.alignment,
+            )
+            .expect("Allocate memory failed");
 
-        use hal::memory::Properties;
-        let memory_types = self.adapter.physical_device.memory_properties().memory_types;
-        let upload_type = memory_types
-            .iter()
-            .enumerate()
-            .position(|(id, mem_type)| {
-                buffer_req.type_mask & (1 << id) != 0
-                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT | Properties::CPU_CACHED)
-            });
+        assert!(memory_block.properties().contains(hal::memory::Properties::CPU_CACHED));
+        let coherent = memory_block.properties().contains(hal::memory::Properties::COHERENT);
+        if !coherent {
+            warn!("Using non coherent memory for gpu cache buffer!");
+        }
 
-        let upload_type = match upload_type {
-            Some(ty) => {
-                info!("A proper memory type found for gpu cache buffer");
-                coherent = true;
-                ty
-            },
-            None => {
-                warn!("Using non coherent memory for gpu cache buffer!");
-                memory_types
-                    .iter()
-                    .enumerate()
-                    .position(|(id, mem_type)| {
-                        buffer_req.type_mask & (1 << id) != 0
-                            && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::CPU_CACHED)
-                    })
-                    .unwrap()
-            }
-        };
-
-        let buffer_memory = unsafe { self.device.allocate_memory(upload_type.into(), buffer_req.size) }.unwrap();
-
-        unsafe { self.device.bind_buffer_memory(&buffer_memory, 0, &mut storage_buffer) }.unwrap();
-        let ptr = unsafe { self.device.map_memory(&buffer_memory, 0..buffer_req.size) }.unwrap();
+        unsafe {
+            self.device.bind_buffer_memory(
+                &memory_block.memory(),
+                memory_block.range().start,
+                &mut storage_buffer,
+            )
+        }
+        .expect("Bind buffer memory failed");
+        let ptr = unsafe { self.device.map_memory(&memory_block.memory(), 0..buffer_req.size) }.unwrap();
         PMBuffer {
             buffer: storage_buffer,
-            memory: buffer_memory,
+            memory_block,
             ptr,
             coherent,
             height,
@@ -2766,7 +2758,7 @@ impl<B: hal::Backend> Device<B> {
 
         if texture.is_buffer {
             let buffer = self.gpu_cache_buffers.remove(&texture.id).expect("Texture not found.");
-            buffer.deinit(&self.device);
+            buffer.deinit(&self.device, &mut self.heaps);
         } else {
             let image = self.images.remove(&texture.id).expect("Texture not found.");
             image.deinit(&self.device, &mut self.heaps);
@@ -3834,7 +3826,7 @@ impl<B: hal::Backend> Device<B> {
             }
 
             for (_ , buffer) in self.gpu_cache_buffers {
-                buffer.deinit(&self.device);
+                buffer.deinit(&self.device, &mut self.heaps);
             }
             self.device.destroy_sampler(self.sampler_linear);
             self.device.destroy_sampler(self.sampler_nearest);

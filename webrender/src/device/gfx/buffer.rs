@@ -15,7 +15,7 @@ pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
 
 pub struct PMBuffer<B: hal::Backend> {
     pub buffer: B::Buffer,
-    pub memory: B::Memory,
+    pub memory_block: MemoryBlock<B>,
     pub ptr: *mut u8,
     pub coherent: bool,
     pub height: u64,
@@ -35,15 +35,18 @@ impl<B: hal::Backend> PMBuffer<B> {
         ranges: impl Iterator<Item=std::ops::Range<u64>>,
     ) {
         if !self.coherent {
-            device.flush_mapped_memory_ranges(ranges.into_iter().map(|r| (&self.memory, r))).expect("Flush mapped memory range sfailed for PMBuffer");
+            device.flush_mapped_memory_ranges(ranges.into_iter().map(|r| {
+                    println!("## Range {:?}, size {:?}", r, self.size);
+                    (self.memory_block.memory(), r)
+                }
+            )).expect("Flush mapped memory ranges failed for PMBuffer");
         }
     }
 
-    pub fn deinit(self, device: &B::Device) {
+    pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         unsafe {
-            device.unmap_memory(&self.memory);
             device.destroy_buffer(self.buffer);
-            device.free_memory(self.memory);
+            heaps.free(device, self.memory_block);
         }
     }
 

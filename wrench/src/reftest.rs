@@ -445,11 +445,11 @@ impl<'a> ReftestHarness<'a> {
                     "number of differing pixels",
                     count_different
                 );
-                println!("REFTEST   IMAGE 1 (TEST): {}", test.create_data_uri());
+                /*println!("REFTEST   IMAGE 1 (TEST): {}", test.create_data_uri());
                 println!(
                     "REFTEST   IMAGE 2 (REFERENCE): {}",
                     reference.create_data_uri()
-                );
+                );*/
                 println!("REFTEST TEST-END | {}", t);
 
                 false
