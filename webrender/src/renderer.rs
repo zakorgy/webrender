@@ -769,8 +769,6 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                 device.copy_cache_buffer(&texture, &blit_source);
                 device.retain_cache_buffer(blit_source);
             }
-
-            device.bind_cache_buffer(&texture);
             self.texture = Some(texture);
         }
 
@@ -917,22 +915,25 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         match self.bus {
             #[cfg(not(feature = "gleam"))]
             GpuCacheBus::PMbuffer { ref mut mapped_ranges } => {
-                let mut writer = device.create_writer();
-                for update in &updates.updates {
-                    match *update {
-                        GpuCacheUpdate::Copy {
-                            block_index,
-                            block_count,
-                            address,
-                        } => {
-                            let address = address.v as usize * MAX_VERTEX_TEXTURE_WIDTH + address.u as usize;
-                            mapped_ranges.push(address as u64 * GpuBlockData::SIZE .. (address + block_count) as u64 * GpuBlockData::SIZE);
-                            for i in 0 .. block_count {
-                                writer[address + i] = updates.blocks[block_index + i].data;
+                {
+                    let mut writer = device.map_gpu_cache_memory();
+                    for update in &updates.updates {
+                        match *update {
+                            GpuCacheUpdate::Copy {
+                                block_index,
+                                block_count,
+                                address,
+                            } => {
+                                let address = address.v as usize * MAX_VERTEX_TEXTURE_WIDTH + address.u as usize;
+                                mapped_ranges.push(address as u64 * GpuBlockData::SIZE .. (address + block_count) as u64 * GpuBlockData::SIZE);
+                                for i in 0 .. block_count {
+                                    writer[address + i] = updates.blocks[block_index + i];
+                                }
                             }
                         }
                     }
                 }
+                device.unmap_gpu_cache_memory();
             }
             GpuCacheBus::PixelBuffer { ref mut rows, .. } => {
                 for update in &updates.updates {
@@ -1006,7 +1007,9 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         match self.bus {
             #[cfg(not(feature = "gleam"))]
             GpuCacheBus::PMbuffer { ref mut mapped_ranges } => {
-                device.flush_mapped_ranges(mapped_ranges.drain(..));
+                if !mapped_ranges.is_empty() {
+                    device.flush_mapped_ranges(mapped_ranges.drain(..));
+                }
                 0
             }
             GpuCacheBus::PixelBuffer { ref buffer, ref mut rows } => {
