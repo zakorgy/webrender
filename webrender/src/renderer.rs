@@ -798,7 +798,6 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     }
 
     fn new(device: &mut Device<B>, use_scatter: bool, use_pmb: bool) -> Result<Self, RendererError> {
-        assert_ne!(use_scatter, use_pmb);
         if use_scatter && cfg!(not(feature = "gleam")) {
             warn!("GpuCacheBus::Scatter is not supported with gfx backend");
         }
