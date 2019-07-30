@@ -1794,21 +1794,26 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn bind_cache_buffer(&mut self, texture: &Texture) {
-        if self.bound_gpu_cache != texture.id {
-            self.bound_gpu_cache = texture.id;
-            let buffer = &self.gpu_cache_buffers[&self.bound_gpu_cache];
-            if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
-                unsafe {
-                    let cmd_buffer = self.command_pool[self.next_id].acquire_command_buffer();
-                    cmd_buffer.begin();
-                    cmd_buffer.pipeline_barrier(
-                        hal::pso::PipelineStage::TRANSFER
-                            .. hal::pso::PipelineStage::FRAGMENT_SHADER | hal::pso::PipelineStage::VERTEX_SHADER,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                    cmd_buffer.finish();
-                }
+        use hal::pso::PipelineStage as PS;
+        self.bound_gpu_cache = texture.id;
+        let ref buffer = self.gpu_cache_buffers[&self.bound_gpu_cache];
+        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
+        if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ) {
+            unsafe {
+                cmd_buffer.pipeline_barrier(
+                    PS::VERTEX_SHADER | PS::FRAGMENT_SHADER .. PS::HOST,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+        }
+        if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
+            unsafe {
+                cmd_buffer.pipeline_barrier(
+                    PS::HOST .. PS::VERTEX_SHADER | PS::FRAGMENT_SHADER,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
             }
         }
     }
@@ -1990,28 +1995,24 @@ impl<B: hal::Backend> Device<B> {
             .iter()
             .enumerate()
             .position(|(id, mem_type)| {
-                // type_mask is a bit field where each bit represents a memory type. If the bit is set
-                // to 1 it means we can use that type for our buffer. So this code finds the first
-                // memory type that has a `1` (or, is allowed), and is visible to the CPU.
                 buffer_req.type_mask & (1 << id) != 0
-                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT)
+                    && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::COHERENT | Properties::CPU_CACHED)
             });
 
         let upload_type = match upload_type {
             Some(ty) => {
+                info!("A proper memory type found for gpu cache buffer");
                 coherent = true;
                 ty
             },
             None => {
+                warn!("Using non coherent memory for gpu cache buffer!");
                 memory_types
                     .iter()
                     .enumerate()
                     .position(|(id, mem_type)| {
-                        // type_mask is a bit field where each bit represents a memory type. If the bit is set
-                        // to 1 it means we can use that type for our buffer. So this code finds the first
-                        // memory type that has a `1` (or, is allowed), and is visible to the CPU.
                         buffer_req.type_mask & (1 << id) != 0
-                            && mem_type.properties.contains(Properties::CPU_VISIBLE)
+                            && mem_type.properties.contains(Properties::CPU_VISIBLE | Properties::CPU_CACHED)
                     })
                     .unwrap()
             }
@@ -2033,9 +2034,14 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn create_writer(
-        &self
+        &mut self
     ) -> &mut [[f32; 4]] {
-        unsafe { self.gpu_cache_buffers[&self.bound_gpu_cache].acquire_host_visible_slice(None) }
+        unsafe {
+            self.gpu_cache_buffers
+                .get_mut(&self.bound_gpu_cache)
+                .expect("Gpu cache not found!")
+                .acquire_host_visible_slice(None)
+        }
     }
 
     pub fn flush_mapped_ranges(
@@ -2070,6 +2076,17 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let buffer = self.create_cache_buffer(width as u64, height as u64);
+        if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ) {
+            use hal::pso::PipelineStage as PS;
+            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
+            unsafe {
+                cmd_buffer.pipeline_barrier(
+                    PS::VERTEX_SHADER | PS::FRAGMENT_SHADER .. PS::HOST,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+        }
         self.gpu_cache_buffers.insert(texture.id, buffer);
         record_gpu_alloc(texture.size_in_bytes());
 
@@ -2213,14 +2230,18 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn copy_cache_buffer(&self, dst: &Texture, src: &Texture) {
-        let ref src_buffer = self.gpu_cache_buffers[&src.id];
-        let ref dst_buffer = self.gpu_cache_buffers[&dst.id];
-        unsafe {
-            let src_slice = src_buffer.acquire_host_visible_slice(None);
-            let dst_slice = dst_buffer.acquire_host_visible_slice(Some(src_buffer.size));
-            dst_slice.copy_from_slice(src_slice);
+    pub fn copy_cache_buffer(&mut self, dst: &Texture, src: &Texture) {
+        let mut src_buffer = self.gpu_cache_buffers.remove(&src.id).unwrap();
+        {
+            let size = src_buffer.size;
+            let dst_buffer = self.gpu_cache_buffers.get_mut(&dst.id).unwrap();
+            unsafe {
+                let src_slice = src_buffer.acquire_host_visible_slice(None);
+                let dst_slice = dst_buffer.acquire_host_visible_slice(Some(size));
+                dst_slice.copy_from_slice(src_slice);
+            }
         }
+        self.gpu_cache_buffers.insert(src.id, src_buffer);
     }
 
     /// Copies the contents from one renderable texture to another.
