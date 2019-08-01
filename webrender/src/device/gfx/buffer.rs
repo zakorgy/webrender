@@ -21,6 +21,7 @@ pub struct PMBuffer<B: hal::Backend> {
     pub height: u64,
     pub size: u64,
     pub state: Cell<hal::buffer::State>,
+    pub range_max: u64,
 }
 
 impl<B: hal::Backend> PMBuffer<B> {
@@ -30,12 +31,17 @@ impl<B: hal::Backend> PMBuffer<B> {
     }
 
     pub unsafe fn flush_mapped_ranges(
-        &self,
+        &mut self,
         device: &B::Device,
         ranges: impl Iterator<Item=std::ops::Range<u64>>,
     ) {
+        let mut flush_ranges = Vec::new();
+        for range in ranges {
+            self.range_max = self.range_max.max(range.end);
+            flush_ranges.push((&self.memory, range));
+        }
         if !self.coherent {
-            device.flush_mapped_memory_ranges(ranges.into_iter().map(|r| (&self.memory, r))).expect("Flush mapped memory range sfailed for PMBuffer");
+            device.flush_mapped_memory_ranges(flush_ranges).expect("Flush mapped memory range sfailed for PMBuffer");
         }
     }
 
@@ -47,7 +53,7 @@ impl<B: hal::Backend> PMBuffer<B> {
         }
     }
 
-    pub(super) fn transit(&self, access: hal::buffer::Access) -> Option<hal::memory::Barrier<B>> {
+    pub(super) fn transit(&self, access: hal::buffer::Access, with_range: bool) -> Option<hal::memory::Barrier<B>> {
         let src_state = self.state.get();
         if src_state == access {
             None
@@ -57,7 +63,7 @@ impl<B: hal::Backend> PMBuffer<B> {
                 states: src_state .. access,
                 target: &self.buffer,
                 families: None,
-                range: None .. None,
+                range: None .. if with_range { println!("range_max {:?}", self.range_max); Some(self.range_max) } else { None },
             })
         }
     }

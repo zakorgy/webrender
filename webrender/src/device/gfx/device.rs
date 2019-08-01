@@ -1798,19 +1798,19 @@ impl<B: hal::Backend> Device<B> {
         self.bound_gpu_cache = texture.id;
         let ref buffer = self.gpu_cache_buffers[&self.bound_gpu_cache];
         let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
-        if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ) {
+        if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ, true) {
             unsafe {
                 cmd_buffer.pipeline_barrier(
-                    PS::VERTEX_SHADER | PS::FRAGMENT_SHADER .. PS::HOST,
+                    PS::HOST .. PS::VERTEX_SHADER | PS::FRAGMENT_SHADER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
         }
-        if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ) {
+        if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ, false) {
             unsafe {
                 cmd_buffer.pipeline_barrier(
-                    PS::HOST .. PS::VERTEX_SHADER | PS::FRAGMENT_SHADER,
+                    PS::VERTEX_SHADER | PS::FRAGMENT_SHADER .. PS::HOST,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -2030,6 +2030,7 @@ impl<B: hal::Backend> Device<B> {
             height,
             size: buffer_req.size,
             state: Cell::new(hal::buffer::Access::empty()),
+            range_max: 0,
         }
     }
 
@@ -2045,10 +2046,15 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn flush_mapped_ranges(
-        &self,
+        &mut self,
         ranges: impl Iterator<Item = std::ops::Range<u64>>,
     ) {
-        unsafe { self.gpu_cache_buffers[&self.bound_gpu_cache].flush_mapped_ranges(&self.device, ranges) };
+        unsafe {
+            self.gpu_cache_buffers
+                .get_mut(&self.bound_gpu_cache)
+                .unwrap()
+                .flush_mapped_ranges(&self.device, ranges)
+        };
     }
 
     pub fn create_gpu_cache_texture(
@@ -2075,8 +2081,9 @@ impl<B: hal::Backend> Device<B> {
             is_buffer: true,
         };
 
+        self.bound_gpu_cache = texture.id;
         let buffer = self.create_cache_buffer(width as u64, height as u64);
-        if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ) {
+        if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ, false) {
             use hal::pso::PipelineStage as PS;
             let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
             unsafe {
