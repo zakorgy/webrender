@@ -10,10 +10,9 @@ use api::TextureTarget;
 use api::ImageDescriptor;
 use arrayvec::ArrayVec;
 use euclid::Transform3D;
-use gpu_cache::GpuBlockData;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
-use rendy_memory::{Block, Kind, Heaps, HeapsConfig, MemoryUsage ,MemoryUsageValue};
+use rendy_memory::{Block, Kind, Heaps, HeapsConfig, MemoryUsage, MappedRange, MemoryUsageValue, Write};
 use rendy_descriptor::{DescriptorAllocator, DescriptorRanges, DescriptorSet};
 use ron::de::from_str;
 use smallvec::SmallVec;
@@ -204,8 +203,8 @@ pub struct Device<B: hal::Backend> {
     programs: FastHashMap<ProgramId, Program<B>>,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
-    bound_gpu_cache: TextureId,
-    gpu_cache_buffers: FastHashMap<TextureId, PMBuffer<B>>,
+    pub bound_gpu_cache: TextureId,
+    pub(crate) gpu_cache_buffers: FastHashMap<TextureId, PMBuffer<B>>,
     retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
@@ -2050,33 +2049,25 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub(crate) fn map_gpu_cache_memory<'a>(
-        &'a mut self
-    ) -> &mut [GpuBlockData] {
-        let (mapped_range, size) = self.gpu_cache_buffers
-            .get_mut(&self.bound_gpu_cache)
+        gpu_cache_buffers: &'a mut FastHashMap<TextureId, PMBuffer<B>>,
+        buffer_id: TextureId,
+        device: &'a B::Device,
+    ) -> (MappedRange<'a, B>, u64) {
+        gpu_cache_buffers
+            .get_mut(&buffer_id)
             .unwrap()
-            .map(&self.device, None);
-        unsafe { slice::from_raw_parts_mut(mapped_range.ptr().as_ptr() as _, size as usize / mem::size_of::<GpuBlockData>())}
+            .map(device, None)
     }
 
-    pub fn unmap_gpu_cache_memory(
-        &mut self
-    ) {
-        self.gpu_cache_buffers
-            .get_mut(&self.bound_gpu_cache)
-            .unwrap()
-            .unmap(&self.device)
-    }
-
-    pub fn flush_mapped_ranges(
+    pub fn update_gpu_cache_transit_range(
         &mut self,
-        ranges: impl Iterator<Item = std::ops::Range<u64>>,
+        address_max: u64,
     ) {
         unsafe {
             self.gpu_cache_buffers
                 .get_mut(&self.bound_gpu_cache)
                 .unwrap()
-                .flush_mapped_ranges(&self.device, ranges)
+                .update_transit_range(address_max)
         };
     }
 
@@ -2264,15 +2255,15 @@ impl<B: hal::Backend> Device<B> {
         let mut src_buffer = self.gpu_cache_buffers.remove(&src.id).unwrap();
         {
             let dst_buffer = self.gpu_cache_buffers.get_mut(&dst.id).unwrap();
-            let read_size = src_buffer.transit_range_end;
-            let (read_mapping, _) = src_buffer.map(&self.device, None);
+            let (mut mapped, read_size) = src_buffer.map(&self.device, None);
             unsafe {
-                let (write_mapping, _) = dst_buffer.map(&self.device, Some(read_size));
-                let src_slice = slice::from_raw_parts(read_mapping.ptr().as_ptr() as _, read_size as usize);
-                let dst_slice = slice::from_raw_parts_mut(write_mapping.ptr().as_ptr() as _, read_size as usize);
-                dst_slice.copy_from_slice(src_slice);
+                let read_slice = mapped.read::<u8>(&self.device, 0..read_size).unwrap();
+                let (mut mapped, _) = dst_buffer.map(&self.device, Some(read_size));
+                let mut writer = mapped.write::<u8>(&self.device, 0..read_size).unwrap();
+                let writer_slice = writer.slice();
+
+                writer_slice.copy_from_slice(read_slice);
             }
-            unsafe { dst_buffer.flush_mapped_ranges(&self.device, std::iter::once(0..read_size)) };
             dst_buffer.unmap(&self.device);
         }
         src_buffer.unmap(&self.device);

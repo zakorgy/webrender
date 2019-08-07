@@ -12,7 +12,7 @@ use std::mem;
 
 pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
 
-pub(super) struct PMBuffer<B: hal::Backend> {
+pub(crate) struct PMBuffer<B: hal::Backend> {
     pub buffer: B::Buffer,
     pub memory_block: MemoryBlock<B>,
     pub coherent: bool,
@@ -25,6 +25,7 @@ pub(super) struct PMBuffer<B: hal::Backend> {
 
 impl<B: hal::Backend> PMBuffer<B> {
     pub(super) fn map<'a>(&'a mut self, device: &B::Device, size: Option<u64>) -> (MappedRange<'a, B>, u64) {
+        assert!(size.unwrap_or(0) <= self.size);
         let size = size.unwrap_or(self.size);
         (self.memory_block.map(&device, 0..size).expect("Mapping memory block failed"), size)
     }
@@ -33,30 +34,11 @@ impl<B: hal::Backend> PMBuffer<B> {
         self.memory_block.unmap(device);
     }
 
-    pub(super) unsafe fn flush_mapped_ranges(
+    pub(super) unsafe fn update_transit_range(
         &mut self,
-        device: &B::Device,
-        ranges: impl Iterator<Item=std::ops::Range<u64>>,
+        address_max: u64,
     ) {
-        if !self.coherent {
-            let mut transit_range_end = self.transit_range_end;
-            let mask = self.non_coherent_atom_size_mask;
-            let offset = self.memory_block.range().start;
-            let max_range = self.size + offset;
-            device.flush_mapped_memory_ranges(ranges.into_iter().map(|mut r| {
-                    r.start = r.start + offset;
-                    r.start = if r.start <= mask { 0 } else { (r.start - mask) & !mask };
-                    transit_range_end = transit_range_end.max(r.end);
-                    r.end = ((r.end + offset + mask) & !mask).min(max_range);
-                    (self.memory_block.memory(), r)
-                }
-            )).expect("Flush mapped memory ranges failed for PMBuffer");
-            self.transit_range_end = transit_range_end;
-        } else {
-            if let Some(max) = ranges.max_by(|x, y| x.end.cmp(&y.end)) {
-                self.transit_range_end = self.transit_range_end.max(max.end);
-            }
-        }
+        self.transit_range_end = self.transit_range_end.max(address_max);
     }
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
