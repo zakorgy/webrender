@@ -7,7 +7,10 @@ use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::{ImageFormat, WorldPixel, NotificationRequest};
 use device::TextureFilter;
 use renderer::PipelineInfo;
+#[cfg(not(feature="gleam"))]
+use gpu_cache::GpuCacheBufferUpdate;
 use gpu_cache::GpuCacheUpdateList;
+use hal;
 use fxhash::FxHasher;
 use plane_split::BspSplitter;
 use profiler::BackendProfileCounters;
@@ -299,11 +302,15 @@ pub enum DebugOutput {
 }
 
 #[allow(dead_code)]
-pub enum ResultMsg {
+pub enum ResultMsg<B: hal::Backend> {
     DebugCommand(DebugCommand),
     DebugOutput(DebugOutput),
     RefreshShader(PathBuf),
     UpdateGpuCache(GpuCacheUpdateList),
+    #[cfg(not(feature="gleam"))]
+    UpdateGpuCacheBuffer(GpuCacheBufferUpdate<B>),
+    #[cfg(feature="gleam")]
+    Phantom(std::marker::PhantomData<B>),
     UpdateResources {
         updates: TextureUpdateList,
         memory_pressure: bool,

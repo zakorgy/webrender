@@ -420,6 +420,7 @@ pub fn main_wrapper<E: Example>(
 
         winit::ControlFlow::Continue
     });
+    api.shut_down();
 
     renderer.deinit();
 }
