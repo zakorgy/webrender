@@ -49,7 +49,7 @@ use device::query::GpuTimer;
 #[cfg(feature = "gleam")]
 use device::{CustomVAO, Program, VBO};
 #[cfg(not(feature="gleam"))]
-use device::BufferMemorySlice;
+use device::{BufferMemorySlice, DrawTargetUsage};
 use euclid::rect;
 use euclid::Transform3D;
 use frame_builder::{ChasePrimitive, FrameBuilderConfig};
@@ -2758,11 +2758,15 @@ impl<B: hal::Backend> Renderer<B> {
                             size
                         }
                         TextureUpdateSource::DebugClear => {
-                            self.device.bind_draw_target(DrawTarget::Texture {
-                                texture,
-                                layer: layer_index as usize,
-                                with_depth: false,
-                            });
+                            self.device.bind_draw_target(
+                                DrawTarget::Texture {
+                                    texture,
+                                    layer: layer_index as usize,
+                                    with_depth: false,
+                                },
+                                #[cfg(not(feature="gleam"))]
+                                DrawTargetUsage::Draw,
+                            );
                             self.device.clear_target(
                                 Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
                                 None,
@@ -2884,7 +2888,11 @@ impl<B: hal::Backend> Renderer<B> {
             layer: readback_layer.0 as usize,
             with_depth: false,
         };
-        self.device.bind_draw_target(cache_draw_target);
+        self.device.bind_draw_target(
+            cache_draw_target,
+            #[cfg(not(feature="gleam"))]
+            DrawTargetUsage::CopyOnly,
+        );
 
         let mut src = DeviceIntRect::new(
             source_screen_origin + (backdrop_rect.origin - backdrop_screen_origin),
@@ -2905,7 +2913,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Restore draw target to current pass render target + layer, and reset
         // the read target.
-        self.device.bind_draw_target(draw_target);
+        self.device.bind_draw_target(
+            draw_target,
+            #[cfg(not(feature="gleam"))]
+            DrawTargetUsage::Draw,
+        );
         self.device.reset_read_target();
 
         if uses_scissor {
@@ -3020,7 +3032,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
-            self.device.bind_draw_target(draw_target);
+            self.device.bind_draw_target(
+                draw_target,
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.disable_depth();
             self.set_blend(false, framebuffer_kind);
 
@@ -3314,11 +3330,15 @@ impl<B: hal::Backend> Renderer<B> {
                         .resolve(&blit.target.texture_id)
                         .expect("BUG: invalid target texture");
 
-                    self.device.bind_draw_target(DrawTarget::Texture {
-                        texture,
-                        layer: blit.target.texture_layer as usize,
-                        with_depth: false,
-                    });
+                    self.device.bind_draw_target(
+                        DrawTarget::Texture {
+                            texture,
+                            layer: blit.target.texture_layer as usize,
+                            with_depth: false,
+                        },
+                        #[cfg(not(feature="gleam"))]
+                        DrawTargetUsage::CopyOnly,
+                    );
 
                     let mut src_rect = DeviceIntRect::new(
                         blit.src_offset,
@@ -3348,7 +3368,11 @@ impl<B: hal::Backend> Renderer<B> {
                     );
                 }
 
-                self.device.bind_draw_target(draw_target);
+                self.device.bind_draw_target(
+                    draw_target,
+                    #[cfg(not(feature="gleam"))]
+                    DrawTargetUsage::Draw,
+                );
             }
         }
 
@@ -3403,7 +3427,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
-            self.device.bind_draw_target(draw_target);
+            self.device.bind_draw_target(
+                draw_target,
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.disable_depth();
             self.device.disable_depth_write();
 
@@ -3567,11 +3595,15 @@ impl<B: hal::Backend> Renderer<B> {
             let texture = self.texture_resolver
                 .resolve(&texture_source)
                 .expect("BUG: invalid target texture");
-            self.device.bind_draw_target(DrawTarget::Texture {
-                texture,
-                layer,
-                with_depth: false,
-            });
+            self.device.bind_draw_target(
+                DrawTarget::Texture {
+                    texture,
+                    layer,
+                    with_depth: false,
+                },
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
         }
 
         self.device.disable_depth();
@@ -4534,11 +4566,15 @@ impl<B: hal::Backend> Renderer<B> {
     /// Clears all the layers of a texture with a given color.
     fn clear_texture(&mut self, texture: &Texture, color: [f32; 4]) {
         for i in 0..texture.get_layer_count() {
-            self.device.bind_draw_target(DrawTarget::Texture {
-                texture: &texture,
-                layer: i as usize,
-                with_depth: false,
-            });
+            self.device.bind_draw_target(
+                DrawTarget::Texture {
+                    texture: &texture,
+                    layer: i as usize,
+                    with_depth: false,
+                },
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.clear_target(Some(color), None, None);
         }
     }

@@ -209,11 +209,15 @@ impl<B: hal::Backend> Renderer<B> {
                                                     projection,
                                                     &mut self.renderer_errors);
 
-        self.device.bind_draw_target(DrawTarget::Texture {
-            texture: &current_page.texture,
-            layer: 0,
-            with_depth: false,
-        });
+        self.device.bind_draw_target(
+            DrawTarget::Texture {
+                texture: &current_page.texture,
+                layer: 0,
+                with_depth: false,
+            },
+            #[cfg(not(feature="gleam"))]
+            DrawTargetUsage::Draw,
+        );
         self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, None);
 
         self.device.set_blend(true);
