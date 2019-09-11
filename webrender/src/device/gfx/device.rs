@@ -202,8 +202,8 @@ pub struct Device<B: hal::Backend> {
     command_buffer: B::CommandBuffer,
     staging_buffer_pool: ArrayVec<[BufferPool<B>; FRAME_COUNT_MAILBOX]>,
     pub swap_chain: Option<B::Swapchain>,
-    render_pass: Option<RenderPass<B>>,
     frames: ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
+    render_passes: HalRenderPasses<B>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -391,7 +391,7 @@ impl<B: hal::Backend> Device<B> {
             (device, id, queues.take_raw(id).unwrap())
         };
 
-        let render_pass = Device::create_render_passes(&device, SURFACE_FORMAT, DEPTH_FORMAT);
+        let render_passes = HalRenderPasses::create_render_passes(&device, SURFACE_FORMAT, DEPTH_FORMAT);
 
         // Disable push constants for Intel's Vulkan driver on Windows
         let has_broken_push_const_support = cfg!(target_os = "windows")
@@ -420,7 +420,7 @@ impl<B: hal::Backend> Device<B> {
                     surface,
                     Some(window_size),
                     None,
-                    &render_pass,
+                    &render_passes,
                 );
                 (
                     Some(swap_chain),
@@ -442,7 +442,7 @@ impl<B: hal::Backend> Device<B> {
                         height: window_size.1 as _,
                         depth: 1,
                     },
-                    &render_pass,
+                    &render_passes,
                     SURFACE_FORMAT,
                     FRAME_COUNT_NOT_MAILBOX,
                     None,
@@ -662,7 +662,7 @@ impl<B: hal::Backend> Device<B> {
             command_buffer,
             staging_buffer_pool,
             swap_chain: swap_chain,
-            render_pass: Some(render_pass),
+            render_passes,
             frames,
             frame_count,
             viewport,
@@ -819,7 +819,7 @@ impl<B: hal::Backend> Device<B> {
                 surface,
                 window_size,
                 self.swap_chain.take(),
-                self.render_pass.as_ref().unwrap()
+                &self.render_passes,
             );
             (
                 Some(swap_chain),
@@ -848,7 +848,7 @@ impl<B: hal::Backend> Device<B> {
                 self.device.as_ref(),
                 heaps,
                 extent,
-                self.render_pass.as_ref().unwrap(),
+                &self.render_passes,
                 SURFACE_FORMAT,
                 FRAME_COUNT_NOT_MAILBOX,
                 None,
@@ -890,7 +890,7 @@ impl<B: hal::Backend> Device<B> {
         surface: &mut B::Surface,
         window_size: Option<(i32, i32)>,
         old_swap_chain: Option<B::Swapchain>,
-        render_pass: &RenderPass<B>,
+        render_passes: &HalRenderPasses<B>,
     ) -> (
         B::Swapchain,
         ImageFormat,
@@ -973,7 +973,7 @@ impl<B: hal::Backend> Device<B> {
                 device,
                 heaps,
                 image_extent,
-                render_pass,
+                render_passes,
                 available_surface_format,
                 frame_count,
                 Some(images),
@@ -993,7 +993,7 @@ impl<B: hal::Backend> Device<B> {
         device: &B::Device,
         heaps: &mut Heaps<B>,
         extent: hal::image::Extent,
-        render_pass: &RenderPass<B>,
+        render_passes: &HalRenderPasses<B>,
         surface_format: hal::format::Format,
         frame_count: usize,
         images: Option<Vec<B::Image>>
@@ -1046,7 +1046,7 @@ impl<B: hal::Backend> Device<B> {
             );
             let framebuffer = unsafe {
                 device.create_framebuffer(
-                    &render_pass.bgra8,
+                    &render_passes.bgra8,
                     Some(&image.view),
                     extent,
                 )
@@ -1055,7 +1055,7 @@ impl<B: hal::Backend> Device<B> {
 
             let framebuffer_depth = unsafe {
                 device.create_framebuffer(
-                    &render_pass.bgra8_depth,
+                    &render_passes.bgra8_depth,
                     vec![&image.view, &depth.core.view],
                     extent,
                 )
@@ -1082,116 +1082,6 @@ impl<B: hal::Backend> Device<B> {
             frames,
             viewport,
         )
-    }
-
-    fn create_render_passes(
-        device: &<B as hal::Backend>::Device,
-        surface_format: hal::format::Format,
-        depth_format: hal::format::Format,
-    ) -> RenderPass<B> {
-        let attachment_r8 = hal::pass::Attachment {
-            format: Some(hal::format::Format::R8Unorm),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::DontCare,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: hal::image::Layout::ColorAttachmentOptimal
-                .. hal::image::Layout::ColorAttachmentOptimal,
-        };
-
-        let attachment_bgra8 = hal::pass::Attachment {
-            format: Some(surface_format),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::DontCare,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: hal::image::Layout::ColorAttachmentOptimal
-                .. hal::image::Layout::ColorAttachmentOptimal,
-        };
-
-        let attachment_depth = hal::pass::Attachment {
-            format: Some(depth_format),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::DontCare,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: hal::image::Layout::DepthStencilAttachmentOptimal
-                .. hal::image::Layout::DepthStencilAttachmentOptimal,
-        };
-
-        let subpass_r8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: None,
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        let subpass_depth_r8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        let subpass_bgra8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: None,
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        let subpass_depth_bgra8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        use std::iter;
-        RenderPass {
-            r8: unsafe {
-                device.create_render_pass(
-                    iter::once(&attachment_r8),
-                    &[subpass_r8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            r8_depth: unsafe {
-                device.create_render_pass(
-                    iter::once(&attachment_r8).chain(iter::once(&attachment_depth)),
-                    &[subpass_depth_r8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            bgra8: unsafe {
-                device.create_render_pass(
-                    iter::once(&attachment_bgra8),
-                    &[subpass_bgra8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            bgra8_depth: unsafe {
-                device.create_render_pass(
-                    &[attachment_bgra8, attachment_depth],
-                    &[subpass_depth_bgra8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-        }
     }
 
     pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
@@ -1326,7 +1216,7 @@ impl<B: hal::Backend> Device<B> {
             &name,
             features,
             shader_kind.clone(),
-            self.render_pass.as_ref().unwrap(),
+            &self.render_passes,
             self.frame_count,
             &mut self.shader_modules,
             self.pipeline_cache.as_ref(),
@@ -1560,11 +1450,7 @@ impl<B: hal::Backend> Device<B> {
                 ),
             }
         };
-        let rp = self
-            .render_pass
-            .as_ref()
-            .unwrap()
-            .get_render_pass(format, depth_img.is_some());
+        let rp = self.render_passes.get_render_pass(format, depth_img.is_some());
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
         let descriptor_group = self.programs
@@ -2071,7 +1957,7 @@ impl<B: hal::Backend> Device<B> {
                 &texture,
                 &self.images.get(&texture.id).unwrap(),
                 i,
-                self.render_pass.as_ref().unwrap(),
+                &self.render_passes,
                 rbo_id.clone(),
                 depth,
             );
@@ -3098,12 +2984,7 @@ impl<B: hal::Backend> Device<B> {
             }
         };
 
-        let render_pass = self
-            .render_pass
-            .as_ref()
-            .unwrap()
-            .get_render_pass(format, depth_img.is_some());
-
+        let render_pass = self.render_passes.get_render_pass(format, depth_img.is_some());
         unsafe {
             assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
 
@@ -3656,7 +3537,7 @@ impl<B: hal::Backend> Device<B> {
                 self.device.destroy_shader_module(fs_module);
             }
             self.descriptor_data.deinit(self.device.as_ref());
-            self.render_pass.unwrap().deinit(self.device.as_ref());
+            self.render_passes.deinit(self.device.as_ref());
             for fence in self.frame_fence {
                 self.device.destroy_fence(fence.inner);
             }
