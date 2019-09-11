@@ -401,6 +401,13 @@ impl<B: hal::Backend> Program<B> {
                 cmd_buffer.set_blend_constants(blend_color.to_array());
             }
 
+            cmd_buffer.begin_render_pass(
+                render_pass,
+                frame_buffer,
+                viewport.rect,
+                clear_values,
+                SubpassContents::Inline,
+            );
             if let Some(ref index_buffer) = self.index_buffer {
                 cmd_buffer.bind_vertex_buffers(0, Some((&vertex_buffer.buffer().buffer, 0)));
                 cmd_buffer.bind_index_buffer(hal::buffer::IndexBufferView {
@@ -409,21 +416,12 @@ impl<B: hal::Backend> Program<B> {
                     index_type: hal::IndexType::U32,
                 });
 
-                cmd_buffer.begin_render_pass(
-                    render_pass,
-                    frame_buffer,
-                    viewport.rect,
-                    clear_values,
-                    SubpassContents::Inline,
-                );
 
                 cmd_buffer.draw_indexed(
                     0 .. index_buffer[next_id].buffer().buffer_len as u32,
                     0,
                     0 .. 1,
                 );
-
-                cmd_buffer.end_render_pass();
             } else {
                 for i in instance_range.into_iter() {
                     cmd_buffer.bind_vertex_buffers(
@@ -433,14 +431,6 @@ impl<B: hal::Backend> Program<B> {
                             .chain(Some((&instance_buffer.buffers[i].buffer.buffer, 0))),
                     );
 
-                    cmd_buffer.begin_render_pass(
-                        render_pass,
-                        frame_buffer,
-                        viewport.rect,
-                        clear_values,
-                        SubpassContents::Inline,
-                    );
-
                     let data_stride = instance_buffer.buffers[i].last_data_stride;
                     let end = instance_buffer.buffers[i].offset / data_stride;
                     let start = end - instance_buffer.buffers[i].last_update_size / data_stride;
@@ -448,10 +438,9 @@ impl<B: hal::Backend> Program<B> {
                         0 .. vertex_buffer.buffer_len as _,
                         start as u32 .. end as u32,
                     );
-
-                    cmd_buffer.end_render_pass();
                 }
             }
+            cmd_buffer.end_render_pass();
         }
     }
 
