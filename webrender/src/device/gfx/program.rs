@@ -12,7 +12,7 @@ use std::borrow::Cow::{Borrowed};
 
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
-use super::render_pass::RenderPass;
+use super::render_pass::HalRenderPasses;
 use super::PipelineRequirements;
 use super::super::{ShaderKind, VertexArrayKind};
 use super::super::super::shader_source;
@@ -52,7 +52,7 @@ impl<B: hal::Backend> Program<B> {
         shader_name: &str,
         features: &[&str],
         shader_kind: ShaderKind,
-        render_pass: &RenderPass<B>,
+        render_passes: &HalRenderPasses<B>,
         frame_count: usize,
         shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
         pipeline_cache: Option<&B::PipelineCache>,
@@ -232,7 +232,7 @@ impl<B: hal::Backend> Program<B> {
             let create_desc = |(blend_state, depth_test)| {
                 let subpass = hal::pass::Subpass {
                     index: 0,
-                    main_pass: render_pass
+                    main_pass: render_passes
                         .get_render_pass(format, depth_test != None),
                 };
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
