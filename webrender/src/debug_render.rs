@@ -385,6 +385,9 @@ impl DebugRenderer {
                 true,
             );
 
+            #[cfg(not(feature = "gleam"))]
+            device.begin_render_pass();
+
             // Triangles
             if !self.tri_vertices.is_empty() {
                 device.bind_program(&self.color_program);
@@ -426,6 +429,9 @@ impl DebugRenderer {
                 );
                 device.draw_triangles_u32(0, self.font_indices.len() as i32);
             }
+
+            #[cfg(not(feature = "gleam"))]
+            device.end_render_pass();
         }
 
         self.font_indices.clear();
