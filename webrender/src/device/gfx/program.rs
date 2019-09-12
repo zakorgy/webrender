@@ -4,7 +4,7 @@
 
 use api::{ColorF, DeviceIntRect, ImageFormat};
 use hal::{self, Device as BackendDevice};
-use hal::command::{RawCommandBuffer, SubpassContents};
+use hal::command::RawCommandBuffer;
 use internal_types::FastHashMap;
 use smallvec::SmallVec;
 use rendy_memory::Heaps;
@@ -329,13 +329,10 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         cmd_buffer: &mut B::CommandBuffer,
         viewport: hal::pso::Viewport,
-        render_pass: &B::RenderPass,
-        frame_buffer: &B::Framebuffer,
         desc_set_per_draw: &B::DescriptorSet,
         desc_set_per_pass: Option<&B::DescriptorSet>,
         desc_set_per_frame: &B::DescriptorSet,
         desc_set_locals: Option<&B::DescriptorSet>,
-        clear_values: &[hal::command::ClearValueRaw],
         blend_state: Option<hal::pso::BlendState>,
         blend_color: ColorF,
         depth_test: Option<hal::pso::DepthTest>,
@@ -401,13 +398,6 @@ impl<B: hal::Backend> Program<B> {
                 cmd_buffer.set_blend_constants(blend_color.to_array());
             }
 
-            cmd_buffer.begin_render_pass(
-                render_pass,
-                frame_buffer,
-                viewport.rect,
-                clear_values,
-                SubpassContents::Inline,
-            );
             if let Some(ref index_buffer) = self.index_buffer {
                 cmd_buffer.bind_vertex_buffers(0, Some((&vertex_buffer.buffer().buffer, 0)));
                 cmd_buffer.bind_index_buffer(hal::buffer::IndexBufferView {
@@ -440,7 +430,6 @@ impl<B: hal::Backend> Program<B> {
                     );
                 }
             }
-            cmd_buffer.end_render_pass();
         }
     }
 

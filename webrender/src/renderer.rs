@@ -1248,7 +1248,7 @@ pub struct Renderer<B: hal::Backend> {
     max_recorded_profiles: usize,
 
     clear_color: Option<ColorF>,
-    enable_clear_scissor: bool,
+    _enable_clear_scissor: bool,
     debug: LazyInitializedDebugRenderer<B>,
     debug_flags: DebugFlags,
     backend_profile_counters: BackendProfileCounters,
@@ -1756,7 +1756,7 @@ impl<B: hal::Backend> Renderer<B> {
             slow_frame_indicator: ChangeIndicator::new(),
             max_recorded_profiles: options.max_recorded_profiles,
             clear_color: options.clear_color,
-            enable_clear_scissor: options.enable_clear_scissor,
+            _enable_clear_scissor: options.enable_clear_scissor,
             last_time: 0,
             gpu_profile,
             gpu_glyph_renderer,
@@ -3047,8 +3047,9 @@ impl<B: hal::Backend> Renderer<B> {
                 None
             };
 
+            #[cfg(feature = "gleam")]
             let clear_rect = if !draw_target.is_default() {
-                if self.enable_clear_scissor {
+                if self._enable_clear_scissor {
                     // TODO(gw): Applying a scissor rect and minimal clear here
                     // is a very large performance win on the Intel and nVidia
                     // GPUs that I have tested with. It's possible it may be a
@@ -3071,9 +3072,7 @@ impl<B: hal::Backend> Renderer<B> {
                 // Note: `framebuffer_target_rect` needs a Y-flip before going to GL
                 // Note: at this point, the target rectangle is not guaranteed to be within the main framebuffer bounds
                 // but `clear_target_rect` is totally fine with negative origin, as long as width & height are positive
-                if cfg!(feature = "gleam") {
-                    rect.origin.y = draw_target.dimensions().height as i32 - rect.origin.y - rect.size.height;
-                }
+                rect.origin.y = draw_target.dimensions().height as i32 - rect.origin.y - rect.size.height;
                 Some(rect)
             };
             #[cfg(not(feature = "gleam"))]
@@ -3088,6 +3087,9 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Handle any blits from the texture cache to this target.
         self.handle_blits(&target.blits, render_tasks);
+
+        #[cfg(not(feature = "gleam"))]
+        self.device.begin_render_pass();
 
         // Draw any blurs for this target.
         // Blurs are rendered as a standard 2-pass
@@ -3138,7 +3140,8 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
-        for alpha_batch_container in &target.alpha_batch_containers {
+        let alpha_batches = target.alpha_batch_containers.len();
+        for (i, alpha_batch_container) in target.alpha_batch_containers.iter().enumerate() {
             let uses_scissor = alpha_batch_container.task_scissor_rect.is_some() ||
                                !alpha_batch_container.regions.is_empty();
 
@@ -3258,6 +3261,8 @@ impl<B: hal::Backend> Renderer<B> {
                         // composites can't be grouped together because
                         // they may overlap and affect each other.
                         debug_assert_eq!(batch.instances.len(), 1);
+                        #[cfg(not(feature = "gleam"))]
+                        self.device.end_render_pass();
                         self.handle_readback_composite(
                             draw_target,
                             uses_scissor,
@@ -3265,6 +3270,8 @@ impl<B: hal::Backend> Renderer<B> {
                             &render_tasks[task_id],
                             &render_tasks[backdrop_id],
                         );
+                        #[cfg(not(feature = "gleam"))]
+                        self.device.begin_render_pass();
                     }
 
                     let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
@@ -3323,6 +3330,9 @@ impl<B: hal::Backend> Renderer<B> {
             // At the end of rendering a container, blit across any cache tiles
             // to the texture cache for use on subsequent frames.
             if !alpha_batch_container.tile_blits.is_empty() {
+                #[cfg(not(feature = "gleam"))]
+                self.device.end_render_pass();
+
                 let _timer = self.gpu_profile.start_timer(GPU_TAG_BLIT);
 
                 self.device.bind_read_target(draw_target.into());
@@ -3375,8 +3385,17 @@ impl<B: hal::Backend> Renderer<B> {
                     #[cfg(not(feature="gleam"))]
                     DrawTargetUsage::Draw,
                 );
+
+                // Don't create a new RP if it's the last element
+                if i < alpha_batches - 1 {
+                    #[cfg(not(feature = "gleam"))]
+                    self.device.begin_render_pass();
+                }
             }
         }
+        #[cfg(not(feature = "gleam"))]
+        self.device.end_render_pass();
+
 
         // For any registered image outputs on this render target,
         // get the texture from caller and blit it.
@@ -3436,6 +3455,9 @@ impl<B: hal::Backend> Renderer<B> {
             );
             self.device.disable_depth();
             self.device.disable_depth_write();
+
+            #[cfg(not(feature = "gleam"))]
+            self.device.begin_render_pass();
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -3558,6 +3580,9 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
+        #[cfg(not(feature = "gleam"))]
+        self.device.end_render_pass();
+
         self.gpu_profile.finish_sampler(alpha_sampler);
     }
 
@@ -3618,6 +3643,9 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Handle any blits to this texture from child tasks.
         self.handle_blits(&target.blits, render_tasks);
+
+        #[cfg(not(feature = "gleam"))]
+        self.device.begin_render_pass();
 
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
@@ -3705,6 +3733,9 @@ impl<B: hal::Backend> Renderer<B> {
                 stats,
             );
         }
+
+        #[cfg(not(feature = "gleam"))]
+        self.device.end_render_pass();
 
         // Blit any Pathfinder glyphs to the cache texture.
         if let Some(stencil_page) = stencil_page {

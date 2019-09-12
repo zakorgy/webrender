@@ -269,6 +269,7 @@ pub struct Device<B: hal::Backend> {
 
     // debug
     inside_frame: bool,
+    inside_render_pass: bool,
 
     // resources
     _resource_override_path: Option<PathBuf>,
@@ -679,6 +680,7 @@ impl<B: hal::Backend> Device<B> {
             depth_available: true,
             upload_method,
             inside_frame: false,
+            inside_render_pass: false,
 
             capabilities: Capabilities {
                 supports_multisampling: false, //TODO
@@ -1416,41 +1418,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn draw(&mut self) {
+        assert!(self.inside_render_pass);
         self.bind_textures();
         self.bind_uniforms();
-        let (frame_buffer, format, (depth_img, depth_test_changed)) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            let rbo_id = self.fbos[&self.bound_draw_fbo].rbo;
-            (
-                &self.fbos[&self.bound_draw_fbo].fbo,
-                self.fbos[&self.bound_draw_fbo].format,
-                if rbo_id == RBOId(0) {
-                    (None, false)
-                } else {
-                    let mut depth_test_changed =  false;
-                    // This is needed to avoid validation layer errors for different attachments between frambuffer renderpass and pipelinelayout
-                    if self.current_depth_test == None {
-                        self.current_depth_test = Some(LESS_EQUAL_TEST);
-                        depth_test_changed = true;
-                    }
-                    (Some(&self.rbos[&rbo_id].core), depth_test_changed)
-                },
-            )
-        } else {
-            let frame = &self.frames[self.current_frame_id];
-            match self.current_depth_test {
-                Some(_) => (
-                    &frame.framebuffer_depth,
-                    self.surface_format,
-                    (Some(&frame.depth.core), false),
-                ),
-                None => (
-                    &frame.framebuffer,
-                    self.surface_format,
-                    (None, false),
-                ),
-            }
-        };
-        let rp = self.render_passes.get_render_pass(format, depth_img.is_some());
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
         let descriptor_group = self.programs
@@ -1473,13 +1443,10 @@ impl<B: hal::Backend> Device<B> {
             .submit(
                 &mut self.command_buffer,
                 self.viewport.clone(),
-                rp,
-                &frame_buffer,
                 desc_set_per_draw,
                 desc_set_per_pass,
                 desc_set_per_group,
                 Some(*desc_set_locals),
-                &vec![],
                 self.current_blend_state.get(),
                 self.blend_color.get(),
                 self.current_depth_test,
@@ -1491,10 +1458,6 @@ impl<B: hal::Backend> Device<B> {
                 &self.instance_buffers[self.next_id],
                 self.instance_range.clone(),
             );
-
-        if depth_test_changed {
-            self.current_depth_test = None;
-        }
     }
 
     pub fn begin_frame(&mut self) -> GpuFrameId {
@@ -1973,6 +1936,7 @@ impl<B: hal::Backend> Device<B> {
 
     /// Copies the contents from one renderable texture to another.
     pub fn blit_renderable_texture(&mut self, dst: &mut Texture, src: &Texture) {
+        assert!(!self.inside_render_pass);
         dst.bound_in_frame.set(self.frame_id);
         src.bound_in_frame.set(self.frame_id);
         debug_assert!(self.inside_frame);
@@ -2080,6 +2044,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
+        assert!(!self.inside_render_pass);
         texture.bound_in_frame.set(self.frame_id);
 
         let image = self
@@ -2250,6 +2215,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
+        assert!(!self.inside_render_pass);
         debug_assert!(self.inside_frame);
 
         let (src_format, src_img, src_layer, access, layout, pipeline_stage) = if self.bound_read_fbo != DEFAULT_READ_FBO {
@@ -2935,12 +2901,51 @@ impl<B: hal::Backend> Device<B> {
         self.frame_id.0 += 1;
     }
 
+    pub fn begin_render_pass(&mut self) {
+        assert!(!self.inside_render_pass);
+        assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
+
+        let (frame_buffer, format, has_depth) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            let rbo_id = self.fbos[&self.bound_draw_fbo].rbo;
+            (
+                &self.fbos[&self.bound_draw_fbo].fbo,
+                self.fbos[&self.bound_draw_fbo].format,
+                self.rbos.get(&rbo_id).is_some(),
+            )
+        } else {
+            match self.current_depth_test {
+                None => (&self.frames[self.current_frame_id].framebuffer, self.surface_format, false),
+                _ => (&self.frames[self.current_frame_id].framebuffer_depth, self.surface_format, true),
+            }
+        };
+
+        let render_pass = self.render_passes.get_render_pass(format, has_depth);
+        unsafe {
+            self.command_buffer.begin_render_pass(
+                render_pass,
+                frame_buffer,
+                self.viewport.rect,
+                &[],
+                hal::command::SubpassContents::Inline,
+            );
+        }
+        self.inside_render_pass = true;
+    }
+
+    pub fn end_render_pass(&mut self) {
+        if self.inside_render_pass {
+            unsafe { self.command_buffer.end_render_pass() };
+            self.inside_render_pass = false;
+        }
+    }
+
     fn clear_target_rect(
         &mut self,
         rect: DeviceIntRect,
         color: Option<[f32; 4]>,
         depth: Option<f32>,
     ) {
+        assert!(self.inside_render_pass);
         if color.is_none() && depth.is_none() {
             return;
         }
@@ -2965,42 +2970,16 @@ impl<B: hal::Backend> Device<B> {
             stencil: None,
         });
 
-        let (frame_buffer, format, depth_img) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            let rbo_id = self.fbos[&self.bound_draw_fbo].rbo;
-            (
-                &self.fbos[&self.bound_draw_fbo].fbo,
-                self.fbos[&self.bound_draw_fbo].format,
-                if rbo_id == RBOId(0) {
-                    None
-                } else {
-                    Some(&self.rbos[&rbo_id].core)
-                },
-            )
-        } else {
-            let frame = &self.frames[self.current_frame_id];
-            match self.current_depth_test {
-                Some(_) => (&frame.framebuffer_depth, self.surface_format, Some(&frame.depth.core)),
-                None => (&frame.framebuffer, self.surface_format, None),
-            }
-        };
-
-        let render_pass = self.render_passes.get_render_pass(format, depth_img.is_some());
         unsafe {
-            assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
-
-            self.command_buffer.begin_render_pass(
-                render_pass,
-                frame_buffer,
-                self.viewport.rect,
-                &[],
-                hal::command::SubpassContents::Inline,
+            self.command_buffer.clear_attachments(
+                color_clear.into_iter().chain(depth_clear),
+                Some(rect)
             );
-            self.command_buffer.clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
-            self.command_buffer.end_render_pass();
         }
     }
 
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
+        assert!(!self.inside_render_pass);
         let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
@@ -3108,7 +3087,7 @@ impl<B: hal::Backend> Device<B> {
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
     ) {
-        if let Some(rect) = rect {
+        if let Some(mut rect) = rect {
             let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
                 let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture_id]
                     .kind
@@ -3123,13 +3102,12 @@ impl<B: hal::Backend> Device<B> {
                     DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _),
                 )
             };
-            if rect.size.width > target_rect.size.width
-                || rect.size.height > target_rect.size.height
-            {
-                // This can happen, when we resize
-                self.clear_target_image(color, depth);
-            } else if rect == target_rect {
-                self.clear_target_image(color, depth);
+            rect.size.width = rect.size.width.min(target_rect.size.width);
+            rect.size.height = rect.size.height.min(target_rect.size.height);
+            if !self.inside_render_pass {
+                self.begin_render_pass();
+                self.clear_target_rect(rect, color, depth);
+                self.end_render_pass();
             } else {
                 self.clear_target_rect(rect, color, depth);
             }
@@ -3143,11 +3121,17 @@ impl<B: hal::Backend> Device<B> {
             self.depth_available,
             "Enabling depth test without depth target"
         );
-        self.current_depth_test = Some(LESS_EQUAL_TEST);
+        if mem::replace(&mut self.current_depth_test, Some(LESS_EQUAL_TEST)).is_none() && self.inside_render_pass {
+            self.end_render_pass();
+            self.begin_render_pass();
+        }
     }
 
     pub fn disable_depth(&mut self) {
-        self.current_depth_test = None;
+        if mem::replace(&mut self.current_depth_test, None).is_some() && self.inside_render_pass {
+            self.end_render_pass();
+            self.begin_render_pass();
+        }
     }
 
     pub fn set_depth_func(&mut self, _depth_func: DepthFunction) {
@@ -3161,10 +3145,14 @@ impl<B: hal::Backend> Device<B> {
             "Enabling depth test without depth target"
         );
         self.current_depth_test = Some(LESS_EQUAL_WRITE);
+        if mem::replace(&mut self.current_depth_test, Some(LESS_EQUAL_WRITE)).is_none() && self.inside_render_pass {
+            self.end_render_pass();
+            self.begin_render_pass();
+        }
     }
 
     pub fn disable_depth_write(&mut self) {
-        if self.current_depth_test != None {
+        if self.current_depth_test == Some(LESS_EQUAL_WRITE) {
             self.current_depth_test = Some(LESS_EQUAL_TEST);
         }
     }
