@@ -3076,6 +3076,8 @@ impl<B: hal::Backend> Renderer<B> {
                 }
                 Some(rect)
             };
+            #[cfg(not(feature = "gleam"))]
+            let clear_rect = None;
 
             self.device.clear_target(clear_color, depth_clear, clear_rect);
 
