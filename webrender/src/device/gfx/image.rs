@@ -11,6 +11,7 @@ use std::cell::Cell;
 use super::buffer::BufferPool;
 use super::render_pass::RenderPass;
 use super::TextureId;
+use super::PipelineBarrierInfo;
 use super::super::{RBOId, Texture};
 
 const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
@@ -204,7 +205,7 @@ impl<B: hal::Backend> Image<B> {
         rect: DeviceIntRect,
         layer_index: i32,
         image_data: &[u8],
-        draw_target: bool,
+        info: PipelineBarrierInfo,
     ) {
         use hal::pso::PipelineStage;
         let pos = rect.origin;
@@ -222,22 +223,8 @@ impl<B: hal::Backend> Image<B> {
                     self.core.subresource_range.clone(),
                 ));
 
-            let (prev_stage, prev_access, prev_layout) = if draw_target {
-                (
-                    PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                    hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                    hal::image::Layout::ColorAttachmentOptimal,
-                )
-            } else {
-                (
-                    PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
-                    hal::image::Access::SHADER_READ,
-                    hal::image::Layout::ShaderReadOnlyOptimal,
-                )
-            };
-
             cmd_buffer.pipeline_barrier(
-                prev_stage .. PipelineStage::TRANSFER,
+                info.pipeline_stage .. PipelineStage::TRANSFER,
                 hal::memory::Dependencies::empty(),
                 barriers,
             );
@@ -269,12 +256,12 @@ impl<B: hal::Backend> Image<B> {
             );
 
             if let Some(barrier) = self.core.transit(
-                prev_access,
-                prev_layout,
+                info.access,
+                info.layout,
                 self.core.subresource_range.clone(),
             ) {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. prev_stage,
+                    PipelineStage::TRANSFER .. info.pipeline_stage,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );

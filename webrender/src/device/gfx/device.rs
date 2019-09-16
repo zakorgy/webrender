@@ -83,6 +83,12 @@ pub enum DrawTargetUsage {
     Draw,
 }
 
+pub struct PipelineBarrierInfo {
+    pub pipeline_stage: PipelineStage,
+    pub access: hal::image::Access,
+    pub layout: hal::image::Layout,
+}
+
 const QUAD: [vertex_types::Vertex; 6] = [
     vertex_types::Vertex {
         aPosition: [0.0, 0.0, 0.0],
@@ -1835,6 +1841,22 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    fn barrier_info(&self, id: TextureId) -> PipelineBarrierInfo {
+        if self.is_draw_target(id) {
+            PipelineBarrierInfo {
+                pipeline_stage: PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                access: hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                layout: hal::image::Layout::ColorAttachmentOptimal,
+            }
+        } else {
+            PipelineBarrierInfo {
+                pipeline_stage: PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
+                access: hal::image::Access::SHADER_READ,
+                layout: hal::image::Layout::ShaderReadOnlyOptimal,
+            }
+        }
+    }
+
     pub fn bind_draw_target(&mut self, texture_target: DrawTarget, usage: DrawTargetUsage) {
         let (fbo_id, dimensions, depth_available) = match texture_target {
             DrawTarget::Default(dim) => {
@@ -2191,19 +2213,7 @@ impl<B: hal::Backend> Device<B> {
         //     layers: 0 .. layers as _,
         // };
 
-        let (prev_stage, prev_access, prev_layout) = if self.is_draw_target(dst.id) {
-            (
-                PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                hal::image::Layout::ColorAttachmentOptimal,
-            )
-        } else {
-            (
-                PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
-                hal::image::Access::SHADER_READ,
-                hal::image::Layout::ShaderReadOnlyOptimal,
-            )
-        };
+        let info = self.barrier_info(dst.id);
 
         let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
         unsafe {
@@ -2227,7 +2237,7 @@ impl<B: hal::Backend> Device<B> {
                 dst_img.subresource_range.clone(),
             ) {
                 cmd_buffer.pipeline_barrier(
-                    prev_stage .. PipelineStage::TRANSFER,
+                    info.pipeline_stage .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -2281,12 +2291,12 @@ impl<B: hal::Backend> Device<B> {
 
             // the blit caller code expects to be able to render to the target
             if let Some(barrier) = dst_img.transit(
-                prev_access,
-                prev_layout,
+                info.access,
+                info.layout,
                 dst_img.subresource_range.clone(),
             ) {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. prev_stage,
+                    PipelineStage::TRANSFER .. info.pipeline_stage,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
@@ -2788,7 +2798,7 @@ impl<B: hal::Backend> Device<B> {
         for i in 0 .. texture.layer_count {
             let start = len * i as usize;
 
-            let draw_target = self.is_draw_target(texture.id);
+            let info = self.barrier_info(texture.id);
             self.images
                 .get_mut(&texture.id)
                 .expect("Texture not found.")
@@ -2799,7 +2809,7 @@ impl<B: hal::Backend> Device<B> {
                     DeviceIntRect::new(DeviceIntPoint::new(0, 0), texture.size),
                     i,
                     texels_to_u8_slice(&pixels[start .. (start + len)]),
-                    draw_target,
+                    info,
                 );
         }
         if texture.filter == TextureFilter::Trilinear {
@@ -3864,7 +3874,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
         );
 
         self.texture.bound_in_frame.set(self.device.frame_id);
-        let draw_target = self.device.is_draw_target(self.texture.id);
+        let info = self.device.barrier_info(self.texture.id);
         self.device
             .images
             .get_mut(&self.texture.id)
@@ -3876,7 +3886,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
                 rect,
                 layer_index,
                 data,
-                draw_target,
+                info,
             );
 
         if self.texture.filter == TextureFilter::Trilinear {
