@@ -172,7 +172,8 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group_family: QueueFamilyId,
     pub queue_group_queues: Vec<B::CommandQueue>,
-    pub command_pool: SmallVec<[CommandPool<B>; 1]>,
+    command_pools: SmallVec<[CommandPool<B>; 1]>,
+    command_buffer: B::CommandBuffer,
     staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
     pub swap_chain: Option<B::Swapchain>,
     render_pass: Option<RenderPass<B>>,
@@ -475,10 +476,10 @@ impl<B: hal::Backend> Device<B> {
         let mut desc_allocator = DescriptorAllocator::new();
 
         let mut frame_fence = SmallVec::new();
-        let mut command_pool: SmallVec<[CommandPool<B>; 1]> = SmallVec::new();
+        let mut command_pools: SmallVec<[CommandPool<B>; 1]> = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
         let mut instance_buffers = SmallVec::new();
-        for i in 0 .. frame_count {
+        for _ in 0 .. frame_count {
             let fence = device.create_fence(false).expect("create_fence failed");
             frame_fence.push(Fence {
                 inner: fence,
@@ -495,11 +496,7 @@ impl<B: hal::Backend> Device<B> {
             unsafe { hal_cp.reset(false) };
             let mut cp = CommandPool::new(hal_cp);
             cp.create_command_buffer();
-            // Start recording for the 1st frame
-            if i == 0 {
-                unsafe { Self::begin_cmd_buffer(cp.command_buffer_mut()) };
-            }
-            command_pool.push(cp);
+            command_pools.push(cp);
             staging_buffer_pool.push(BufferPool::new(
                 &device,
                 &mut heaps,
@@ -516,6 +513,10 @@ impl<B: hal::Backend> Device<B> {
                 instance_buffer_size,
             ));
         }
+
+        let mut command_buffer = command_pools[0].remove_cmd_buffer();
+        // Start recording for the 1st frame
+        unsafe { Self::begin_cmd_buffer(&mut command_buffer) };
 
         let locals_buffer = UniformBufferHandler::new(
             hal::buffer::Usage::UNIFORM,
@@ -653,7 +654,8 @@ impl<B: hal::Backend> Device<B> {
             depth_format,
             queue_group_family,
             queue_group_queues,
-            command_pool,
+            command_pools,
+            command_buffer,
             staging_buffer_pool,
             swap_chain: swap_chain,
             render_pass: Some(render_pass),
@@ -1337,6 +1339,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn reset_next_frame_resources(&mut self) {
+        let prev_id = self.next_id;
         self.next_id = (self.next_id + 1) % self.frame_count;
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
@@ -1353,8 +1356,13 @@ impl<B: hal::Backend> Device<B> {
             self.frame_fence[self.next_id].is_submitted = false;
         }
         unsafe {
-            self.command_pool[self.next_id].reset();
-            Self::begin_cmd_buffer(self.command_pool[self.next_id].command_buffer_mut());
+            self.command_pools[self.next_id].reset();
+            let old_buffer = mem::replace(
+                &mut self.command_buffer,
+                self.command_pools[self.next_id].remove_cmd_buffer()
+            );
+            self.command_pools[prev_id].return_cmd_buffer(old_buffer);
+            Self::begin_cmd_buffer(&mut self.command_buffer);
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.reset_program_buffer_offsets();
@@ -1688,7 +1696,7 @@ impl<B: hal::Backend> Device<B> {
             .get_mut(&self.bound_program)
             .expect("Program not found")
             .submit(
-                self.command_pool[self.next_id].command_buffer_mut(),
+                &mut self.command_buffer,
                 self.viewport.clone(),
                 rp,
                 &frame_buffer,
@@ -1798,8 +1806,7 @@ impl<B: hal::Backend> Device<B> {
 
                 unsafe {
                     if let Some(barrier) = barrier {
-                        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
-                        cmd_buffer.pipeline_barrier(
+                        self.command_buffer.pipeline_barrier(
                             pipeline_stages,
                             hal::memory::Dependencies::empty(),
                             &[barrier],
@@ -1812,9 +1819,8 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::ColorAttachmentOptimal,
                     self.frame_images[self.current_frame_id].subresource_range.clone(),
                 ) {
-                    let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
                     unsafe {
-                        cmd_buffer.pipeline_barrier(
+                        self.command_buffer.pipeline_barrier(
                             PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                             hal::memory::Dependencies::empty(),
                             &[barrier],
@@ -1866,9 +1872,8 @@ impl<B: hal::Backend> Device<B> {
                         hal::image::Layout::TransferDstOptimal,
                         self.frame_images[self.next_id].subresource_range.clone(),
                     ) {
-                        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
                         unsafe {
-                            cmd_buffer.pipeline_barrier(
+                            self.command_buffer.pipeline_barrier(
                                 PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                                 hal::memory::Dependencies::empty(),
                                 &[barrier],
@@ -1892,7 +1897,6 @@ impl<B: hal::Backend> Device<B> {
 
                 self.fbos.get_mut(&fbo_id).unwrap().layer_index = layer as u16;
                 if !self.is_draw_target(texture.id) {
-                    let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
                     let image = &self.images[&texture.id].core;
                     let (barrier, pipeline_stages) = match usage {
                         DrawTargetUsage::CopyOnly => {
@@ -1921,7 +1925,7 @@ impl<B: hal::Backend> Device<B> {
 
                     unsafe {
                         if let Some(barrier) = barrier {
-                            cmd_buffer.pipeline_barrier(
+                            self.command_buffer.pipeline_barrier(
                                 pipeline_stages,
                                 hal::memory::Dependencies::empty(),
                                 &[barrier],
@@ -2031,9 +2035,8 @@ impl<B: hal::Backend> Device<B> {
         buffer: GpuCacheBuffer<B>,
     ) {
         if let Some(barrier) = buffer.transit(hal::buffer::Access::HOST_WRITE | hal::buffer::Access::HOST_READ, false) {
-            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
             unsafe {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER
                         .. PipelineStage::HOST,
                     hal::memory::Dependencies::empty(),
@@ -2047,10 +2050,9 @@ impl<B: hal::Backend> Device<B> {
     pub fn transit_gpu_cache_buffer(&mut self) {
         use hal::pso::PipelineStage as PS;
         let ref buffer = self.gpu_cache_buffer.as_ref().unwrap();
-        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
         if let Some(barrier) = buffer.transit(hal::buffer::Access::SHADER_READ, true) {
             unsafe {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PS::HOST .. PS::VERTEX_SHADER | PS::FRAGMENT_SHADER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2134,14 +2136,12 @@ impl<B: hal::Backend> Device<B> {
         );
 
         unsafe {
-            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
-
             if let Some(barrier) = img.core.transit(
                 hal::image::Access::SHADER_READ,
                 hal::image::Layout::ShaderReadOnlyOptimal,
                 img.core.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::TOP_OF_PIPE
                         .. PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
                     hal::memory::Dependencies::empty(),
@@ -2214,8 +2214,6 @@ impl<B: hal::Backend> Device<B> {
         // };
 
         let info = self.barrier_info(dst.id);
-
-        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
         unsafe {
             assert_eq!(src_img.state.get().1, hal::image::Layout::ShaderReadOnlyOptimal);
             if let Some(barrier) = src_img.transit(
@@ -2223,7 +2221,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::TransferSrcOptimal,
                 src_img.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER
                         .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
@@ -2236,14 +2234,14 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::TransferDstOptimal,
                 dst_img.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     info.pipeline_stage .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
 
-            cmd_buffer.copy_image(
+            self.command_buffer.copy_image(
                 &src_img.image,
                 hal::image::Layout::TransferSrcOptimal,
                 &dst_img.image,
@@ -2282,7 +2280,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::ShaderReadOnlyOptimal,
                 src_img.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2295,7 +2293,7 @@ impl<B: hal::Backend> Device<B> {
                 info.layout,
                 dst_img.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. info.pipeline_stage,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2306,7 +2304,6 @@ impl<B: hal::Backend> Device<B> {
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
         texture.bound_in_frame.set(self.frame_id);
-        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
 
         let image = self
             .images
@@ -2326,7 +2323,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::TransferDstOptimal,
                 image.core.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2343,13 +2340,13 @@ impl<B: hal::Backend> Device<B> {
                         layers: 0 .. 1,
                     },
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
                 }
-                cmd_buffer.blit_image(
+                self.command_buffer.blit_image(
                     &image.core.image,
                     hal::image::Layout::TransferSrcOptimal,
                     &image.core.image,
@@ -2391,7 +2388,7 @@ impl<B: hal::Backend> Device<B> {
                         layers: 0 .. 1,
                     },
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
@@ -2412,7 +2409,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::ShaderReadOnlyOptimal,
                 image.core.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2441,9 +2438,8 @@ impl<B: hal::Backend> Device<B> {
             hal::image::Layout::DepthStencilAttachmentOptimal,
             rbo.core.subresource_range.clone(),
         ) {
-            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
             unsafe {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS
                         .. PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS,
                     hal::memory::Dependencies::empty(),
@@ -2511,8 +2507,6 @@ impl<B: hal::Backend> Device<B> {
             )
         };
 
-        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
-
         // let src_range = hal::image::SubresourceRange {
         //     aspects: hal::format::Aspects::COLOR,
         //     levels: 0 .. 1,
@@ -2530,7 +2524,7 @@ impl<B: hal::Backend> Device<B> {
                 hal::image::Layout::TransferSrcOptimal,
                 src_img.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     pipeline_stage .. PipelineStage::TRANSFER,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2543,7 +2537,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::TransferDstOptimal,
                     dest_img.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
@@ -2552,7 +2546,7 @@ impl<B: hal::Backend> Device<B> {
             }
 
             if src_rect.size != dest_rect.size || src_format != dest_format {
-                cmd_buffer.blit_image(
+                self.command_buffer.blit_image(
                     &src_img.image,
                     hal::image::Layout::TransferSrcOptimal,
                     &dest_img.image,
@@ -2590,7 +2584,7 @@ impl<B: hal::Backend> Device<B> {
                     }],
                 );
             } else {
-                cmd_buffer.copy_image(
+                self.command_buffer.copy_image(
                     &src_img.image,
                     hal::image::Layout::TransferSrcOptimal,
                     &dest_img.image,
@@ -2631,7 +2625,7 @@ impl<B: hal::Backend> Device<B> {
                 layout,
                 src_img.subresource_range.clone(),
             ) {
-                cmd_buffer.pipeline_barrier(
+                self.command_buffer.pipeline_barrier(
                     PipelineStage::TRANSFER .. pipeline_stage,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
@@ -2644,7 +2638,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::ColorAttachmentOptimal,
                     dest_img.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
@@ -2804,7 +2798,7 @@ impl<B: hal::Backend> Device<B> {
                 .expect("Texture not found.")
                 .update(
                     self.device.as_ref(),
-                    self.command_pool[self.next_id].command_buffer_mut(),
+                    &mut self.command_buffer,
                     &mut self.staging_buffer_pool[self.next_id],
                     DeviceIntRect::new(DeviceIntPoint::new(0, 0), texture.size),
                     i,
@@ -3223,19 +3217,18 @@ impl<B: hal::Backend> Device<B> {
             .unwrap()
             .get_render_pass(format, depth_img.is_some());
 
-        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
         unsafe {
             assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
 
-            cmd_buffer.begin_render_pass(
+            self.command_buffer.begin_render_pass(
                 render_pass,
                 frame_buffer,
                 self.viewport.rect,
                 &[],
                 hal::command::SubpassContents::Inline,
             );
-            cmd_buffer.clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
-            cmd_buffer.end_render_pass();
+            self.command_buffer.clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
+            self.command_buffer.end_render_pass();
         }
     }
 
@@ -3261,7 +3254,6 @@ impl<B: hal::Backend> Device<B> {
 
         //Note: this function is assumed to be called within an active FBO
         // thus, we bring back the targets into renderable state
-        let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
         unsafe {
             if let Some(color) = color {
                 if let Some(barrier) = img.transit(
@@ -3269,13 +3261,13 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::TransferDstOptimal,
                     img.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::COLOR_ATTACHMENT_OUTPUT .. PipelineStage::TRANSFER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
                 }
-                cmd_buffer.clear_image(
+                self.command_buffer.clear_image(
                     &img.image,
                     hal::image::Layout::TransferDstOptimal,
                     hal::command::ClearColorRaw { float32: [color[0], color[1], color[2], color[3]] },
@@ -3294,7 +3286,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::ColorAttachmentOptimal,
                     img.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
@@ -3310,14 +3302,14 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::TransferDstOptimal,
                     dimg.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS
                             .. PipelineStage::TRANSFER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
                 }
-                cmd_buffer.clear_image(
+                self.command_buffer.clear_image(
                     &dimg.image,
                     hal::image::Layout::TransferDstOptimal,
                     hal::command::ClearColorRaw { float32: [0.0; 4] },
@@ -3330,7 +3322,7 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::DepthStencilAttachmentOptimal,
                     dimg.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::TRANSFER
                             .. PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS,
                         hal::memory::Dependencies::empty(),
@@ -3511,7 +3503,6 @@ impl<B: hal::Backend> Device<B> {
                     ) {
                         Ok((id, _)) => {
                             self.current_frame_id = id as _;
-                            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
                             let image = &self.frame_images[self.current_frame_id];
                             if let Some(barrier) = image.transit(
                                 hal::image::Access::COLOR_ATTACHMENT_READ
@@ -3519,7 +3510,7 @@ impl<B: hal::Backend> Device<B> {
                                 hal::image::Layout::ColorAttachmentOptimal,
                                 image.subresource_range.clone(),
                             ) {
-                                cmd_buffer.pipeline_barrier(
+                                self.command_buffer.pipeline_barrier(
                                     PipelineStage::COLOR_ATTACHMENT_OUTPUT
                                         .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                                     hal::memory::Dependencies::empty(),
@@ -3533,7 +3524,7 @@ impl<B: hal::Backend> Device<B> {
                                 hal::image::Layout::DepthStencilAttachmentOptimal,
                                 depth_image.subresource_range.clone(),
                             ) {
-                                cmd_buffer.pipeline_barrier(
+                                self.command_buffer.pipeline_barrier(
                                     PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS
                                         .. PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS,
                                     hal::memory::Dependencies::empty(),
@@ -3568,7 +3559,6 @@ impl<B: hal::Backend> Device<B> {
             return;
         }
         {
-            let cmd_buffer = self.command_pool[self.next_id].command_buffer_mut();
             let image = &self.frame_images[self.current_frame_id];
             unsafe {
                 if let Some(barrier) = image.transit(
@@ -3576,21 +3566,21 @@ impl<B: hal::Backend> Device<B> {
                     hal::image::Layout::Present,
                     image.subresource_range.clone(),
                 ) {
-                    cmd_buffer.pipeline_barrier(
+                    self.command_buffer.pipeline_barrier(
                         PipelineStage::COLOR_ATTACHMENT_OUTPUT
                             .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
                 }
-                cmd_buffer.finish();
+                self.command_buffer.finish();
             }
         }
         unsafe {
             match self.swap_chain.as_mut() {
                 Some(swap_chain) => {
                     let submission = hal::queue::Submission {
-                        command_buffers: self.command_pool[self.next_id].command_buffers(),
+                        command_buffers: &[&self.command_buffer],
                         wait_semaphores: Some((
                             &self.image_available_semaphore,
                             PipelineStage::BOTTOM_OF_PIPE,
@@ -3629,7 +3619,7 @@ impl<B: hal::Backend> Device<B> {
                 }
                 None => {
                     let submission = hal::queue::Submission {
-                        command_buffers: self.command_pool[self.next_id].command_buffers(),
+                        command_buffers: &[&self.command_buffer],
                         wait_semaphores: None,
                         signal_semaphores: None,
                     };
@@ -3661,7 +3651,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn reset_command_pools(&mut self) {
-        for command_pool in &mut self.command_pool {
+        for command_pool in &mut self.command_pools {
             unsafe { command_pool.reset() };
         }
     }
@@ -3722,7 +3712,8 @@ impl<B: hal::Backend> Device<B> {
 
             let mut heaps = Arc::try_unwrap(self.heaps).unwrap().into_inner().unwrap();
 
-            for command_pool in self.command_pool {
+            self.command_pools[self.next_id].return_cmd_buffer(self.command_buffer);
+            for command_pool in self.command_pools {
                 command_pool.destroy(self.device.as_ref());
             }
             for staging_buffer_pool in self.staging_buffer_pool {
@@ -3881,7 +3872,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
             .expect("Texture not found.")
             .update(
                 self.device.device.as_ref(),
-                self.device.command_pool[self.device.next_id].command_buffer_mut(),
+                &mut self.device.command_buffer,
                 &mut self.device.staging_buffer_pool[self.device.next_id],
                 rect,
                 layer_index,
