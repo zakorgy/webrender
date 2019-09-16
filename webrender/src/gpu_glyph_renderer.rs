@@ -12,6 +12,8 @@ use device::{desc, ShaderKind};
 use device::{Device, PrimitiveType, ShaderPrecacheFlags, Texture};
 use device::{DrawTarget, TextureFilter, TextureSampler, VAO, VertexArrayKind};
 use euclid::{Point2D, Size2D, Transform3D, TypedVector2D, Vector2D};
+#[cfg(not(feature = "gleam"))]
+use device::DrawTargetUsage;
 use hal;
 use internal_types::RenderTargetInfo;
 use pathfinder_gfx_utils::ShelfBinPacker;
@@ -215,7 +217,7 @@ impl<B: hal::Backend> Renderer<B> {
                 layer: 0,
                 with_depth: false,
             },
-            #[cfg(not(feature="gleam"))]
+            #[cfg(not(feature = "gleam"))]
             DrawTargetUsage::Draw,
         );
         self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, None);
