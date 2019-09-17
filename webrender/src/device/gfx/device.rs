@@ -2943,8 +2943,8 @@ impl<B: hal::Backend> Device<B> {
                 }],
             );
             if let Some(barrier) = image.transit(
-                hal::image::Access::empty(),
-                hal::image::Layout::ColorAttachmentOptimal,
+                hal::image::Access::MEMORY_READ,
+                hal::image::Layout::Present,
                 image.subresource_range.clone(),
             ) {
                 cmd_buffer.pipeline_barrier(
@@ -3511,7 +3511,7 @@ impl<B: hal::Backend> Device<B> {
                                 image.subresource_range.clone(),
                             ) {
                                 self.command_buffer.pipeline_barrier(
-                                    PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                                    PipelineStage::TRANSFER
                                         .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
                                     hal::memory::Dependencies::empty(),
                                     &[barrier],
@@ -3562,13 +3562,13 @@ impl<B: hal::Backend> Device<B> {
             let image = &self.frame_images[self.current_frame_id];
             unsafe {
                 if let Some(barrier) = image.transit(
-                    hal::image::Access::empty(),
+                    hal::image::Access::MEMORY_READ,
                     hal::image::Layout::Present,
                     image.subresource_range.clone(),
                 ) {
                     self.command_buffer.pipeline_barrier(
                         PipelineStage::COLOR_ATTACHMENT_OUTPUT
-                            .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+                            .. PipelineStage::TRANSFER,
                         hal::memory::Dependencies::empty(),
                         &[barrier],
                     );
