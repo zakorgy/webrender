@@ -1867,10 +1867,10 @@ impl<B: hal::Backend> Device<B> {
         let (fbo_id, dimensions, depth_available) = match texture_target {
             DrawTarget::Default(dim) => {
                 if let DrawTargetUsage::CopyOnly = usage {
-                    if let Some(barrier) = self.frame_images[self.next_id].transit(
+                    if let Some(barrier) = self.frame_images[self.current_frame_id].transit(
                         hal::image::Access::TRANSFER_WRITE,
                         hal::image::Layout::TransferDstOptimal,
-                        self.frame_images[self.next_id].subresource_range.clone(),
+                        self.frame_images[self.current_frame_id].subresource_range.clone(),
                     ) {
                         unsafe {
                             self.command_buffer.pipeline_barrier(
