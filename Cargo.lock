@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "gfx-backend-dx12"
-version = "0.3.2"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2392,7 +2392,7 @@ dependencies = [
  "dirs 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.5.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "euclid 0.19.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "gfx-backend-dx12 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gfx-backend-dx12 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-empty 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-metal 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-vulkan 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2527,7 +2527,7 @@ dependencies = [
  "env_logger 0.5.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "euclid 0.19.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "font-loader 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gfx-backend-dx12 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gfx-backend-dx12 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-empty 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-metal 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "gfx-backend-vulkan 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2713,7 +2713,7 @@ dependencies = [
 "checksum gdi32-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "0912515a8ff24ba900422ecda800b52f4016a56251922d397c576bf92c690518"
 "checksum generic-array 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c0f28c2f5bfb5960175af447a2da7c18900693738343dc896ffbcabd9839592"
 "checksum generic-array 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ef25c5683767570c2bbd7deba372926a55eaae9982d7726ee2a1050239d45b9d"
-"checksum gfx-backend-dx12 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "2a9bb18da75f1f69bc4114809842b171d735e08d59d4061f8cb9987c07844b65"
+"checksum gfx-backend-dx12 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "e5c682db9424f06de94138d24204db00b874e900e331eea9426fa9eb866d63ab"
 "checksum gfx-backend-empty 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "19ee69c0aaa5b96b0995914e7136676ba8a9b5bd8a87d8b21f26641e72aa309b"
 "checksum gfx-backend-metal 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "979d807dcd10f193d874317eb4fdf9106ded161b08dd2ea4212bbae1294ff8cd"
 "checksum gfx-backend-vulkan 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "5facf0b6e4306a6a93682077f85602c89b49aca8ecceb73b9558e7baa37f8c54"
