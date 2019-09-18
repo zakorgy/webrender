@@ -1254,31 +1254,13 @@ impl<B: hal::Backend> Device<B> {
             preserves: &[],
         };
 
-        let dependency = hal::pass::SubpassDependency {
-            passes: hal::pass::SubpassRef::External .. hal::pass::SubpassRef::Pass(0),
-            stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
-                .. PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-            accesses: hal::image::Access::empty()
-                .. (hal::image::Access::COLOR_ATTACHMENT_READ
-                    | hal::image::Access::COLOR_ATTACHMENT_WRITE),
-        };
-
-        let depth_dependency = hal::pass::SubpassDependency {
-            passes: hal::pass::SubpassRef::External .. hal::pass::SubpassRef::Pass(0),
-            stages: PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS
-                 .. PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS,
-            accesses: hal::image::Access::empty()
-                .. (hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
-                    | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE),
-        };
-
         use std::iter;
         RenderPass {
             r8: unsafe {
                 device.create_render_pass(
                     iter::once(&attachment_r8),
                     &[subpass_r8],
-                    iter::once(&dependency),
+                    &[],
                 )
             }
             .expect("create_render_pass failed"),
@@ -1286,7 +1268,7 @@ impl<B: hal::Backend> Device<B> {
                 device.create_render_pass(
                     iter::once(&attachment_r8).chain(iter::once(&attachment_depth)),
                     &[subpass_depth_r8],
-                    iter::once(&dependency).chain(iter::once(&depth_dependency)),
+                    &[],
                 )
             }
             .expect("create_render_pass failed"),
@@ -1294,7 +1276,7 @@ impl<B: hal::Backend> Device<B> {
                 device.create_render_pass(
                     iter::once(&attachment_bgra8),
                     &[subpass_bgra8],
-                    iter::once(&dependency),
+                    &[],
                 )
             }
             .expect("create_render_pass failed"),
@@ -1302,7 +1284,7 @@ impl<B: hal::Backend> Device<B> {
                 device.create_render_pass(
                     &[attachment_bgra8, attachment_depth],
                     &[subpass_depth_bgra8],
-                    &[dependency, depth_dependency],
+                    &[],
                 )
             }
             .expect("create_render_pass failed"),
