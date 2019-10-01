@@ -212,6 +212,17 @@ impl Wrench {
             ShaderPrecacheFlags::empty()
         };
 
+        #[cfg(feature = "gfx")]
+        let heaps_config = {
+            let config_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("webrender/res/mem_config.ron");
+            let source = std::fs::read_to_string(&config_path)
+                .expect(&format!("Unable to open memory config file from {:?}", config_path));
+            ron::de::from_str(&source).expect("Unable to parse HeapsConfig")
+        };
+
         let opts = webrender::RendererOptions {
             device_pixel_ratio: dp_ratio,
             resource_override_path: shader_override_path,
@@ -225,16 +236,7 @@ impl Wrench {
             disable_dual_source_blending,
             chase_primitive,
             #[cfg(feature = "gfx")]
-            heaps_config: webrender::HeapsConfig {
-                linear: Some(webrender::LinearConfig {
-                    linear_size: 128 * 1024 * 1024,
-                }),
-                dynamic: Some(webrender::DynamicConfig {
-                    min_device_allocation: 1024 * 1024,
-                    block_size_granularity: 256,
-                    max_chunk_size: 32 * 1024 * 1024,
-                })
-            },
+            heaps_config,
             ..Default::default()
         };
 

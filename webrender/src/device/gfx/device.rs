@@ -12,7 +12,7 @@ use arrayvec::ArrayVec;
 use euclid::Transform3D;
 use internal_types::{FastHashMap, RenderTargetInfo};
 use rand::{self, Rng};
-use rendy_memory::{Block, Heaps, HeapsConfig, MemoryUsageValue};
+use rendy_memory::{Block, DynamicConfig, Heaps, HeapsConfig, LinearConfig, MemoryUsageValue};
 use rendy_descriptor::{DescriptorAllocator, DescriptorRanges, DescriptorSet};
 use ron::de::from_str;
 use smallvec::SmallVec;
@@ -301,32 +301,30 @@ impl<B: hal::Backend> Device<B> {
         let mut heaps = {
             let types = memory_properties.memory_types.iter().map(|ref mt| {
                 let mut config = heaps_config;
-                if let Some(mut linear) = config.linear {
-                    if !mt
-                        .properties
-                        .contains(hal::memory::Properties::CPU_VISIBLE)
-                    {
-                        config.linear = None;
-                    } else {
-                        linear.linear_size = linear.linear_size.min(
+                if !mt
+                    .properties
+                    .contains(hal::memory::Properties::CPU_VISIBLE)
+                {
+                    config.linear = None;
+                } else if config.linear.is_none() {
+                    config.linear = Some(LinearConfig {
+                        linear_size:
                             (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1)
-                                .next_power_of_two(),
-                        );
-                    }
+                            .next_power_of_two(),
+                    });
                 }
-                if let Some(mut dynamic) = config.dynamic {
-                    dynamic.min_device_allocation = dynamic.min_device_allocation.min(
-                        (memory_properties.memory_heaps[mt.heap_index as usize] / 1048)
+                if config.dynamic.is_none() {
+                    config.dynamic = Some(DynamicConfig {
+                        min_device_allocation:
+                            (memory_properties.memory_heaps[mt.heap_index as usize] / 1024 - 1)
                             .next_power_of_two(),
-                    );
-                    dynamic.block_size_granularity = dynamic.block_size_granularity.min(
-                        (memory_properties.memory_heaps[mt.heap_index as usize] / 1024 - 1)
+                        block_size_granularity:
+                            (memory_properties.memory_heaps[mt.heap_index as usize] / 1024 - 1)
                             .next_power_of_two(),
-                    );
-                    dynamic.max_chunk_size = dynamic.max_chunk_size.min(
-                        (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1)
+                        max_chunk_size:
+                            (memory_properties.memory_heaps[mt.heap_index as usize] / 8 - 1)
                             .next_power_of_two(),
-                    );
+                    })
                 }
                 (mt.properties, mt.heap_index as u32, config)
             });
