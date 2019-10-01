@@ -47,7 +47,7 @@ plane-split = "0.13.3"
 png = { optional = true, version = "0.14" }
 rand ="0.4"
 rayon = "1"
-rendy-memory = "0.4.0"
+rendy-memory = { version = "0.4.0", features = ["serde"] }
 relevant = { version = "0.4", features = ["std"] }
 ron = "0.1.7"
 rendy-descriptor = "0.4.0"

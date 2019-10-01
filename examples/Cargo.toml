@@ -73,6 +73,7 @@ gfx-backend-empty = "0.3.0"
 gleam = { version = "0.6.2", optional = true}
 glutin = { version = "0.20", optional = true }
 rayon = "1"
+ron = "0.1.7"
 webrender = { path = "../webrender" }
 winit = "0.19"
 

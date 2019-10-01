@@ -1778,6 +1778,7 @@ dependencies = [
  "hibitset 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "relevant 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
  "slab 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -2399,6 +2400,7 @@ dependencies = [
  "gleam 0.6.17 (registry+https://github.com/rust-lang/crates.io-index)",
  "glutin 0.20.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ron 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "webrender 0.59.0",
  "winit 0.19.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

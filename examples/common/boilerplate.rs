@@ -219,6 +219,18 @@ pub fn main_wrapper<E: Example>(
 
     println!("Loading shaders...");
     let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES | DebugFlags::TEXTURE_CACHE_DBG;
+
+    #[cfg(feature = "gfx-hal")]
+    let heaps_config = {
+        let config_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("webrender/res/mem_config.ron");
+        let source = std::fs::read_to_string(&config_path)
+            .expect(&format!("Unable to open memory config file from {:?}", config_path));
+        ron::de::from_str(&source).expect("Unable to parse HeapsConfig")
+    };
+
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
         precache_flags: E::PRECACHE_SHADER_FLAGS,
@@ -227,16 +239,7 @@ pub fn main_wrapper<E: Example>(
         //scatter_gpu_cache_updates: false,
         debug_flags,
         #[cfg(feature = "gfx-hal")]
-        heaps_config: webrender::HeapsConfig {
-            linear: Some(webrender::LinearConfig {
-                linear_size: 128 * 1024 * 1024,
-            }),
-            dynamic: Some(webrender::DynamicConfig {
-                min_device_allocation: 1024 * 1024,
-                block_size_granularity: 256,
-                max_chunk_size: 32 * 1024 * 1024,
-            })
-        },
+        heaps_config,
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
