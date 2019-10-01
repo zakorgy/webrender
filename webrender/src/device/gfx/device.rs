@@ -3121,16 +3121,14 @@ impl<B: hal::Backend> Device<B> {
             self.depth_available,
             "Enabling depth test without depth target"
         );
-        if mem::replace(&mut self.current_depth_test, Some(LESS_EQUAL_TEST)).is_none() && self.inside_render_pass {
-            self.end_render_pass();
-            self.begin_render_pass();
-        }
+        self.current_depth_test = Some(LESS_EQUAL_TEST);
     }
 
     pub fn disable_depth(&mut self) {
-        if mem::replace(&mut self.current_depth_test, None).is_some() && self.inside_render_pass {
-            self.end_render_pass();
-            self.begin_render_pass();
+        if self.depth_available {
+            self.current_depth_test = Some(LESS_EQUAL_TEST);
+        } else {
+            self.current_depth_test =  None;
         }
     }
 
@@ -3145,10 +3143,6 @@ impl<B: hal::Backend> Device<B> {
             "Enabling depth test without depth target"
         );
         self.current_depth_test = Some(LESS_EQUAL_WRITE);
-        if mem::replace(&mut self.current_depth_test, Some(LESS_EQUAL_WRITE)).is_none() && self.inside_render_pass {
-            self.end_render_pass();
-            self.begin_render_pass();
-        }
     }
 
     pub fn disable_depth_write(&mut self) {
