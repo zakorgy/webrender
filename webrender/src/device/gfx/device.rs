@@ -61,6 +61,7 @@ pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 pub const DEBUG_READ_FBO: FBOId = FBOId(2);
+const MAX_FRAME_COUNT: usize = 3;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -172,15 +173,15 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group_family: QueueFamilyId,
     pub queue_group_queues: Vec<B::CommandQueue>,
-    command_pools: SmallVec<[CommandPool<B>; 1]>,
+    command_pools: SmallVec<[CommandPool<B>; MAX_FRAME_COUNT]>,
     command_buffer: B::CommandBuffer,
-    staging_buffer_pool: SmallVec<[BufferPool<B>; 1]>,
+    staging_buffer_pool: SmallVec<[BufferPool<B>; MAX_FRAME_COUNT]>,
     pub swap_chain: Option<B::Swapchain>,
     render_pass: Option<RenderPass<B>>,
-    pub framebuffers: Vec<B::Framebuffer>,
-    pub framebuffers_depth: Vec<B::Framebuffer>,
-    frame_images: Vec<ImageCore<B>>,
-    frame_depths: Vec<DepthBuffer<B>>,
+    pub framebuffers: SmallVec<[B::Framebuffer; MAX_FRAME_COUNT]>,
+    pub framebuffers_depth: SmallVec<[B::Framebuffer; MAX_FRAME_COUNT]>,
+    frame_images: SmallVec<[ImageCore<B>; MAX_FRAME_COUNT]>,
+    frame_depths: SmallVec<[DepthBuffer<B>; MAX_FRAME_COUNT]>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -230,8 +231,8 @@ pub struct Device<B: hal::Backend> {
     upload_method: UploadMethod,
     locals_buffer: UniformBufferHandler<B>,
     quad_buffer: VertexBufferHandler<B>,
-    instance_buffers: SmallVec<[InstanceBufferHandler<B>; 1]>,
-    free_instance_buffers: SmallVec<[InstancePoolBuffer<B>; 16]>,
+    instance_buffers: SmallVec<[InstanceBufferHandler<B>; MAX_FRAME_COUNT]>,
+    free_instance_buffers: Vec<InstancePoolBuffer<B>>,
     download_buffer: Option<Buffer<B>>,
     instance_range: std::ops::Range<usize>,
 
@@ -261,7 +262,7 @@ pub struct Device<B: hal::Backend> {
     features: hal::Features,
 
     next_id: usize,
-    frame_fence: SmallVec<[Fence<B>; 1]>,
+    frame_fence: SmallVec<[Fence<B>; MAX_FRAME_COUNT]>,
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: FastHashMap<String, PipelineRequirements>,
@@ -474,7 +475,7 @@ impl<B: hal::Backend> Device<B> {
         let mut desc_allocator = DescriptorAllocator::new();
 
         let mut frame_fence = SmallVec::new();
-        let mut command_pools: SmallVec<[CommandPool<B>; 1]> = SmallVec::new();
+        let mut command_pools: SmallVec<[CommandPool<B>; MAX_FRAME_COUNT]> = SmallVec::new();
         let mut staging_buffer_pool = SmallVec::new();
         let mut instance_buffers = SmallVec::new();
         for _ in 0 .. frame_count {
@@ -731,7 +732,7 @@ impl<B: hal::Backend> Device<B> {
             locals_buffer,
             quad_buffer,
             instance_buffers,
-            free_instance_buffers: SmallVec::new(),
+            free_instance_buffers: Vec::new(),
             download_buffer: None,
             instance_range: 0..0,
             wait_for_resize: false,
@@ -776,11 +777,11 @@ impl<B: hal::Backend> Device<B> {
         self.device.wait_idle().unwrap();
 
         let ref mut heaps = *self.heaps.lock().unwrap();
-        for image in self.frame_images.drain(..) {
+        for image in self.frame_images.drain() {
             image.deinit(self.device.as_ref(), heaps);
         }
 
-        for depth in self.frame_depths.drain(..) {
+        for depth in self.frame_depths.drain() {
             depth.deinit(self.device.as_ref(), heaps);
         }
 
@@ -801,10 +802,10 @@ impl<B: hal::Backend> Device<B> {
         self.locals_buffer.reset();
 
         unsafe {
-            for framebuffer in self.framebuffers.drain(..) {
+            for framebuffer in self.framebuffers.drain() {
                 self.device.destroy_framebuffer(framebuffer);
             }
-            for framebuffer_depth in self.framebuffers_depth.drain(..) {
+            for framebuffer_depth in self.framebuffers_depth.drain() {
                 self.device.destroy_framebuffer(framebuffer_depth);
             }
         }
@@ -916,10 +917,10 @@ impl<B: hal::Backend> Device<B> {
         B::Swapchain,
         ImageFormat,
         hal::format::Format,
-        Vec<B::Framebuffer>,
-        Vec<B::Framebuffer>,
-        Vec<DepthBuffer<B>>,
-        Vec<ImageCore<B>>,
+        SmallVec<[B::Framebuffer; MAX_FRAME_COUNT]>,
+        SmallVec<[B::Framebuffer; MAX_FRAME_COUNT]>,
+        SmallVec<[DepthBuffer<B>; MAX_FRAME_COUNT]>,
+        SmallVec<[ImageCore<B>; MAX_FRAME_COUNT]>,
         hal::pso::Viewport,
         usize,
     ) {
@@ -983,7 +984,7 @@ impl<B: hal::Backend> Device<B> {
             hal::format::Format::Bgra8Unorm => ImageFormat::BGRA8,
             f => unimplemented!("Unsupported surface format: {:?}", f),
         };
-        let mut frame_depths = Vec::new();
+        let mut frame_depths = SmallVec::new();
         // Framebuffer and render target creation
         let (frame_images, framebuffers, framebuffers_depth) = {
                 let extent = hal::image::Extent {
@@ -1009,10 +1010,10 @@ impl<B: hal::Backend> Device<B> {
                             COLOR_RANGE.clone(),
                         )
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<SmallVec<_>>();
                 let fbos = cores
                     .iter()
-                    .map(|core| {
+                    .map(|core: &ImageCore<B>| {
                         unsafe {
                             device.create_framebuffer(
                                 render_pass.get_render_pass(image_format, false),
@@ -1021,12 +1022,11 @@ impl<B: hal::Backend> Device<B> {
                             )
                         }
                         .expect("create_framebuffer failed")
-                    })
-                    .collect();
+                    }).collect();
                 let fbos_depth = cores
                     .iter()
                     .zip(frame_depths.iter())
-                    .map(|(core, depth)| {
+                    .map(|(core, depth): (&ImageCore<B>, &DepthBuffer<B>)| {
                         unsafe {
                             device.create_framebuffer(
                                 render_pass.get_render_pass(image_format, true),
@@ -1062,7 +1062,7 @@ impl<B: hal::Backend> Device<B> {
             frame_images,
             viewport,
             if present_mode == hal::window::PresentMode::Mailbox {
-                *caps.image_count.end().min(&3) as usize
+                *caps.image_count.end().min(&(MAX_FRAME_COUNT as u32)) as usize
             } else {
                 *caps.image_count.end().min(&2) as usize
             },
@@ -1077,10 +1077,10 @@ impl<B: hal::Backend> Device<B> {
     ) -> (
         ImageFormat,
         hal::format::Format,
-        Vec<B::Framebuffer>,
-        Vec<B::Framebuffer>,
-        Vec<DepthBuffer<B>>,
-        Vec<ImageCore<B>>,
+        SmallVec<[B::Framebuffer; MAX_FRAME_COUNT]>,
+        SmallVec<[B::Framebuffer; MAX_FRAME_COUNT]>,
+        SmallVec<[DepthBuffer<B>; MAX_FRAME_COUNT]>,
+        SmallVec<[ImageCore<B>; MAX_FRAME_COUNT]>,
         hal::pso::Viewport,
         usize,
     ) {
@@ -1094,8 +1094,8 @@ impl<B: hal::Backend> Device<B> {
         };
         let frame_count = 2;
         let (frame_images, frame_depths, framebuffers, framebuffers_depth) = {
-            let mut cores = Vec::new();
-            let mut frame_depths = Vec::new();
+            let mut cores = SmallVec::new();
+            let mut frame_depths = SmallVec::new();
             let mip_levels = 1;
             let kind = hal::image::Kind::D2(
                 extent.width as _,
@@ -1130,7 +1130,7 @@ impl<B: hal::Backend> Device<B> {
             }
             let fbos = cores
                 .iter()
-                .map(|core| {
+                .map(|core: &ImageCore<B>| {
                     unsafe {
                         device.create_framebuffer(
                             &render_pass.bgra8,
@@ -1144,7 +1144,7 @@ impl<B: hal::Backend> Device<B> {
             let fbos_depth = cores
                 .iter()
                 .zip(frame_depths.iter())
-                .map(|(core, depth)| {
+                .map(|(core, depth): (&ImageCore<B>, &DepthBuffer<B>)| {
                     unsafe {
                         device.create_framebuffer(
                             &render_pass.bgra8_depth,
