@@ -1968,9 +1968,9 @@ impl<B: hal::Backend> Device<B> {
         program_id
     }
 
-    fn generate_fbo_ids(&mut self, count: i32) -> Vec<FBOId> {
+    fn generate_fbo_ids(&mut self, count: i32) -> SmallVec<[FBOId; 16]> {
         let mut rng = rand::thread_rng();
-        let mut fboids = vec![];
+        let mut fboids = SmallVec::new();
         let mut fbo_id = FBOId(DEFAULT_DRAW_FBO.0 + 1);
         for _ in 0 .. count {
             while self.fbos.contains_key(&fbo_id) || fboids.contains(&fbo_id) {
@@ -2713,7 +2713,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn delete_retained_textures(&mut self) {
-        let textures: Vec<_> = self.retained_textures.drain(..).collect();
+        let textures: SmallVec<[Texture; 16]> = self.retained_textures.drain(..).collect();
         for texture in textures {
             self.free_texture(texture);
         }
