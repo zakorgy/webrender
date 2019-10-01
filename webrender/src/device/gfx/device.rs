@@ -179,15 +179,15 @@ pub struct Device<B: hal::Backend> {
     pub depth_format: hal::format::Format,
     pub queue_group_family: QueueFamilyId,
     pub queue_group_queues: Vec<B::CommandQueue>,
-    command_pools: SmallVec<[CommandPool<B>; FRAME_COUNT_MAILBOX]>,
+    command_pools: ArrayVec<[CommandPool<B>; FRAME_COUNT_MAILBOX]>,
     command_buffer: B::CommandBuffer,
-    staging_buffer_pool: SmallVec<[BufferPool<B>; FRAME_COUNT_MAILBOX]>,
+    staging_buffer_pool: ArrayVec<[BufferPool<B>; FRAME_COUNT_MAILBOX]>,
     pub swap_chain: Option<B::Swapchain>,
     render_pass: Option<RenderPass<B>>,
-    pub framebuffers: SmallVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-    pub framebuffers_depth: SmallVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-    frame_images: SmallVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
-    frame_depths: SmallVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
+    pub framebuffers: ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
+    pub framebuffers_depth: ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
+    frame_images: ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
+    frame_depths: ArrayVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -237,7 +237,7 @@ pub struct Device<B: hal::Backend> {
     upload_method: UploadMethod,
     locals_buffer: UniformBufferHandler<B>,
     quad_buffer: VertexBufferHandler<B>,
-    instance_buffers: SmallVec<[InstanceBufferHandler<B>; FRAME_COUNT_MAILBOX]>,
+    instance_buffers: ArrayVec<[InstanceBufferHandler<B>; FRAME_COUNT_MAILBOX]>,
     free_instance_buffers: Vec<InstancePoolBuffer<B>>,
     download_buffer: Option<Buffer<B>>,
     instance_range: std::ops::Range<usize>,
@@ -268,7 +268,7 @@ pub struct Device<B: hal::Backend> {
     features: hal::Features,
 
     next_id: usize,
-    frame_fence: SmallVec<[Fence<B>; FRAME_COUNT_MAILBOX]>,
+    frame_fence: ArrayVec<[Fence<B>; FRAME_COUNT_MAILBOX]>,
     image_available_semaphore: B::Semaphore,
     render_finished_semaphore: B::Semaphore,
     pipeline_requirements: FastHashMap<String, PipelineRequirements>,
@@ -478,10 +478,10 @@ impl<B: hal::Backend> Device<B> {
 
         let mut desc_allocator = DescriptorAllocator::new();
 
-        let mut frame_fence = SmallVec::new();
-        let mut command_pools: SmallVec<[CommandPool<B>; FRAME_COUNT_MAILBOX]> = SmallVec::new();
-        let mut staging_buffer_pool = SmallVec::new();
-        let mut instance_buffers = SmallVec::new();
+        let mut frame_fence = ArrayVec::new();
+        let mut command_pools: ArrayVec<[CommandPool<B>; FRAME_COUNT_MAILBOX]> = ArrayVec::new();
+        let mut staging_buffer_pool = ArrayVec::new();
+        let mut instance_buffers = ArrayVec::new();
         for _ in 0 .. frame_count {
             let fence = device.create_fence(false).expect("create_fence failed");
             frame_fence.push(Fence {
@@ -781,11 +781,11 @@ impl<B: hal::Backend> Device<B> {
         self.device.wait_idle().unwrap();
 
         let ref mut heaps = *self.heaps.lock().unwrap();
-        for image in self.frame_images.drain() {
+        for image in self.frame_images.drain(..) {
             image.deinit(self.device.as_ref(), heaps);
         }
 
-        for depth in self.frame_depths.drain() {
+        for depth in self.frame_depths.drain(..) {
             depth.deinit(self.device.as_ref(), heaps);
         }
 
@@ -806,10 +806,10 @@ impl<B: hal::Backend> Device<B> {
         self.locals_buffer.reset();
 
         unsafe {
-            for framebuffer in self.framebuffers.drain() {
+            for framebuffer in self.framebuffers.drain(..) {
                 self.device.destroy_framebuffer(framebuffer);
             }
-            for framebuffer_depth in self.framebuffers_depth.drain() {
+            for framebuffer_depth in self.framebuffers_depth.drain(..) {
                 self.device.destroy_framebuffer(framebuffer_depth);
             }
         }
@@ -927,10 +927,10 @@ impl<B: hal::Backend> Device<B> {
     ) -> (
         B::Swapchain,
         ImageFormat,
-        SmallVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        SmallVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        SmallVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
-        SmallVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
         hal::pso::Viewport,
         usize,
     ) {
@@ -1037,15 +1037,15 @@ impl<B: hal::Backend> Device<B> {
         frame_count: usize,
         images: Option<Vec<B::Image>>
     ) -> (
-        SmallVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        SmallVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        SmallVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
-        SmallVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
         hal::pso::Viewport,
     ) {
-        let mut frame_depths = SmallVec::new();
-        let mut framebuffers = SmallVec::new();
-        let mut framebuffers_depth = SmallVec::new();
+        let mut frame_depths = ArrayVec::new();
+        let mut framebuffers = ArrayVec::new();
+        let mut framebuffers_depth = ArrayVec::new();
         let mip_levels = 1;
         let kind = hal::image::Kind::D2(
             extent.width as _,
@@ -1053,7 +1053,7 @@ impl<B: hal::Backend> Device<B> {
             extent.depth as _,
             1,
         );
-        let frame_images: SmallVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]> = match images {
+        let frame_images: ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]> = match images {
             Some(mut images) => {
                 images.into_iter().map(|image| {
                     ImageCore::from_image(
