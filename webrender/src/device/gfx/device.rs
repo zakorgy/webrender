@@ -168,6 +168,25 @@ struct Fence<B: hal::Backend> {
     is_submitted: bool,
 }
 
+#[derive(Debug)]
+struct Frame<B: hal::Backend> {
+    image: ImageCore<B>,
+    depth: DepthBuffer<B>,
+    framebuffer: B::Framebuffer,
+    framebuffer_depth: B::Framebuffer,
+}
+
+impl<B: hal::Backend> Frame<B> {
+    fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
+        self.image.deinit(device, heaps);
+        self.depth.deinit(device, heaps);
+        unsafe {
+            device.destroy_framebuffer(self.framebuffer);
+            device.destroy_framebuffer(self.framebuffer_depth);
+        }
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: Arc<B::Device>,
     pub heaps: Arc<Mutex<Heaps<B>>>,
@@ -184,10 +203,7 @@ pub struct Device<B: hal::Backend> {
     staging_buffer_pool: ArrayVec<[BufferPool<B>; FRAME_COUNT_MAILBOX]>,
     pub swap_chain: Option<B::Swapchain>,
     render_pass: Option<RenderPass<B>>,
-    pub framebuffers: ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-    pub framebuffers_depth: ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-    frame_images: ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
-    frame_depths: ArrayVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
+    frames: ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -386,10 +402,7 @@ impl<B: hal::Backend> Device<B> {
         let (
             swap_chain,
             surface_format,
-            framebuffers,
-            framebuffers_depth,
-            frame_images,
-            frame_depths,
+            frames,
             viewport,
             frame_count,
         ) = match surface.as_mut() {
@@ -397,13 +410,10 @@ impl<B: hal::Backend> Device<B> {
                 let (
                     swap_chain,
                     surface_format,
-                    framebuffers,
-                    framebuffers_depth,
-                    frame_images,
-                    frame_depths,
+                    frames,
                     viewport,
                     frame_count,
-                ) = Device::init_frame_resources_with_surface(
+                ) = Device::init_frames_with_surface(
                     &device,
                     &mut heaps,
                     &adapter,
@@ -415,22 +425,16 @@ impl<B: hal::Backend> Device<B> {
                 (
                     Some(swap_chain),
                     surface_format,
-                    framebuffers,
-                    framebuffers_depth,
-                    frame_images,
-                    frame_depths,
+                    frames,
                     viewport,
                     frame_count,
                 )
             }
             None => {
                 let (
-                    framebuffers,
-                    framebuffers_depth,
-                    frame_images,
-                    frame_depths,
+                    frames,
                     viewport,
-                ) = Device::init_frame_resources(
+                ) = Device::init_frames(
                     &device,
                     &mut heaps,
                     hal::image::Extent {
@@ -446,10 +450,7 @@ impl<B: hal::Backend> Device<B> {
                 (
                     None,
                     ImageFormat::BGRA8,
-                    framebuffers,
-                    framebuffers_depth,
-                    frame_images,
-                    frame_depths,
+                    frames,
                     viewport,
                     FRAME_COUNT_NOT_MAILBOX,
                 )
@@ -662,10 +663,7 @@ impl<B: hal::Backend> Device<B> {
             staging_buffer_pool,
             swap_chain: swap_chain,
             render_pass: Some(render_pass),
-            framebuffers,
-            framebuffers_depth,
-            frame_images,
-            frame_depths,
+            frames,
             frame_count,
             viewport,
             sampler_linear,
@@ -781,12 +779,8 @@ impl<B: hal::Backend> Device<B> {
         self.device.wait_idle().unwrap();
 
         let ref mut heaps = *self.heaps.lock().unwrap();
-        for image in self.frame_images.drain(..) {
-            image.deinit(self.device.as_ref(), heaps);
-        }
-
-        for depth in self.frame_depths.drain(..) {
-            depth.deinit(self.device.as_ref(), heaps);
+        for frame in self.frames.drain(..) {
+            frame.deinit(self.device.as_ref(), heaps);
         }
 
         self.bound_per_draw_bindings = PerDrawBindings::default();
@@ -805,35 +799,20 @@ impl<B: hal::Backend> Device<B> {
 
         self.locals_buffer.reset();
 
-        unsafe {
-            for framebuffer in self.framebuffers.drain(..) {
-                self.device.destroy_framebuffer(framebuffer);
-            }
-            for framebuffer_depth in self.framebuffers_depth.drain(..) {
-                self.device.destroy_framebuffer(framebuffer_depth);
-            }
-        }
-
         let (
             swap_chain,
             surface_format,
-            framebuffers,
-            framebuffers_depth,
-            frame_images,
-            frame_depths,
+            frames,
             viewport,
             _frame_count,
         ) = if let Some (ref mut surface) = self.surface {
             let (
                 swap_chain,
                 surface_format,
-                framebuffers,
-                framebuffers_depth,
-                frame_images,
-                frame_depths,
+                frames,
                 viewport,
                 frame_count,
-            ) = Device::init_frame_resources_with_surface(
+            ) = Device::init_frames_with_surface(
                 self.device.as_ref(),
                 heaps,
                 &self.adapter,
@@ -845,10 +824,7 @@ impl<B: hal::Backend> Device<B> {
             (
                 Some(swap_chain),
                 surface_format,
-                framebuffers,
-                framebuffers_depth,
-                frame_images,
-                frame_depths,
+                frames,
                 viewport,
                 frame_count,
             )
@@ -866,12 +842,9 @@ impl<B: hal::Backend> Device<B> {
                     }
                 });
             let (
-                framebuffers,
-                framebuffers_depth,
-                frame_images,
-                frame_depths,
+                frames,
                 viewport,
-            ) = Device::init_frame_resources(
+            ) = Device::init_frames(
                 self.device.as_ref(),
                 heaps,
                 extent,
@@ -883,20 +856,14 @@ impl<B: hal::Backend> Device<B> {
             (
                 None,
                 ImageFormat::BGRA8,
-                framebuffers,
-                framebuffers_depth,
-                frame_images,
-                frame_depths,
+                frames,
                 viewport,
                 FRAME_COUNT_NOT_MAILBOX,
             )
         };
 
         self.swap_chain = swap_chain;
-        self.framebuffers = framebuffers;
-        self.framebuffers_depth = framebuffers_depth;
-        self.frame_depths = frame_depths;
-        self.frame_images = frame_images;
+        self.frames = frames;
         self.viewport = viewport;
         self.surface_format = surface_format;
         self.wait_for_resize = false;
@@ -916,7 +883,7 @@ impl<B: hal::Backend> Device<B> {
         DeviceIntSize::new(self.viewport.rect.w.into(), self.viewport.rect.h.into())
     }
 
-    fn init_frame_resources_with_surface(
+    fn init_frames_with_surface(
         device: &B::Device,
         heaps: &mut Heaps<B>,
         adapter: &hal::Adapter<B>,
@@ -927,10 +894,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> (
         B::Swapchain,
         ImageFormat,
-        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
-        ArrayVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
         hal::pso::Viewport,
         usize,
     ) {
@@ -1004,8 +968,8 @@ impl<B: hal::Backend> Device<B> {
             depth: 1,
         };
 
-        let (framebuffers, framebuffers_depth, frame_images, frame_depths, viewport) =
-            Self::init_frame_resources(
+        let (frames, viewport) =
+            Self::init_frames(
                 device,
                 heaps,
                 image_extent,
@@ -1015,20 +979,17 @@ impl<B: hal::Backend> Device<B> {
                 Some(images),
             );
 
-        info!("Frame images: {:?}\nFrame depths: {:?}", frame_images, frame_depths);
+        info!("Frames: {:?}", frames);
         (
             swap_chain,
             image_format,
-            framebuffers,
-            framebuffers_depth,
-            frame_images,
-            frame_depths,
+            frames,
             viewport,
             frame_count,
         )
     }
 
-    fn init_frame_resources(
+    fn init_frames(
         device: &B::Device,
         heaps: &mut Heaps<B>,
         extent: hal::image::Extent,
@@ -1037,16 +998,9 @@ impl<B: hal::Backend> Device<B> {
         frame_count: usize,
         images: Option<Vec<B::Image>>
     ) -> (
-        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        ArrayVec<[B::Framebuffer; FRAME_COUNT_MAILBOX]>,
-        ArrayVec<[ImageCore<B>; FRAME_COUNT_MAILBOX]>,
-        ArrayVec<[DepthBuffer<B>; FRAME_COUNT_MAILBOX]>,
+        ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
         hal::pso::Viewport,
     ) {
-        let mut frame_depths = ArrayVec::new();
-        let mut framebuffers = ArrayVec::new();
-        let mut framebuffers_depth = ArrayVec::new();
-        let mip_levels = 1;
         let kind = hal::image::Kind::D2(
             extent.width as _,
             extent.height as _,
@@ -1072,7 +1026,7 @@ impl<B: hal::Backend> Device<B> {
                         heaps,
                         kind,
                         hal::image::ViewKind::D2Array,
-                        mip_levels,
+                        1,
                         surface_format,
                         hal::image::Usage::TRANSFER_SRC
                             | hal::image::Usage::TRANSFER_DST
@@ -1082,7 +1036,7 @@ impl<B: hal::Backend> Device<B> {
                 }).collect()
             },
         };
-        for core in &frame_images {
+        let frames = frame_images.into_iter().map(|image| {
             let depth = DepthBuffer::new(
                 device,
                 heaps,
@@ -1090,29 +1044,30 @@ impl<B: hal::Backend> Device<B> {
                 extent.height,
                 DEPTH_FORMAT,
             );
-            framebuffers.push(
-                unsafe {
-                    device.create_framebuffer(
-                        &render_pass.bgra8,
-                        Some(&core.view),
-                        extent,
-                    )
-                }
-                .expect("create_framebuffer failed")
-            );
+            let framebuffer = unsafe {
+                device.create_framebuffer(
+                    &render_pass.bgra8,
+                    Some(&image.view),
+                    extent,
+                )
+            }
+            .expect("create_framebuffer failed");
 
-            framebuffers_depth.push(
-                unsafe {
-                    device.create_framebuffer(
-                        &render_pass.bgra8_depth,
-                        vec![&core.view, &depth.core.view],
-                        extent,
-                    )
-                }
-                .expect("create_framebuffer failed")
-            );
-            frame_depths.push(depth);
-        }
+            let framebuffer_depth = unsafe {
+                device.create_framebuffer(
+                    &render_pass.bgra8_depth,
+                    vec![&image.view, &depth.core.view],
+                    extent,
+                )
+            }
+            .expect("create_framebuffer failed");
+            Frame {
+                image,
+                depth,
+                framebuffer,
+                framebuffer_depth,
+            }
+        }).collect();
         let viewport = hal::pso::Viewport {
             rect: hal::pso::Rect {
                 x: 0,
@@ -1124,10 +1079,7 @@ impl<B: hal::Backend> Device<B> {
         };
 
         (
-            framebuffers,
-            framebuffers_depth,
-            frame_images,
-            frame_depths,
+            frames,
             viewport,
         )
     }
@@ -1594,15 +1546,19 @@ impl<B: hal::Backend> Device<B> {
                 },
             )
         } else {
-            let (frame_buffer, depth_image) = match self.current_depth_test {
-                None => (&self.framebuffers[self.current_frame_id], None),
-                _ => (&self.framebuffers_depth[self.current_frame_id], Some(&self.frame_depths[self.current_frame_id].core)),
-            };
-            (
-                frame_buffer,
-                self.surface_format,
-                (depth_image, false)
-            )
+            let frame = &self.frames[self.current_frame_id];
+            match self.current_depth_test {
+                Some(_) => (
+                    &frame.framebuffer_depth,
+                    self.surface_format,
+                    (Some(&frame.depth.core), false),
+                ),
+                None => (
+                    &frame.framebuffer,
+                    self.surface_format,
+                    (None, false),
+                ),
+            }
         };
         let rp = self
             .render_pass
@@ -1747,10 +1703,11 @@ impl<B: hal::Backend> Device<B> {
                     }
                 }
             } else if old_fbo_id == DEFAULT_DRAW_FBO && old_usage == DrawTargetUsage::CopyOnly {
-                if let Some(barrier) = self.frame_images[self.current_frame_id].transit(
+                let image = &self.frames[self.current_frame_id].image;
+                if let Some(barrier) = image.transit(
                     hal::image::Access::COLOR_ATTACHMENT_WRITE,
                     hal::image::Layout::ColorAttachmentOptimal,
-                    self.frame_images[self.current_frame_id].subresource_range.clone(),
+                    image.subresource_range.clone(),
                 ) {
                     unsafe {
                         self.command_buffer.pipeline_barrier(
@@ -1800,10 +1757,11 @@ impl<B: hal::Backend> Device<B> {
         let (fbo_id, dimensions, depth_available) = match texture_target {
             DrawTarget::Default(dim) => {
                 if let DrawTargetUsage::CopyOnly = usage {
-                    if let Some(barrier) = self.frame_images[self.current_frame_id].transit(
+                    let image = &self.frames[self.current_frame_id].image;
+                    if let Some(barrier) = image.transit(
                         hal::image::Access::TRANSFER_WRITE,
                         hal::image::Layout::TransferDstOptimal,
-                        self.frame_images[self.current_frame_id].subresource_range.clone(),
+                        image.subresource_range.clone(),
                     ) {
                         unsafe {
                             self.command_buffer.pipeline_barrier(
@@ -2419,7 +2377,7 @@ impl<B: hal::Backend> Device<B> {
         } else {
             (
                 self.surface_format,
-                &self.frame_images[self.current_frame_id],
+                &self.frames[self.current_frame_id].image,
                 0,
                 hal::image::Access::COLOR_ATTACHMENT_WRITE,
                 hal::image::Layout::ColorAttachmentOptimal,
@@ -2435,7 +2393,7 @@ impl<B: hal::Backend> Device<B> {
         } else {
             (
                 self.surface_format,
-                &self.frame_images[self.current_frame_id],
+                &self.frames[self.current_frame_id].image,
                 0,
             )
         };
@@ -2786,7 +2744,7 @@ impl<B: hal::Backend> Device<B> {
             (&img.core, img.format, layer)
         } else {
             (
-                &self.frame_images[self.current_frame_id],
+                &self.frames[self.current_frame_id].image,
                 self.surface_format,
                 0,
             )
@@ -3133,15 +3091,11 @@ impl<B: hal::Backend> Device<B> {
                 },
             )
         } else {
-            let (frame_buffer, depth_image) = match self.current_depth_test {
-                None => (&self.framebuffers[self.current_frame_id], None),
-                _ => (&self.framebuffers_depth[self.current_frame_id], Some(&self.frame_depths[self.current_frame_id].core)),
-            };
-            (
-                frame_buffer,
-                self.surface_format,
-                depth_image,
-            )
+            let frame = &self.frames[self.current_frame_id];
+            match self.current_depth_test {
+                Some(_) => (&frame.framebuffer_depth, self.surface_format, Some(&frame.depth.core)),
+                None => (&frame.framebuffer, self.surface_format, None),
+            }
         };
 
         let render_pass = self
@@ -3176,10 +3130,11 @@ impl<B: hal::Backend> Device<B> {
             };
             (&img.core, fbo.layer_index, dimg)
         } else {
+            let frame = &self.frames[self.current_frame_id];
             (
-                &self.frame_images[self.current_frame_id],
+                &frame.image,
                 0,
-                Some(&self.frame_depths[self.current_frame_id].core),
+                Some(&frame.depth.core),
             )
         };
 
@@ -3436,7 +3391,7 @@ impl<B: hal::Backend> Device<B> {
                     ) {
                         Ok((id, _)) => {
                             self.current_frame_id = id as _;
-                            let image = &self.frame_images[self.current_frame_id];
+                            let image = &self.frames[self.current_frame_id].image;
                             if let Some(barrier) = image.transit(
                                 hal::image::Access::COLOR_ATTACHMENT_READ
                                     | hal::image::Access::COLOR_ATTACHMENT_WRITE,
@@ -3450,7 +3405,7 @@ impl<B: hal::Backend> Device<B> {
                                     &[barrier],
                                 );
                             }
-                            let depth_image = &self.frame_depths[self.current_frame_id].core;
+                            let depth_image = &self.frames[self.current_frame_id].depth.core;
                             if let Some(barrier) = depth_image.transit(
                                 hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
                                     | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
@@ -3492,7 +3447,7 @@ impl<B: hal::Backend> Device<B> {
             return;
         }
         {
-            let image = &self.frame_images[self.current_frame_id];
+            let image = &self.frames[self.current_frame_id].image;
             unsafe {
                 if let Some(barrier) = image.transit(
                     hal::image::Access::MEMORY_READ,
@@ -3662,11 +3617,8 @@ impl<B: hal::Backend> Device<B> {
             if let Some(buffer) = self.download_buffer {
                 buffer.deinit(self.device.as_ref(), &mut heaps);
             }
-            for image in self.frame_images {
-                image.deinit(self.device.as_ref(), &mut heaps);
-            }
-            for depth in self.frame_depths {
-                depth.deinit(self.device.as_ref(), &mut heaps);
+            for frame in self.frames.drain(..) {
+                frame.deinit(self.device.as_ref(), &mut heaps);
             }
             for (_, image) in self.images {
                 image.deinit(self.device.as_ref(), &mut heaps);
@@ -3676,12 +3628,6 @@ impl<B: hal::Backend> Device<B> {
             }
             for (_, rbo) in self.rbos {
                 rbo.deinit(self.device.as_ref(), &mut heaps);
-            }
-            for framebuffer in self.framebuffers {
-                self.device.destroy_framebuffer(framebuffer);
-            }
-            for framebuffer_depth in self.framebuffers_depth {
-                self.device.destroy_framebuffer(framebuffer_depth);
             }
 
             if let Some(buffer) = self.gpu_cache_buffer {
