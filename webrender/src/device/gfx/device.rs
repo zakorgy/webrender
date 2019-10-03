@@ -75,7 +75,7 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     layers: 0 .. 1,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum BackendApiType {
     Vulkan,
     Dx12,
@@ -278,6 +278,7 @@ pub struct Device<B: hal::Backend> {
 
     max_texture_size: i32,
     _renderer_name: String,
+    backend_api: BackendApiType,
 
     // Frame counter. This is used to map between CPU
     // frames and GPU frames.
@@ -424,6 +425,7 @@ impl<B: hal::Backend> Device<B> {
                     Some(window_size),
                     None,
                     &render_passes,
+                    backend_api,
                 );
                 (
                     Some(swap_chain),
@@ -449,6 +451,7 @@ impl<B: hal::Backend> Device<B> {
                     SURFACE_FORMAT,
                     FRAME_COUNT_NOT_MAILBOX,
                     None,
+                    backend_api,
                 );
                 (
                     None,
@@ -725,6 +728,7 @@ impl<B: hal::Backend> Device<B> {
 
             max_texture_size,
             _renderer_name: renderer_name,
+            backend_api,
             frame_id: GpuFrameId(0),
             features,
 
@@ -841,6 +845,7 @@ impl<B: hal::Backend> Device<B> {
                 window_size,
                 self.swap_chain.take(),
                 &self.render_passes,
+                self.backend_api
             );
             (
                 Some(swap_chain),
@@ -873,6 +878,7 @@ impl<B: hal::Backend> Device<B> {
                 SURFACE_FORMAT,
                 FRAME_COUNT_NOT_MAILBOX,
                 None,
+                self.backend_api,
             );
             (
                 None,
@@ -912,6 +918,7 @@ impl<B: hal::Backend> Device<B> {
         window_size: Option<(i32, i32)>,
         old_swap_chain: Option<B::Swapchain>,
         render_passes: &HalRenderPasses<B>,
+        backend_api: BackendApiType,
     ) -> (
         B::Swapchain,
         ImageFormat,
@@ -959,17 +966,19 @@ impl<B: hal::Backend> Device<B> {
                         .max(1),
             };
 
+        let mut usage = hal::image::Usage::TRANSFER_SRC
+            | hal::image::Usage::TRANSFER_DST
+            | hal::image::Usage::COLOR_ATTACHMENT;
+        if backend_api == BackendApiType::Vulkan {
+            usage |= hal::image::Usage::SAMPLED
+        };
         let mut swap_config = SwapchainConfig::new(
             window_extent.width,
             window_extent.height,
             available_surface_format,
             frame_count as _,
         )
-        .with_image_usage(
-            hal::image::Usage::TRANSFER_SRC
-                | hal::image::Usage::TRANSFER_DST
-                | hal::image::Usage::COLOR_ATTACHMENT,
-        )
+        .with_image_usage(usage)
         .with_mode(present_mode);
         if caps.composite_alpha.contains(hal::CompositeAlpha::INHERIT) {
             swap_config.composite_alpha =  hal::CompositeAlpha::INHERIT;
@@ -998,6 +1007,7 @@ impl<B: hal::Backend> Device<B> {
                 available_surface_format,
                 frame_count,
                 Some(images),
+                backend_api,
             );
 
         info!("Frames: {:?}", frames);
@@ -1017,7 +1027,8 @@ impl<B: hal::Backend> Device<B> {
         render_passes: &HalRenderPasses<B>,
         surface_format: hal::format::Format,
         frame_count: usize,
-        images: Option<Vec<B::Image>>
+        images: Option<Vec<B::Image>>,
+        backend_api: BackendApiType,
     ) -> (
         ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
         hal::pso::Viewport,
@@ -1042,6 +1053,12 @@ impl<B: hal::Backend> Device<B> {
                 }).collect()
             },
             None => {
+                let mut usage = hal::image::Usage::TRANSFER_SRC
+                    | hal::image::Usage::TRANSFER_DST
+                    | hal::image::Usage::COLOR_ATTACHMENT;
+                if backend_api == BackendApiType::Vulkan {
+                    usage |= hal::image::Usage::SAMPLED
+                };
                 (0 .. frame_count).into_iter().map(|_| {
                     ImageCore::create(
                         device,
@@ -1050,9 +1067,7 @@ impl<B: hal::Backend> Device<B> {
                         hal::image::ViewKind::D2Array,
                         1,
                         surface_format,
-                        hal::image::Usage::TRANSFER_SRC
-                            | hal::image::Usage::TRANSFER_DST
-                            | hal::image::Usage::COLOR_ATTACHMENT,
+                        usage,
                         COLOR_RANGE,
                     )
                 }).collect()
