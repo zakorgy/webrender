@@ -2909,6 +2909,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         self.device.bind_read_target(draw_target.into());
+        // Inside render pass blit
         self.device.blit_render_target(src, dest);
 
         // Restore draw target to current pass render target + layer, and reset
@@ -3335,6 +3336,24 @@ impl<B: hal::Backend> Renderer<B> {
 
                 let _timer = self.gpu_profile.start_timer(GPU_TAG_BLIT);
 
+                // 1. Check if we have a texture for new render target (texture A)
+                //    with a suitable size (equal or greater than the current render pas bounds)
+                //    in the render_target_pool or create a new one with the required size
+
+                // 2. Begin next subpass, it will transit our render target to a shader readable state
+
+                // 3. Bind texture A as draw target instead of the texture blit.target (texture B) points
+                //    Note: we have multiple B textures
+
+                // 4. Perform blit with a shader and collect blit infos for texture B for later
+
+                // 5. Begin next subpass where we transit our render target back to color target state
+                //    and texture A to readable state,
+
+                // 6. Check if we can do this out of the loop (starting at #3145)
+                //    so iterate trough `target.alpha_batch_containers` again,
+                //    in this case we only need two render passes
+
                 self.device.bind_read_target(draw_target.into());
 
                 for blit in &alpha_batch_container.tile_blits {
@@ -3373,7 +3392,7 @@ impl<B: hal::Backend> Renderer<B> {
                         dest_rect.origin.y += dest_rect.size.height;
                         dest_rect.size.height = -dest_rect.size.height;
                     }
-
+                    // Inside render pass blit
                     self.device.blit_render_target(
                         src_rect,
                         dest_rect,
@@ -3391,10 +3410,12 @@ impl<B: hal::Backend> Renderer<B> {
                     #[cfg(not(feature = "gleam"))]
                     self.device.begin_render_pass();
                 }
+
             }
         }
         #[cfg(not(feature = "gleam"))]
         self.device.end_render_pass();
+                // 7. Copy from texture A to texture B with the blit info we collected
 
 
         // For any registered image outputs on this render target,
