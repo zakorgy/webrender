@@ -56,7 +56,7 @@ use hal::command::{CommandBufferFlags, CommandBufferInheritanceInfo, RawCommandB
 use hal::pool::{RawCommandPool};
 use hal::queue::{QueueFamilyId};
 
-pub const INVALID_TEXTURE_ID: TextureId = 0;
+pub const INVALID_TEXTURE_ID: TextureId = 10;
 pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
@@ -214,6 +214,7 @@ pub struct Device<B: hal::Backend> {
     current_depth_test: Option<DepthTest>,
     // device state
     programs: FastHashMap<ProgramId, Program<B>>,
+    blit_programs: FastHashMap<hal::image::ViewKind, Program<B>>,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
     pub(crate) gpu_cache_buffer: Option<GpuCacheBuffer<B>>,
@@ -256,7 +257,7 @@ pub struct Device<B: hal::Backend> {
     instance_buffers: ArrayVec<[InstanceBufferHandler<B>; FRAME_COUNT_MAILBOX]>,
     free_instance_buffers: Vec<InstancePoolBuffer<B>>,
     download_buffer: Option<Buffer<B>>,
-    instance_range: std::ops::Range<usize>,
+    instance_buffer_range: std::ops::Range<usize>,
 
     // HW or API capabilities
     capabilities: Capabilities,
@@ -690,6 +691,7 @@ impl<B: hal::Backend> Device<B> {
             depth_targets: FastHashMap::default(),
 
             programs: FastHashMap::default(),
+            blit_programs: FastHashMap::default(),
             shader_modules: FastHashMap::default(),
             images: FastHashMap::default(),
             gpu_cache_buffer: None,
@@ -740,10 +742,25 @@ impl<B: hal::Backend> Device<B> {
             instance_buffers,
             free_instance_buffers: Vec::new(),
             download_buffer: None,
-            instance_range: 0..0,
+            instance_buffer_range: 0..0,
             wait_for_resize: false,
 
             use_push_consts,
+        }
+    }
+
+    fn ensure_blit_program(&mut self, kind: hal::image::ViewKind) {
+        if !self.blit_programs.contains_key(&kind) {
+            let program = self.create_program_inner(
+                "blit",
+                &ShaderKind::Service,
+                match kind {
+                    hal::image::ViewKind::D2 => &["TEXTURE_2D"],
+                    hal::image::ViewKind::D2Array => &[""],
+                    _ => unimplemented!(),
+                },
+            );
+            self.blit_programs.insert(kind, program);
         }
     }
 
@@ -1018,6 +1035,7 @@ impl<B: hal::Backend> Device<B> {
                         device,
                         image,
                         hal::image::ViewKind::D2Array,
+                        kind,
                         surface_format,
                         COLOR_RANGE,
                     )
@@ -1192,12 +1210,13 @@ impl<B: hal::Backend> Device<B> {
         warn!("link_program is not implemented with gfx backend");
         Ok(())
     }
-    pub fn create_program(
+
+    fn create_program_inner(
         &mut self,
         shader_name: &str,
         shader_kind: &ShaderKind,
         features: &[&str],
-    ) -> Result<ProgramId, ShaderError> {
+    ) -> Program<B> {
         let mut name = String::from(shader_name);
         for feature_names in features {
             for feature in feature_names.split(',') {
@@ -1208,7 +1227,7 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let desc_group = DescriptorGroup::from(*shader_kind);
-        let program = Program::create(
+        Program::create(
             self.pipeline_requirements
                 .get(&name)
                 .expect(&format!("Can't load pipeline data for: {}!", name))
@@ -1226,8 +1245,20 @@ impl<B: hal::Backend> Device<B> {
             self.pipeline_cache.as_ref(),
             self.surface_format,
             self.use_push_consts,
-        );
+        )
+    }
 
+    pub fn create_program(
+        &mut self,
+        shader_name: &str,
+        shader_kind: &ShaderKind,
+        features: &[&str],
+    ) -> Result<ProgramId, ShaderError> {
+        let program = self.create_program_inner(
+            shader_name,
+            shader_kind,
+            features,
+        );
         let id = self.generate_program_id();
         self.programs.insert(id, program);
         Ok(id)
@@ -1282,16 +1313,13 @@ impl<B: hal::Backend> Device<B> {
         cmd_buffer.begin(flags, CommandBufferInheritanceInfo::default());
     }
 
-    fn bind_textures(&mut self) {
-        debug_assert!(self.inside_frame);
-        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-        let program = self
-            .programs
-            .get_mut(&self.bound_program)
-            .expect("Program not found.");
-        let descriptor_group = program.shader_kind.into();
-        // Per draw textures and samplers
-        let per_draw_bindings = PerDrawBindings(
+    fn bind_per_draw_textures(
+        &mut self,
+        descriptor_group: DescriptorGroup,
+        per_draw_bindings: Option<PerDrawBindings>,
+        store: bool,
+    ) {
+        let per_draw_bindings = per_draw_bindings.unwrap_or(PerDrawBindings(
             [
                 self.bound_textures[0],
                 self.bound_textures[1],
@@ -1302,13 +1330,23 @@ impl<B: hal::Backend> Device<B> {
                 self.bound_sampler[1],
                 self.bound_sampler[2],
             ],
-        );
+        ));
+
+        let mut bound_textures = self.bound_textures;
+        bound_textures[0] = per_draw_bindings.0[0];
+        bound_textures[1] = per_draw_bindings.0[1];
+        bound_textures[2] = per_draw_bindings.0[2];
+        let mut bound_sampler = self.bound_sampler;
+        bound_sampler[0] = per_draw_bindings.1[0];
+        bound_sampler[1] = per_draw_bindings.1[1];
+        bound_sampler[2] = per_draw_bindings.1[2];
 
         self.per_draw_descriptors.bind_textures(
-            &self.bound_textures,
-            &self.bound_sampler,
+            &bound_textures,
+            &bound_sampler,
             per_draw_bindings,
             &self.images,
+            self.frames.iter().map(|f| &f.image).collect(),
             None,
             &mut self.desc_allocator,
             self.device.as_ref(),
@@ -1319,36 +1357,43 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_linear,
             &self.sampler_nearest,
         );
-        self.bound_per_draw_bindings = per_draw_bindings;
-
-        // Per pass textures
-        if descriptor_group == DescriptorGroup::Primitive {
-            let per_pass_bindings = PerPassBindings(
-                [
-                    self.bound_textures[3],
-                    self.bound_textures[4],
-                ],
-            );
-
-            self.per_pass_descriptors.bind_textures(
-                &self.bound_textures,
-                &self.bound_sampler,
-                per_pass_bindings,
-                &self.images,
-                None,
-                &mut self.desc_allocator,
-                self.device.as_ref(),
-                &self.descriptor_data,
-                &descriptor_group,
-                DESCRIPTOR_SET_PER_PASS,
-                PER_DRAW_TEXTURE_COUNT..PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT,
-                &self.sampler_linear,
-                &self.sampler_nearest,
-            );
-            self.bound_per_pass_textures = per_pass_bindings;
+        if store {
+            self.bound_per_draw_bindings = per_draw_bindings;
         }
+    }
 
-        // Per frame textures
+    fn bind_per_pass_textures(&mut self) {
+        let per_pass_bindings = PerPassBindings(
+            [
+                self.bound_textures[3],
+                self.bound_textures[4],
+            ],
+        );
+
+        self.per_pass_descriptors.bind_textures(
+            &self.bound_textures,
+            &self.bound_sampler,
+            per_pass_bindings,
+            &self.images,
+            self.frames.iter().map(|f| &f.image).collect(),
+            None,
+            &mut self.desc_allocator,
+            self.device.as_ref(),
+            &self.descriptor_data,
+            &DescriptorGroup::Primitive,
+            DESCRIPTOR_SET_PER_PASS,
+            PER_DRAW_TEXTURE_COUNT..PER_DRAW_TEXTURE_COUNT + PER_PASS_TEXTURE_COUNT,
+            &self.sampler_linear,
+            &self.sampler_nearest,
+        );
+        self.bound_per_pass_textures = per_pass_bindings;
+    }
+
+    fn bind_per_group_textures(
+        &mut self,
+        descriptor_group: DescriptorGroup,
+        store: bool,
+    ) {
         let per_group_bindings = PerGroupBindings(
             [
                 self.bound_textures[5],
@@ -1365,6 +1410,7 @@ impl<B: hal::Backend> Device<B> {
             &self.bound_sampler,
             (descriptor_group, per_group_bindings),
             &self.images,
+            self.frames.iter().map(|f| &f.image).collect(),
             match descriptor_group {
                 DescriptorGroup::Default => None,
                 _ => self.gpu_cache_buffer.as_ref().map(|b| b.buffer.as_ref()),
@@ -1382,7 +1428,29 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_linear,
             &self.sampler_nearest,
         );
-        self.bound_per_group_textures = per_group_bindings;
+        if store {
+            self.bound_per_group_textures = per_group_bindings;
+        }
+    }
+
+    fn bind_textures(&mut self) {
+        debug_assert!(self.inside_frame);
+        assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
+
+        let descriptor_group = {
+            let program = self
+                .programs
+                .get_mut(&self.bound_program)
+                .expect("Program not found.");
+            program.shader_kind.into()
+        };
+        self.bind_per_draw_textures(descriptor_group, None, true);
+
+        if descriptor_group == DescriptorGroup::Primitive {
+            self.bind_per_pass_textures();
+        }
+
+        self.bind_per_group_textures(descriptor_group, true);
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
@@ -1416,7 +1484,12 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn update_instances<T: Copy>(&mut self, instances: &[T]) {
-        self.instance_range = self.instance_buffers[self.next_id].add(self.device.as_ref(), instances, &mut *self.heaps.lock().unwrap(), &mut self.free_instance_buffers);
+        self.instance_buffer_range = self.instance_buffers[self.next_id].add(
+            self.device.as_ref(),
+            instances,
+            &mut *self.heaps.lock().unwrap(),
+            &mut self.free_instance_buffers,
+        );
     }
 
     fn draw(&mut self) {
@@ -1457,9 +1530,9 @@ impl<B: hal::Backend> Device<B> {
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 self.use_push_consts,
-                &self.quad_buffer,
+                Some(&self.quad_buffer),
                 &self.instance_buffers[self.next_id],
-                self.instance_range.clone(),
+                self.instance_buffer_range.clone(),
             );
     }
 
@@ -1511,6 +1584,7 @@ impl<B: hal::Backend> Device<B> {
         let fbo_id = match read_target {
             ReadTarget::Default => DEFAULT_READ_FBO,
             ReadTarget::Texture { texture, layer } => texture.fbos[layer],
+
         };
         self.bind_read_target_impl(fbo_id)
     }
@@ -2075,7 +2149,7 @@ impl<B: hal::Backend> Device<B> {
                 );
             }
 
-            for index in 1 .. image.kind.num_levels() {
+            for index in 1 .. image.core.kind.num_levels() {
                 if let Some(barrier) = image.core.transit(
                     hal::image::Access::TRANSFER_READ,
                     hal::image::Layout::TransferSrcOptimal,
@@ -2215,6 +2289,161 @@ impl<B: hal::Backend> Device<B> {
             old_rbo.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
             record_gpu_free(depth_target_size_in_bytes(&dimensions));
         }
+    }
+
+    fn blit_with_shader(
+        &mut self,
+        src_rect: DeviceIntRect,
+        dest_rect: DeviceIntRect,
+    ) {
+        let (src_format, src_layer, view_kind, texture_id, width, height) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+            let fbo = &self.fbos[&self.bound_read_fbo];
+            let img = &self.images[&fbo.texture_id];
+            let hal::image::Extent { width, height, .. } = img.core.kind.level_extent(0);
+            let layer = fbo.layer_index;
+            (img.format, layer, img.view_kind, fbo.texture_id, width, height)
+        } else {
+            let hal::image::Extent { width, height, .. } = self.frames[self.current_frame_id].image.kind.level_extent(0);
+            (
+                self.surface_format,
+                0,
+                hal::image::ViewKind::D2Array,
+                self.current_frame_id as _,
+                width,
+                height,
+            )
+        };
+
+        let dest_format = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            let fbo = &self.fbos[&self.bound_draw_fbo];
+            let img = &self.images[&fbo.texture_id];
+            img.format
+        } else {
+            self.surface_format
+        };
+        assert_eq!(src_format, dest_format);
+
+        let descriptor_group = (ShaderKind::Service).into();
+        let per_draw_bindings = PerDrawBindings(
+            [
+                texture_id,
+                texture_id,
+                texture_id,
+            ],
+            [
+                TextureFilter::Nearest,
+                TextureFilter::Nearest,
+                TextureFilter::Nearest,
+            ],
+        );
+
+        let per_group_bindings = PerGroupBindings(
+            [
+                self.bound_textures[5],
+                self.bound_textures[6],
+                self.bound_textures[7],
+                self.bound_textures[8],
+                self.bound_textures[9],
+                self.bound_textures[10],
+            ],
+        );
+
+        self.bind_per_draw_textures(descriptor_group, Some(per_draw_bindings), false);
+        self.bind_per_group_textures(descriptor_group, false);
+        self.bind_uniforms();
+
+        let src_bounds = hal::image::Offset {
+            x: src_rect.origin.x as i32,
+            y: src_rect.origin.y as i32,
+            z: 0,
+        } .. hal::image::Offset {
+            x: src_rect.origin.x as i32 + src_rect.size.width as i32,
+            y: src_rect.origin.y as i32 + src_rect.size.height as i32,
+            z: 1,
+        };
+
+        let dst_bounds= hal::image::Offset {
+            x: dest_rect.origin.x as i32,
+            y: dest_rect.origin.y as i32,
+            z: 0,
+        } .. hal::image::Offset {
+            x: dest_rect.origin.x as i32 + dest_rect.size.width as i32,
+            y: dest_rect.origin.y as i32 + dest_rect.size.height as i32,
+            z: 1,
+        };
+
+        let data = {
+            // Image extents, layers are treated as depth
+            let (sx, dx) = if dst_bounds.start.x > dst_bounds.end.x {
+                (
+                    src_bounds.end.x,
+                    src_bounds.start.x - src_bounds.end.x,
+                )
+            } else {
+                (
+                    src_bounds.start.x,
+                    src_bounds.end.x - src_bounds.start.x,
+                )
+            };
+            let (sy, dy) = if dst_bounds.start.y > dst_bounds.end.y {
+                (
+                    src_bounds.end.y,
+                    src_bounds.start.y - src_bounds.end.y,
+                )
+            } else {
+                (
+                    src_bounds.start.y,
+                    src_bounds.end.y - src_bounds.start.y,
+                )
+            };
+
+            vertex_types::BlitInstance {
+                aOffset: [sx as f32 / width as f32, sy as f32 / height as f32],
+                aExtent: [dx as f32 / width as f32, dy as f32 / height as f32],
+                aZ: src_layer as f32,
+                aLevel: 0.0,
+            }
+        };
+
+        let viewport = hal::pso::Viewport {
+            rect: hal::pso::Rect {
+                x: dst_bounds.start.x.min(dst_bounds.end.x) as _,
+                y: dst_bounds.start.y.min(dst_bounds.end.y) as _,
+                w: (dst_bounds.end.x - dst_bounds.start.x).abs() as _,
+                h: (dst_bounds.end.y - dst_bounds.start.y).abs() as _,
+            },
+            depth: 0.0 .. 1.0,
+        };
+        self.update_instances(&[data]);
+
+        self.ensure_blit_program(view_kind);
+        let ref desc_set_per_draw = self.per_draw_descriptors.descriptor_set(&per_draw_bindings);
+        let locals = if self.use_push_consts { Locals::default() } else { self.bound_locals };
+        let ref desc_set_locals = self.locals_descriptors.descriptor_set(&locals);
+        let ref desc_set_per_group = self.per_group_descriptors.descriptor_set(&(descriptor_group, per_group_bindings));
+
+        self.blit_programs
+            .get_mut(&view_kind)
+            .unwrap()
+            .submit(
+                &mut self.command_buffer,
+                viewport,
+                desc_set_per_draw,
+                None,
+                desc_set_per_group,
+                Some(*desc_set_locals),
+                None,
+                self.blend_color.get(),
+                None,
+                self.render_pass_depth_state,
+                None,
+                self.next_id,
+                self.descriptor_data.pipeline_layout(&descriptor_group),
+                self.use_push_consts,
+                Some(&self.quad_buffer),
+                &self.instance_buffers[self.next_id],
+                self.instance_buffer_range.clone(),
+            );
     }
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
@@ -3095,6 +3324,7 @@ impl<B: hal::Backend> Device<B> {
         if let Some(mut rect) = rect {
             let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
                 let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture_id]
+                    .core
                     .kind
                     .extent();
                 DeviceIntRect::new(
@@ -3512,6 +3742,9 @@ impl<B: hal::Backend> Device<B> {
             self.desc_allocator.dispose(self.device.as_ref());
             self.locals_buffer.deinit(self.device.as_ref(), &mut heaps);
             for (_, program) in self.programs {
+                program.deinit(self.device.as_ref(), &mut heaps)
+            }
+            for (_, program) in self.blit_programs {
                 program.deinit(self.device.as_ref(), &mut heaps)
             }
             heaps.dispose(self.device.as_ref());

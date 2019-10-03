@@ -12,10 +12,11 @@ use smallvec::SmallVec;
 use std::clone::Clone;
 use std::cmp::Eq;
 use std::collections::hash_map::Entry;
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::marker::Copy;
 use super::buffer::UniformBufferHandler;
-use super::image::Image;
+use super::image::{Image, ImageCore};
 use super::TextureId;
 use super::super::{ShaderKind, TextureFilter, VertexArrayKind};
 
@@ -116,7 +117,7 @@ impl From<ShaderKind> for DescriptorGroup {
     fn from(kind: ShaderKind) -> Self {
         match kind {
             ShaderKind::Cache(VertexArrayKind::Border) | ShaderKind::Cache(VertexArrayKind::LineDecoration)
-                | ShaderKind::DebugColor | ShaderKind::DebugFont
+                | ShaderKind::DebugColor | ShaderKind::DebugFont | ShaderKind::Service
                 | ShaderKind::VectorStencil | ShaderKind::VectorCover => DescriptorGroup::Default,
             ShaderKind::ClipCache => DescriptorGroup::Clip,
             ShaderKind::Brush | ShaderKind::Cache(VertexArrayKind::Blur) | ShaderKind::Cache(VertexArrayKind::Scale)
@@ -271,7 +272,7 @@ pub(super) struct DescriptorSetHandler<K, B: hal::Backend, F> {
 
 impl<K, B, F> DescriptorSetHandler<K, B, F>
     where
-        K: Copy + Clone + Eq + Hash + DescGroupKey,
+        K: Copy + Clone + Debug + Eq + Hash + DescGroupKey,
         B: hal::Backend,
         F: FreeSets<B> + Extend<DescriptorSet<B>> {
     pub(super) fn new(
@@ -298,7 +299,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
 
 impl<K, B, F> DescriptorSetHandler<K, B, F>
     where
-        K: Copy + Clone + Eq + Hash + DescGroupKey,
+        K: Copy + Clone + Debug + Eq + Hash + DescGroupKey,
         B: hal::Backend,
         F: FreeSets<B> {
     pub(super) fn from_existing(free_sets: F) -> Self {
@@ -315,7 +316,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
     }
 
     pub(super) fn descriptor_set(&self, key: &K) -> &B::DescriptorSet {
-        self.descriptor_bindings[key].raw()
+        self.descriptor_bindings.get(&key).expect(&format!("Descriptor set not found for key {:?}", key)).raw()
     }
 
     pub(super) fn retain(&mut self, id: &TextureId) {
@@ -339,6 +340,7 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
         bound_samplers: &[TextureFilter; RENDERER_TEXTURE_COUNT],
         bindings: K,
         images: &FastHashMap<TextureId, Image<B>>,
+        frame_images: Vec<&ImageCore<B>>,
         storage_buffer: Option<&B::Buffer>,
         desc_allocator: &mut DescriptorAllocator<B>,
         device: &B::Device,
@@ -385,7 +387,10 @@ impl<K, B, F> DescriptorSetHandler<K, B, F>
             });
         }
         for index in range {
-            let image = &images[&bound_textures[index]].core;
+            let image = match images.get(&bound_textures[index]) {
+                Some(ref image) => &image.core,
+                None => frame_images[bound_textures[index] as usize],
+            };
             let sampler = if index < PER_DRAW_TEXTURE_COUNT {
                 match bound_samplers[index] {
                     TextureFilter::Linear | TextureFilter::Trilinear => sampler_linear,

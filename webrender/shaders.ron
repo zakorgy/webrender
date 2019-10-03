@@ -140,4 +140,12 @@
             "",// [0]
         ],
     ),// [18]
+    (
+        name: "blit",
+        source_name: "blit",
+        features: [
+            "",// [0]
+            "TEXTURE_2D",// [1]
+        ],
+    ),// [19]
 ]

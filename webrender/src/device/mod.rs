@@ -546,10 +546,12 @@ pub enum ShaderKind {
     VectorStencil,
     #[allow(dead_code)]
     VectorCover,
-    #[cfg(all(not(feature = "gleam")))]
+    #[cfg(not(feature = "gleam"))]
     DebugColor,
-    #[cfg(all(not(feature = "gleam")))]
+    #[cfg(not(feature = "gleam"))]
     DebugFont,
+    #[cfg(not(feature = "gleam"))]
+    Service,
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Copy, Clone)]

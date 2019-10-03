@@ -29,6 +29,7 @@ pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) image: B::Image,
     pub(super) memory_block: Option<MemoryBlock<B>>,
     pub(super) view: B::ImageView,
+    pub(super) kind: hal::image::Kind,
     pub(super) subresource_range: hal::image::SubresourceRange,
     pub(super) state: Cell<hal::image::State>,
 }
@@ -38,6 +39,7 @@ impl<B: hal::Backend> ImageCore<B> {
         device: &B::Device,
         image: B::Image,
         view_kind: hal::image::ViewKind,
+        kind: hal::image::Kind,
         format: hal::format::Format,
         subresource_range: hal::image::SubresourceRange,
     ) -> Self {
@@ -55,6 +57,7 @@ impl<B: hal::Backend> ImageCore<B> {
             image,
             memory_block: None,
             view,
+            kind,
             subresource_range,
             state: Cell::new((hal::image::Access::empty(), hal::image::Layout::Undefined)),
         }
@@ -105,7 +108,7 @@ impl<B: hal::Backend> ImageCore<B> {
 
         ImageCore {
             memory_block: Some(memory_block),
-            ..Self::from_image(device, image, view_kind, format, subresource_range)
+            ..Self::from_image(device, image, view_kind, kind, format, subresource_range)
         }
     }
 
@@ -148,7 +151,7 @@ impl<B: hal::Backend> ImageCore<B> {
 
 pub(super) struct Image<B: hal::Backend> {
     pub(super) core: ImageCore<B>,
-    pub(super) kind: hal::image::Kind,
+    pub(super) view_kind: hal::image::ViewKind,
     pub(super) format: ImageFormat,
 }
 
@@ -192,7 +195,7 @@ impl<B: hal::Backend> Image<B> {
 
         Image {
             core,
-            kind,
+            view_kind,
             format: image_format,
         }
     }
