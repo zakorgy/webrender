@@ -44,8 +44,6 @@ headless = ["gl", "osmesa-sys", "osmesa-src"]
 pathfinder = ["webrender/pathfinder"]
 gfx = ["dirs"]
 gl = ["gleam", "glutin", "mozangle", "webrender/gleam"]
-dx12 = ["gfx-backend-dx12", "gfx", "webrender/push_constants"]
-metal = ["gfx-backend-metal", "gfx", "webrender/push_constants"]
 vulkan = ["gfx-backend-vulkan", "gfx"]
 
 [target.'cfg(target_os = "windows")'.dependencies]

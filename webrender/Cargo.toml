@@ -15,7 +15,6 @@ debugger = ["ws", "serde_json", "image", "base64"]
 capture = ["webrender_api/serialize"]
 replay = ["webrender_api/deserialize"]
 pathfinder = ["pathfinder_font_renderer", "pathfinder_gfx_utils", "pathfinder_partitioner", "pathfinder_path_utils"]
-push_constants = []
 serialize_program = ["webrender_build/serialize_program"]
 no_static_freetype = []
 
