@@ -287,8 +287,8 @@ pub struct Device<B: hal::Backend> {
 
     next_id: usize,
     frame_fence: ArrayVec<[Fence<B>; FRAME_COUNT_MAILBOX]>,
-    image_available_semaphore: B::Semaphore,
-    render_finished_semaphore: B::Semaphore,
+    image_available_semaphores: ArrayVec<[B::Semaphore; FRAME_COUNT_MAILBOX]>,
+    render_finished_semaphores: ArrayVec<[B::Semaphore; FRAME_COUNT_MAILBOX]>,
     pipeline_requirements: FastHashMap<String, PipelineRequirements>,
     pipeline_cache: Option<B::PipelineCache>,
     cache_path: Option<PathBuf>,
@@ -485,6 +485,8 @@ impl<B: hal::Backend> Device<B> {
         let mut command_pools: ArrayVec<[CommandPool<B>; FRAME_COUNT_MAILBOX]> = ArrayVec::new();
         let mut staging_buffer_pool = ArrayVec::new();
         let mut instance_buffers = ArrayVec::new();
+        let mut image_available_semaphores = ArrayVec::new();
+        let mut render_finished_semaphores = ArrayVec::new();
         for _ in 0 .. frame_count {
             let fence = device.create_fence(false).expect("create_fence failed");
             frame_fence.push(Fence {
@@ -518,6 +520,9 @@ impl<B: hal::Backend> Device<B> {
                 (limits.optimal_buffer_copy_pitch_alignment - 1) as usize,
                 instance_buffer_size,
             ));
+
+            image_available_semaphores.push(device.create_semaphore().expect("create_semaphore failed"));
+            render_finished_semaphores.push(device.create_semaphore().expect("create_semaphore failed"));
         }
 
         let mut command_buffer = command_pools[0].remove_cmd_buffer();
@@ -640,9 +645,6 @@ impl<B: hal::Backend> Device<B> {
             Vec::new(),
         );
 
-        let image_available_semaphore = device.create_semaphore().expect("create_semaphore failed");
-        let render_finished_semaphore = device.create_semaphore().expect("create_semaphore failed");
-
         let pipeline_cache = if let Some(ref path) = cache_path {
             Self::load_pipeline_cache(&device, &path, &adapter.physical_device)
         } else {
@@ -728,8 +730,8 @@ impl<B: hal::Backend> Device<B> {
 
             next_id: 0,
             frame_fence,
-            image_available_semaphore,
-            render_finished_semaphore,
+            image_available_semaphores,
+            render_finished_semaphores,
             pipeline_requirements,
             pipeline_cache,
             cache_path,
@@ -3250,7 +3252,7 @@ impl<B: hal::Backend> Device<B> {
                 Some(swap_chain) => {
                     match swap_chain.acquire_image(
                         !0,
-                        Some(&mut self.image_available_semaphore),
+                        Some(&mut self.image_available_semaphores[self.next_id]),
                         None,
                     ) {
                         Ok((id, _)) => {
@@ -3334,10 +3336,10 @@ impl<B: hal::Backend> Device<B> {
                     let submission = hal::queue::Submission {
                         command_buffers: &[&self.command_buffer],
                         wait_semaphores: Some((
-                            &self.image_available_semaphore,
+                            &self.image_available_semaphores[self.next_id],
                             PipelineStage::BOTTOM_OF_PIPE,
                         )),
-                        signal_semaphores: Some(&self.render_finished_semaphore),
+                        signal_semaphores: Some(&self.render_finished_semaphores[self.next_id]),
                     };
                     self.queue_group_queues[0]
                         .submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
@@ -3347,7 +3349,7 @@ impl<B: hal::Backend> Device<B> {
                     match self.queue_group_queues[0]
                         .present(
                             std::iter::once((&swap_chain, self.current_frame_id as _)),
-                            Some(&self.render_finished_semaphore),
+                            Some(&self.render_finished_semaphores[self.next_id]),
                         ) {
                             Ok(suboptimal) => {
                                 match suboptimal {
@@ -3524,10 +3526,10 @@ impl<B: hal::Backend> Device<B> {
             for fence in self.frame_fence {
                 self.device.destroy_fence(fence.inner);
             }
-            self.device
-                .destroy_semaphore(self.image_available_semaphore);
-            self.device
-                .destroy_semaphore(self.render_finished_semaphore);
+
+            for s in self.render_finished_semaphores.into_iter().chain(self.image_available_semaphores.into_iter()) {
+                self.device.destroy_semaphore(s);
+            }
             if let Some(swap_chain) = self.swap_chain {
                 self.device.destroy_swapchain(swap_chain);
             }
