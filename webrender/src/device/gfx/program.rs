@@ -165,7 +165,6 @@ impl<B: hal::Backend> Program<B> {
                 .into_iter(),
                 ShaderKind::Cache(VertexArrayKind::Border)
                     | ShaderKind::Cache(VertexArrayKind::LineDecoration) => [
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
                     (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
                 ].into_iter(),
                 ShaderKind::ClipCache => [
@@ -181,12 +180,6 @@ impl<B: hal::Backend> Program<B> {
                             (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, None),
                             (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Disabled, None),
                             (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_PASS0), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_PASS0), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_PASS1), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_PASS1), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_PASS1), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
                             (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, None),
                             (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Disabled, None),
                             (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
@@ -209,12 +202,6 @@ impl<B: hal::Backend> Program<B> {
                             (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, None),
                             (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Disabled, None),
                             (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_PASS0), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_PASS0), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_PASS1), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_PASS1), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_PASS1), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
                             (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, None),
                             (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Disabled, None),
                             (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
@@ -230,25 +217,18 @@ impl<B: hal::Backend> Program<B> {
                 }
                 ShaderKind::DebugColor | ShaderKind::DebugFont => [
                     (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
                 ].into_iter(),
                 _ => [
-                    (None, RPDS::Enabled, None),
-                    (None, RPDS::Disabled, None),
-                    (None, RPDS::Enabled, Some(LESS_EQUAL_TEST)),
                     (None, RPDS::Enabled, Some(LESS_EQUAL_WRITE)),
                     (Some(ALPHA), RPDS::Enabled, None),
                     (Some(ALPHA), RPDS::Disabled, None),
                     (Some(ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                    (Some(ALPHA), RPDS::Enabled, Some(LESS_EQUAL_WRITE)),
                     (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
                     (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
                     (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_WRITE)),
                     (Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, None),
                     (Some(PREMULTIPLIED_DEST_OUT), RPDS::Disabled, None),
                     (Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                    (Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, Some(LESS_EQUAL_WRITE)),
                 ]
                 .into_iter(),
             };
