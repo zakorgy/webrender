@@ -1208,6 +1208,10 @@ impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
         }
     }
 
+    fn is_some(&self) -> bool {
+        self.debug_renderer.is_some()
+    }
+
     #[cfg(not(feature = "gleam"))]
     fn take(&mut self) -> Option<DebugRenderer> {
         self.debug_renderer.take()
@@ -2428,7 +2432,19 @@ impl<B: hal::Backend> Renderer<B> {
                 self.owned_external_images.iter().map(|(key, value)| (*key, value.clone()))
             );
 
-            for &mut (_, RenderedDocument { ref mut frame, .. }) in &mut active_documents {
+            let last_main_target_draw = match active_documents.iter().rev().position(|(_, doc)| {
+                doc.frame.passes.iter().any(|p| {
+                    if let RenderPassKind::MainFramebuffer(_) = p.kind {
+                        true
+                    } else {
+                        false
+                    }
+                })
+            }) {
+                Some(from_back) => active_documents.len() - 1 - from_back,
+                None =>!0,
+            };
+            for (i, &mut (_, RenderedDocument { ref mut frame, .. })) in active_documents.iter_mut().enumerate() {
                 frame.profile_counters.reset_targets();
                 self.prepare_gpu_cache(frame);
                 assert!(frame.gpu_cache_frame_id <= self.gpu_cache_frame_id,
@@ -2440,7 +2456,8 @@ impl<B: hal::Backend> Renderer<B> {
                     framebuffer_size,
                     clear_depth_value.is_some(),
                     cpu_frame_id,
-                    &mut stats
+                    &mut stats,
+                    i == last_main_target_draw && !self.debug.is_some(),
                 );
 
                 if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
@@ -3019,6 +3036,7 @@ impl<B: hal::Backend> Renderer<B> {
         projection: &Transform3D<f32>,
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
+        last_main_target_draw: bool,
     ) {
         self.profile_counters.color_targets.inc();
         let _gm = self.gpu_profile.start_marker("color target");
@@ -3093,7 +3111,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.handle_blits(&target.blits, render_tasks);
 
         #[cfg(not(feature = "gleam"))]
-        self.device.begin_render_pass();
+        self.device.begin_render_pass(last_main_target_draw && target.alpha_batch_containers.is_empty());
 
         // Draw any blurs for this target.
         // Blurs are rendered as a standard 2-pass
@@ -3144,8 +3162,28 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
-        let alpha_batches = target.alpha_batch_containers.len();
+        #[cfg(not(feature = "gleam"))]
+        self.device.end_render_pass();
+
+        let last_batch_idx = target.alpha_batch_containers.len() - 1;
         for (i, alpha_batch_container) in target.alpha_batch_containers.iter().enumerate() {
+            let last_batch = i == last_batch_idx;
+            let will_break_pass = if last_batch {
+                alpha_batch_container
+                .alpha_batches
+                .iter().any(|batch| {
+                    if let BatchKind::Brush(BrushBatchKind::MixBlend { .. }) = batch.key.kind {
+                        true
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                true
+            };
+            let last_pass = last_main_target_draw && last_batch && !will_break_pass;
+            #[cfg(not(feature = "gleam"))]
+            self.device.begin_render_pass(last_pass);
             let uses_scissor = alpha_batch_container.task_scissor_rect.is_some() ||
                                !alpha_batch_container.regions.is_empty();
 
@@ -3274,8 +3312,9 @@ impl<B: hal::Backend> Renderer<B> {
                             &render_tasks[task_id],
                             &render_tasks[backdrop_id],
                         );
+                        let last_pass = last_main_target_draw && last_batch;
                         #[cfg(not(feature = "gleam"))]
-                        self.device.begin_render_pass();
+                        self.device.begin_render_pass(last_pass);
                     }
 
                     let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
@@ -3331,12 +3370,12 @@ impl<B: hal::Backend> Renderer<B> {
                 self.device.disable_scissor();
             }
 
+            #[cfg(not(feature = "gleam"))]
+            self.device.end_render_pass();
+
             // At the end of rendering a container, blit across any cache tiles
             // to the texture cache for use on subsequent frames.
             if !alpha_batch_container.tile_blits.is_empty() {
-                #[cfg(not(feature = "gleam"))]
-                self.device.end_render_pass();
-
                 let _timer = self.gpu_profile.start_timer(GPU_TAG_BLIT);
 
                 self.device.bind_read_target(draw_target.into());
@@ -3389,16 +3428,8 @@ impl<B: hal::Backend> Renderer<B> {
                     #[cfg(not(feature="gleam"))]
                     DrawTargetUsage::Draw,
                 );
-
-                // Don't create a new RP if it's the last element
-                if i < alpha_batches - 1 {
-                    #[cfg(not(feature = "gleam"))]
-                    self.device.begin_render_pass();
-                }
             }
         }
-        #[cfg(not(feature = "gleam"))]
-        self.device.end_render_pass();
 
 
         // For any registered image outputs on this render target,
@@ -3461,7 +3492,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.disable_depth_write();
 
             #[cfg(not(feature = "gleam"))]
-            self.device.begin_render_pass();
+            self.device.begin_render_pass(false);
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -3649,7 +3680,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.handle_blits(&target.blits, render_tasks);
 
         #[cfg(not(feature = "gleam"))]
-        self.device.begin_render_pass();
+        self.device.begin_render_pass(false);
 
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
@@ -3989,6 +4020,7 @@ impl<B: hal::Backend> Renderer<B> {
         framebuffer_depth_is_ready: bool,
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
+        last_main_target_draw: bool,
     ) {
         let _gm = self.gpu_profile.start_marker("tile frame draw");
 
@@ -4004,6 +4036,20 @@ impl<B: hal::Backend> Renderer<B> {
         self.bind_frame_data(frame);
         self.texture_resolver.begin_frame();
 
+        let last_main_target_idx = if !last_main_target_draw {
+            !0
+        } else {
+            match frame.passes.iter().rev().position(|p| {
+                if let RenderPassKind::MainFramebuffer(..) = p.kind {
+                    true
+                } else {
+                    false
+                }
+            }) {
+                Some(from_back) => frame.passes.len() - 1 - from_back,
+                None => !0,
+            }
+        };
         for (pass_index, pass) in frame.passes.iter_mut().enumerate() {
             let _gm = self.gpu_profile.start_marker(&format!("pass {}", pass_index));
 
@@ -4042,6 +4088,7 @@ impl<B: hal::Backend> Renderer<B> {
                             &projection,
                             frame_id,
                             stats,
+                            pass_index == last_main_target_idx,
                         );
                     }
 
@@ -4117,6 +4164,7 @@ impl<B: hal::Backend> Renderer<B> {
                             &projection,
                             frame_id,
                             stats,
+                            false,
                         );
                     }
 

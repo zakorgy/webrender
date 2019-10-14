@@ -9,7 +9,7 @@ use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
 
 use std::cell::Cell;
 use super::buffer::BufferPool;
-use super::render_pass::HalRenderPasses;
+use super::render_pass::{RenderPassManager, DEPTH_ATTACHMENT_STATE};
 use super::TextureId;
 use super::PipelineBarrierInfo;
 use super::super::{RBOId, Texture};
@@ -164,15 +164,6 @@ impl<B: hal::Backend> Image<B> {
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
     ) -> Self {
-        let format = match image_format {
-            ImageFormat::R8 => hal::format::Format::R8Unorm,
-            ImageFormat::R16 => hal::format::Format::R16Unorm,
-            ImageFormat::RG8 => hal::format::Format::Rg8Unorm,
-            ImageFormat::RGBA8 => hal::format::Format::Rgba8Unorm,
-            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
-            ImageFormat::RGBAF32 => hal::format::Format::Rgba32Sfloat,
-            ImageFormat::RGBAI32 => hal::format::Format::Rgba32Sint,
-        };
         let kind = hal::image::Kind::D2(image_width as _, image_height as _, image_depth as _, 1);
 
         let core = ImageCore::create(
@@ -181,7 +172,7 @@ impl<B: hal::Backend> Image<B> {
             kind,
             view_kind,
             mip_levels,
-            format,
+            image_format.into(),
             usage,
             hal::image::SubresourceRange {
                 aspects: hal::format::Aspects::COLOR,
@@ -277,7 +268,6 @@ impl<B: hal::Backend> Image<B> {
 pub(super) struct Framebuffer<B: hal::Backend> {
     pub(super) texture_id: TextureId,
     pub(super) layer_index: u16,
-    pub(super) format: ImageFormat,
     image_view: B::ImageView,
     pub(super) fbo: B::Framebuffer,
     pub(super) rbo: RBOId,
@@ -289,7 +279,7 @@ impl<B: hal::Backend> Framebuffer<B> {
         texture: &Texture,
         image: &Image<B>,
         layer_index: u16,
-        render_passes: &HalRenderPasses<B>,
+        render_pass_manager: &mut RenderPassManager<B>,
         rbo: RBOId,
         depth: Option<&B::ImageView>,
     ) -> Self {
@@ -320,13 +310,13 @@ impl<B: hal::Backend> Framebuffer<B> {
         let fbo = unsafe {
             if rbo != RBOId(0) {
                 device.create_framebuffer(
-                    render_passes.get_render_pass(texture.format, true),
+                    render_pass_manager.get_render_pass(device, (texture.format.into(), Some(DEPTH_ATTACHMENT_STATE))),
                     Some(&image_view).into_iter().chain(depth.into_iter()),
                     extent,
                 )
             } else {
                 device.create_framebuffer(
-                    render_passes.get_render_pass(texture.format, false),
+                    render_pass_manager.get_render_pass(device, (texture.format.into(), None)),
                     Some(&image_view),
                     extent,
                 )
@@ -337,7 +327,6 @@ impl<B: hal::Backend> Framebuffer<B> {
         Framebuffer {
             texture_id: texture.id,
             layer_index,
-            format: texture.format,
             image_view,
             fbo,
             rbo,

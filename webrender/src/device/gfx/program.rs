@@ -12,7 +12,7 @@ use std::borrow::Cow::{Borrowed};
 
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
-use super::render_pass::HalRenderPasses;
+use super::render_pass::*;
 use super::PipelineRequirements;
 use super::super::{ShaderKind, VertexArrayKind};
 use super::super::super::shader_source;
@@ -59,7 +59,7 @@ impl<B: hal::Backend> Program<B> {
         shader_name: &str,
         features: &[&str],
         shader_kind: ShaderKind,
-        render_passes: &HalRenderPasses<B>,
+        render_pass_manager: &mut RenderPassManager<B>,
         frame_count: usize,
         shader_modules: &mut FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
         pipeline_cache: Option<&B::PipelineCache>,
@@ -233,32 +233,40 @@ impl<B: hal::Backend> Program<B> {
                 .into_iter(),
             };
 
-            let format = match shader_kind {
-                ShaderKind::ClipCache => ImageFormat::R8,
-                ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => {
-                    ImageFormat::R8
-                }
-                ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => {
-                    ImageFormat::R8
-                }
-                _ => surface_format,
+            let color_attachment_state = match shader_kind {
+                ShaderKind::ClipCache => ImageFormat::R8.into(),
+                ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => ImageFormat::R8.into(),
+                ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => ImageFormat::R8.into(),
+                _ => surface_format.into(),
             };
 
-            let create_desc = |(blend_state, render_pass_depth_state, depth_test)| {
-                let depth_enabled = match depth_test {
-                    Some(_) => true,
+            fn create_descriptor<'a, 'b, B: hal::Backend>(
+                device: &'b B::Device,
+                color_attachment_state: AttachmentState,
+                shader_entries: hal::pso::GraphicsShaderSet<'b, B>,
+                pipeline_layout: &'b B::PipelineLayout,
+                pipeline_requirements: &PipelineRequirements,
+                (blend_state, render_pass_depth_state, depth_test): (Option<hal::pso::BlendState>, RenderPassDepthState, Option<hal::pso::DepthTest>),
+                render_pass_manager: &'b mut RenderPassManager<B>,
+            ) -> hal::pso::GraphicsPipelineDesc<'a, B>
+                where 'b: 'a {
+                let depth_attachment_state = match depth_test {
+                    Some(_) => Some(DEPTH_ATTACHMENT_STATE),
                     None => match render_pass_depth_state {
-                        RenderPassDepthState::Enabled => true,
-                        RenderPassDepthState::Disabled => false,
+                        RenderPassDepthState::Enabled => Some(DEPTH_ATTACHMENT_STATE),
+                        RenderPassDepthState::Disabled => None,
                     },
                 };
                 let subpass = hal::pass::Subpass {
                     index: 0,
-                    main_pass: render_passes
-                        .get_render_pass(format, depth_enabled),
+                    main_pass: render_pass_manager
+                        .get_render_pass(
+                            device,
+                            (color_attachment_state, depth_attachment_state),
+                        ),
                 };
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
-                    shader_entries.clone(),
+                    shader_entries,
                     hal::Primitive::TriangleList,
                     hal::pso::Rasterizer::FILL,
                     &pipeline_layout,
@@ -283,24 +291,33 @@ impl<B: hal::Backend> Program<B> {
                 pipeline_descriptor.attributes =
                     pipeline_requirements.attribute_descriptors.clone();
                 pipeline_descriptor
-            };
+            }
 
-            let pipelines_descriptors = pipeline_states
-                .clone()
-                .map(|ps| create_desc(*ps));
-
-            let pipelines =
-                unsafe { device.create_graphics_pipelines(pipelines_descriptors, pipeline_cache) }
-                    .into_iter();
-
-            let mut states = pipeline_states
-                .cloned()
-                .zip(pipelines.map(|pipeline| pipeline.expect("Pipeline creation failed")))
-                .collect::<FastHashMap<PipelineKey, B::GraphicsPipeline>>();
+            let mut states = pipeline_states.map(|ps| {
+                let graphics_desc = create_descriptor(
+                    device,
+                    color_attachment_state,
+                    shader_entries.clone(),
+                    pipeline_layout,
+                    &pipeline_requirements,
+                    ps.clone(),
+                    render_pass_manager,
+                );
+                let pipeline = unsafe { device.create_graphics_pipeline(&graphics_desc, pipeline_cache) }.unwrap();
+                (*ps, pipeline)
+            }).collect::<FastHashMap<PipelineKey, B::GraphicsPipeline>>();
 
             if features.contains(&"DEBUG_OVERDRAW") {
                 let pipeline_state = (Some(OVERDRAW), RPDS::Enabled, Some(LESS_EQUAL_TEST));
-                let pipeline_descriptor = create_desc(pipeline_state);
+                let pipeline_descriptor = create_descriptor(
+                    device,
+                    color_attachment_state,
+                    shader_entries.clone(),
+                    pipeline_layout,
+                    &pipeline_requirements,
+                    pipeline_state,
+                    render_pass_manager,
+                );
                 let pipeline = unsafe {
                     device.create_graphics_pipeline(&pipeline_descriptor, pipeline_cache)
                 }
