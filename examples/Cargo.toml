@@ -60,6 +60,8 @@ default = []
 debug = ["webrender/capture", "webrender/debugger", "webrender/profiler"]
 gfx-hal = ["dirs"]
 gl = ["gleam", "glutin", "webrender/gleam"]
+dx12 = ["gfx-backend-dx12", "gfx-hal"]
+metal = ["gfx-backend-metal", "gfx-hal"]
 vulkan = ["gfx-backend-vulkan", "gfx-hal"]
 
 [dependencies]
