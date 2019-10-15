@@ -3165,7 +3165,7 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(not(feature = "gleam"))]
         self.device.end_render_pass();
 
-        let last_batch_idx = target.alpha_batch_containers.len() - 1;
+        let last_batch_idx = target.alpha_batch_containers.len().max(1) - 1;
         for (i, alpha_batch_container) in target.alpha_batch_containers.iter().enumerate() {
             let last_batch = i == last_batch_idx;
             let will_break_pass = if last_batch {
