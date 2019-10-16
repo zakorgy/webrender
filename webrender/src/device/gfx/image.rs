@@ -5,13 +5,14 @@
 use api::{DeviceIntRect, ImageFormat};
 use hal::{self, Device as BackendDevice};
 use hal::command::RawCommandBuffer;
+use hal::image::{Layout, Access};
+use hal::pso::PipelineStage;
 use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
 
 use std::cell::Cell;
 use super::buffer::BufferPool;
 use super::render_pass::HalRenderPasses;
 use super::TextureId;
-use super::PipelineBarrierInfo;
 use super::super::{RBOId, Texture};
 
 const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
@@ -31,6 +32,7 @@ pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) view: B::ImageView,
     pub(super) subresource_range: hal::image::SubresourceRange,
     pub(super) state: Cell<hal::image::State>,
+    prev_state: Cell<hal::image::State>,
 }
 
 impl<B: hal::Backend> ImageCore<B> {
@@ -56,7 +58,8 @@ impl<B: hal::Backend> ImageCore<B> {
             memory_block: None,
             view,
             subresource_range,
-            state: Cell::new((hal::image::Access::empty(), hal::image::Layout::Undefined)),
+            state: Cell::new((Access::empty(), Layout::Undefined)),
+            prev_state: Cell::new((Access::empty(), Layout::Undefined)),
         }
     }
 
@@ -111,7 +114,7 @@ impl<B: hal::Backend> ImageCore<B> {
 
     fn _reset(&self) {
         self.state
-            .set((hal::image::Access::empty(), hal::image::Layout::Undefined));
+            .set((Access::empty(), Layout::Undefined));
     }
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
@@ -124,12 +127,24 @@ impl<B: hal::Backend> ImageCore<B> {
         }
     }
 
+    fn pick_stage_for_layout(layout: Layout) -> PipelineStage {
+        match layout {
+            Layout::Undefined => PipelineStage::TOP_OF_PIPE,
+            Layout::Present => PipelineStage::TRANSFER,
+            Layout::ColorAttachmentOptimal => PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+            Layout::ShaderReadOnlyOptimal => PipelineStage::VERTEX_SHADER | PipelineStage::FRAGMENT_SHADER,
+            Layout::TransferSrcOptimal | Layout::TransferDstOptimal => PipelineStage::TRANSFER,
+            Layout::DepthStencilAttachmentOptimal => PipelineStage::EARLY_FRAGMENT_TESTS | PipelineStage::LATE_FRAGMENT_TESTS,
+            state => unimplemented!("State not covered {:?}", state),
+        }
+    }
+
     pub(super) fn transit(
         &self,
-        access: hal::image::Access,
-        layout: hal::image::Layout,
+        access: Access,
+        layout: Layout,
         range: hal::image::SubresourceRange,
-    ) -> Option<hal::memory::Barrier<B>> {
+    ) -> Option<(hal::memory::Barrier<B>, std::ops::Range<PipelineStage>)> {
         let src_state = self.state.get();
         if src_state == (access, layout) {
             None
@@ -141,8 +156,15 @@ impl<B: hal::Backend> ImageCore<B> {
                 families: None,
                 range,
             };
-            Some(barrier)
+            self.prev_state.set(src_state);
+            Some((barrier, Self::pick_stage_for_layout(src_state.1) .. Self::pick_stage_for_layout(self.state.get().1)))
         }
+    }
+
+    pub(super) fn transit_back(&self) -> Option<(hal::memory::Barrier<B>, std::ops::Range<PipelineStage>)> {
+        let (access, layout) = self.prev_state.get();
+        debug_assert!(layout != Layout::Undefined);
+        self.transit(access, layout, self.subresource_range.clone())
     }
 }
 
@@ -205,34 +227,40 @@ impl<B: hal::Backend> Image<B> {
         rect: DeviceIntRect,
         layer_index: i32,
         image_data: &[u8],
-        info: PipelineBarrierInfo,
     ) {
-        use hal::pso::PipelineStage;
         let pos = rect.origin;
         let size = rect.size;
         staging_buffer_pool.add(device, image_data, self.format.bytes_per_pixel().max(BUFFER_COPY_ALIGNMENT) as usize - 1);
         let buffer = staging_buffer_pool.buffer();
 
         unsafe {
-            let barriers = buffer
-                .transit(hal::buffer::Access::TRANSFER_READ)
-                .into_iter()
-                .chain(self.core.transit(
-                    hal::image::Access::TRANSFER_WRITE,
-                    hal::image::Layout::TransferDstOptimal,
-                    self.core.subresource_range.clone(),
-                ));
+            let buffer_barrier = buffer.transit(hal::buffer::Access::TRANSFER_READ);
+            match self.core.transit(
+                Access::TRANSFER_WRITE,
+                Layout::TransferDstOptimal,
+                self.core.subresource_range.clone(),
+            ) {
+                Some((barrier, pipeline_stages)) => {
+                    cmd_buffer.pipeline_barrier(
+                        pipeline_stages,
+                        hal::memory::Dependencies::empty(),
+                        buffer_barrier.into_iter().chain(Some(barrier)),
+                    );
+                }
+                None => {
+                    cmd_buffer.pipeline_barrier(
+                        PipelineStage::TRANSFER .. PipelineStage::TRANSFER,
+                        hal::memory::Dependencies::empty(),
+                        buffer_barrier.into_iter(),
+                    );
+                },
+            };
 
-            cmd_buffer.pipeline_barrier(
-                info.pipeline_stage .. PipelineStage::TRANSFER,
-                hal::memory::Dependencies::empty(),
-                barriers,
-            );
 
             cmd_buffer.copy_buffer_to_image(
                 &buffer.buffer,
                 &self.core.image,
-                hal::image::Layout::TransferDstOptimal,
+                Layout::TransferDstOptimal,
                 &[hal::command::BufferImageCopy {
                     buffer_offset: staging_buffer_pool.buffer_offset as _,
                     buffer_width: size.width as _,
@@ -255,13 +283,9 @@ impl<B: hal::Backend> Image<B> {
                 }],
             );
 
-            if let Some(barrier) = self.core.transit(
-                info.access,
-                info.layout,
-                self.core.subresource_range.clone(),
-            ) {
+            if let Some((barrier, stages)) = self.core.transit_back() {
                 cmd_buffer.pipeline_barrier(
-                    PipelineStage::TRANSFER .. info.pipeline_stage,
+                    stages,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
