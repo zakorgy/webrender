@@ -2,147 +2,142 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::ImageFormat;
 use hal::Device;
+use hal::format::Format;
+use hal::image::Layout;
+use hal::pass::{Attachment, SubpassDesc};
+use internal_types::FastHashMap;
 
-pub(super) struct HalRenderPasses<B: hal::Backend> {
-    pub(super) r8: B::RenderPass,
-    pub(super) r8_depth: B::RenderPass,
-    pub(super) bgra8: B::RenderPass,
-    pub(super) bgra8_depth: B::RenderPass,
+pub(super) const DEPTH_FORMAT: Format = hal::format::Format::D32Sfloat;
+
+const SUBPASS_R8: SubpassDesc = SubpassDesc {
+    colors: &[(0, Layout::ColorAttachmentOptimal)],
+    depth_stencil: None,
+    inputs: &[],
+    resolves: &[],
+    preserves: &[],
+};
+
+const SUBPASS_DEPTH_R8: SubpassDesc = SubpassDesc {
+    colors: &[(0, Layout::ColorAttachmentOptimal)],
+    depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
+    inputs: &[],
+    resolves: &[],
+    preserves: &[],
+};
+
+const SUBPASS_BGRA8: SubpassDesc = SubpassDesc {
+    colors: &[(0, Layout::ColorAttachmentOptimal)],
+    depth_stencil: None,
+    inputs: &[],
+    resolves: &[],
+    preserves: &[],
+};
+
+const SUBPASS_DEPTH_BGRA8: SubpassDesc = SubpassDesc {
+    colors: &[(0, Layout::ColorAttachmentOptimal)],
+    depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
+    inputs: &[],
+    resolves: &[],
+    preserves: &[],
+};
+
+pub(super) const DEPTH_ATTACHMENT_STATE: AttachmentState = AttachmentState {
+    format: DEPTH_FORMAT,
+    src_layout: Layout::DepthStencilAttachmentOptimal,
+    dst_layout: Layout::DepthStencilAttachmentOptimal,
+};
+
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub(super) struct AttachmentState {
+    pub format: Format,
+    pub src_layout: Layout,
+    pub dst_layout: Layout,
 }
 
-impl<B: hal::Backend> HalRenderPasses<B> {
-    pub(super) fn get_render_pass(
-        &self,
-        format: ImageFormat,
-        depth_enabled: bool,
-    ) -> &B::RenderPass {
-        match format {
-            ImageFormat::R8 if depth_enabled => &self.r8_depth,
-            ImageFormat::R8 => &self.r8,
-            ImageFormat::BGRA8 if depth_enabled => &self.bgra8_depth,
-            ImageFormat::BGRA8 => &self.bgra8,
-            f => unimplemented!("No render pass for image format {:?}", f),
+impl<T: Into<Format>> From<T> for AttachmentState {
+    fn from(format: T) -> Self {
+        AttachmentState {
+            format: format.into(),
+            src_layout: Layout::ColorAttachmentOptimal,
+            dst_layout: Layout::ColorAttachmentOptimal,
         }
+    }
+}
+
+pub(super) type RenderPassSKey = (AttachmentState, Option<AttachmentState>);
+
+pub(super) struct RenderPassManager<B: hal::Backend> {
+    attachments: FastHashMap<AttachmentState, Attachment>,
+    render_passes: FastHashMap<RenderPassSKey, B::RenderPass>,
+}
+
+impl<B: hal::Backend> RenderPassManager<B> {
+    pub(super) fn new() -> RenderPassManager<B> {
+        RenderPassManager {
+            attachments: FastHashMap::default(),
+            render_passes: FastHashMap::default(),
+        }
+    }
+
+    fn create_attachment(att_state: &AttachmentState) -> Attachment {
+        hal::pass::Attachment {
+            format: Some(att_state.format),
+            samples: 1,
+            // TODO(zakorgy): add AttachmentOps to AttachmentState
+            ops: hal::pass::AttachmentOps::new(
+                hal::pass::AttachmentLoadOp::Load,
+                hal::pass::AttachmentStoreOp::Store,
+            ),
+            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+            layouts: att_state.src_layout .. att_state.dst_layout,
+        }
+    }
+
+    fn get_subpass_for_attachments((color_att, depth_att): &RenderPassSKey) -> SubpassDesc {
+        match color_att.format {
+            Format::Bgra8Unorm => {
+                if depth_att.is_some() {
+                    SUBPASS_DEPTH_BGRA8
+                } else {
+                    SUBPASS_BGRA8
+                }
+            }
+            Format::R8Unorm => {
+                if depth_att.is_some() {
+                    SUBPASS_DEPTH_R8
+                } else {
+                    SUBPASS_R8
+                }
+            }
+            _ => unimplemented!("Format not supported {:?}", color_att.format),
+        }
+    }
+
+    pub(super) fn get_render_pass(
+        &mut self,
+        device: &B::Device,
+        key: RenderPassSKey,
+    ) -> &B::RenderPass {
+        if !self.render_passes.contains_key(&key) {
+            let ref mut attachment1 = self.attachments.entry(key.0).or_insert(Self::create_attachment(&key.0)).clone();
+            let attachment2 = key.1.map(|k| self.attachments.entry(k).or_insert(Self::create_attachment(&k)));
+            let rp = unsafe {
+                device.create_render_pass(
+                    Some(attachment1).into_iter().chain(attachment2),
+                    &[Self::get_subpass_for_attachments(&key)],
+                    &[],
+                )
+                .expect("create_render_pass failed")
+            };
+            self.render_passes.insert(key, rp);
+        }
+        self.render_passes.get(&key).unwrap()
     }
 
     pub(super) fn deinit(self, device: &B::Device) {
-        unsafe {
-            device.destroy_render_pass(self.r8);
-            device.destroy_render_pass(self.r8_depth);
-            device.destroy_render_pass(self.bgra8);
-            device.destroy_render_pass(self.bgra8_depth);
-        }
-    }
-
-    pub fn create_render_passes(
-        device: &B::Device,
-        surface_format: hal::format::Format,
-        depth_format: hal::format::Format,
-    ) -> HalRenderPasses<B> {
-        let attachment_r8 = hal::pass::Attachment {
-            format: Some(hal::format::Format::R8Unorm),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::Load,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: hal::image::Layout::ColorAttachmentOptimal
-                .. hal::image::Layout::ColorAttachmentOptimal,
-        };
-
-        let attachment_bgra8 = hal::pass::Attachment {
-            format: Some(surface_format),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::Load,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: hal::image::Layout::ColorAttachmentOptimal
-                .. hal::image::Layout::ColorAttachmentOptimal,
-        };
-
-        let attachment_depth = hal::pass::Attachment {
-            format: Some(depth_format),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::Load,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: hal::image::Layout::DepthStencilAttachmentOptimal
-                .. hal::image::Layout::DepthStencilAttachmentOptimal,
-        };
-
-        let subpass_r8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: None,
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        let subpass_depth_r8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        let subpass_bgra8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: None,
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        let subpass_depth_bgra8 = hal::pass::SubpassDesc {
-            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
-            depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        use std::iter;
-        HalRenderPasses {
-            r8: unsafe {
-                device.create_render_pass(
-                    iter::once(&attachment_r8),
-                    &[subpass_r8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            r8_depth: unsafe {
-                device.create_render_pass(
-                    iter::once(&attachment_r8).chain(iter::once(&attachment_depth)),
-                    &[subpass_depth_r8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            bgra8: unsafe {
-                device.create_render_pass(
-                    iter::once(&attachment_bgra8),
-                    &[subpass_bgra8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            bgra8_depth: unsafe {
-                device.create_render_pass(
-                    &[attachment_bgra8, attachment_depth],
-                    &[subpass_depth_bgra8],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
+        for (_, rp) in self.render_passes {
+            unsafe { device.destroy_render_pass(rp); }
         }
     }
 }

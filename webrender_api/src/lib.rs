@@ -28,6 +28,7 @@ extern crate core_graphics;
 #[macro_use]
 extern crate derive_more;
 pub extern crate euclid;
+extern crate gfx_hal;
 #[cfg(feature = "ipc")]
 extern crate ipc_channel;
 #[macro_use]

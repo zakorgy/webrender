@@ -67,7 +67,6 @@ const FRAME_COUNT_MAILBOX: usize = 3;
 // Frame count if present mode is not mailbox
 const FRAME_COUNT_NOT_MAILBOX: usize = 2;
 const SURFACE_FORMAT: hal::format::Format = hal::format::Format::Bgra8Unorm;
-const DEPTH_FORMAT: hal::format::Format = hal::format::Format::D32Sfloat;
 
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     aspects: hal::format::Aspects::COLOR,
@@ -181,6 +180,30 @@ impl<B: hal::Backend> Frame<B> {
     }
 }
 
+struct RenderPassState {
+    target_texture: Option<TextureId>,
+    color_attachment: AttachmentState,
+    depth_attachment: Option<AttachmentState>,
+}
+
+impl RenderPassState {
+    fn depth_state(&self) -> RenderPassDepthState {
+        if self.depth_attachment.is_some() {
+            return RenderPassDepthState::Enabled
+        }
+        RenderPassDepthState::Disabled
+    }
+
+    fn get_suitable_render_pass<'a, B: hal::Backend>(
+        &self,
+        device: &B::Device,
+        manager: &'a mut RenderPassManager<B>,
+    ) -> &'a B::RenderPass {
+        let rp_key = (self.color_attachment.clone(), self.depth_attachment.clone());
+        manager.get_render_pass(device, rp_key)
+    }
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: Arc<B::Device>,
     pub heaps: Arc<Mutex<Heaps<B>>>,
@@ -197,7 +220,7 @@ pub struct Device<B: hal::Backend> {
     staging_buffer_pool: ArrayVec<[BufferPool<B>; FRAME_COUNT_MAILBOX]>,
     pub swap_chain: Option<B::Swapchain>,
     frames: ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
-    render_passes: HalRenderPasses<B>,
+    render_pass_manager: RenderPassManager<B>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -263,8 +286,7 @@ pub struct Device<B: hal::Backend> {
 
     // debug
     inside_frame: bool,
-    inside_render_pass: bool,
-    render_pass_depth_state: RenderPassDepthState,
+    render_pass_state: Option<RenderPassState>,
 
     // resources
     _resource_override_path: Option<PathBuf>,
@@ -386,8 +408,7 @@ impl<B: hal::Backend> Device<B> {
             };
             (device, id, queues.take_raw(id).unwrap())
         };
-
-        let render_passes = HalRenderPasses::create_render_passes(&device, SURFACE_FORMAT, DEPTH_FORMAT);
+        let mut render_pass_manager = RenderPassManager::new();
 
         // Disable push constants for Intel's Vulkan driver on Windows
         let has_broken_push_const_support = cfg!(target_os = "windows")
@@ -416,7 +437,7 @@ impl<B: hal::Backend> Device<B> {
                     surface,
                     Some(window_size),
                     None,
-                    &render_passes,
+                    &mut render_pass_manager,
                 );
                 (
                     Some(swap_chain),
@@ -438,7 +459,7 @@ impl<B: hal::Backend> Device<B> {
                         height: window_size.1 as _,
                         depth: 1,
                     },
-                    &render_passes,
+                    &mut render_pass_manager,
                     SURFACE_FORMAT,
                     FRAME_COUNT_NOT_MAILBOX,
                     None,
@@ -658,7 +679,7 @@ impl<B: hal::Backend> Device<B> {
             command_buffer,
             staging_buffer_pool,
             swap_chain: swap_chain,
-            render_passes,
+            render_pass_manager,
             frames,
             frame_count,
             viewport,
@@ -675,8 +696,7 @@ impl<B: hal::Backend> Device<B> {
             depth_available: true,
             upload_method,
             inside_frame: false,
-            inside_render_pass: false,
-            render_pass_depth_state: RenderPassDepthState::Disabled,
+            render_pass_state: None,
 
             capabilities: Capabilities {
                 supports_multisampling: false, //TODO
@@ -738,6 +758,17 @@ impl<B: hal::Backend> Device<B> {
             wait_for_resize: false,
 
             use_push_consts,
+        }
+    }
+
+    fn inside_render_pass(&self) -> bool {
+        self.render_pass_state.is_some()
+    }
+
+    fn render_pass_depth_state(&self) -> RenderPassDepthState {
+        match self.render_pass_state {
+            Some(ref state) => state.depth_state(),
+            None => RenderPassDepthState::Disabled,
         }
     }
 
@@ -817,7 +848,7 @@ impl<B: hal::Backend> Device<B> {
                 surface,
                 window_size,
                 self.swap_chain.take(),
-                &self.render_passes,
+                &mut self.render_pass_manager,
             );
             (
                 Some(swap_chain),
@@ -846,7 +877,7 @@ impl<B: hal::Backend> Device<B> {
                 self.device.as_ref(),
                 heaps,
                 extent,
-                &self.render_passes,
+                &mut self.render_pass_manager,
                 SURFACE_FORMAT,
                 FRAME_COUNT_NOT_MAILBOX,
                 None,
@@ -888,7 +919,7 @@ impl<B: hal::Backend> Device<B> {
         surface: &mut B::Surface,
         window_size: Option<(i32, i32)>,
         old_swap_chain: Option<B::Swapchain>,
-        render_passes: &HalRenderPasses<B>,
+        render_pass_manager: &mut RenderPassManager<B>,
     ) -> (
         B::Swapchain,
         ImageFormat,
@@ -971,7 +1002,7 @@ impl<B: hal::Backend> Device<B> {
                 device,
                 heaps,
                 image_extent,
-                render_passes,
+                render_pass_manager,
                 available_surface_format,
                 frame_count,
                 Some(images),
@@ -991,7 +1022,7 @@ impl<B: hal::Backend> Device<B> {
         device: &B::Device,
         heaps: &mut Heaps<B>,
         extent: hal::image::Extent,
-        render_passes: &HalRenderPasses<B>,
+        render_pass_manager: &mut RenderPassManager<B>,
         surface_format: hal::format::Format,
         frame_count: usize,
         images: Option<Vec<B::Image>>
@@ -1044,7 +1075,7 @@ impl<B: hal::Backend> Device<B> {
             );
             let framebuffer = unsafe {
                 device.create_framebuffer(
-                    &render_passes.bgra8,
+                    render_pass_manager.get_render_pass(device, (surface_format.into(), None)),
                     Some(&image.view),
                     extent,
                 )
@@ -1053,7 +1084,7 @@ impl<B: hal::Backend> Device<B> {
 
             let framebuffer_depth = unsafe {
                 device.create_framebuffer(
-                    &render_passes.bgra8_depth,
+                    render_pass_manager.get_render_pass(device, (surface_format.into(), Some(DEPTH_ATTACHMENT_STATE))),
                     vec![&image.view, &depth.core.view],
                     extent,
                 )
@@ -1214,7 +1245,7 @@ impl<B: hal::Backend> Device<B> {
             &name,
             features,
             shader_kind.clone(),
-            &self.render_passes,
+            &mut self.render_pass_manager,
             self.frame_count,
             &mut self.shader_modules,
             self.pipeline_cache.as_ref(),
@@ -1414,7 +1445,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn draw(&mut self) {
-        assert!(self.inside_render_pass);
+        assert!(self.inside_render_pass());
         self.bind_textures();
         self.bind_uniforms();
 
@@ -1432,6 +1463,7 @@ impl<B: hal::Backend> Device<B> {
         let ref desc_set_per_draw = self.per_draw_descriptors.descriptor_set(&self.bound_per_draw_bindings);
         let locals = if self.use_push_consts { Locals::default() } else { self.bound_locals };
         let ref desc_set_locals = self.locals_descriptors.descriptor_set(&locals);
+        let depth_state = self.render_pass_depth_state();
 
         self.programs
             .get_mut(&self.bound_program)
@@ -1446,7 +1478,7 @@ impl<B: hal::Backend> Device<B> {
                 self.current_blend_state.get(),
                 self.blend_color.get(),
                 self.current_depth_test,
-                self.render_pass_depth_state,
+                depth_state,
                 self.scissor_rect,
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
@@ -1844,7 +1876,7 @@ impl<B: hal::Backend> Device<B> {
                 &texture,
                 &self.images.get(&texture.id).unwrap(),
                 i,
-                &self.render_passes,
+                &mut self.render_pass_manager,
                 rbo_id.clone(),
                 depth,
             );
@@ -1882,7 +1914,7 @@ impl<B: hal::Backend> Device<B> {
 
     /// Copies the contents from one renderable texture to another.
     pub fn blit_renderable_texture(&mut self, dst: &mut Texture, src: &Texture) {
-        assert!(!self.inside_render_pass);
+        assert!(!self.inside_render_pass());
         dst.bound_in_frame.set(self.frame_id);
         src.bound_in_frame.set(self.frame_id);
         debug_assert!(self.inside_frame);
@@ -1966,7 +1998,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn generate_mipmaps(&mut self, texture: &Texture) {
-        assert!(!self.inside_render_pass);
+        assert!(!self.inside_render_pass());
         texture.bound_in_frame.set(self.frame_id);
 
         let image = self
@@ -2134,7 +2166,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn blit_render_target(&mut self, src_rect: DeviceIntRect, dest_rect: DeviceIntRect) {
-        assert!(!self.inside_render_pass);
+        assert!(!self.inside_render_pass());
         debug_assert!(self.inside_frame);
 
         let (src_format, src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
@@ -2799,22 +2831,59 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn begin_render_pass(&mut self) {
-        assert!(!self.inside_render_pass);
+        assert!(!self.inside_render_pass());
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
 
-        let (frame_buffer, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (frame_buffer, render_pass_state) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            let fbo = &self.fbos[&self.bound_draw_fbo];
+            let texture_id = fbo.texture_id;
+            let image = &self.images[&texture_id];
             (
-                &self.fbos[&self.bound_draw_fbo].fbo,
-                self.fbos[&self.bound_draw_fbo].format,
+                &fbo.fbo,
+                RenderPassState {
+                    target_texture: Some(fbo.texture_id),
+                    color_attachment: AttachmentState {
+                        format: image.format.into(),
+                        src_layout: image.core.state.get().1,
+                        dst_layout: hal::image::Layout::ColorAttachmentOptimal,
+                    },
+                    depth_attachment: if self.depth_available {
+                        Some(DEPTH_ATTACHMENT_STATE)
+                    } else {
+                        None
+                    },
+                },
             )
         } else {
+            let frame = &self.frames[self.current_frame_id];
+            let mut render_pass_state = RenderPassState {
+                target_texture: None,
+                color_attachment: AttachmentState {
+                    format: SURFACE_FORMAT,
+                    src_layout: frame.image.state.get().1,
+                    dst_layout: hal::image::Layout::ColorAttachmentOptimal,
+                },
+                depth_attachment: Some(DEPTH_ATTACHMENT_STATE),
+            };
             match self.depth_available {
-                true => (&self.frames[self.current_frame_id].framebuffer_depth, self.surface_format),
-                false => (&self.frames[self.current_frame_id].framebuffer, self.surface_format),
+                true => (
+                    &frame.framebuffer_depth,
+                    render_pass_state
+                ),
+                false => {
+                    render_pass_state.depth_attachment = None;
+                    (
+                        &frame.framebuffer,
+                        render_pass_state,
+                    )
+                },
             }
         };
 
-        let render_pass = self.render_passes.get_render_pass(format, self.depth_available);
+        let render_pass = render_pass_state
+            .get_suitable_render_pass(self.device.as_ref(), &mut self.render_pass_manager);
+        self.render_pass_state = Some(render_pass_state);
+
         unsafe {
             self.command_buffer.begin_render_pass(
                 render_pass,
@@ -2824,18 +2893,30 @@ impl<B: hal::Backend> Device<B> {
                 hal::command::SubpassContents::Inline,
             );
         }
-        self.inside_render_pass = true;
-        self.render_pass_depth_state = match self.depth_available {
-            true => RenderPassDepthState::Enabled,
-            false => RenderPassDepthState::Disabled,
-        }
     }
 
     pub fn end_render_pass(&mut self) {
-        if self.inside_render_pass {
-            unsafe { self.command_buffer.end_render_pass() };
-            self.inside_render_pass = false;
+        assert!(self.inside_render_pass());
+        let render_pass_state = mem::replace(&mut self.render_pass_state, None).unwrap();
+        let image = match render_pass_state.target_texture {
+            Some(texture_id) => &self.images.get_mut(&texture_id).unwrap().core,
+            None => &self.frames.get_mut(self.current_frame_id).unwrap().image,
+        };
+
+        match render_pass_state.color_attachment.dst_layout {
+            hal::image::Layout::ColorAttachmentOptimal => {
+                image.state.set((
+                        hal::image::Access::COLOR_ATTACHMENT_READ
+                            | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+                        hal::image::Layout::ColorAttachmentOptimal,
+                    )
+                );
+            },
+            // Note: We can extend this here if our render passes ends with different layouts
+            s => unimplemented!("Unhandled layout {:?}", s),
         }
+
+        unsafe { self.command_buffer.end_render_pass() };
     }
 
     fn clear_target_rect(
@@ -2844,7 +2925,7 @@ impl<B: hal::Backend> Device<B> {
         color: Option<[f32; 4]>,
         depth: Option<f32>,
     ) {
-        assert!(self.inside_render_pass);
+        assert!(self.inside_render_pass());
         if color.is_none() && depth.is_none() {
             return;
         }
@@ -2878,7 +2959,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
-        assert!(!self.inside_render_pass);
+        assert!(!self.inside_render_pass());
         let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
@@ -2997,7 +3078,7 @@ impl<B: hal::Backend> Device<B> {
             };
             rect.size.width = rect.size.width.min(target_rect.size.width);
             rect.size.height = rect.size.height.min(target_rect.size.height);
-            if !self.inside_render_pass {
+            if !self.inside_render_pass() {
                 self.begin_render_pass();
                 self.clear_target_rect(rect, color, depth);
                 self.end_render_pass();
@@ -3398,7 +3479,7 @@ impl<B: hal::Backend> Device<B> {
                 self.device.destroy_shader_module(fs_module);
             }
             self.descriptor_data.deinit(self.device.as_ref());
-            self.render_passes.deinit(self.device.as_ref());
+            self.render_pass_manager.deinit(self.device.as_ref());
             for fence in self.frame_fence {
                 self.device.destroy_fence(fence.inner);
             }

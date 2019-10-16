@@ -147,6 +147,20 @@ impl ImageFormat {
     }
 }
 
+impl From<ImageFormat> for gfx_hal::format::Format {
+    fn from(image_format: ImageFormat) -> gfx_hal::format::Format {
+        match image_format {
+            ImageFormat::R8 => gfx_hal::format::Format::R8Unorm,
+            ImageFormat::R16 => gfx_hal::format::Format::R16Unorm,
+            ImageFormat::RG8 => gfx_hal::format::Format::Rg8Unorm,
+            ImageFormat::RGBA8 => gfx_hal::format::Format::Rgba8Unorm,
+            ImageFormat::BGRA8 => gfx_hal::format::Format::Bgra8Unorm,
+            ImageFormat::RGBAF32 => gfx_hal::format::Format::Rgba32Sfloat,
+            ImageFormat::RGBAI32 => gfx_hal::format::Format::Rgba32Sint,
+        }
+    }
+}
+
 /// Specifies the color depth of an image. Currently only used for YUV images.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
