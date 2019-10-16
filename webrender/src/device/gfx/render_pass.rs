@@ -46,7 +46,7 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             samples: 1,
             ops: hal::pass::AttachmentOps::new(
                 hal::pass::AttachmentLoadOp::Load,
-                hal::pass::AttachmentStoreOp::DontCare,
+                hal::pass::AttachmentStoreOp::Store,
             ),
             stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
             layouts: hal::image::Layout::ColorAttachmentOptimal
@@ -58,7 +58,7 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             samples: 1,
             ops: hal::pass::AttachmentOps::new(
                 hal::pass::AttachmentLoadOp::Load,
-                hal::pass::AttachmentStoreOp::DontCare,
+                hal::pass::AttachmentStoreOp::Store,
             ),
             stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
             layouts: hal::image::Layout::ColorAttachmentOptimal
@@ -70,7 +70,7 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             samples: 1,
             ops: hal::pass::AttachmentOps::new(
                 hal::pass::AttachmentLoadOp::Load,
-                hal::pass::AttachmentStoreOp::DontCare,
+                hal::pass::AttachmentStoreOp::Store,
             ),
             stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
             layouts: hal::image::Layout::DepthStencilAttachmentOptimal
