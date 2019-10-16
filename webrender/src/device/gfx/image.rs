@@ -32,7 +32,6 @@ pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) view: B::ImageView,
     pub(super) subresource_range: hal::image::SubresourceRange,
     pub(super) state: Cell<hal::image::State>,
-    prev_state: Cell<hal::image::State>,
 }
 
 impl<B: hal::Backend> ImageCore<B> {
@@ -59,7 +58,6 @@ impl<B: hal::Backend> ImageCore<B> {
             view,
             subresource_range,
             state: Cell::new((Access::empty(), Layout::Undefined)),
-            prev_state: Cell::new((Access::empty(), Layout::Undefined)),
         }
     }
 
@@ -141,30 +139,22 @@ impl<B: hal::Backend> ImageCore<B> {
 
     pub(super) fn transit(
         &self,
-        access: Access,
-        layout: Layout,
+        new_state: hal::image::State,
         range: hal::image::SubresourceRange,
     ) -> Option<(hal::memory::Barrier<B>, std::ops::Range<PipelineStage>)> {
         let src_state = self.state.get();
-        if src_state == (access, layout) {
+        if src_state == new_state {
             None
         } else {
-            self.state.set((access, layout));
+            self.state.set(new_state);
             let barrier = hal::memory::Barrier::Image {
-                states: src_state .. (access, layout),
+                states: src_state .. new_state,
                 target: &self.image,
                 families: None,
                 range,
             };
-            self.prev_state.set(src_state);
             Some((barrier, Self::pick_stage_for_layout(src_state.1) .. Self::pick_stage_for_layout(self.state.get().1)))
         }
-    }
-
-    pub(super) fn transit_back(&self) -> Option<(hal::memory::Barrier<B>, std::ops::Range<PipelineStage>)> {
-        let (access, layout) = self.prev_state.get();
-        debug_assert!(layout != Layout::Undefined);
-        self.transit(access, layout, self.subresource_range.clone())
     }
 }
 
@@ -235,9 +225,9 @@ impl<B: hal::Backend> Image<B> {
 
         unsafe {
             let buffer_barrier = buffer.transit(hal::buffer::Access::TRANSFER_READ);
+            let prev_state = self.core.state.get();
             match self.core.transit(
-                Access::TRANSFER_WRITE,
-                Layout::TransferDstOptimal,
+                (Access::TRANSFER_WRITE, Layout::TransferDstOptimal),
                 self.core.subresource_range.clone(),
             ) {
                 Some((barrier, pipeline_stages)) => {
@@ -283,7 +273,10 @@ impl<B: hal::Backend> Image<B> {
                 }],
             );
 
-            if let Some((barrier, stages)) = self.core.transit_back() {
+            if let Some((barrier, stages)) = self.core.transit(
+                prev_state,
+                self.core.subresource_range.clone(),
+            ) {
                 cmd_buffer.pipeline_barrier(
                     stages,
                     hal::memory::Dependencies::empty(),
