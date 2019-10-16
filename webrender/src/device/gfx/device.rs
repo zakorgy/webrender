@@ -1861,6 +1861,28 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    fn execute_transitions<'a>(
+        command_buffer: &mut B::CommandBuffer,
+        transitions: impl IntoIterator<Item = (hal::memory::Barrier<'a, B>, std::ops::Range<PipelineStage>)>,
+    ) {
+        let mut barriers: SmallVec<[hal::memory::Barrier<B>; 2]> = SmallVec::new();
+        let mut pipeline_stages = PipelineStage::empty() .. PipelineStage::empty();
+        for (barrier, ps) in transitions {
+            barriers.push(barrier);
+            pipeline_stages.start |= ps.start;
+            pipeline_stages.end |= ps.end;
+        }
+        if !barriers.is_empty() {
+            unsafe {
+                command_buffer.pipeline_barrier(
+                    pipeline_stages,
+                    hal::memory::Dependencies::empty(),
+                    barriers,
+                );
+            }
+        }
+    }
+
     /// Copies the contents from one renderable texture to another.
     pub fn blit_renderable_texture(&mut self, dst: &mut Texture, src: &Texture) {
         assert!(!self.inside_render_pass);
@@ -1883,29 +1905,19 @@ impl<B: hal::Backend> Device<B> {
 
         unsafe {
             assert_eq!(src_img.state.get().1, hal::image::Layout::ShaderReadOnlyOptimal);
-            if let Some((barrier, pipeline_stages)) = src_img.transit(
+            let transitions = src_img.transit(
                 hal::image::Access::TRANSFER_READ,
                 hal::image::Layout::TransferSrcOptimal,
                 src_img.subresource_range.clone(),
-            ) {
-                self.command_buffer.pipeline_barrier(
-                    pipeline_stages,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
+            ).into_iter().chain(
+                dst_img.transit(
+                    hal::image::Access::TRANSFER_WRITE,
+                    hal::image::Layout::TransferDstOptimal,
+                    dst_img.subresource_range.clone(),
+                )
+            );
 
-            if let Some((barrier, pipeline_stages)) = dst_img.transit(
-                hal::image::Access::TRANSFER_WRITE,
-                hal::image::Layout::TransferDstOptimal,
-                dst_img.subresource_range.clone(),
-            ) {
-                self.command_buffer.pipeline_barrier(
-                    pipeline_stages,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
+            Self::execute_transitions(&mut self.command_buffer, transitions);
 
             self.command_buffer.copy_image(
                 &src_img.image,
@@ -1941,22 +1953,8 @@ impl<B: hal::Backend> Device<B> {
                 }],
             );
 
-            if let Some((barrier, pipeline_stages)) = src_img.transit_back() {
-                self.command_buffer.pipeline_barrier(
-                    pipeline_stages,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
-
-            // the blit caller code expects to be able to render to the target
-            if let Some((barrier, pipeline_stages)) = dst_img.transit_back() {
-                self.command_buffer.pipeline_barrier(
-                    pipeline_stages,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
+            let transitions = src_img.transit_back().into_iter().chain(dst_img.transit_back());
+            Self::execute_transitions(&mut self.command_buffer, transitions);
         }
     }
 
@@ -2171,31 +2169,22 @@ impl<B: hal::Backend> Device<B> {
         // };
 
         unsafe {
-            if let Some((barrier, pipeline_stages)) = src_img.transit(
+            let transitions = src_img.transit(
                 hal::image::Access::TRANSFER_READ,
                 hal::image::Layout::TransferSrcOptimal,
                 src_img.subresource_range.clone(),
-            ) {
-                self.command_buffer.pipeline_barrier(
-                    pipeline_stages,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
-
-            if self.draw_target_usage != DrawTargetUsage::CopyOnly {
-                if let Some((barrier, pipeline_stages)) = dest_img.transit(
-                    hal::image::Access::TRANSFER_WRITE,
-                    hal::image::Layout::TransferDstOptimal,
-                    dest_img.subresource_range.clone(),
-                ) {
-                    self.command_buffer.pipeline_barrier(
-                        pipeline_stages,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
+            ).into_iter().chain(
+                if self.draw_target_usage != DrawTargetUsage::CopyOnly {
+                    dest_img.transit(
+                        hal::image::Access::TRANSFER_WRITE,
+                        hal::image::Layout::TransferDstOptimal,
+                        dest_img.subresource_range.clone(),
+                    )
+                } else {
+                    None
                 }
-            }
+            );
+            Self::execute_transitions(&mut self.command_buffer, transitions);
 
             if src_rect.size != dest_rect.size || src_format != dest_format {
                 self.command_buffer.blit_image(
@@ -2271,24 +2260,15 @@ impl<B: hal::Backend> Device<B> {
                 );
             }
 
-            // the blit caller code expects to be able to render to the target
-            if let Some((barrier, pipeline_stages)) = src_img.transit_back() {
-                self.command_buffer.pipeline_barrier(
-                    pipeline_stages,
-                    hal::memory::Dependencies::empty(),
-                    &[barrier],
-                );
-            }
-
-            if self.draw_target_usage != DrawTargetUsage::CopyOnly {
-                if let Some((barrier, pipeline_stages)) = dest_img.transit_back() {
-                    self.command_buffer.pipeline_barrier(
-                        pipeline_stages,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
+            let transitions = src_img.transit_back().into_iter().chain(
+                // the blit caller code expects to be able to render to the target
+                if self.draw_target_usage != DrawTargetUsage::CopyOnly {
+                    dest_img.transit_back()
+                } else {
+                    None
                 }
-            }
+            );
+            Self::execute_transitions(&mut self.command_buffer, transitions);
         }
     }
 
@@ -3147,31 +3127,21 @@ impl<B: hal::Backend> Device<B> {
                         Ok((id, _)) => {
                             self.current_frame_id = id as _;
                             let image = &self.frames[self.current_frame_id].image;
-                            if let Some((barrier, pipeline_stages)) = image.transit(
+                            let depth_image = &self.frames[self.current_frame_id].depth.core;
+                            let transitions = image.transit(
                                 hal::image::Access::COLOR_ATTACHMENT_READ
                                     | hal::image::Access::COLOR_ATTACHMENT_WRITE,
                                 hal::image::Layout::ColorAttachmentOptimal,
                                 image.subresource_range.clone(),
-                            ) {
-                                self.command_buffer.pipeline_barrier(
-                                    pipeline_stages,
-                                    hal::memory::Dependencies::empty(),
-                                    &[barrier],
-                                );
-                            }
-                            let depth_image = &self.frames[self.current_frame_id].depth.core;
-                            if let Some((barrier, pipeline_stages)) = depth_image.transit(
-                                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
-                                    | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                                hal::image::Layout::DepthStencilAttachmentOptimal,
-                                depth_image.subresource_range.clone(),
-                            ) {
-                                self.command_buffer.pipeline_barrier(
-                                    pipeline_stages,
-                                    hal::memory::Dependencies::empty(),
-                                    &[barrier],
-                                );
-                            }
+                            ).into_iter().chain(
+                                depth_image.transit(
+                                    hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
+                                        | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                                    hal::image::Layout::DepthStencilAttachmentOptimal,
+                                    depth_image.subresource_range.clone(),
+                                )
+                            );
+                            Self::execute_transitions(&mut self.command_buffer, transitions);
                         }
                         Err(acq_err) => {
                             match acq_err {
