@@ -1208,6 +1208,10 @@ impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
         }
     }
 
+    fn is_some(&self) -> bool {
+        self.debug_renderer.is_some()
+    }
+
     #[cfg(not(feature = "gleam"))]
     fn take(&mut self) -> Option<DebugRenderer> {
         self.debug_renderer.take()
@@ -2428,19 +2432,27 @@ impl<B: hal::Backend> Renderer<B> {
                 self.owned_external_images.iter().map(|(key, value)| (*key, value.clone()))
             );
 
-            for &mut (_, RenderedDocument { ref mut frame, .. }) in &mut active_documents {
+            let last_document_idx = match active_documents.len() {
+                0 => 0,
+                len => len -1,
+            };
+            for (i, &mut (_, RenderedDocument { ref mut frame, .. })) in active_documents.iter_mut().enumerate() {
                 frame.profile_counters.reset_targets();
                 self.prepare_gpu_cache(frame);
                 assert!(frame.gpu_cache_frame_id <= self.gpu_cache_frame_id,
                     "Received frame depends on a later GPU cache epoch ({:?}) than one we received last via `UpdateGpuCache` ({:?})",
                     frame.gpu_cache_frame_id, self.gpu_cache_frame_id);
 
+                // The last pass of the last document has the main render target, which will be presented.
+                // We will tell the final render pass to transfer that target to a presentable state.
+                let present_frame_image = i == last_document_idx && !self.debug.is_some();
                 self.draw_tile_frame(
                     frame,
                     framebuffer_size,
                     clear_depth_value.is_some(),
                     cpu_frame_id,
-                    &mut stats
+                    &mut stats,
+                    present_frame_image,
                 );
 
                 if self.debug_flags.contains(DebugFlags::PROFILER_DBG) {
@@ -3019,6 +3031,7 @@ impl<B: hal::Backend> Renderer<B> {
         projection: &Transform3D<f32>,
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
+        last_main_target_draw: bool,
     ) {
         self.profile_counters.color_targets.inc();
         let _gm = self.gpu_profile.start_marker("color target");
@@ -3093,7 +3106,10 @@ impl<B: hal::Backend> Renderer<B> {
         self.handle_blits(&target.blits, render_tasks);
 
         #[cfg(not(feature = "gleam"))]
-        self.device.begin_render_pass();
+        self.device.begin_render_pass(
+            last_main_target_draw && target.alpha_batch_containers.is_empty(),
+            false,
+        );
 
         // Draw any blurs for this target.
         // Blurs are rendered as a standard 2-pass
@@ -3144,8 +3160,30 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
-        let alpha_batches = target.alpha_batch_containers.len();
+        #[cfg(not(feature = "gleam"))]
+        self.device.end_render_pass();
+
+        #[cfg(not(feature = "gleam"))]
+        let last_alpha_batch_idx = target.alpha_batch_containers.len().max(1) - 1;
         for (i, alpha_batch_container) in target.alpha_batch_containers.iter().enumerate() {
+            #[cfg(not(feature = "gleam"))]
+            let last_batch = i == last_alpha_batch_idx;
+            #[cfg(not(feature = "gleam"))]
+            let will_break_pass = alpha_batch_container
+                .alpha_batches
+                .iter().any(|batch| {
+                    if let BatchKind::Brush(BrushBatchKind::MixBlend { .. }) = batch.key.kind {
+                        true
+                    } else {
+                        false
+                    }
+                });
+            #[cfg(not(feature = "gleam"))]
+            let transit_to_presentable_state = last_main_target_draw && last_batch && !will_break_pass;
+            #[cfg(not(feature = "gleam"))]
+            let transit_to_transfer_src_state = will_break_pass;
+            #[cfg(not(feature = "gleam"))]
+            self.device.begin_render_pass(transit_to_presentable_state, transit_to_transfer_src_state);
             let uses_scissor = alpha_batch_container.task_scissor_rect.is_some() ||
                                !alpha_batch_container.regions.is_empty();
 
@@ -3275,7 +3313,15 @@ impl<B: hal::Backend> Renderer<B> {
                             &render_tasks[backdrop_id],
                         );
                         #[cfg(not(feature = "gleam"))]
-                        self.device.begin_render_pass();
+                        let transit_to_presentable_state = last_main_target_draw && last_batch;
+                        #[cfg(not(feature = "gleam"))]
+                        let transit_to_transfer_src_state = !alpha_batch_container.tile_blits.is_empty()
+                                || (last_batch && !target.outputs.is_empty());
+                        #[cfg(not(feature = "gleam"))]
+                        self.device.begin_render_pass(
+                            transit_to_presentable_state,
+                            transit_to_transfer_src_state,
+                        );
                     }
 
                     let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
@@ -3331,12 +3377,12 @@ impl<B: hal::Backend> Renderer<B> {
                 self.device.disable_scissor();
             }
 
+            #[cfg(not(feature = "gleam"))]
+            self.device.end_render_pass();
+
             // At the end of rendering a container, blit across any cache tiles
             // to the texture cache for use on subsequent frames.
             if !alpha_batch_container.tile_blits.is_empty() {
-                #[cfg(not(feature = "gleam"))]
-                self.device.end_render_pass();
-
                 let _timer = self.gpu_profile.start_timer(GPU_TAG_BLIT);
 
                 self.device.bind_read_target(draw_target.into());
@@ -3389,16 +3435,8 @@ impl<B: hal::Backend> Renderer<B> {
                     #[cfg(not(feature="gleam"))]
                     DrawTargetUsage::Draw,
                 );
-
-                // Don't create a new RP if it's the last element
-                if i < alpha_batches - 1 {
-                    #[cfg(not(feature = "gleam"))]
-                    self.device.begin_render_pass();
-                }
             }
         }
-        #[cfg(not(feature = "gleam"))]
-        self.device.end_render_pass();
 
 
         // For any registered image outputs on this render target,
@@ -3461,7 +3499,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.disable_depth_write();
 
             #[cfg(not(feature = "gleam"))]
-            self.device.begin_render_pass();
+            self.device.begin_render_pass(false, false);
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -3649,7 +3687,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.handle_blits(&target.blits, render_tasks);
 
         #[cfg(not(feature = "gleam"))]
-        self.device.begin_render_pass();
+        self.device.begin_render_pass(false, false);
 
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
@@ -3989,6 +4027,7 @@ impl<B: hal::Backend> Renderer<B> {
         framebuffer_depth_is_ready: bool,
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
+        present_frame_image: bool,
     ) {
         let _gm = self.gpu_profile.start_marker("tile frame draw");
 
@@ -4042,6 +4081,7 @@ impl<B: hal::Backend> Renderer<B> {
                             &projection,
                             frame_id,
                             stats,
+                            present_frame_image,
                         );
                     }
 
@@ -4117,6 +4157,7 @@ impl<B: hal::Backend> Renderer<B> {
                             &projection,
                             frame_id,
                             stats,
+                            false,
                         );
                     }
 

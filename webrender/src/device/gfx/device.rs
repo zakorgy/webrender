@@ -2169,29 +2169,38 @@ impl<B: hal::Backend> Device<B> {
         assert!(!self.inside_render_pass());
         debug_assert!(self.inside_frame);
 
-        let (src_format, src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+        let (src_format, src_img, src_layer) = if self.bound_read_fbo == DEFAULT_READ_FBO {
+            (
+                self.surface_format,
+                &self.frames[self.current_frame_id].image,
+                0,
+            )
+        } else {
             let fbo = &self.fbos[&self.bound_read_fbo];
             let img = &self.images[&fbo.texture_id];
             (img.format, &img.core, fbo.layer_index)
-        } else {
-            (
-                self.surface_format,
-                &self.frames[self.current_frame_id].image,
-                0,
-            )
         };
 
-        let (dest_format, dst_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (dest_format, dst_img, dest_layer, dst_image_prev_state, dst_image_transition) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
+            // Unfortunately we blit to the main target if debug renderer is enabled
+            let image = &self.frames[self.current_frame_id].image;
+            (
+                self.surface_format,
+                image,
+                0,
+                None,
+                None,
+            )
+        } else {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
             let layer = fbo.layer_index;
-            (img.format, &img.core, layer)
-        } else {
-            (
-                self.surface_format,
-                &self.frames[self.current_frame_id].image,
-                0,
-            )
+            let prev_state = Some(img.core.state.get());
+            let transition = img.core.transit(
+                (hal::image::Access::TRANSFER_WRITE, hal::image::Layout::TransferDstOptimal),
+                img.core.subresource_range.clone(),
+            );
+            (img.format, &img.core, layer, prev_state, transition)
         };
 
         // let src_range = hal::image::SubresourceRange {
@@ -2206,23 +2215,11 @@ impl<B: hal::Backend> Device<B> {
         // };
 
         unsafe {
-            let (src_image_prev_state, dst_image_prev_state) = (
-                src_img.state.get(),
-                dst_img.state.get()
-            );
+            let src_image_prev_state = src_img.state.get();
             let transitions = src_img.transit(
                 (hal::image::Access::TRANSFER_READ, hal::image::Layout::TransferSrcOptimal),
                 src_img.subresource_range.clone(),
-            ).into_iter().chain(
-                if self.draw_target_usage != DrawTargetUsage::CopyOnly {
-                    dst_img.transit(
-                        (hal::image::Access::TRANSFER_WRITE, hal::image::Layout::TransferDstOptimal),
-                        dst_img.subresource_range.clone(),
-                    )
-                } else {
-                    None
-                }
-            );
+            ).into_iter().chain(dst_image_transition);
             Self::execute_transitions(&mut self.command_buffer, transitions);
 
             if src_rect.size != dest_rect.size || src_format != dest_format {
@@ -2303,15 +2300,12 @@ impl<B: hal::Backend> Device<B> {
                 src_image_prev_state,
                 src_img.subresource_range.clone(),
             ).into_iter().chain(
-                // the blit caller code expects to be able to render to the target
-                if self.draw_target_usage != DrawTargetUsage::CopyOnly {
+                dst_image_prev_state.map_or(None, |state| {
                     dst_img.transit(
-                        dst_image_prev_state,
+                        state,
                         dst_img.subresource_range.clone(),
                     )
-                } else {
-                    None
-                }
+                })
             );
             Self::execute_transitions(&mut self.command_buffer, transitions);
         }
@@ -2513,17 +2507,17 @@ impl<B: hal::Backend> Device<B> {
         let (image, image_format, layer) = if capture_read {
             let img = &self.images[&self.bound_read_texture.0];
             (&img.core, img.format, self.bound_read_texture.1 as u16)
-        } else if self.bound_read_fbo != DEFAULT_READ_FBO {
-            let fbo = &self.fbos[&self.bound_read_fbo];
-            let img = &self.images[&fbo.texture_id];
-            let layer = fbo.layer_index;
-            (&img.core, img.format, layer)
-        } else {
+        } else if self.bound_read_fbo == DEFAULT_READ_FBO {
             (
                 &self.frames[self.current_frame_id].image,
                 self.surface_format,
                 0,
             )
+        } else {
+            let fbo = &self.fbos[&self.bound_read_fbo];
+            let img = &self.images[&fbo.texture_id];
+            let layer = fbo.layer_index;
+            (&img.core, img.format, layer)
         };
 
         let (fmt_mismatch, stride) = if bytes_per_pixel < image_format.bytes_per_pixel() {
@@ -2830,11 +2824,45 @@ impl<B: hal::Backend> Device<B> {
         self.frame_id.0 += 1;
     }
 
-    pub fn begin_render_pass(&mut self) {
+    pub fn begin_render_pass(
+        &mut self,
+        transit_to_presentable_state: bool,
+        transit_to_transfer_src_state: bool,
+    ) {
+        let dst_layout = match (transit_to_presentable_state, transit_to_transfer_src_state) {
+            (true, true) => hal::image::Layout::General,
+            (true, false) => hal::image::Layout::Present,
+            (false, true) => hal::image::Layout::TransferSrcOptimal,
+            (false, false) => hal::image::Layout::ColorAttachmentOptimal,
+        };
         assert!(!self.inside_render_pass());
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
 
-        let (frame_buffer, render_pass_state) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (frame_buffer, render_pass_state) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
+            let frame = &self.frames[self.current_frame_id];
+            let mut render_pass_state = RenderPassState {
+                target_texture: None,
+                color_attachment: AttachmentState {
+                    format: SURFACE_FORMAT,
+                    src_layout: frame.image.state.get().1,
+                    dst_layout,
+                },
+                depth_attachment: Some(DEPTH_ATTACHMENT_STATE),
+            };
+            match self.depth_available {
+                true => (
+                    &frame.framebuffer_depth,
+                    render_pass_state
+                ),
+                false => {
+                    render_pass_state.depth_attachment = None;
+                    (
+                        &frame.framebuffer,
+                        render_pass_state,
+                    )
+                },
+            }
+        } else {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let texture_id = fbo.texture_id;
             let image = &self.images[&texture_id];
@@ -2854,30 +2882,6 @@ impl<B: hal::Backend> Device<B> {
                     },
                 },
             )
-        } else {
-            let frame = &self.frames[self.current_frame_id];
-            let mut render_pass_state = RenderPassState {
-                target_texture: None,
-                color_attachment: AttachmentState {
-                    format: SURFACE_FORMAT,
-                    src_layout: frame.image.state.get().1,
-                    dst_layout: hal::image::Layout::ColorAttachmentOptimal,
-                },
-                depth_attachment: Some(DEPTH_ATTACHMENT_STATE),
-            };
-            match self.depth_available {
-                true => (
-                    &frame.framebuffer_depth,
-                    render_pass_state
-                ),
-                false => {
-                    render_pass_state.depth_attachment = None;
-                    (
-                        &frame.framebuffer,
-                        render_pass_state,
-                    )
-                },
-            }
         };
 
         let render_pass = render_pass_state
@@ -2912,7 +2916,27 @@ impl<B: hal::Backend> Device<B> {
                     )
                 );
             },
-            // Note: We can extend this here if our render passes ends with different layouts
+            hal::image::Layout::Present => {
+                image.state.set((
+                        hal::image::Access::MEMORY_READ,
+                        hal::image::Layout::Present,
+                    )
+                );
+            },
+            hal::image::Layout::General => {
+                image.state.set((
+                        hal::image::Access::MEMORY_READ,
+                        hal::image::Layout::General,
+                    )
+                );
+            },
+            hal::image::Layout::TransferSrcOptimal => {
+                image.state.set((
+                        hal::image::Access::TRANSFER_READ,
+                        hal::image::Layout::TransferSrcOptimal,
+                    )
+                );
+            },
             s => unimplemented!("Unhandled layout {:?}", s),
         }
 
@@ -2960,7 +2984,15 @@ impl<B: hal::Backend> Device<B> {
 
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
         assert!(!self.inside_render_pass());
-        let (img, layer, dimg) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+        let (img, layer, dimg) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
+            // TODO: set load op for render pass instea dof this
+            let frame = &self.frames[self.current_frame_id];
+            (
+                &frame.image,
+                0,
+                Some(&frame.depth.core),
+            )
+        } else {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
             let dimg = if depth.is_some() {
@@ -2969,13 +3001,6 @@ impl<B: hal::Backend> Device<B> {
                 None
             };
             (&img.core, fbo.layer_index, dimg)
-        } else {
-            let frame = &self.frames[self.current_frame_id];
-            (
-                &frame.image,
-                0,
-                Some(&frame.depth.core),
-            )
         };
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
@@ -3062,7 +3087,12 @@ impl<B: hal::Backend> Device<B> {
         rect: Option<DeviceIntRect>,
     ) {
         if let Some(mut rect) = rect {
-            let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            let target_rect = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
+                DeviceIntRect::new(
+                    DeviceIntPoint::zero(),
+                    DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _),
+                )
+            } else {
                 let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture_id]
                     .kind
                     .extent();
@@ -3070,16 +3100,11 @@ impl<B: hal::Backend> Device<B> {
                     DeviceIntPoint::zero(),
                     DeviceIntSize::new(extent.width as _, extent.height as _),
                 )
-            } else {
-                DeviceIntRect::new(
-                    DeviceIntPoint::zero(),
-                    DeviceIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _),
-                )
             };
             rect.size.width = rect.size.width.min(target_rect.size.width);
             rect.size.height = rect.size.height.min(target_rect.size.height);
             if !self.inside_render_pass() {
-                self.begin_render_pass();
+                self.begin_render_pass(false, false);
                 self.clear_target_rect(rect, color, depth);
                 self.end_render_pass();
             } else {
@@ -3224,26 +3249,21 @@ impl<B: hal::Backend> Device<B> {
                     ) {
                         Ok((id, _)) => {
                             self.current_frame_id = id as _;
-                            let image = &self.frames[self.current_frame_id].image;
                             let depth_image = &self.frames[self.current_frame_id].depth.core;
-                            let transitions = image.transit(
+                            if let Some((barrier, pipeline_stages)) = depth_image.transit(
                                 (
-                                    hal::image::Access::COLOR_ATTACHMENT_READ
-                                        | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                                    hal::image::Layout::ColorAttachmentOptimal
+                                    hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
+                                        | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                                    hal::image::Layout::DepthStencilAttachmentOptimal
                                 ),
-                                image.subresource_range.clone(),
-                            ).into_iter().chain(
-                                depth_image.transit(
-                                    (
-                                        hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
-                                            | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                                        hal::image::Layout::DepthStencilAttachmentOptimal
-                                    ),
-                                    depth_image.subresource_range.clone(),
-                                )
-                            );
-                            Self::execute_transitions(&mut self.command_buffer, transitions);
+                                depth_image.subresource_range.clone(),
+                            ) {
+                                self.command_buffer.pipeline_barrier(
+                                    pipeline_stages,
+                                    hal::memory::Dependencies::empty(),
+                                    &[barrier],
+                                );
+                            }
                         }
                         Err(acq_err) => {
                             match acq_err {
@@ -3271,23 +3291,8 @@ impl<B: hal::Backend> Device<B> {
             self.reset_next_frame_resources();
             return;
         }
-        {
-            let image = &self.frames[self.current_frame_id].image;
-            unsafe {
-                if let Some((barrier, pipeline_stages)) = image.transit(
-                    (hal::image::Access::MEMORY_READ, hal::image::Layout::Present),
-                    image.subresource_range.clone(),
-                ) {
-                    self.command_buffer.pipeline_barrier(
-                        pipeline_stages,
-                        hal::memory::Dependencies::empty(),
-                        &[barrier],
-                    );
-                }
-                self.command_buffer.finish();
-            }
-        }
         unsafe {
+            self.command_buffer.finish();
             match self.swap_chain.as_mut() {
                 Some(swap_chain) => {
                     let submission = hal::queue::Submission {

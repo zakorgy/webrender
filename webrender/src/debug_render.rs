@@ -386,7 +386,7 @@ impl DebugRenderer {
             );
 
             #[cfg(not(feature = "gleam"))]
-            device.begin_render_pass();
+            device.begin_render_pass(true, false);
 
             // Triangles
             if !self.tri_vertices.is_empty() {
