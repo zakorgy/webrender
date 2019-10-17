@@ -35,7 +35,7 @@ extern crate image;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "gl"))]
 extern crate mozangle;
 #[cfg(feature = "headless")]
 extern crate osmesa_sys;
