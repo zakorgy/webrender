@@ -2829,20 +2829,10 @@ impl<B: hal::Backend> Device<B> {
         self.frame_id.0 += 1;
     }
 
-    pub fn begin_render_pass(
+    pub fn begin_render_pass_inner(
         &mut self,
-        transit_to_presentable_state: bool,
-        transit_to_transfer_src_state: bool,
-    ) {
-        assert!(!self.inside_render_pass());
-        assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
-        let dst_layout = match (transit_to_presentable_state, transit_to_transfer_src_state) {
-            (true, true) => hal::image::Layout::General,
-            (true, false) => hal::image::Layout::Present,
-            (false, true) => hal::image::Layout::TransferSrcOptimal,
-            (false, false) => hal::image::Layout::ColorAttachmentOptimal,
-        };
-
+        dst_layout: hal::image::Layout,
+     ) {
         let (color_clear, depth_clear) = match self.clear_values.remove(&self.bound_draw_fbo) {
             Some((None, Some(depth))) => (Some(PLACEHOLDER_CLEAR), Some(depth)),
             Some(clear_values) => clear_values,
@@ -2923,6 +2913,23 @@ impl<B: hal::Backend> Device<B> {
                 hal::command::SubpassContents::Inline,
             );
         }
+    }
+
+    pub fn begin_render_pass(
+        &mut self,
+        transit_to_presentable_state: bool,
+        transit_to_transfer_src_state: bool,
+    ) {
+        assert!(!self.inside_render_pass());
+        assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
+        let dst_layout = match (transit_to_presentable_state, transit_to_transfer_src_state) {
+            (true, true) => hal::image::Layout::General,
+            (true, false) => hal::image::Layout::Present,
+            (false, true) => hal::image::Layout::TransferSrcOptimal,
+            (false, false) => hal::image::Layout::ColorAttachmentOptimal,
+        };
+
+        self.begin_render_pass_inner(dst_layout);
     }
 
     pub fn end_render_pass(&mut self) {

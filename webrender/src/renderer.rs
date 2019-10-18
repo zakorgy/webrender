@@ -4402,11 +4402,20 @@ impl<B: hal::Backend> Renderer<B> {
                     false
                 );
 
+                // This is a WIP solution to avoid validation layer errors,
+                // by moving the frame images into TransferDstOptimal layout.
+                #[cfg(not(feature = "gleam"))]
+                device.begin_render_pass_inner(hal::image::Layout::TransferDstOptimal);
+                #[cfg(not(feature = "gleam"))]
+                device.end_render_pass();
+
                 // Draw the dimensions onto the tag.
                 let dim = texture.get_dimensions();
                 let mut text_rect = tag_rect;
-                text_rect.origin.y =
-                    fb_height - text_rect.origin.y - text_rect.size.height; // Top-relative.
+                if cfg!(feature = "gleam") {
+                    text_rect.origin.y =
+                        fb_height - text_rect.origin.y - text_rect.size.height; // Top-relative.
+                }
                 debug_renderer.add_text(
                     (x + text_margin) as f32,
                     (fb_height - y - text_margin) as f32, // Top-relative.
