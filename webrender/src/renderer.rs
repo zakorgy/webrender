@@ -2422,7 +2422,13 @@ impl<B: hal::Backend> Renderer<B> {
                     };
                     self.device.reset_draw_target();
                     self.device.enable_depth_write();
-                    self.device.clear_target(clear_color, clear_depth_value, None);
+                    self.device.clear_target(
+                        clear_color,
+                        clear_depth_value,
+                        None,
+                        #[cfg(not(feature = "gleam"))]
+                        true
+                    );
                     self.device.disable_depth_write();
                 }
             }
@@ -2786,7 +2792,9 @@ impl<B: hal::Backend> Renderer<B> {
                             self.device.clear_target(
                                 Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
                                 None,
-                                Some(rect.to_i32())
+                                Some(rect.to_i32()),
+                                #[cfg(not(feature = "gleam"))]
+                                false,
                             );
                             0
                         }
@@ -3095,7 +3103,10 @@ impl<B: hal::Backend> Renderer<B> {
             #[cfg(not(feature = "gleam"))]
             let clear_rect = None;
 
-            self.device.clear_target(clear_color, depth_clear, clear_rect);
+            self.device.clear_target(clear_color, depth_clear, clear_rect,
+                #[cfg(not(feature = "gleam"))]
+                target.blits.is_empty()
+            );
 
             if depth_clear.is_some() {
                 self.device.disable_depth_write();
@@ -3511,6 +3522,8 @@ impl<B: hal::Backend> Renderer<B> {
                 Some(clear_color),
                 None,
                 Some(target.used_rect()),
+                #[cfg(not(feature = "gleam"))]
+                false,
             );
 
             let zero_color = [0.0, 0.0, 0.0, 0.0];
@@ -3520,6 +3533,8 @@ impl<B: hal::Backend> Renderer<B> {
                     Some(zero_color),
                     None,
                     Some(rect),
+                    #[cfg(not(feature = "gleam"))]
+                    false,
                 );
             }
         }
@@ -3680,7 +3695,10 @@ impl<B: hal::Backend> Renderer<B> {
         self.set_blend(false, FramebufferKind::Other);
 
         for rect in &target.clears {
-            self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, Some(*rect));
+            self.device.clear_target(Some([0.0, 0.0, 0.0, 0.0]), None, Some(*rect),
+                #[cfg(not(feature = "gleam"))]
+                false
+            );
         }
 
         // Handle any blits to this texture from child tasks.
@@ -4379,7 +4397,10 @@ impl<B: hal::Backend> Renderer<B> {
                     rect(x, fb_height - (y + tag_height), size, tag_height)
                 };
                 let tag_color = select_color(texture);
-                device.clear_target(Some(tag_color), None, Some(tag_rect));
+                device.clear_target(Some(tag_color), None, Some(tag_rect),
+                    #[cfg(not(feature = "gleam"))]
+                    false
+                );
 
                 // Draw the dimensions onto the tag.
                 let dim = texture.get_dimensions();
@@ -4653,7 +4674,13 @@ impl<B: hal::Backend> Renderer<B> {
                 #[cfg(not(feature="gleam"))]
                 DrawTargetUsage::Draw,
             );
-            self.device.clear_target(Some(color), None, None);
+            self.device.clear_target(
+                Some(color),
+                None,
+                None,
+                #[cfg(not(feature = "gleam"))]
+                false
+            );
         }
     }
 }

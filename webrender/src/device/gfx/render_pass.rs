@@ -46,6 +46,7 @@ pub(super) const DEPTH_ATTACHMENT_STATE: AttachmentState = AttachmentState {
     format: DEPTH_FORMAT,
     src_layout: Layout::DepthStencilAttachmentOptimal,
     dst_layout: Layout::DepthStencilAttachmentOptimal,
+    load_op: hal::pass::AttachmentLoadOp::Load,
 };
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -53,6 +54,7 @@ pub(super) struct AttachmentState {
     pub format: Format,
     pub src_layout: Layout,
     pub dst_layout: Layout,
+    pub load_op: hal::pass::AttachmentLoadOp,
 }
 
 impl<T: Into<Format>> From<T> for AttachmentState {
@@ -61,6 +63,7 @@ impl<T: Into<Format>> From<T> for AttachmentState {
             format: format.into(),
             src_layout: Layout::ColorAttachmentOptimal,
             dst_layout: Layout::ColorAttachmentOptimal,
+            load_op: hal::pass::AttachmentLoadOp::Load,
         }
     }
 }
@@ -86,7 +89,7 @@ impl<B: hal::Backend> RenderPassManager<B> {
             samples: 1,
             // TODO(zakorgy): add AttachmentOps to AttachmentState
             ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::Load,
+                att_state.load_op,
                 hal::pass::AttachmentStoreOp::Store,
             ),
             stencil_ops: hal::pass::AttachmentOps::DONT_CARE,

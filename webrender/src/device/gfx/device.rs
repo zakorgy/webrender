@@ -52,7 +52,7 @@ use hal::{SwapchainConfig, AcquireError};
 use hal::pso::PipelineStage;
 use hal::queue::RawCommandQueue;
 use hal::window::PresentError;
-use hal::command::{CommandBufferFlags, CommandBufferInheritanceInfo, RawCommandBuffer, RawLevel};
+use hal::command::{ClearColorRaw, ClearDepthStencilRaw, ClearValueRaw, CommandBufferFlags, CommandBufferInheritanceInfo, RawCommandBuffer, RawLevel};
 use hal::pool::{RawCommandPool};
 use hal::queue::{QueueFamilyId};
 
@@ -73,6 +73,9 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
     levels: 0 .. 1,
     layers: 0 .. 1,
 };
+
+// If we want to clear only the depth when beginning a render-pass we have to put something to the first position in `pClearValues`.
+const PLACEHOLDER_CLEAR: ClearValueRaw = ClearValueRaw { color: ClearColorRaw { float32: [0.0; 4]} };
 
 #[derive(PartialEq)]
 pub enum BackendApiType {
@@ -221,6 +224,7 @@ pub struct Device<B: hal::Backend> {
     pub swap_chain: Option<B::Swapchain>,
     frames: ArrayVec<[Frame<B>; FRAME_COUNT_MAILBOX]>,
     render_pass_manager: RenderPassManager<B>,
+    clear_values: FastHashMap<FBOId, (/*color*/Option<ClearValueRaw>, /*depth*/Option<ClearValueRaw>)>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     pub sampler_linear: B::Sampler,
@@ -680,6 +684,7 @@ impl<B: hal::Backend> Device<B> {
             staging_buffer_pool,
             swap_chain: swap_chain,
             render_pass_manager,
+            clear_values: FastHashMap::default(),
             frames,
             frame_count,
             viewport,
@@ -2829,14 +2834,25 @@ impl<B: hal::Backend> Device<B> {
         transit_to_presentable_state: bool,
         transit_to_transfer_src_state: bool,
     ) {
+        assert!(!self.inside_render_pass());
+        assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
         let dst_layout = match (transit_to_presentable_state, transit_to_transfer_src_state) {
             (true, true) => hal::image::Layout::General,
             (true, false) => hal::image::Layout::Present,
             (false, true) => hal::image::Layout::TransferSrcOptimal,
             (false, false) => hal::image::Layout::ColorAttachmentOptimal,
         };
-        assert!(!self.inside_render_pass());
-        assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
+
+        let (color_clear, depth_clear) = match self.clear_values.remove(&self.bound_draw_fbo) {
+            Some((None, Some(depth))) => (Some(PLACEHOLDER_CLEAR), Some(depth)),
+            Some(clear_values) => clear_values,
+            None => (None, None),
+        };
+
+        let mut depth_att_state = DEPTH_ATTACHMENT_STATE;
+        if depth_clear.is_some() {
+            depth_att_state.load_op = hal::pass::AttachmentLoadOp::Clear;
+        }
 
         let (frame_buffer, render_pass_state) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
             let frame = &self.frames[self.current_frame_id];
@@ -2846,8 +2862,13 @@ impl<B: hal::Backend> Device<B> {
                     format: SURFACE_FORMAT,
                     src_layout: frame.image.state.get().1,
                     dst_layout,
+                    load_op: if color_clear.is_some() {
+                        hal::pass::AttachmentLoadOp::Clear
+                    } else {
+                        hal::pass::AttachmentLoadOp::Load
+                    },
                 },
-                depth_attachment: Some(DEPTH_ATTACHMENT_STATE),
+                depth_attachment: Some(depth_att_state),
             };
             match self.depth_available {
                 true => (
@@ -2874,9 +2895,14 @@ impl<B: hal::Backend> Device<B> {
                         format: image.format.into(),
                         src_layout: image.core.state.get().1,
                         dst_layout: hal::image::Layout::ColorAttachmentOptimal,
+                        load_op: if color_clear.is_some() {
+                            hal::pass::AttachmentLoadOp::Clear
+                        } else {
+                            hal::pass::AttachmentLoadOp::Load
+                        },
                     },
                     depth_attachment: if self.depth_available {
-                        Some(DEPTH_ATTACHMENT_STATE)
+                        Some(depth_att_state)
                     } else {
                         None
                     },
@@ -2893,7 +2919,7 @@ impl<B: hal::Backend> Device<B> {
                 render_pass,
                 frame_buffer,
                 self.viewport.rect,
-                &[],
+                color_clear.into_iter().chain(depth_clear),
                 hal::command::SubpassContents::Inline,
             );
         }
@@ -2907,39 +2933,17 @@ impl<B: hal::Backend> Device<B> {
             None => &self.frames.get_mut(self.current_frame_id).unwrap().image,
         };
 
-        match render_pass_state.color_attachment.dst_layout {
-            hal::image::Layout::ColorAttachmentOptimal => {
-                image.state.set((
-                        hal::image::Access::COLOR_ATTACHMENT_READ
-                            | hal::image::Access::COLOR_ATTACHMENT_WRITE,
-                        hal::image::Layout::ColorAttachmentOptimal,
-                    )
-                );
-            },
-            hal::image::Layout::Present => {
-                image.state.set((
-                        hal::image::Access::MEMORY_READ,
-                        hal::image::Layout::Present,
-                    )
-                );
-            },
-            hal::image::Layout::General => {
-                image.state.set((
-                        hal::image::Access::MEMORY_READ,
-                        hal::image::Layout::General,
-                    )
-                );
-            },
-            hal::image::Layout::TransferSrcOptimal => {
-                image.state.set((
-                        hal::image::Access::TRANSFER_READ,
-                        hal::image::Layout::TransferSrcOptimal,
-                    )
-                );
-            },
-            s => unimplemented!("Unhandled layout {:?}", s),
-        }
-
+        let new_layout = render_pass_state.color_attachment.dst_layout;
+        let new_access = match new_layout {
+            hal::image::Layout::ColorAttachmentOptimal => hal::image::Access::COLOR_ATTACHMENT_READ
+                | hal::image::Access::COLOR_ATTACHMENT_WRITE,
+            hal::image::Layout::Present => hal::image::Access::MEMORY_READ,
+            hal::image::Layout::General => hal::image::Access::MEMORY_READ,
+            hal::image::Layout::TransferSrcOptimal => hal::image::Access::TRANSFER_READ,
+            hal::image::Layout::TransferDstOptimal => hal::image::Access::TRANSFER_WRITE,
+            l => unimplemented!("Unhandled layout {:?}", l),
+        };
+        image.state.set((new_access, new_layout));
         unsafe { self.command_buffer.end_render_pass() };
     }
 
@@ -2985,13 +2989,7 @@ impl<B: hal::Backend> Device<B> {
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
         assert!(!self.inside_render_pass());
         let (img, layer, dimg) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
-            // TODO: set load op for render pass instea dof this
-            let frame = &self.frames[self.current_frame_id];
-            (
-                &frame.image,
-                0,
-                Some(&frame.depth.core),
-            )
+            panic!("This should be handled by attachment load operations");
         } else {
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
@@ -3085,6 +3083,7 @@ impl<B: hal::Backend> Device<B> {
         color: Option<[f32; 4]>,
         depth: Option<f32>,
         rect: Option<DeviceIntRect>,
+        can_use_load_op: bool,
     ) {
         if let Some(mut rect) = rect {
             let target_rect = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
@@ -3110,7 +3109,24 @@ impl<B: hal::Backend> Device<B> {
             } else {
                 self.clear_target_rect(rect, color, depth);
             }
-        } else {
+        } else if can_use_load_op {
+            let color = color.map(|c| ClearValueRaw { color: ClearColorRaw { float32: c} });
+            let depth = depth.map(|d| ClearValueRaw { depth_stencil: ClearDepthStencilRaw { depth: d, stencil: 0} });
+            match self.clear_values.entry(self.bound_draw_fbo) {
+                Entry::Occupied(mut o) => {
+                    let (old_color, old_depth) = o.get_mut();
+                    if !color.is_none() {
+                        *old_color = color;
+                    }
+                    if !depth.is_none() {
+                        *old_depth = depth;
+                    }
+                }
+                Entry::Vacant(v) => {
+                    v.insert((color, depth));
+                }
+            }
+        }  else {
             self.clear_target_image(color, depth);
         }
     }
