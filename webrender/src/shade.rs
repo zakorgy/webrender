@@ -3,14 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::batch::{BatchKey, BatchKind, BrushBatchKind, BatchFeatures};
-use crate::device::{Device, Program, ShaderError};
+use crate::device::{Device, Program, ShaderError, ShaderKind};
+use crate::device::{TextureSampler, VertexArrayKind, ShaderPrecacheFlags};
 use euclid::default::Transform3D;
 use crate::glyph_rasterizer::GlyphFormat;
 use crate::renderer::{
     desc,
     MAX_VERTEX_TEXTURE_WIDTH,
     BlendMode, DebugFlags, ImageBufferKind, RendererError, RendererOptions,
-    TextureSampler, VertexArrayKind, ShaderPrecacheFlags,
 };
 
 use gleam::gl::GlType;
@@ -54,20 +54,6 @@ const DITHERING_FEATURE: &str = "DITHERING";
 const DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
 const FAST_PATH_FEATURE: &str = "FAST_PATH";
 const PIXEL_LOCAL_STORAGE_FEATURE: &str = "PIXEL_LOCAL_STORAGE";
-
-pub(crate) enum ShaderKind {
-    Primitive,
-    Cache(VertexArrayKind),
-    ClipCache,
-    Brush,
-    Text,
-    #[allow(dead_code)]
-    VectorStencil,
-    #[allow(dead_code)]
-    VectorCover,
-    Resolve,
-    Composite,
-}
 
 pub struct LazilyCompiledShader {
     program: Option<Program>,

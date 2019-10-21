@@ -202,7 +202,7 @@ extern crate webrender_build;
 
 #[doc(hidden)]
 pub use crate::device::{build_shader_strings, UploadMethod, VertexUsageHint, get_gl_target};
-pub use crate::device::{ProgramBinary, ProgramCache, ProgramCacheObserver, FormatDesc};
+pub use crate::device::{ProgramBinary, ProgramCache, ProgramCacheObserver, FormatDesc, ShaderPrecacheFlags};
 pub use crate::device::Device;
 pub use crate::frame_builder::ChasePrimitive;
 pub use crate::prim_store::PrimitiveDebugId;
@@ -211,7 +211,7 @@ pub use crate::renderer::{
     AsyncPropertySampler, CpuProfile, DebugFlags, OutputImageHandler, RendererKind, ExternalImage,
     ExternalImageHandler, ExternalImageSource, GpuProfile, GraphicsApi, GraphicsApiInfo,
     PipelineInfo, Renderer, RendererOptions, RenderResults, RendererStats, SceneBuilderHooks,
-    ThreadListener, ShaderPrecacheFlags, MAX_VERTEX_TEXTURE_WIDTH, PresentConfig,
+    ThreadListener, MAX_VERTEX_TEXTURE_WIDTH, PresentConfig,
 };
 pub use crate::screen_capture::{AsyncScreenshotHandle, RecordedFrameHandle};
 pub use crate::shade::{Shaders, WrShaders};

@@ -7,7 +7,7 @@ extern crate cfg_if;
 extern crate webrender_build;
 
 cfg_if! {
-    if #[cfg(not(feature = "gleam"))] {
+    if #[cfg(not(feature = "gl"))] {
         extern crate ron;
         #[macro_use]
         extern crate serde;
@@ -108,6 +108,6 @@ fn main() {
     glsl_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
     let _shaders = write_shaders(glsl_files, &shaders_file);
-    #[cfg(not(feature = "gleam"))]
+    #[cfg(not(feature = "gl"))]
     gfx_main(&out_dir, _shaders, &shaders_file)
 }

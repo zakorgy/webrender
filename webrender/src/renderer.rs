@@ -51,10 +51,10 @@ use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile};
 use crate::debug_colors;
 use crate::debug_render::{DebugItem, DebugRenderer};
 use crate::device::{DepthFunction, Device, GpuFrameId, Program, UploadMethod, Texture, PBO};
-use crate::device::{DrawTarget, ExternalTexture, FBOId, ReadTarget, TextureSlot};
-use crate::device::{ShaderError, TextureFilter, TextureFlags,
+use crate::device::{DrawTarget, ExternalTexture, FBOId, ReadTarget};
+use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, VertexArrayKind,
              VertexUsageHint, VAO, VBO, CustomVAO};
-use crate::device::ProgramCache;
+use crate::device::{ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
 use euclid::{rect, Transform3D, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
@@ -311,57 +311,6 @@ impl From<GlyphFormat> for ShaderColorMode {
     }
 }
 
-/// Enumeration of the texture samplers used across the various WebRender shaders.
-///
-/// Each variant corresponds to a uniform declared in shader source. We only bind
-/// the variants we need for a given shader, so not every variant is bound for every
-/// batch.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum TextureSampler {
-    Color0,
-    Color1,
-    Color2,
-    PrevPassAlpha,
-    PrevPassColor,
-    GpuCache,
-    TransformPalette,
-    RenderTasks,
-    Dither,
-    PrimitiveHeadersF,
-    PrimitiveHeadersI,
-}
-
-impl TextureSampler {
-    pub(crate) fn color(n: usize) -> TextureSampler {
-        match n {
-            0 => TextureSampler::Color0,
-            1 => TextureSampler::Color1,
-            2 => TextureSampler::Color2,
-            _ => {
-                panic!("There are only 3 color samplers.");
-            }
-        }
-    }
-}
-
-impl Into<TextureSlot> for TextureSampler {
-    fn into(self) -> TextureSlot {
-        match self {
-            TextureSampler::Color0 => TextureSlot(0),
-            TextureSampler::Color1 => TextureSlot(1),
-            TextureSampler::Color2 => TextureSlot(2),
-            TextureSampler::PrevPassAlpha => TextureSlot(3),
-            TextureSampler::PrevPassColor => TextureSlot(4),
-            TextureSampler::GpuCache => TextureSlot(5),
-            TextureSampler::TransformPalette => TextureSlot(6),
-            TextureSampler::RenderTasks => TextureSlot(7),
-            TextureSampler::Dither => TextureSlot(8),
-            TextureSampler::PrimitiveHeadersF => TextureSlot(9),
-            TextureSampler::PrimitiveHeadersI => TextureSlot(10),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PackedVertex {
@@ -369,6 +318,7 @@ pub struct PackedVertex {
 }
 
 pub(crate) mod desc {
+    #![cfg_attr(not(feature = "gl"), allow(dead_code))]
     use crate::device::{VertexAttribute, VertexAttributeKind, VertexDescriptor};
 
     pub const PRIM_INSTANCES: VertexDescriptor = VertexDescriptor {
@@ -839,22 +789,6 @@ pub(crate) mod desc {
             },
         ],
     };
-}
-
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
-    Primitive,
-    Blur,
-    Clip,
-    VectorStencil,
-    VectorCover,
-    Border,
-    Scale,
-    LineDecoration,
-    Gradient,
-    Resolve,
-    SvgFilter,
-    Composite,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5809,21 +5743,6 @@ pub trait AsyncPropertySampler {
     /// This is called exactly once, when the render backend thread is about to
     /// terminate.
     fn deregister(&self);
-}
-
-bitflags! {
-    /// Flags that control how shaders are pre-cached, if at all.
-    #[derive(Default)]
-    pub struct ShaderPrecacheFlags: u32 {
-        /// Needed for const initialization
-        const EMPTY                 = 0;
-
-        /// Only start async compile
-        const ASYNC_COMPILE         = 1 << 2;
-
-        /// Do a full compile/link during startup
-        const FULL_COMPILE          = 1 << 3;
-    }
 }
 
 pub struct RendererOptions {
