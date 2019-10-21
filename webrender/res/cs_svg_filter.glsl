@@ -507,9 +507,9 @@ vec4 composite(vec4 Cs, vec4 Cb, int mode) {
     return Cr;
 }
 
-vec4 sampleInUvRect(sampler2DArray sampler, vec3 uv, vec4 uvRect) {
+vec4 sampleInUvRect(sampler2DArray samp, vec3 uv, vec4 uvRect) {
     vec2 clamped = clamp(uv.xy, uvRect.xy, uvRect.zw);
-    return texture(sampler, vec3(clamped, uv.z), 0.0);
+    return texture(samp, vec3(clamped, uv.z), 0.0);
 }
 
 void main(void) {

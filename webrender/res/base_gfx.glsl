@@ -2,56 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const bool alpha_pass =
-#ifdef WR_FEATURE_ALPHA_PASS
-  true;
-#else
-  false;
-#endif
-
-const bool color_target =
-#ifdef WR_FEATURE_COLOR_TARGET
-     true;
-#else
-    false;
-#endif
-
-const bool glyph_transform_f =
-#ifdef WR_FEATURE_GLYPH_TRANSFORM
-     true;
-#else
-    false;
-#endif
-
-const bool dithering =
-#ifdef WR_FEATURE_DITHERING
-    true;
-#else
-    false;
-#endif
-
-const bool debug_overdraw =
-#ifdef WR_FEATURE_DEBUG_OVERDRAW
-    true;
-#else
-    false;
-#endif
-
-const bool repetition =
-#ifdef WR_FEATURE_REPETITION
-    true;
-#else
-    false;
-#endif
-
-const bool antialiasing =
-#ifdef WR_FEATURE_ANTIALIASING
-    true;
-#else
-    false;
-#endif
-
-const bool push_constants = false;
+layout(constant_id = 0) const bool alpha_pass = false;
+layout(constant_id = 1) const bool color_target = false;
+layout(constant_id = 2) const bool glyph_transform_f = false;
+layout(constant_id = 3) const bool dithering = false;
+layout(constant_id = 4) const bool debug_overdraw = false;
+layout(constant_id = 5) const bool repetition = false;
+layout(constant_id = 6) const bool antialiasing = false;
+layout(constant_id = 7) const bool push_constants = true;
 
 #if defined(GL_ES)
     #if GL_ES == 1

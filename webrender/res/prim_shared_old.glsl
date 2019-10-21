@@ -245,10 +245,8 @@ float do_clip() {
     return texelFetch(sPrevPassAlpha, tc, 0).r;
 }
 
+#ifdef WR_FEATURE_DITHERING
 vec4 dither(vec4 color) {
-    if (!dithering) {
-        return color;
-    }
     const int matrix_mask = 7;
 
     ivec2 pos = ivec2(gl_FragCoord.xy) & ivec2(matrix_mask);
@@ -257,6 +255,11 @@ vec4 dither(vec4 color) {
 
     return color + vec4(noise, noise, noise, 0);
 }
+#else
+vec4 dither(vec4 color) {
+    return color;
+}
+#endif //WR_FEATURE_DITHERING
 
 vec4 sample_gradient(HIGHP_FS_ADDRESS int address, float offset, float gradient_repeat) {
     // Modulo the offset if the gradient repeats.

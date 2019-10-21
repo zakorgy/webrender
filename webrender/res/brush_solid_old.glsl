@@ -8,7 +8,9 @@
 
 flat varying vec4 vColor;
 
+#ifdef WR_FEATURE_ALPHA_PASS
 varying vec2 vLocalPos;
+#endif
 
 #ifdef WR_VERTEX_SHADER
 
@@ -38,20 +40,18 @@ void brush_vs(
     float opacity = float(prim_user_data.x) / 65535.0;
     vColor = prim.color * opacity;
 
-    if (alpha_pass) {
-        vLocalPos = vi.local_pos;
-    } else {
-        vLocalPos = vec2(0.0);
-    }
+#ifdef WR_FEATURE_ALPHA_PASS
+    vLocalPos = vi.local_pos;
+#endif
 }
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
 Fragment brush_fs() {
     vec4 color = vColor;
-    if (alpha_pass) {
-        color *= init_transform_fs(vLocalPos);
-    }
+#ifdef WR_FEATURE_ALPHA_PASS
+    color *= init_transform_fs(vLocalPos);
+#endif
     return Fragment(color);
 }
 #endif
