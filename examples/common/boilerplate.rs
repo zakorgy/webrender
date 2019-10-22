@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[cfg(feature = "gl")]
 use gleam::gl;
+#[cfg(feature = "gl")]
 use glutin;
 use std::env;
 use std::path::PathBuf;
@@ -11,6 +13,8 @@ use winit;
 use webrender::{DebugFlags, ShaderPrecacheFlags};
 use webrender::api::*;
 use webrender::api::units::*;
+#[cfg(feature = "gl")]
+extern crate gfx_backend_empty as back;
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -179,8 +183,12 @@ pub fn main_wrapper<E: Example>(
         DeviceIntSize::new(size.width as i32, size.height as i32)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-    let (mut renderer, sender) = webrender::Renderer::new(
-        gl.clone(),
+
+    #[cfg(feature = "gl")]
+    let init = gl.clone().into();
+
+    let (mut renderer, sender): (webrender::Renderer<back::Backend>, _) = webrender::Renderer::new(
+        init,
         notifier,
         opts,
         None,

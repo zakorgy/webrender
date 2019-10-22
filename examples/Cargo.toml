@@ -29,6 +29,7 @@ path = "document.rs"
 [[bin]]
 name = "frame_output"
 path = "frame_output.rs"
+required-features = ["gl"]
 
 [[bin]]
 name = "iframe"
@@ -53,16 +54,20 @@ path = "texture_cache_stress.rs"
 [[bin]]
 name = "yuv"
 path = "yuv.rs"
+required-features = ["gl"]
 
 [features]
+default = ["gl"]
 debug = ["webrender/capture", "webrender/debugger", "webrender/profiler"]
+gl = ["gfx-backend-empty", "gleam", "glutin", "webrender/gl"]
 
 [dependencies]
 app_units = "0.7"
 env_logger = "0.5"
 euclid = "0.20"
-gleam = "0.6.2"
-glutin = "0.21"
+gfx-backend-empty = { optional = true, version = "0.3.1"}
+gleam = { optional = true, version = "0.6.2"}
+glutin = { optional = true, version = "0.21" }
 rayon = "1"
 webrender = { path = "../webrender" }
 winit = "0.19"
