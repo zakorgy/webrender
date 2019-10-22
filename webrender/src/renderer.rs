@@ -54,7 +54,7 @@ use crate::device::{DepthFunction, Device, GpuFrameId, Program, UploadMethod, Te
 use crate::device::{DrawTarget, ExternalTexture, FBOId, ReadTarget};
 use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, VertexArrayKind,
              VertexUsageHint, VAO, VBO, CustomVAO};
-use crate::device::{ProgramCache, ShaderPrecacheFlags};
+use crate::device::{DeviceInit, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
 use euclid::{rect, Transform3D, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
@@ -914,7 +914,7 @@ struct ActiveTexture {
 /// Manages the mapping between the at-a-distance texture handles used by the
 /// `RenderBackend` (which does not directly interface with the GPU) and actual
 /// device texture handles.
-struct TextureResolver {
+struct TextureResolver<B: hal::Backend> {
     /// A map to resolve texture cache IDs to native textures.
     texture_cache_map: FastHashMap<CacheTextureId, Texture>,
 
@@ -951,10 +951,11 @@ struct TextureResolver {
     /// See the comments in `allocate_target_texture` for more insight on why
     /// reuse is a win.
     render_target_pool: Vec<Texture>,
+    phantom_data: PhantomData<B>,
 }
 
-impl TextureResolver {
-    fn new(device: &mut Device) -> TextureResolver {
+impl<B: hal::Backend> TextureResolver<B> {
+    fn new(device: &mut Device<B>) -> TextureResolver<B> {
         let dummy_cache_texture = device
             .create_texture(
                 TextureTarget::Array,
@@ -978,10 +979,11 @@ impl TextureResolver {
             prev_pass_color: None,
             saved_targets: Vec::default(),
             render_target_pool: Vec::new(),
+            phantom_data: PhantomData,
         }
     }
 
-    fn deinit(self, device: &mut Device) {
+    fn deinit(self, device: &mut Device<B>) {
         device.delete_texture(self.dummy_cache_texture);
 
         for (_id, texture) in self.texture_cache_map {
@@ -999,7 +1001,7 @@ impl TextureResolver {
         assert!(self.saved_targets.is_empty());
     }
 
-    fn end_frame(&mut self, device: &mut Device, frame_id: GpuFrameId) {
+    fn end_frame(&mut self, device: &mut Device<B>, frame_id: GpuFrameId) {
         // return the cached targets to the pool
         self.end_pass(device, None, None);
         // return the saved targets as well
@@ -1020,13 +1022,13 @@ impl TextureResolver {
     }
 
     /// Transfers ownership of a render target back to the pool.
-    fn return_to_pool(&mut self, device: &mut Device, target: Texture) {
+    fn return_to_pool(&mut self, device: &mut Device<B>, target: Texture) {
         device.invalidate_render_target(&target);
         self.render_target_pool.push(target);
     }
 
     /// Drops all targets from the render target pool that do not satisfy the predicate.
-    pub fn retain_targets<F: Fn(&Texture) -> bool>(&mut self, device: &mut Device, f: F) {
+    pub fn retain_targets<F: Fn(&Texture) -> bool>(&mut self, device: &mut Device<B>, f: F) {
         // We can't just use retain() because `Texture` requires manual cleanup.
         let mut tmp = SmallVec::<[Texture; 8]>::new();
         for target in self.render_target_pool.drain(..) {
@@ -1041,7 +1043,7 @@ impl TextureResolver {
 
     fn end_pass(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         a8_texture: Option<ActiveTexture>,
         rgba8_texture: Option<ActiveTexture>,
     ) {
@@ -1073,7 +1075,7 @@ impl TextureResolver {
     }
 
     // Bind a source texture to the device.
-    fn bind(&self, texture_id: &TextureSource, sampler: TextureSampler, device: &mut Device) -> Swizzle {
+    fn bind(&self, texture_id: &TextureSource, sampler: TextureSampler, device: &mut Device<B>) -> Swizzle {
         match *texture_id {
             TextureSource::Invalid => {
                 Swizzle::default()
@@ -1249,16 +1251,17 @@ enum GpuCacheBus {
 }
 
 /// The device-specific representation of the cache texture in gpu_cache.rs
-struct GpuCacheTexture {
+struct GpuCacheTexture<B: hal::Backend> {
     texture: Option<Texture>,
     bus: GpuCacheBus,
+    phantom: PhantomData<B>,
 }
 
-impl GpuCacheTexture {
+impl<B: hal::Backend> GpuCacheTexture<B> {
 
     /// Ensures that we have an appropriately-sized texture. Returns true if a
     /// new texture was created.
-    fn ensure_texture(&mut self, device: &mut Device, height: i32) {
+    fn ensure_texture(&mut self, device: &mut Device<B>, height: i32) {
         // If we already have a texture that works, we're done.
         if self.texture.as_ref().map_or(false, |t| t.get_dimensions().height >= height) {
             if GPU_CACHE_RESIZE_TEST {
@@ -1306,7 +1309,7 @@ impl GpuCacheTexture {
         self.texture = Some(texture);
     }
 
-    fn new(device: &mut Device, use_scatter: bool) -> Result<Self, RendererError> {
+    fn new(device: &mut Device<B>, use_scatter: bool) -> Result<Self, RendererError> {
         let bus = if use_scatter {
             let program = device.create_program_linked(
                 "gpu_cache_update",
@@ -1339,10 +1342,11 @@ impl GpuCacheTexture {
         Ok(GpuCacheTexture {
             texture: None,
             bus,
+            phantom: PhantomData,
         })
     }
 
-    fn deinit(mut self, device: &mut Device) {
+    fn deinit(mut self, device: &mut Device<B>) {
         if let Some(t) = self.texture.take() {
             device.delete_texture(t);
         }
@@ -1365,7 +1369,7 @@ impl GpuCacheTexture {
 
     fn prepare_for_updates(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         total_block_count: usize,
         max_height: i32,
     ) {
@@ -1387,7 +1391,7 @@ impl GpuCacheTexture {
         }
     }
 
-    fn update(&mut self, device: &mut Device, updates: &GpuCacheUpdateList) {
+    fn update(&mut self, device: &mut Device<B>, updates: &GpuCacheUpdateList) {
         match self.bus {
             GpuCacheBus::PixelBuffer { ref mut rows, .. } => {
                 for update in &updates.updates {
@@ -1455,7 +1459,7 @@ impl GpuCacheTexture {
         }
     }
 
-    fn flush(&mut self, device: &mut Device) -> usize {
+    fn flush(&mut self, device: &mut Device<B>) -> usize {
         let texture = self.texture.as_ref().unwrap();
         match self.bus {
             GpuCacheBus::PixelBuffer { ref buffer, ref mut rows } => {
@@ -1509,16 +1513,16 @@ impl GpuCacheTexture {
     }
 }
 
-struct VertexDataTexture<T> {
+struct VertexDataTexture<T, B: hal::Backend> {
     texture: Option<Texture>,
     format: ImageFormat,
     pbo: PBO,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<(T, B)>,
 }
 
-impl<T> VertexDataTexture<T> {
+impl<T, B: hal::Backend> VertexDataTexture<T, B> {
     fn new(
-        device: &mut Device,
+        device: &mut Device<B>,
         format: ImageFormat,
     ) -> Self {
         VertexDataTexture {
@@ -1539,7 +1543,7 @@ impl<T> VertexDataTexture<T> {
         self.texture.as_ref().map_or(0, |t| t.size_in_bytes())
     }
 
-    fn update(&mut self, device: &mut Device, data: &mut Vec<T>) {
+    fn update(&mut self, device: &mut Device<B>, data: &mut Vec<T>) {
         debug_assert!(mem::size_of::<T>() % 16 == 0);
         let texels_per_item = mem::size_of::<T>() / 16;
         let items_per_row = MAX_VERTEX_TEXTURE_WIDTH / texels_per_item;
@@ -1610,7 +1614,7 @@ impl<T> VertexDataTexture<T> {
             .upload(rect, 0, None, None, data);
     }
 
-    fn deinit(mut self, device: &mut Device) {
+    fn deinit(mut self, device: &mut Device<B>) {
         device.delete_pbo(self.pbo);
         if let Some(t) = self.texture.take() {
             device.delete_texture(t);
@@ -1630,20 +1634,22 @@ struct TargetSelector {
     format: ImageFormat,
 }
 
-struct LazyInitializedDebugRenderer {
+struct LazyInitializedDebugRenderer<B: hal::Backend> {
     debug_renderer: Option<DebugRenderer>,
     failed: bool,
+    phantom_data: PhantomData<B>,
 }
 
-impl LazyInitializedDebugRenderer {
+impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
     pub fn new() -> Self {
         Self {
             debug_renderer: None,
             failed: false,
+            phantom_data: PhantomData,
         }
     }
 
-    pub fn get_mut<'a>(&'a mut self, device: &mut Device) -> Option<&'a mut DebugRenderer> {
+    pub fn get_mut<'a>(&'a mut self, device: &mut Device<B>) -> Option<&'a mut DebugRenderer> {
         if self.failed {
             return None;
         }
@@ -1665,7 +1671,7 @@ impl LazyInitializedDebugRenderer {
         self.debug_renderer.as_mut()
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut Device<B>) {
         if let Some(debug_renderer) = self.debug_renderer {
             debug_renderer.deinit(device);
         }
@@ -1693,17 +1699,17 @@ pub struct RendererVAOs {
 ///
 /// We have a separate `Renderer` instance for each instance of WebRender (generally
 /// one per OS window), and all instances share the same thread.
-pub struct Renderer {
+pub struct Renderer<B: hal::Backend> {
     result_rx: Receiver<ResultMsg>,
     debug_server: Box<dyn DebugServer>,
-    pub device: Device,
+    pub device: Device<B>,
     pending_texture_updates: Vec<TextureUpdateList>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_gpu_cache_clear: bool,
     pending_shader_updates: Vec<PathBuf>,
     active_documents: Vec<(DocumentId, RenderedDocument)>,
 
-    shaders: Rc<RefCell<Shaders>>,
+    shaders: Rc<RefCell<Shaders<B>>>,
 
     max_recorded_profiles: usize,
 
@@ -1712,7 +1718,7 @@ pub struct Renderer {
     enable_picture_caching: bool,
     enable_advanced_blend_barriers: bool,
 
-    debug: LazyInitializedDebugRenderer,
+    debug: LazyInitializedDebugRenderer<B>,
     debug_flags: DebugFlags,
     backend_profile_counters: BackendProfileCounters,
     profile_counters: RendererProfileCounters,
@@ -1728,11 +1734,11 @@ pub struct Renderer {
     pub gpu_profile: GpuProfiler<GpuProfileTag>,
     vaos: RendererVAOs,
 
-    prim_header_f_texture: VertexDataTexture<PrimitiveHeaderF>,
-    prim_header_i_texture: VertexDataTexture<PrimitiveHeaderI>,
-    transforms_texture: VertexDataTexture<TransformData>,
-    render_task_texture: VertexDataTexture<RenderTaskData>,
-    gpu_cache_texture: GpuCacheTexture,
+    prim_header_f_texture: VertexDataTexture<PrimitiveHeaderF, B>,
+    prim_header_i_texture: VertexDataTexture<PrimitiveHeaderI, B>,
+    transforms_texture: VertexDataTexture<TransformData, B>,
+    render_task_texture: VertexDataTexture<RenderTaskData, B>,
+    gpu_cache_texture: GpuCacheTexture<B>,
 
     /// When the GPU cache debugger is enabled, we keep track of the live blocks
     /// in the GPU cache so that we can use them for the debug display. This
@@ -1745,7 +1751,7 @@ pub struct Renderer {
     pipeline_info: PipelineInfo,
 
     // Manages and resolves source textures IDs to real texture IDs.
-    texture_resolver: TextureResolver,
+    texture_resolver: TextureResolver<B>,
 
     // A PBO used to do asynchronous texture cache uploads.
     texture_cache_upload_pbo: PBO,
@@ -1770,8 +1776,8 @@ pub struct Renderer {
 
     pub renderer_errors: Vec<RendererError>,
 
-    pub(in crate) async_frame_recorder: Option<AsyncScreenshotGrabber>,
-    pub(in crate) async_screenshots: Option<AsyncScreenshotGrabber>,
+    pub(in crate) async_frame_recorder: Option<AsyncScreenshotGrabber<B>>,
+    pub(in crate) async_screenshots: Option<AsyncScreenshotGrabber<B>>,
 
     /// List of profile results from previous frames. Can be retrieved
     /// via get_frame_profiles().
@@ -1837,7 +1843,7 @@ impl From<ResourceCacheError> for RendererError {
     }
 }
 
-impl Renderer {
+impl<B: hal::Backend> Renderer<B> {
     /// Initializes WebRender and creates a `Renderer` and `RenderApiSender`.
     ///
     /// # Examples
@@ -1856,10 +1862,10 @@ impl Renderer {
     /// ```
     /// [rendereroptions]: struct.RendererOptions.html
     pub fn new(
-        gl: Rc<dyn gl::Gl>,
+        init: DeviceInit<B>,
         notifier: Box<dyn RenderNotifier>,
         mut options: RendererOptions,
-        shaders: Option<&mut WrShaders>,
+        shaders: Option<&mut WrShaders<B>>,
         start_size: DeviceIntSize,
     ) -> Result<(Self, RenderApiSender), RendererError> {
         HAS_BEEN_INITIALIZED.store(true, Ordering::SeqCst);
@@ -1867,12 +1873,15 @@ impl Renderer {
         let (api_tx, api_rx) = channel::msg_channel()?;
         let (payload_tx, payload_rx) = channel::payload_channel()?;
         let (result_tx, result_rx) = channel();
-        let gl_type = gl.get_type();
+        #[cfg(feature = "gl")]
+        let gl_type = init.gl.get_type();
+        #[cfg(not(feature = "gl"))]
+        let gl_type = ();
 
         let debug_server = new_debug_server(options.start_debug_server, api_tx.clone());
 
         let mut device = Device::new(
-            gl,
+            init,
             options.resource_override_path.clone(),
             options.upload_method.clone(),
             options.cached_programs.take(),
@@ -1884,11 +1893,15 @@ impl Renderer {
 
         let color_cache_formats = device.preferred_color_formats();
         let swizzle_settings = device.swizzle_settings();
+        #[cfg(feature = "gl")]
         let supports_dual_source_blending = match gl_type {
             gl::GlType::Gl => device.supports_extension("GL_ARB_blend_func_extended") &&
                 device.supports_extension("GL_ARB_explicit_attrib_location"),
             gl::GlType::Gles => device.supports_extension("GL_EXT_blend_func_extended"),
         };
+        #[cfg(not(feature = "gl"))]
+        let supports_dual_source_blending = false;
+
         let use_dual_source_blending =
             supports_dual_source_blending &&
             options.allow_dual_source_blending &&
@@ -5301,7 +5314,7 @@ impl Renderer {
     }
 
     fn do_debug_blit(
-        device: &mut Device,
+        device: &mut Device<B>,
         debug_renderer: &mut DebugRenderer,
         mut textures: Vec<&Texture>,
         device_size: DeviceIntSize,
@@ -5992,10 +6005,10 @@ pub struct PipelineInfo {
     pub removed_pipelines: Vec<(PipelineId, DocumentId)>,
 }
 
-impl Renderer {
+impl<B: hal::Backend> Renderer<B> {
     #[cfg(feature = "capture")]
     fn save_texture(
-        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device
+        texture: &Texture, name: &str, root: &PathBuf, device: &mut Device<B>
     ) -> PlainTexture {
         use std::fs;
         use std::io::Write;
@@ -6056,7 +6069,7 @@ impl Renderer {
         plain: &PlainTexture,
         rt_info: Option<RenderTargetInfo>,
         root: &PathBuf,
-        device: &mut Device
+        device: &mut Device<B>
     ) -> (Texture, Vec<u8>)
     {
         use std::fs::File;

@@ -9,7 +9,7 @@ build = "build.rs"
 edition = "2018"
 
 [features]
-default = ["freetype-lib", "gl"]
+default = ["freetype-lib"]
 gl = ["gleam"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
@@ -38,7 +38,7 @@ cstr = "0.1.2"
 euclid = { version = "0.20.0", features = ["serde"] }
 fxhash = "0.2.1"
 gfx-hal = { version = "0.3.1", features = ["serde"] }
-gleam = { version = "0.6.17", optional = true }
+gleam = { optional = true, version = "0.6.17" }
 image_loader = { optional = true, version = "0.22", package = "image", default-features = false, features = ["png_codec"] }
 lazy_static = "1"
 log = "0.4"

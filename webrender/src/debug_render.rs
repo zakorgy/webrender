@@ -120,7 +120,7 @@ pub struct DebugRenderer {
 }
 
 impl DebugRenderer {
-    pub fn new(device: &mut Device) -> Result<Self, ShaderError> {
+    pub fn new<B: hal::Backend>(device: &mut Device<B>) -> Result<Self, ShaderError> {
         let font_program = device.create_program_linked(
             "debug_font",
             String::new(),
@@ -168,7 +168,7 @@ impl DebugRenderer {
         })
     }
 
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit<B: hal::Backend>(self, device: &mut Device<B>) {
         device.delete_texture(self.font_texture);
         device.delete_program(self.font_program);
         device.delete_program(self.color_program);
@@ -310,9 +310,9 @@ impl DebugRenderer {
         self.add_line(p0.x, p1.y, color, p0.x, p0.y, color);
     }
 
-    pub fn render(
+    pub fn render<B: hal::Backend>(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         viewport_size: Option<DeviceIntSize>,
         scale: f32,
     ) {

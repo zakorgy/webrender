@@ -5,6 +5,7 @@
 //! Screen capture infrastructure for the Gecko Profiler and Composition Recorder.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use api::{ImageFormat, TextureTarget};
 use api::units::*;
@@ -52,7 +53,7 @@ enum AsyncScreenshotGrabberMode {
 }
 
 /// Renderer infrastructure for capturing screenshots and scaling them asynchronously.
-pub(in crate) struct AsyncScreenshotGrabber {
+pub(in crate) struct AsyncScreenshotGrabber<B: hal::Backend> {
     /// The textures used to scale screenshots.
     scaling_textures: Vec<Texture>,
     /// PBOs available to be used for screenshot readback.
@@ -63,9 +64,10 @@ pub(in crate) struct AsyncScreenshotGrabber {
     next_pbo_handle: usize,
     /// The mode the grabber operates in.
     mode: AsyncScreenshotGrabberMode,
+    phantom: PhantomData<B>,
 }
 
-impl Default for AsyncScreenshotGrabber {
+impl<B: hal::Backend> Default for AsyncScreenshotGrabber<B> {
     fn default() -> Self {
         AsyncScreenshotGrabber {
             scaling_textures: Vec::new(),
@@ -73,11 +75,12 @@ impl Default for AsyncScreenshotGrabber {
             awaiting_readback: HashMap::new(),
             next_pbo_handle: 1,
             mode: AsyncScreenshotGrabberMode::ProfilerScreenshots,
+            phantom: PhantomData,
         }
     }
 }
 
-impl AsyncScreenshotGrabber {
+impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
     /// Create a new AsyncScreenshotGrabber for the composition recorder.
     pub fn new_composition_recorder() -> Self {
         let mut recorder = Self::default();
@@ -87,7 +90,7 @@ impl AsyncScreenshotGrabber {
     }
 
     /// Deinitialize the allocated textures and PBOs.
-    pub fn deinit(self, device: &mut Device) {
+    pub fn deinit(self, device: &mut Device<B>) {
         for texture in self.scaling_textures {
             device.delete_texture(texture);
         }
@@ -108,7 +111,7 @@ impl AsyncScreenshotGrabber {
     /// The returned size is the size of the screenshot.
     pub fn get_screenshot(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         window_rect: DeviceIntRect,
         buffer_size: DeviceIntSize,
         image_format: ImageFormat,
@@ -225,7 +228,7 @@ impl AsyncScreenshotGrabber {
     /// so that an optimally-sized area can be read from it.
     fn scale_screenshot(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         read_target: ReadTarget,
         read_target_rect: DeviceIntRect,
         buffer_size: DeviceIntSize,
@@ -314,7 +317,7 @@ impl AsyncScreenshotGrabber {
     /// the given buffer.
     pub fn map_and_recycle_screenshot(
         &mut self,
-        device: &mut Device,
+        device: &mut Device<B>,
         handle: AsyncScreenshotHandle,
         dst_buffer: &mut [u8],
         dst_stride: usize,
@@ -382,7 +385,7 @@ impl AsyncScreenshotGrabber {
 }
 
 // Screen-capture specific Renderer impls.
-impl Renderer {
+impl<B: hal::Backend> Renderer<B> {
     /// Record a frame for the Composition Recorder.
     ///
     /// The returned handle can be passed to `map_recorded_frame` to copy it into

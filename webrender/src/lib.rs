@@ -57,6 +57,7 @@ extern crate bitflags;
 extern crate cfg_if;
 #[macro_use]
 extern crate cstr;
+extern crate gfx_hal as hal;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -173,6 +174,7 @@ extern crate bincode;
 extern crate byteorder;
 pub extern crate euclid;
 extern crate fxhash;
+#[cfg(feature = "gl")]
 extern crate gleam;
 extern crate num_traits;
 extern crate plane_split;

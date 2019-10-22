@@ -344,12 +344,12 @@ impl Drop for PBO {
     }
 }
 
-pub struct BoundPBO<'a> {
-    device: &'a mut Device,
+pub struct BoundPBO<'a, B> {
+    device: &'a mut Device<B>,
     pub data: &'a [u8]
 }
 
-impl<'a> Drop for BoundPBO<'a> {
+impl<'a, B> Drop for BoundPBO<'a, B> {
     fn drop(&mut self) {
         self.device.gl.unmap_buffer(gl::PIXEL_PACK_BUFFER);
         self.device.gl.bind_buffer(gl::PIXEL_PACK_BUFFER, 0);
@@ -357,8 +357,8 @@ impl<'a> Drop for BoundPBO<'a> {
 }
 
 impl ProgramSourceInfo {
-    fn new(
-        device: &Device,
+    fn new<B>(
+        device: &Device<B>,
         name: &'static str,
         features: String,
     ) -> Self {
@@ -413,7 +413,7 @@ impl ProgramSourceInfo {
         }
     }
 
-    fn compute_source(&self, device: &Device, kind: &str) -> String {
+    fn compute_source<B>(&self, device: &Device<B>, kind: &str) -> String {
         let mut src = String::new();
         device.build_shader_string(
             &self.features,
@@ -468,7 +468,23 @@ enum TexStorageUsage {
     Always,
 }
 
-pub struct Device {
+pub trait PrimitiveType { }
+impl PrimitiveType for crate::gpu_types::BorderInstance { }
+impl PrimitiveType for crate::gpu_types::BlurInstance { }
+impl PrimitiveType for crate::gpu_types::ClipMaskInstance { }
+impl PrimitiveType for crate::gpu_types::PrimitiveInstanceData { }
+impl PrimitiveType for crate::gpu_types::ScalingInstance { }
+impl PrimitiveType for crate::gpu_types::SvgFilterInstance { }
+impl PrimitiveType for crate::gpu_types::ResolveInstanceData { }
+impl PrimitiveType for crate::gpu_types::CompositeInstance { }
+impl PrimitiveType for crate::render_target::LineDecorationJob { }
+
+pub struct DeviceInit<B> {
+    pub gl: Rc<dyn gl::Gl>,
+    pub phantom_data: PhantomData<B>,
+}
+
+pub struct Device<B> {
     gl: Rc<dyn gl::Gl>,
 
     /// If non-None, |gl| points to a profiling wrapper, and this points to the
@@ -533,11 +549,12 @@ pub struct Device {
 
     /// Dumps the source of the shader with the given name
     dump_shader_source: Option<String>,
+    phantom_data: PhantomData<B>,
 }
 
-impl Device {
+impl<B> Device<B> {
     pub fn new(
-        mut gl: Rc<dyn gl::Gl>,
+        init: DeviceInit<B>,
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         cached_programs: Option<Rc<ProgramCache>>,
@@ -545,7 +562,8 @@ impl Device {
         allow_texture_storage_support: bool,
         allow_texture_swizzling: bool,
         dump_shader_source: Option<String>,
-    ) -> Device {
+    ) -> Device<B> {
+        let mut gl = init.gl;
         let mut max_texture_size = [0];
         let mut max_texture_layers = [0];
         unsafe {
@@ -770,6 +788,7 @@ impl Device {
             texture_storage_usage,
             optimal_pbo_stride,
             dump_shader_source,
+            phantom_data: PhantomData,
         }
     }
 
@@ -1149,7 +1168,7 @@ impl Device {
         if build_program {
             // Compile the vertex shader
             let vs_source = info.compute_source(self, SHADER_KIND_VERTEX);
-            let vs_id = match Device::compile_shader(&*self.gl, &info.base_filename, gl::VERTEX_SHADER, &vs_source) {
+            let vs_id = match Self::compile_shader(&*self.gl, &info.base_filename, gl::VERTEX_SHADER, &vs_source) {
                     Ok(vs_id) => vs_id,
                     Err(err) => return Err(err),
                 };
@@ -1157,7 +1176,7 @@ impl Device {
             // Compile the fragment shader
             let fs_source = info.compute_source(self, SHADER_KIND_FRAGMENT);
             let fs_id =
-                match Device::compile_shader(&*self.gl, &info.base_filename, gl::FRAGMENT_SHADER, &fs_source) {
+                match Self::compile_shader(&*self.gl, &info.base_filename, gl::FRAGMENT_SHADER, &fs_source) {
                     Ok(fs_id) => fs_id,
                     Err(err) => {
                         self.gl.delete_shader(vs_id);
@@ -1918,7 +1937,7 @@ impl Device {
         self.gl.bind_buffer(gl::PIXEL_PACK_BUFFER, 0);
     }
 
-    pub fn map_pbo_for_readback<'a>(&'a mut self, pbo: &'a PBO) -> Option<BoundPBO<'a>> {
+    pub fn map_pbo_for_readback<'a>(&'a mut self, pbo: &'a PBO) -> Option<BoundPBO<'a, B>> {
         self.gl.bind_buffer(gl::PIXEL_PACK_BUFFER, pbo.id);
 
         let buf_ptr = match self.gl.get_type() {
@@ -2611,7 +2630,7 @@ impl Device {
 
     pub fn echo_driver_messages(&self) {
         if self.capabilities.supports_khr_debug {
-            Device::log_driver_messages(self.gl());
+            Self::log_driver_messages(self.gl());
         }
     }
 
