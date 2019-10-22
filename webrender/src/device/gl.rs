@@ -44,26 +44,6 @@ pub enum DepthFunction {
     LessEqual = gl::LEQUAL,
 }
 
-/// A structure defining a particular workflow of texture transfers.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct TextureFormatPair<T> {
-    /// Format the GPU natively stores texels in.
-    pub internal: T,
-    /// Format we expect the users to provide the texels in.
-    pub external: T,
-}
-
-impl<T: Copy> From<T> for TextureFormatPair<T> {
-    fn from(value: T) -> Self {
-        TextureFormatPair {
-            internal: value,
-            external: value,
-        }
-    }
-}
-
 enum FBOTarget {
     Read,
     Draw,
@@ -322,31 +302,6 @@ impl Drop for VAO {
             "renderer::deinit not called"
         );
     }
-}
-
-pub struct PBO {
-    id: gl::GLuint,
-    reserved_size: usize,
-}
-
-impl PBO {
-    pub fn get_reserved_size(&self) -> usize {
-        self.reserved_size
-    }
-}
-
-impl Drop for PBO {
-    fn drop(&mut self) {
-        debug_assert!(
-            thread::panicking() || self.id == 0,
-            "renderer::deinit not called"
-        );
-    }
-}
-
-pub struct BoundPBO<'a, B> {
-    device: &'a mut Device<B>,
-    pub data: &'a [u8]
 }
 
 impl<'a, B> Drop for BoundPBO<'a, B> {

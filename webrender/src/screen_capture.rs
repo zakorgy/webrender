@@ -9,12 +9,19 @@ use std::marker::PhantomData;
 
 use api::{ImageFormat, TextureTarget};
 use api::units::*;
-use gleam::gl::GlType;
 
 use crate::device::{Device, PBO, DrawTarget, ReadTarget, Texture, TextureFilter};
 use crate::internal_types::RenderTargetInfo;
 use crate::renderer::Renderer;
 use crate::util::round_up_to_multiple;
+
+cfg_if! {
+    if #[cfg(feature = "gl")] {
+        use gleam::gl::GlType;
+    } else {
+        type GlType = ();
+    }
+}
 
 /// A handle to a screenshot that is being asynchronously captured and scaled.
 #[repr(C)]
@@ -288,7 +295,13 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
             (read_target, read_target_rect)
         };
 
-        let draw_target = DrawTarget::from_texture(&self.scaling_textures[level], 0 as _, false);
+        let draw_target = DrawTarget::from_texture(
+            &self.scaling_textures[level],
+            0 as _,
+            false,
+            #[cfg(not(feature = "gl"))]
+            device.frame_id,
+        );
 
         let draw_target_rect = draw_target
             .to_framebuffer_rect(DeviceIntRect::new(DeviceIntPoint::new(0, 0), dest_size));
@@ -332,9 +345,9 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
             None => return false,
         };
 
-        let gl_type = device.gl().get_type();
-
+        #[cfg(feature = "gl")]
         let success = if let Some(bound_pbo) = device.map_pbo_for_readback(&pbo) {
+            let gl_type = device.gl().get_type();
             let src_buffer = &bound_pbo.data;
             let src_stride = buffer_stride;
             let src_width =
@@ -353,6 +366,9 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
             false
         };
 
+        #[cfg(not(feature = "gl"))]
+        let success = false;
+
         match self.mode {
             AsyncScreenshotGrabberMode::ProfilerScreenshots => self.available_pbos.push(pbo),
             AsyncScreenshotGrabberMode::CompositionRecorder => device.delete_pbo(pbo),
@@ -369,7 +385,11 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
     ) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
         use AsyncScreenshotGrabberMode::*;
 
+        #[cfg(feature = "gl")]
         let is_angle = cfg!(windows) && gl_type == GlType::Gles;
+
+        #[cfg(not(feature = "gl"))]
+        let is_angle = false;
 
         if self.mode == CompositionRecorder && !is_angle {
             // This is a non-ANGLE configuration. in this case, the recorded frames were captured

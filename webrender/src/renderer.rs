@@ -50,15 +50,14 @@ use crate::capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile};
 use crate::debug_colors;
 use crate::debug_render::{DebugItem, DebugRenderer};
-use crate::device::{DepthFunction, Device, GpuFrameId, Program, UploadMethod, Texture, PBO};
+use crate::device::{DepthFunction, Device, GpuFrameId, UploadMethod, Texture, PBO};
 use crate::device::{DrawTarget, ExternalTexture, FBOId, ReadTarget};
 use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, VertexArrayKind,
-             VertexUsageHint, VAO, VBO, CustomVAO};
-use crate::device::{create_projection, DeviceInit, ProgramCache, ShaderPrecacheFlags};
+             VertexUsageHint, VAO};
+use crate::device::{create_projection, DeviceInit, PrimitiveType, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
 use euclid::{rect, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
-use gleam::gl;
 use crate::glyph_cache::GlyphCache;
 use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use crate::gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
@@ -91,6 +90,10 @@ use crate::render_target::{AlphaRenderTarget, ColorRenderTarget, PictureCacheTar
 use crate::render_target::{RenderTarget, TextureCacheRenderTarget, RenderTargetList};
 use crate::render_target::{RenderTargetKind, BlitJob, BlitJobSource};
 use crate::render_task_graph::RenderPassKind;
+#[cfg(not(feature = "gl"))]
+use rendy_memory::HeapsConfig;
+#[cfg(not(feature = "gl"))]
+use crate::device::DrawTargetUsage;
 use crate::util::drain_filter;
 
 use std;
@@ -115,6 +118,13 @@ cfg_if! {
     if #[cfg(feature = "debugger")] {
         use serde_json;
         use crate::debug_server;
+    }
+}
+
+cfg_if! {
+    if #[cfg(feature = "gl")] {
+        use gleam::gl;
+        use crate::device::{VBO, CustomVAO, Program};
     }
 }
 
@@ -315,6 +325,12 @@ impl From<GlyphFormat> for ShaderColorMode {
 #[repr(C)]
 pub struct PackedVertex {
     pub pos: [f32; 2],
+}
+
+#[cfg(not(feature = "gl"))]
+impl PrimitiveType for PackedVertex {
+    type Primitive = [f32; 2];
+    fn to_primitive_type(&self) -> [f32; 2] { self.pos }
 }
 
 pub(crate) mod desc {
@@ -794,6 +810,7 @@ pub(crate) mod desc {
 #[derive(Clone, Debug, PartialEq)]
 pub enum GraphicsApi {
     OpenGL,
+    GfxHaL,
 }
 
 #[derive(Clone, Debug)]
@@ -1018,7 +1035,18 @@ impl<B: hal::Backend> TextureResolver<B> {
         // flush all the WebRender caches in that case [1].
         //
         // [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1494099
-        self.retain_targets(device, |texture| texture.used_recently(frame_id, 30));
+        #[cfg(not(feature = "gl"))]
+        let frame_count = device.frame_count;
+        self.retain_targets(device, |texture| {
+            // We ignore the textures which are still used by the GPU
+            #[cfg(not(feature = "gl"))]
+            {
+                if texture.still_in_flight(frame_id, frame_count) {
+                    return true;
+                }
+            }
+            texture.used_recently(frame_id, 30)
+        });
     }
 
     /// Transfers ownership of a render target back to the pool.
@@ -1078,6 +1106,8 @@ impl<B: hal::Backend> TextureResolver<B> {
     fn bind(&self, texture_id: &TextureSource, sampler: TextureSampler, device: &mut Device<B>) -> Swizzle {
         match *texture_id {
             TextureSource::Invalid => {
+                #[cfg(not(feature = "gl"))]
+                device.bind_texture(sampler, &self.dummy_cache_texture, Swizzle::default());
                 Swizzle::default()
             }
             TextureSource::Dummy => {
@@ -1104,10 +1134,15 @@ impl<B: hal::Backend> TextureResolver<B> {
                 swizzle
             }
             TextureSource::External(external_image) => {
-                let texture = self.external_images
-                    .get(&(external_image.id, external_image.channel_index))
-                    .expect(&format!("BUG: External image should be resolved by now"));
-                device.bind_external_texture(sampler, texture);
+                if cfg!(feature = "gl") {
+                    let texture = self.external_images
+                        .get(&(external_image.id, external_image.channel_index))
+                        .expect(&format!("BUG: External image should be resolved by now"));
+                    device.bind_external_texture(sampler, texture);
+                } else {
+                    warn!("External textures are not supported");
+                    device.bind_texture(sampler, &self.dummy_cache_texture,  Swizzle::default());
+                }
                 Swizzle::default()
             }
             TextureSource::TextureCache(index, swizzle) => {
@@ -1236,6 +1271,7 @@ enum GpuCacheBus {
     },
     /// Shader-based scattering updates. Currently rendered by a set
     /// of points into the GPU texture, each carrying a `GpuBlockData`.
+    #[cfg(feature = "gl")]
     Scatter {
         /// Special program to run the scattered update.
         program: Program,
@@ -1310,6 +1346,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
     }
 
     fn new(device: &mut Device<B>, use_scatter: bool) -> Result<Self, RendererError> {
+        #[cfg(feature = "gl")]
         let bus = if use_scatter {
             let program = device.create_program_linked(
                 "gpu_cache_update",
@@ -1339,6 +1376,15 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             }
         };
 
+        #[cfg(not(feature = "gl"))]
+        let bus = {
+            let buffer = device.create_pbo();
+            GpuCacheBus::PixelBuffer {
+                buffer,
+                rows: Vec::new(),
+            }
+        };
+
         Ok(GpuCacheTexture {
             texture: None,
             bus,
@@ -1354,6 +1400,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             GpuCacheBus::PixelBuffer { buffer, ..} => {
                 device.delete_pbo(buffer);
             }
+            #[cfg(feature = "gl")]
             GpuCacheBus::Scatter { program, vao, buf_position, buf_value, ..} => {
                 device.delete_program(program);
                 device.delete_custom_vao(vao);
@@ -1376,6 +1423,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         self.ensure_texture(device, max_height);
         match self.bus {
             GpuCacheBus::PixelBuffer { .. } => {},
+            #[cfg(feature = "gl")]
             GpuCacheBus::Scatter {
                 ref mut buf_position,
                 ref mut buf_value,
@@ -1423,6 +1471,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
                     }
                 }
             }
+            #[cfg(feature = "gl")]
             GpuCacheBus::Scatter {
                 ref buf_position,
                 ref buf_value,
@@ -1494,6 +1543,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
 
                 rows_dirty
             }
+            #[cfg(feature = "gl")]
             GpuCacheBus::Scatter { ref program, ref vao, count, .. } => {
                 device.disable_depth();
                 device.set_blend(false);
@@ -1675,6 +1725,11 @@ impl<B: hal::Backend> LazyInitializedDebugRenderer<B> {
         if let Some(debug_renderer) = self.debug_renderer {
             debug_renderer.deinit(device);
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn take(&mut self) -> Option<DebugRenderer> {
+        self.debug_renderer.take()
     }
 }
 
@@ -1889,6 +1944,12 @@ impl<B: hal::Backend> Renderer<B> {
             options.allow_texture_storage_support,
             options.allow_texture_swizzling,
             options.dump_shader_source.take(),
+            #[cfg(not(feature = "gl"))]
+            options.heaps_config,
+            #[cfg(not(feature = "gl"))]
+            options.instance_buffer_size,
+            #[cfg(not(feature = "gl"))]
+            options.texture_cahce_size,
         );
 
         let color_cache_formats = device.preferred_color_formats();
@@ -1900,7 +1961,7 @@ impl<B: hal::Backend> Renderer<B> {
             gl::GlType::Gles => device.supports_extension("GL_EXT_blend_func_extended"),
         };
         #[cfg(not(feature = "gl"))]
-        let supports_dual_source_blending = false;
+        let supports_dual_source_blending = device.supports_features(hal::Features::DUAL_SRC_BLENDING);
 
         let use_dual_source_blending =
             supports_dual_source_blending &&
@@ -2252,7 +2313,12 @@ impl<B: hal::Backend> Renderer<B> {
 
         info!("using {:?}", debug_support);
 
+        #[cfg(feature = "gl")]
         let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()), debug_support);
+        #[cfg(not(feature = "gl"))]
+
+        let gpu_profile = GpuProfiler::new(debug_support);
+
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo();
 
@@ -2354,11 +2420,21 @@ impl<B: hal::Backend> Renderer<B> {
         self.device.max_texture_size()
     }
 
+    #[cfg(feature = "gl")]
     pub fn get_graphics_api_info(&self) -> GraphicsApiInfo {
         GraphicsApiInfo {
             kind: GraphicsApi::OpenGL,
             version: self.device.gl().get_string(gl::VERSION),
             renderer: self.device.gl().get_string(gl::RENDERER),
+        }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn get_graphics_api_info(&self) -> GraphicsApiInfo {
+        GraphicsApiInfo {
+            kind: GraphicsApi::GfxHaL,
+            version: String::from("0.3.1"),
+            renderer: String::from("Gfx-rs"),
         }
     }
 
@@ -2393,6 +2469,10 @@ impl<B: hal::Backend> Renderer<B> {
         // Pull any pending results and return the most recent.
         while let Ok(msg) = self.result_rx.try_recv() {
             match msg {
+                #[cfg(not(feature = "gl"))]
+                ResultMsg::UpdateWindowSize(window_size) => {
+                    self.resize(Some((window_size.width, window_size.height)));
+                }
                 ResultMsg::PublishPipelineInfo(mut pipeline_info) => {
                     for ((pipeline_id, document_id), epoch) in pipeline_info.epochs {
                         self.pipeline_info.epochs.insert((pipeline_id, document_id), epoch);
@@ -2526,6 +2606,16 @@ impl<B: hal::Backend> Renderer<B> {
                 }
             }
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn resize(&mut self, window_size: Option<(i32, i32)>) -> DeviceIntSize {
+        self.shaders.borrow_mut().reset();
+        let size = self.device.recreate_swapchain(window_size);
+        if let Some(debug_renderer) = self.debug.take() {
+            debug_renderer.deinit(&mut self.device);
+        }
+        size
     }
 
     #[cfg(not(feature = "debugger"))]
@@ -2771,6 +2861,7 @@ impl<B: hal::Backend> Renderer<B> {
                             row.is_dirty = true;
                         }
                     }
+                    #[cfg(feature = "gl")]
                     GpuCacheBus::Scatter { .. } => {
                         warn!("Unable to invalidate scattered GPU cache");
                     }
@@ -2876,6 +2967,9 @@ impl<B: hal::Backend> Renderer<B> {
             profile_timers.gpu_samples = timers;
             samplers
         };
+
+        #[cfg(not(feature="gl"))]
+        self.device.set_next_frame_id();
 
 
         let cpu_frame_id = profile_timers.cpu_time.profile(|| {
@@ -3056,6 +3150,8 @@ impl<B: hal::Backend> Renderer<B> {
             // should ensure any left over render targets get invalidated and
             // returned to the pool correctly.
             self.texture_resolver.end_frame(&mut self.device, cpu_frame_id);
+            #[cfg(not(feature="gleam"))]
+            self.device.submit_to_gpu();
             self.device.end_frame();
         });
 
@@ -3133,8 +3229,11 @@ impl<B: hal::Backend> Renderer<B> {
 
     fn prepare_gpu_cache(&mut self, frame: &Frame) {
         if self.pending_gpu_cache_clear {
+            #[cfg(feature = "gl")]
             let use_scatter =
                 matches!(self.gpu_cache_texture.bus, GpuCacheBus::Scatter { .. });
+            #[cfg(not(feature = "gl"))]
+            let use_scatter = false;
             let new_cache = GpuCacheTexture::new(&mut self.device, use_scatter).unwrap();
             let old_cache = mem::replace(&mut self.gpu_cache_texture, new_cache);
             old_cache.deinit(&mut self.device);
@@ -3286,8 +3385,14 @@ impl<B: hal::Backend> Renderer<B> {
                                 texture,
                                 layer_index as usize,
                                 false,
+                                #[cfg(not(feature = "gl"))]
+                                self.device.frame_id,
                             );
-                            self.device.bind_draw_target(draw_target);
+                            self.device.bind_draw_target(
+                                draw_target,
+                                #[cfg(not(feature="gleam"))]
+                                DrawTargetUsage::Draw,
+                            );
                             self.device.clear_target(
                                 Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
                                 None,
@@ -3313,7 +3418,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.resource_upload_time += upload_time.get();
     }
 
-    pub(crate) fn draw_instanced_batch<T>(
+    pub(crate) fn draw_instanced_batch<T: PrimitiveType>(
         &mut self,
         data: &[T],
         vertex_array_kind: VertexArrayKind,
@@ -3345,7 +3450,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
     }
 
-    pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T>(
+    pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T: PrimitiveType>(
         &mut self,
         data: &[T],
         vertex_array_kind: VertexArrayKind,
@@ -3421,6 +3526,8 @@ impl<B: hal::Backend> Renderer<B> {
             cache_texture,
             readback_layer.0 as usize,
             false,
+            #[cfg(not(feature = "gl"))]
+            self.device.frame_id,
         );
 
         let mut src = DeviceIntRect::new(
@@ -3432,7 +3539,7 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Need to invert the y coordinates and flip the image vertically when
         // reading back from the framebuffer.
-        if draw_target.is_default() {
+        if cfg!(feature = "gl") && draw_target.is_default() {
             src.origin.y = draw_target.dimensions().height as i32 - src.size.height - src.origin.y;
             dest.origin.y += dest.size.height;
             dest.size.height = -dest.size.height;
@@ -3448,7 +3555,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Restore draw target to current pass render target + layer, and reset
         // the read target.
-        self.device.bind_draw_target(draw_target);
+        self.device.bind_draw_target(
+            draw_target,
+            #[cfg(not(feature="gleam"))]
+            DrawTargetUsage::Draw,
+        );
         self.device.reset_read_target();
 
         if uses_scissor {
@@ -3500,6 +3611,8 @@ impl<B: hal::Backend> Renderer<B> {
                 texture,
                 layer,
                 false,
+                #[cfg(not(feature = "gl"))]
+                self.device.frame_id,
             );
 
             self.device.blit_render_target(
@@ -3585,7 +3698,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
-            self.device.bind_draw_target(draw_target);
+            self.device.bind_draw_target(
+                draw_target,
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.disable_depth();
             self.device.enable_depth_write();
             self.set_blend(false, framebuffer_kind);
@@ -3651,6 +3768,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.set_depth_func(DepthFunction::LessEqual);
             self.device.enable_depth();
             self.device.enable_depth_write();
+            #[cfg(not(feature = "gl"))]
+            self.device.begin_render_pass();
 
             // Draw opaque batches front-to-back for maximum
             // z-buffer efficiency!
@@ -3678,6 +3797,8 @@ impl<B: hal::Backend> Renderer<B> {
                         stats
                     );
                 }
+            #[cfg(not(feature = "gl"))]
+            self.device.end_render_pass();
 
             self.device.disable_depth_write();
             self.gpu_profile.finish_sampler(opaque_sampler);
@@ -3700,6 +3821,7 @@ impl<B: hal::Backend> Renderer<B> {
                 // TODO(gw): If using PLS, the fixed function blender is disabled. It's possible
                 //           we could take advantage of this by skipping batching on the blend
                 //           mode in these cases.
+                #[cfg(feature = "gl")]
                 self.init_pixel_local_storage(
                     alpha_batch_container.task_rect,
                     projection,
@@ -3711,6 +3833,8 @@ impl<B: hal::Backend> Renderer<B> {
                 if should_skip_batch(&batch.key.kind, &self.debug_flags) {
                     continue;
                 }
+                #[cfg(not(feature = "gl"))]
+                self.device.begin_render_pass();
 
                 self.shaders.borrow_mut()
                     .get(&batch.key, batch.features | BatchFeatures::ALPHA_PASS, self.debug_flags)
@@ -3754,6 +3878,7 @@ impl<B: hal::Backend> Renderer<B> {
                         }
                         BlendMode::Advanced(mode) => {
                             if self.enable_advanced_blend_barriers {
+                                #[cfg(feature = "gl")]
                                 self.device.gl().blend_barrier_khr();
                             }
                             self.device.set_blend_mode_advanced(mode);
@@ -3767,6 +3892,8 @@ impl<B: hal::Backend> Renderer<B> {
                     // composites can't be grouped together because
                     // they may overlap and affect each other.
                     debug_assert_eq!(batch.instances.len(), 1);
+                    #[cfg(not(feature = "gl"))]
+                    self.device.end_render_pass();
                     self.handle_readback_composite(
                         draw_target,
                         uses_scissor,
@@ -3774,6 +3901,8 @@ impl<B: hal::Backend> Renderer<B> {
                         &render_tasks[task_id],
                         &render_tasks[backdrop_id],
                     );
+                    #[cfg(not(feature = "gl"))]
+                    self.device.begin_render_pass();
                 }
 
                 let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
@@ -3802,6 +3931,8 @@ impl<B: hal::Backend> Renderer<B> {
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                 }
+                #[cfg(not(feature = "gl"))]
+                self.device.end_render_pass();
 
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     prev_blend_mode = BlendMode::None;
@@ -3812,6 +3943,7 @@ impl<B: hal::Backend> Renderer<B> {
             // This pass reads the final PLS color value, and writes it to a normal
             // fragment output.
             if self.device.get_capabilities().supports_pixel_local_storage {
+                #[cfg(feature = "gl")]
                 self.resolve_pixel_local_storage(
                     alpha_batch_container.task_rect,
                     projection,
@@ -3916,7 +4048,11 @@ impl<B: hal::Backend> Renderer<B> {
         let _gm = self.gpu_profile.start_marker("framebuffer");
         let _timer = self.gpu_profile.start_timer(GPU_TAG_COMPOSITE);
 
-        self.device.bind_draw_target(draw_target);
+        self.device.bind_draw_target(
+            draw_target,
+            #[cfg(not(feature="gleam"))]
+            DrawTargetUsage::Draw,
+        );
         self.device.enable_depth();
         self.device.enable_depth_write();
 
@@ -4074,7 +4210,11 @@ impl<B: hal::Backend> Renderer<B> {
 
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
-            self.device.bind_draw_target(draw_target);
+            self.device.bind_draw_target(
+                draw_target,
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.disable_depth();
             self.set_blend(false, framebuffer_kind);
 
@@ -4082,6 +4222,7 @@ impl<B: hal::Backend> Renderer<B> {
                 self.device.enable_depth_write();
             }
 
+            #[cfg(feature = "gl")]
             let clear_rect = match draw_target {
                 DrawTarget::Default { rect, total_size } if rect.origin == FramebufferIntPoint::zero() && rect.size == total_size => {
                     // whole screen is covered, no need for scissor
@@ -4107,6 +4248,8 @@ impl<B: hal::Backend> Renderer<B> {
                     None
                 }
             };
+            #[cfg(not(feature = "gl"))]
+            let clear_rect = None;
 
             self.device.clear_target(
                 clear_color,
@@ -4123,6 +4266,8 @@ impl<B: hal::Backend> Renderer<B> {
         self.handle_blits(
             &target.blits, render_tasks, draw_target, &content_origin,
         );
+        #[cfg(not(feature = "gl"))]
+        self.device.begin_render_pass();
 
         // Draw any blurs for this target.
         // Blurs are rendered as a standard 2-pass
@@ -4170,6 +4315,8 @@ impl<B: hal::Backend> Renderer<B> {
                 stats,
             );
         }
+        #[cfg(not(feature = "gl"))]
+        self.device.end_render_pass();
 
         for alpha_batch_container in &target.alpha_batch_containers {
             self.draw_alpha_batch_container(
@@ -4312,10 +4459,17 @@ impl<B: hal::Backend> Renderer<B> {
 
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
-            self.device.bind_draw_target(draw_target);
+            self.device.bind_draw_target(
+                draw_target,
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.disable_depth();
             self.device.disable_depth_write();
             self.set_blend(false, FramebufferKind::Other);
+
+            #[cfg(not(feature = "gl"))]
+            self.device.begin_render_pass();
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -4409,6 +4563,9 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
 
+        #[cfg(not(feature = "gl"))]
+        self.device.end_render_pass();
+
         self.gpu_profile.finish_sampler(alpha_sampler);
     }
 
@@ -4449,8 +4606,14 @@ impl<B: hal::Backend> Renderer<B> {
                 texture,
                 layer,
                 false,
+                #[cfg(not(feature = "gl"))]
+                self.device.frame_id,
             );
-            self.device.bind_draw_target(draw_target);
+            self.device.bind_draw_target(
+                draw_target,
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
 
             self.device.disable_depth();
             self.device.disable_depth_write();
@@ -4469,6 +4632,9 @@ impl<B: hal::Backend> Renderer<B> {
                 &target.blits, render_tasks, draw_target, &DeviceIntPoint::zero(),
             );
         }
+
+        #[cfg(not(feature = "gl"))]
+        self.device.begin_render_pass();
 
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
@@ -4574,6 +4740,8 @@ impl<B: hal::Backend> Renderer<B> {
                 stats,
             );
         }
+        #[cfg(not(feature = "gl"))]
+        self.device.end_render_pass();
     }
 
     fn update_deferred_resolves(&mut self, deferred_resolves: &[DeferredResolve]) -> Option<GpuCacheUpdateList> {
@@ -4681,6 +4849,8 @@ impl<B: hal::Backend> Renderer<B> {
         &mut self,
         list: &mut RenderTargetList<T>,
         counters: &mut FrameProfileCounters,
+        // TODO: check if we still need this with gfx
+        _frame_id: GpuFrameId,
     ) -> Option<ActiveTexture> {
         if list.targets.is_empty() {
             return None
@@ -4712,6 +4882,13 @@ impl<B: hal::Backend> Renderer<B> {
         let index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
+                // We ignore the textures which are still used by the GPU
+                #[cfg(not(feature = "gl"))]
+                {
+                    if texture.still_in_flight(_frame_id, self.device.frame_count) {
+                        return false;
+                    }
+                }
                 selector == TargetSelector {
                     size: texture.get_dimensions(),
                     num_layers: texture.get_layer_count() as usize,
@@ -4862,7 +5039,11 @@ impl<B: hal::Backend> Renderer<B> {
                         } else {
                             if clear_framebuffer {
                                 let clear_color = self.clear_color.map(|color| color.to_array());
-                                self.device.bind_draw_target(draw_target);
+                                self.device.bind_draw_target(
+                                    draw_target,
+                                    #[cfg(not(feature="gleam"))]
+                                    DrawTargetUsage::Draw,
+                                );
                                 self.device.enable_depth_write();
                                 self.device.clear_target(clear_color,
                                                          Some(1.0),
@@ -4889,8 +5070,8 @@ impl<B: hal::Backend> Renderer<B> {
                     ref mut texture_cache,
                     ref mut picture_cache,
                 } => {
-                    let alpha_tex = self.allocate_target_texture(alpha, &mut frame.profile_counters);
-                    let color_tex = self.allocate_target_texture(color, &mut frame.profile_counters);
+                    let alpha_tex = self.allocate_target_texture(alpha, &mut frame.profile_counters, frame_id);
+                    let color_tex = self.allocate_target_texture(color, &mut frame.profile_counters, frame_id);
 
                     // If this frame has already been drawn, then any texture
                     // cache targets have already been updated and can be
@@ -4917,6 +5098,8 @@ impl<B: hal::Backend> Renderer<B> {
                                 texture,
                                 picture_target.layer,
                                 true,
+                                #[cfg(not(feature = "gl"))]
+                                self.device.frame_id,
                             );
 
                             let projection = create_projection(
@@ -4944,6 +5127,8 @@ impl<B: hal::Backend> Renderer<B> {
                             &alpha_tex.as_ref().unwrap().texture,
                             target_index,
                             false,
+                            #[cfg(not(feature = "gl"))]
+                            self.device.frame_id,
                         );
 
                         let projection = create_projection(
@@ -4969,6 +5154,8 @@ impl<B: hal::Backend> Renderer<B> {
                             &color_tex.as_ref().unwrap().texture,
                             target_index,
                             target.needs_depth(),
+                            #[cfg(not(feature = "gl"))]
+                            self.device.frame_id,
                         );
 
                         let projection = create_projection(
@@ -5035,6 +5222,7 @@ impl<B: hal::Backend> Renderer<B> {
     }
 
     /// Initialize the PLS block, by reading the current framebuffer color.
+    #[cfg(feature = "gl")]
     pub fn init_pixel_local_storage(
         &mut self,
         task_rect: DeviceIntRect,
@@ -5065,6 +5253,7 @@ impl<B: hal::Backend> Renderer<B> {
     }
 
     /// Resolve the current PLS structure, writing it to a fragment color output.
+    #[cfg(feature = "gl")]
     pub fn resolve_pixel_local_storage(
         &mut self,
         task_rect: DeviceIntRect,
@@ -5259,6 +5448,8 @@ impl<B: hal::Backend> Renderer<B> {
                 self.zoom_debug_texture.as_ref().unwrap(),
                 0,
                 false,
+                #[cfg(not(feature = "gl"))]
+                self.device.frame_id,
             ),
             texture_rect,
             TextureFilter::Nearest,
@@ -5362,7 +5553,11 @@ impl<B: hal::Backend> Renderer<B> {
                 let text_margin = 1;
                 let text_height = 14; // Visually aproximated.
                 let tag_height = text_height + text_margin * 2;
-                let tag_rect = rect(x, y, size, tag_height);
+                let tag_rect = if cfg!(feature = "gl") {
+                    rect(x, y, size, tag_height)
+                } else {
+                    rect(x, fb_height - (y + tag_height), size, tag_height)
+                };
                 let tag_color = select_color(texture);
                 device.clear_target(
                     Some(tag_color),
@@ -5373,8 +5568,10 @@ impl<B: hal::Backend> Renderer<B> {
                 // Draw the dimensions onto the tag.
                 let dim = texture.get_dimensions();
                 let mut text_rect = tag_rect;
-                text_rect.origin.y =
-                    fb_height - text_rect.origin.y - text_rect.size.height; // Top-relative.
+                if cfg!(feature = "gl") {
+                    text_rect.origin.y =
+                        fb_height - text_rect.origin.y - text_rect.size.height; // Top-relative.
+                }
                 debug_renderer.add_text(
                     (x + text_margin) as f32,
                     (fb_height - y - text_margin) as f32, // Top-relative.
@@ -5386,7 +5583,11 @@ impl<B: hal::Backend> Renderer<B> {
                 // Blit the contents of the layer. We need to invert Y because
                 // we're blitting from a texture to the main framebuffer, which
                 // use different conventions.
-                let dest_rect = rect(x, y + tag_height, size, size);
+                let dest_rect = if cfg!(feature = "gl") {
+                    rect(x, y + tag_height, size, size)
+                } else {
+                    rect(x, fb_height - (y + tag_height + size), size, size)
+                };
                 device.blit_render_target_invert_y(
                     ReadTarget::from_texture(texture, layer),
                     src_rect,
@@ -5503,6 +5704,8 @@ impl<B: hal::Backend> Renderer<B> {
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
+        #[cfg(not(feature = "gl"))]
+        self.device.wait_for_resources_and_reset();
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
@@ -5551,6 +5754,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.delete_external_texture(ext);
         }
         self.device.end_frame();
+        #[cfg(not(feature = "gl"))]
+        self.device.deinit();
     }
 
     fn size_of<T>(&self, ptr: *const T) -> usize {
@@ -5643,11 +5848,17 @@ impl<B: hal::Backend> Renderer<B> {
     /// Clears all the layers of a texture with a given color.
     fn clear_texture(&mut self, texture: &Texture, color: [f32; 4]) {
         for i in 0..texture.get_layer_count() {
-            self.device.bind_draw_target(DrawTarget::from_texture(
-                &texture,
-                i as usize,
-                false,
-            ));
+            self.device.bind_draw_target(
+                DrawTarget::from_texture(
+                    &texture,
+                    i as usize,
+                    false,
+                    #[cfg(not(feature = "gl"))]
+                    self.device.frame_id,
+                ),
+                #[cfg(not(feature="gleam"))]
+                DrawTargetUsage::Draw,
+            );
             self.device.clear_target(Some(color), None, None);
         }
     }
@@ -5812,6 +6023,14 @@ pub struct RendererOptions {
     pub dump_shader_source: Option<String>,
     /// An optional presentation config for compositor integration.
     pub present_config: Option<PresentConfig>,
+    #[cfg(not(feature = "gl"))]
+    pub heaps_config: HeapsConfig,
+    // The size of an instance buffer in bytes
+    #[cfg(not(feature = "gl"))]
+    pub instance_buffer_size: usize,
+    #[cfg(not(feature = "gl"))]
+    // The size of a staging buffer for image data upload in bytes
+    pub texture_cahce_size: usize,
 }
 
 impl Default for RendererOptions {
@@ -5864,6 +6083,15 @@ impl Default for RendererOptions {
             start_debug_server: true,
             dump_shader_source: None,
             present_config: None,
+            #[cfg(not(feature = "gl"))]
+            heaps_config: HeapsConfig {
+                linear: None,
+                dynamic: None,
+            },
+            #[cfg(not(feature = "gl"))]
+            instance_buffer_size: 1 << 20,
+            #[cfg(not(feature = "gl"))]
+            texture_cahce_size: 16 << 20,
         }
     }
 }
@@ -5960,7 +6188,7 @@ struct PlainRenderer {
 
 #[cfg(feature = "replay")]
 enum CapturedExternalImageData {
-    NativeTexture(gl::GLuint),
+    NativeTexture(IdType),
     Buffer(Arc<Vec<u8>>),
 }
 
@@ -6045,6 +6273,10 @@ impl<B: hal::Backend> Renderer<B> {
                 );
             }
             device.read_pixels_into(rect, read_format, &mut data);
+
+            #[cfg(not(feature = "gl"))]
+            device.invalidate_read_texture();
+
             file.write_all(&data)
                 .unwrap();
         }
@@ -6082,7 +6314,15 @@ impl<B: hal::Backend> Renderer<B> {
             plain.size.0.width,
             plain.size.0.height,
             plain.filter,
-            rt_info,
+            if cfg!(feature = "gl") {
+                rt_info
+            } else {
+                if plain.format == ImageFormat::RGBAF32 {
+                    None
+                } else {
+                    rt_info
+                }
+            },
             plain.size.1,
         );
         device.upload_texture_immediate(&texture, &texels);
@@ -6301,12 +6541,13 @@ impl<B: hal::Backend> Renderer<B> {
                         row.cpu_blocks.copy_from_slice(chunk);
                     }
                 }
+                #[cfg(feature = "gl")]
                 GpuCacheBus::Scatter { .. } => {}
             }
             self.gpu_cache_frame_id = renderer.gpu_cache_frame_id;
 
             info!("loading external texture-backed images");
-            let mut native_map = FastHashMap::<String, gl::GLuint>::default();
+            let mut native_map = FastHashMap::<String, IdType>::default();
             for ExternalCaptureImage { short_path, external, descriptor } in renderer.external_images {
                 let target = match external.image_type {
                     ExternalImageType::TextureHandle(target) => target,

@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::batch::{BatchKey, BatchKind, BrushBatchKind, BatchFeatures};
-use crate::device::{Device, Program, ShaderError, ShaderKind};
+use crate::device::{Device, ShaderError, ShaderKind};
 use crate::device::{VertexArrayKind, ShaderPrecacheFlags};
 use euclid::default::Transform3D;
 use crate::glyph_rasterizer::GlyphFormat;
@@ -11,22 +11,21 @@ use crate::renderer::{
     BlendMode, DebugFlags, ImageBufferKind, RendererError, RendererOptions,
 };
 
-use gleam::gl::GlType;
 use time::precise_time_ns;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::marker::PhantomData;
 
-// cfg_if! {
-//     if #[cfg(feature = "gl")] {
-//         use gleam::gl::GlType;
-//         use device::Program;
-//     } else {
-//         use device::ProgramId as Program;
-//         type GlType = ();
-//     }
-// }
+cfg_if! {
+    if #[cfg(feature = "gl")] {
+        use gleam::gl::GlType;
+        use crate::device::Program;
+    } else {
+        use crate::device::ProgramId as Program;
+        type GlType = ();
+    }
+}
 
 impl ImageBufferKind {
     pub(crate) fn get_feature_string(&self) -> &'static str {
@@ -38,6 +37,7 @@ impl ImageBufferKind {
         }
     }
 
+    #[cfg(feature = "gl")]
     fn has_platform_support(&self, gl_type: &GlType) -> bool {
         match (*self, gl_type) {
             (ImageBufferKind::Texture2D, _) => true,
@@ -45,6 +45,16 @@ impl ImageBufferKind {
             (ImageBufferKind::TextureRect, _) => true,
             (ImageBufferKind::TextureExternal, &GlType::Gles) => true,
             (ImageBufferKind::TextureExternal, &GlType::Gl) => false,
+        }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn has_platform_support(&self, _gl_type: &GlType) -> bool {
+        match *self {
+            ImageBufferKind::Texture2D => true,
+            ImageBufferKind::Texture2DArray => true,
+            ImageBufferKind::TextureRect => true,
+            ImageBufferKind::TextureExternal => false,
         }
     }
 }
@@ -88,7 +98,7 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             phantom_data: PhantomData,
         };
 
-        if precache_flags.intersects(ShaderPrecacheFlags::ASYNC_COMPILE | ShaderPrecacheFlags::FULL_COMPILE) {
+        if precache_flags.intersects(ShaderPrecacheFlags::ASYNC_COMPILE | ShaderPrecacheFlags::FULL_COMPILE) && cfg!(feature="gl") {
             let t0 = precise_time_ns();
             shader.get_internal(device, precache_flags)?;
             let t1 = precise_time_ns();
@@ -147,6 +157,11 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         if let Some(program) = self.program {
             device.delete_program(program);
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn reset(&mut self) {
+        self.program = None;
     }
 }
 
@@ -294,6 +309,19 @@ impl<B: hal::Backend> BrushShader<B> {
         }
         self.debug_overdraw.deinit(device);
     }
+
+    #[cfg(not(feature = "gl"))]
+    fn reset(&mut self) {
+        self.alpha.reset();
+        self.opaque.reset();
+        if let Some(ref mut advanced_blend) = self.advanced_blend {
+            advanced_blend.reset();
+        }
+        if let Some(ref mut dual_source) = self.dual_source {
+            dual_source.reset();
+        }
+        self.debug_overdraw.reset();
+    }
 }
 
 pub struct TextShader<B: hal::Backend> {
@@ -362,6 +390,13 @@ impl<B: hal::Backend> TextShader<B> {
         self.simple.deinit(device);
         self.glyph_transform.deinit(device);
         self.debug_overdraw.deinit(device);
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn reset(&mut self) {
+        self.simple.reset();
+        self.glyph_transform.reset();
+        self.debug_overdraw.reset();
     }
 }
 
@@ -817,6 +852,48 @@ impl<B: hal::Backend> Shaders<B> {
                 text_shader.get(glyph_format, debug_flags)
             }
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn reset(&mut self) {
+        self.cs_scale.reset();
+        self.cs_blur_a8.reset();
+        self.cs_blur_rgba8.reset();
+        self.cs_svg_filter.reset();
+        self.brush_solid.reset();
+        self.brush_blend.reset();
+        self.brush_mix_blend.reset();
+        self.brush_radial_gradient.reset();
+        self.brush_linear_gradient.reset();
+        self.cs_clip_rectangle_slow.reset();
+        self.cs_clip_rectangle_fast.reset();
+        self.cs_clip_box_shadow.reset();
+        self.cs_clip_image.reset();
+        self.pls_init.reset();
+        self.pls_resolve.reset();
+        self.ps_text_run.reset();
+        self.ps_text_run_dual_source.reset();
+        for shader in self.brush_image.iter_mut() {
+            if let Some(ref mut shader) = shader {
+                shader.reset();
+            }
+        }
+        for shader in self.brush_fast_image.iter_mut() {
+            if let Some(ref mut shader) = shader {
+                shader.reset();
+            }
+        }
+        for shader in self.brush_yuv_image.iter_mut() {
+            if let Some(ref mut shader) = shader {
+                shader.reset();
+            }
+        }
+        self.cs_border_solid.reset();
+        self.cs_gradient.reset();
+        self.cs_line_decoration.reset();
+        self.cs_border_segment.reset();
+        self.ps_split_composite.reset();
+        self.composite.reset();
     }
 
     pub fn deinit(self, device: &mut Device<B>) {

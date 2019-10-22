@@ -538,6 +538,8 @@ pub enum ResultMsg {
         BackendProfileCounters,
     ),
     AppendNotificationRequests(Vec<NotificationRequest>),
+    #[cfg(not(feature = "gl"))]
+    UpdateWindowSize(DeviceIntSize),
 }
 
 #[derive(Clone, Debug)]

@@ -23,11 +23,22 @@ use std::thread;
 use webrender_build::shader::{parse_shader_source, shader_source_from_file};
 use webrender_build::shader::ProgramSourceDigest;
 
-mod gl;
-pub mod query_gl;
+cfg_if! {
+    if #[cfg(feature = "gl")] {
+        mod gl;
+        pub mod query_gl;
 
-pub use self::gl::*;
-pub use self::query_gl as query;
+        pub use self::gl::*;
+        pub use self::query_gl as query;
+    } else {
+        mod gfx;
+        pub mod query_gfx;
+
+        pub use self::gfx::*;
+        pub use self::gfx::PrimitiveType;
+        pub use self::query_gfx as query;
+    }
+}
 
 /// Sequence number for frames, as tracked by the device layer.
 #[derive(Debug, Copy, Clone, PartialEq, Ord, Eq, PartialOrd)]
@@ -85,13 +96,23 @@ pub type IdType = gleam_gl::GLuint;
 pub struct TextureSlot(pub usize);
 
 #[repr(u32)]
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum TextureFilter {
     Nearest,
     Linear,
     Trilinear,
+}
+
+#[cfg(not(feature = "gl"))]
+impl From<TextureFilter> for crate::hal::image::Filter {
+    fn from(filter: TextureFilter) -> crate::hal::image::Filter {
+        match filter {
+            TextureFilter::Nearest => crate::hal::image::Filter::Nearest,
+            _ => crate::hal::image::Filter::Linear,
+        }
+    }
 }
 
 #[cfg(not(feature = "gl"))]
@@ -148,6 +169,31 @@ pub struct VBOId(IdType);
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct IBOId(IdType);
+
+pub struct PBO {
+    id: IdType,
+    reserved_size: usize,
+}
+
+impl PBO {
+    pub fn get_reserved_size(&self) -> usize {
+        self.reserved_size
+    }
+}
+
+impl Drop for PBO {
+    fn drop(&mut self) {
+        debug_assert!(
+            thread::panicking() || self.id == 0,
+            "renderer::deinit not called"
+        );
+    }
+}
+
+pub struct BoundPBO<'a, B: hal::Backend> {
+    device: &'a mut Device<B>,
+    pub data: &'a [u8]
+}
 
 /// Returns the size in bytes of a depth target with the given dimensions.
 fn depth_target_size_in_bytes(dimensions: &DeviceIntSize) -> usize {
@@ -550,7 +596,7 @@ pub enum ShaderError {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Copy, Clone)]
-pub(crate) enum ShaderKind {
+pub enum ShaderKind {
     Primitive,
     Cache(VertexArrayKind),
     ClipCache,
@@ -569,7 +615,7 @@ pub(crate) enum ShaderKind {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Copy, Clone)]
-pub(crate) enum VertexArrayKind {
+pub enum VertexArrayKind {
     Primitive,
     Blur,
     Clip,
@@ -653,6 +699,7 @@ impl DrawTarget {
         }
     }
 
+    #[cfg(feature = "gl")]
     pub fn from_texture(
         texture: &Texture,
         layer: usize,
@@ -663,6 +710,31 @@ impl DrawTarget {
         } else {
             texture.fbos[layer]
         };
+
+        DrawTarget::Texture {
+            dimensions: texture.get_dimensions(),
+            fbo_id,
+            with_depth,
+            layer,
+            blit_workaround_buffer: texture.blit_workaround_buffer,
+            id: texture.id,
+            target: texture.target,
+        }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn from_texture(
+        texture: &Texture,
+        layer: usize,
+        with_depth: bool,
+        frame_id: GpuFrameId,
+    ) -> Self {
+        let fbo_id = if with_depth {
+            texture.fbos_with_depth[layer]
+        } else {
+            texture.fbos[layer]
+        };
+        texture.bound_in_frame.set(frame_id);
 
         DrawTarget::Texture {
             dimensions: texture.get_dimensions(),
@@ -834,6 +906,29 @@ impl Into<TextureSlot> for TextureSampler {
         }
     }
 }
+
+/// A structure defining a particular workflow of texture transfers.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct TextureFormatPair<T> {
+    /// Format the GPU natively stores texels in.
+    pub internal: T,
+    /// Format we expect the users to provide the texels in.
+    pub external: T,
+}
+
+impl<T: Copy> From<T> for TextureFormatPair<T> {
+    fn from(value: T) -> Self {
+        TextureFormatPair {
+            internal: value,
+            external: value,
+        }
+    }
+}
+
+#[cfg(not(feature = "gl"))]
+pub struct FormatDesc;
 
 pub(crate) fn create_projection(
     left: f32,

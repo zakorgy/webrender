@@ -57,14 +57,14 @@ extern crate bitflags;
 extern crate cfg_if;
 #[macro_use]
 extern crate cstr;
-extern crate gfx_hal as hal;
+pub extern crate gfx_hal as hal;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate malloc_size_of_derive;
-#[cfg(any(feature = "serde"))]
+//#[cfg(any(feature = "serde"))]
 #[macro_use]
 extern crate serde;
 #[macro_use]
@@ -203,7 +203,7 @@ pub extern crate api;
 extern crate webrender_build;
 
 #[doc(hidden)]
-pub use crate::device::{build_shader_strings, UploadMethod, VertexUsageHint, get_gl_target};
+pub use crate::device::{build_shader_strings, UploadMethod, VertexUsageHint};
 pub use crate::device::{ProgramBinary, ProgramCache, ProgramCacheObserver, FormatDesc, ShaderPrecacheFlags};
 pub use crate::device::{Device, DeviceInit};
 pub use crate::frame_builder::ChasePrimitive;
@@ -219,3 +219,8 @@ pub use crate::screen_capture::{AsyncScreenshotHandle, RecordedFrameHandle};
 pub use crate::shade::{Shaders, WrShaders};
 pub use api as webrender_api;
 pub use webrender_build::shader::ProgramSourceDigest;
+#[cfg(feature = "gl")]
+pub use crate::device::get_gl_target;
+pub use rendy_memory::{DynamicConfig, HeapsConfig, LinearConfig};
+#[cfg(not(feature = "gl"))]
+pub use device::BackendApiType;

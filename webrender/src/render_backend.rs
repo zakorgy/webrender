@@ -775,6 +775,9 @@ impl RenderBackend {
             } => {
                 doc.view.device_rect = device_rect;
                 doc.view.device_pixel_ratio = device_pixel_ratio;
+                #[cfg(not(feature = "gleam"))] {
+                    self.result_tx.send(ResultMsg::UpdateWindowSize(device_rect.size)).unwrap();
+                }
             }
             SceneMsg::SetDisplayList {
                 epoch,

@@ -54,11 +54,11 @@ pub struct ScalingInstance {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct CompositeInstance {
-    aDeviceRect: [f32; 4],
-    aDeviceClipRect: [f32; 4],
-    aColor: [f32; 4],
-    aLayer: f32,
-    aZId: f32,
+    pub aDeviceRect: [f32; 4],
+    pub aDeviceClipRect: [f32; 4],
+    pub aColor: [f32; 4],
+    pub aLayer: f32,
+    pub aZId: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,13 +79,13 @@ pub struct BlurInstance {
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)]
 pub struct ClipMaskInstance {
-    aTransformIds: [i32; 2],
-    aClipDataResourceAddress: [i32; 4],
-    aClipLocalPos: [f32; 2],
-    aClipTileRect: [f32; 4],
-    aClipDeviceArea: [f32; 4],
-    aClipOrigins: [f32; 4],
-    aDevicePixelScale: f32,
+    pub aTransformIds: [i32; 2],
+    pub aClipDataResourceAddress: [i32; 4],
+    pub aClipLocalPos: [f32; 2],
+    pub aClipTileRect: [f32; 4],
+    pub aClipDeviceArea: [f32; 4],
+    pub aClipOrigins: [f32; 4],
+    pub aDevicePixelScale: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,28 +123,4 @@ pub struct PrimitiveInstanceData {
 #[allow(non_snake_case)]
 pub struct Vertex {
     pub aPosition: [f32; 3],
-}
-
-#[cfg(feature = "pathfinder")]
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct VectorStencilInstance {
-    pub aFromPosition: [f32; 2],
-    pub aCtrlPosition: [f32; 2],
-    pub aToPosition: [f32; 2],
-    pub aFromNormal: [f32; 2],
-    pub aCtrlNormal: [f32; 2],
-    pub aToNormal: [f32; 2],
-    pub aPathID: i32,
-    pub aPad: i32,
-}
-
-#[cfg(feature = "pathfinder")]
-#[derive(Debug, Clone, Copy)]
-#[allow(non_snake_case)]
-pub struct VectorCoverInstance {
-    pub aTargetRect: [i32; 4],
-    pub aStencilOrigin: [i32; 2],
-    pub aSubpixel: i32,
-    pub aPad: i32,
 }
