@@ -147,7 +147,7 @@ pub struct Wrench {
     pub device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer,
+    pub renderer: webrender::Renderer<back::Backend>,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
@@ -242,8 +242,11 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
+        #[cfg(feature = "gl")]
+        let init = window.clone_gl().into();
+
         let (renderer, sender) = webrender::Renderer::new(
-            window.clone_gl(),
+            init,
             notifier,
             opts,
             None,

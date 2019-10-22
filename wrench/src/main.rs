@@ -10,6 +10,8 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate serde;
+#[cfg(feature = "gl")]
+extern crate gfx_backend_empty as back;
 
 mod angle;
 mod binary_frame_reader;

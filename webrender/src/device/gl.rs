@@ -484,6 +484,15 @@ pub struct DeviceInit<B> {
     pub phantom_data: PhantomData<B>,
 }
 
+impl<B: hal::Backend> From<Rc<dyn gl::Gl>> for DeviceInit<B> {
+    fn from(gl: Rc<dyn gl::Gl>) -> Self {
+        DeviceInit {
+            gl,
+            phantom_data: PhantomData,
+        }
+    }
+}
+
 pub struct Device<B> {
     gl: Rc<dyn gl::Gl>,
 
@@ -893,6 +902,139 @@ impl<B> Device<B> {
             }
             Ok(id)
         }
+    }
+
+    fn create_prim_shader(
+        &mut self,
+        name: &'static str,
+        features: &[&'static str],
+    ) -> Result<Program, ShaderError> {
+        let mut prefix = format!(
+            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
+            crate::renderer::MAX_VERTEX_TEXTURE_WIDTH
+        );
+
+        for feature in features {
+            prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
+        }
+
+        debug!("PrimShader {}", name);
+
+        self.create_program(name, prefix)
+    }
+
+    fn create_clip_shader(
+        &mut self,
+        name: &'static str,
+        features: &[&'static str],
+    ) -> Result<Program, ShaderError> {
+        let mut prefix = format!(
+            "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
+            crate::renderer::MAX_VERTEX_TEXTURE_WIDTH
+        );
+
+        for feature in features {
+            prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
+        }
+
+        debug!("ClipShader {}", name);
+
+        self.create_program(name, prefix)
+    }
+
+    pub(crate) fn create_program_with_kind(
+        &mut self,
+        base_filename: &'static str,
+        shader_kind: &ShaderKind,
+        features: &[&'static str],
+        precache_flags: ShaderPrecacheFlags,
+    ) -> Result<Program, ShaderError> {
+        let mut program = match shader_kind {
+            ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text | ShaderKind::Resolve => {
+                self.create_prim_shader(base_filename, features)?
+            }
+            ShaderKind::Cache(..) => {
+                self.create_prim_shader(base_filename, features)?
+            }
+            ShaderKind::VectorStencil => {
+                self.create_prim_shader(base_filename, features)?
+            }
+            ShaderKind::VectorCover => {
+                self.create_prim_shader(base_filename, features)?
+            }
+            ShaderKind::Composite => {
+                self.create_prim_shader(base_filename, features)?
+            }
+            ShaderKind::ClipCache => {
+                self.create_clip_shader(base_filename, features)?
+            }
+        };
+
+        if precache_flags.contains(ShaderPrecacheFlags::FULL_COMPILE) && !program.is_initialized() {
+            let vertex_format = match shader_kind {
+                ShaderKind::Primitive |
+                ShaderKind::Brush |
+                ShaderKind::Text => VertexArrayKind::Primitive,
+                ShaderKind::Cache(format) => *format,
+                ShaderKind::VectorStencil => VertexArrayKind::VectorStencil,
+                ShaderKind::VectorCover => VertexArrayKind::VectorCover,
+                ShaderKind::ClipCache => VertexArrayKind::Clip,
+                ShaderKind::Resolve => VertexArrayKind::Resolve,
+                ShaderKind::Composite => VertexArrayKind::Composite,
+            };
+
+            let vertex_descriptor = match vertex_format {
+                VertexArrayKind::Primitive => &crate::renderer::desc::PRIM_INSTANCES,
+                VertexArrayKind::LineDecoration => &crate::renderer::desc::LINE,
+                VertexArrayKind::Gradient => &crate::renderer::desc::GRADIENT,
+                VertexArrayKind::Blur => &crate::renderer::desc::BLUR,
+                VertexArrayKind::Clip => &crate::renderer::desc::CLIP,
+                VertexArrayKind::VectorStencil => &crate::renderer::desc::VECTOR_STENCIL,
+                VertexArrayKind::VectorCover => &crate::renderer::desc::VECTOR_COVER,
+                VertexArrayKind::Border => &crate::renderer::desc::BORDER,
+                VertexArrayKind::Scale => &crate::renderer::desc::SCALE,
+                VertexArrayKind::Resolve => &crate::renderer::desc::RESOLVE,
+                VertexArrayKind::SvgFilter => &crate::renderer::desc::SVG_FILTER,
+                VertexArrayKind::Composite => &crate::renderer::desc::COMPOSITE,
+            };
+
+            self.link_program(&mut program, vertex_descriptor)?;
+            self.bind_program(&mut program);
+            match shader_kind {
+                ShaderKind::ClipCache => {
+                    self.bind_shader_samplers(
+                        &program,
+                        &[
+                            ("sColor0", TextureSampler::Color0),
+                            ("sTransformPalette", TextureSampler::TransformPalette),
+                            ("sRenderTasks", TextureSampler::RenderTasks),
+                            ("sGpuCache", TextureSampler::GpuCache),
+                            ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+                            ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
+                        ],
+                    );
+                }
+                _ => {
+                    self.bind_shader_samplers(
+                        &program,
+                        &[
+                            ("sColor0", TextureSampler::Color0),
+                            ("sColor1", TextureSampler::Color1),
+                            ("sColor2", TextureSampler::Color2),
+                            ("sDither", TextureSampler::Dither),
+                            ("sPrevPassAlpha", TextureSampler::PrevPassAlpha),
+                            ("sPrevPassColor", TextureSampler::PrevPassColor),
+                            ("sTransformPalette", TextureSampler::TransformPalette),
+                            ("sRenderTasks", TextureSampler::RenderTasks),
+                            ("sGpuCache", TextureSampler::GpuCache),
+                            ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+                            ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
+                        ],
+                    );
+                }
+            }
+        }
+        Ok(program)
     }
 
     pub fn begin_frame(&mut self) -> GpuFrameId {

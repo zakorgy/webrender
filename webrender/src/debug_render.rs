@@ -5,10 +5,10 @@
 use api::{ColorU, ColorF, ImageFormat, TextureTarget};
 use api::units::*;
 use crate::debug_font_data;
-use crate::device::{Device, Program, Texture, TextureSlot, VertexDescriptor, ShaderError, VAO};
+use crate::device::{create_projection, Device, Program, Texture, TextureSlot, VertexDescriptor, ShaderError, VAO};
 use crate::device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
-use euclid::{Point2D, Rect, Size2D, Transform3D, default};
-use crate::internal_types::{ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, Swizzle};
+use euclid::{Point2D, Rect, Size2D, default};
+use crate::internal_types::Swizzle;
 use std::f32;
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -321,13 +321,12 @@ impl DebugRenderer {
             device.set_blend(true);
             device.set_blend_mode_premultiplied_alpha();
 
-            let projection = Transform3D::ortho(
+            let projection = create_projection(
                 0.0,
                 viewport_size.width as f32 * scale,
                 viewport_size.height as f32 * scale,
                 0.0,
-                ORTHO_NEAR_PLANE,
-                ORTHO_FAR_PLANE,
+                true,
             );
 
             // Triangles

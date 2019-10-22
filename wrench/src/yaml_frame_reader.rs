@@ -102,7 +102,7 @@ impl LocalExternalImageHandler {
     }
 
     pub fn add_image(&mut self,
-        device: &webrender::Device,
+        device: &webrender::Device<back::Backend>,
         desc: ImageDescriptor,
         target: TextureTarget,
         image_data: ImageData,

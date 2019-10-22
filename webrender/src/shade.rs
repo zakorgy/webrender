@@ -4,12 +4,10 @@
 
 use crate::batch::{BatchKey, BatchKind, BrushBatchKind, BatchFeatures};
 use crate::device::{Device, Program, ShaderError, ShaderKind};
-use crate::device::{TextureSampler, VertexArrayKind, ShaderPrecacheFlags};
+use crate::device::{VertexArrayKind, ShaderPrecacheFlags};
 use euclid::default::Transform3D;
 use crate::glyph_rasterizer::GlyphFormat;
 use crate::renderer::{
-    desc,
-    MAX_VERTEX_TEXTURE_WIDTH,
     BlendMode, DebugFlags, ImageBufferKind, RendererError, RendererOptions,
 };
 
@@ -127,119 +125,16 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         precache_flags: ShaderPrecacheFlags,
     ) -> Result<&mut Program, ShaderError> {
         if self.program.is_none() {
-            let program = match self.kind {
-                ShaderKind::Primitive | ShaderKind::Brush | ShaderKind::Text | ShaderKind::Resolve => {
-                    create_prim_shader(
-                        self.name,
-                        device,
-                        &self.features,
-                    )
-                }
-                ShaderKind::Cache(..) => {
-                    create_prim_shader(
-                        self.name,
-                        device,
-                        &self.features,
-                    )
-                }
-                ShaderKind::VectorStencil => {
-                    create_prim_shader(
-                        self.name,
-                        device,
-                        &self.features,
-                    )
-                }
-                ShaderKind::VectorCover => {
-                    create_prim_shader(
-                        self.name,
-                        device,
-                        &self.features,
-                    )
-                }
-                ShaderKind::Composite => {
-                    create_prim_shader(
-                        self.name,
-                        device,
-                        &self.features,
-                    )
-                }
-                ShaderKind::ClipCache => {
-                    create_clip_shader(
-                        self.name,
-                        device,
-                        &self.features,
-                    )
-                }
-            };
+            let program = device.create_program_with_kind(
+                self.name,
+                &self.kind,
+                &self.features,
+                precache_flags,
+            );
             self.program = Some(program?);
         }
 
         let program = self.program.as_mut().unwrap();
-
-        if precache_flags.contains(ShaderPrecacheFlags::FULL_COMPILE) && !program.is_initialized() {
-            let vertex_format = match self.kind {
-                ShaderKind::Primitive |
-                ShaderKind::Brush |
-                ShaderKind::Text => VertexArrayKind::Primitive,
-                ShaderKind::Cache(format) => format,
-                ShaderKind::VectorStencil => VertexArrayKind::VectorStencil,
-                ShaderKind::VectorCover => VertexArrayKind::VectorCover,
-                ShaderKind::ClipCache => VertexArrayKind::Clip,
-                ShaderKind::Resolve => VertexArrayKind::Resolve,
-                ShaderKind::Composite => VertexArrayKind::Composite,
-            };
-
-            let vertex_descriptor = match vertex_format {
-                VertexArrayKind::Primitive => &desc::PRIM_INSTANCES,
-                VertexArrayKind::LineDecoration => &desc::LINE,
-                VertexArrayKind::Gradient => &desc::GRADIENT,
-                VertexArrayKind::Blur => &desc::BLUR,
-                VertexArrayKind::Clip => &desc::CLIP,
-                VertexArrayKind::VectorStencil => &desc::VECTOR_STENCIL,
-                VertexArrayKind::VectorCover => &desc::VECTOR_COVER,
-                VertexArrayKind::Border => &desc::BORDER,
-                VertexArrayKind::Scale => &desc::SCALE,
-                VertexArrayKind::Resolve => &desc::RESOLVE,
-                VertexArrayKind::SvgFilter => &desc::SVG_FILTER,
-                VertexArrayKind::Composite => &desc::COMPOSITE,
-            };
-
-            device.link_program(program, vertex_descriptor)?;
-            device.bind_program(program);
-            match self.kind {
-                ShaderKind::ClipCache => {
-                    device.bind_shader_samplers(
-                        &program,
-                        &[
-                            ("sColor0", TextureSampler::Color0),
-                            ("sTransformPalette", TextureSampler::TransformPalette),
-                            ("sRenderTasks", TextureSampler::RenderTasks),
-                            ("sGpuCache", TextureSampler::GpuCache),
-                            ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                            ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-                        ],
-                    );
-                }
-                _ => {
-                    device.bind_shader_samplers(
-                        &program,
-                        &[
-                            ("sColor0", TextureSampler::Color0),
-                            ("sColor1", TextureSampler::Color1),
-                            ("sColor2", TextureSampler::Color2),
-                            ("sDither", TextureSampler::Dither),
-                            ("sPrevPassAlpha", TextureSampler::PrevPassAlpha),
-                            ("sPrevPassColor", TextureSampler::PrevPassColor),
-                            ("sTransformPalette", TextureSampler::TransformPalette),
-                            ("sRenderTasks", TextureSampler::RenderTasks),
-                            ("sGpuCache", TextureSampler::GpuCache),
-                            ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                            ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-                        ],
-                    );
-                }
-            }
-        }
 
         Ok(program)
     }
@@ -468,44 +363,6 @@ impl<B: hal::Backend> TextShader<B> {
         self.glyph_transform.deinit(device);
         self.debug_overdraw.deinit(device);
     }
-}
-
-fn create_prim_shader<B: hal::Backend>(
-    name: &'static str,
-    device: &mut Device<B>,
-    features: &[&'static str],
-) -> Result<Program, ShaderError> {
-    let mut prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    for feature in features {
-        prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
-    }
-
-    debug!("PrimShader {}", name);
-
-    device.create_program(name, prefix)
-}
-
-fn create_clip_shader<B: hal::Backend>(
-    name: &'static str,
-    device: &mut Device<B>,
-    features: &[&'static str],
-) -> Result<Program, ShaderError> {
-    let mut prefix = format!(
-        "#define WR_MAX_VERTEX_TEXTURE_WIDTH {}U\n",
-        MAX_VERTEX_TEXTURE_WIDTH
-    );
-
-    for feature in features {
-        prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
-    }
-
-    debug!("ClipShader {}", name);
-
-    device.create_program(name, prefix)
 }
 
 // NB: If you add a new shader here, make sure to deinitialize it

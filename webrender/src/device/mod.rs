@@ -841,7 +841,7 @@ pub(crate) fn create_projection(
     bottom: f32,
     top: f32,
     main_frame_buffer: bool
-) -> Transform3D<f32, f32, f32> {
+) -> Transform3D<f32, euclid::UnknownUnit, euclid::UnknownUnit> {
     let projection = Transform3D::ortho(
         left,
         right,

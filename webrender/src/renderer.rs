@@ -54,9 +54,9 @@ use crate::device::{DepthFunction, Device, GpuFrameId, Program, UploadMethod, Te
 use crate::device::{DrawTarget, ExternalTexture, FBOId, ReadTarget};
 use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, VertexArrayKind,
              VertexUsageHint, VAO, VBO, CustomVAO};
-use crate::device::{DeviceInit, ProgramCache, ShaderPrecacheFlags};
+use crate::device::{create_projection, DeviceInit, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
-use euclid::{rect, Transform3D, Scale, default};
+use euclid::{rect, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
 use gleam::gl;
 use crate::glyph_cache::GlyphCache;
@@ -65,7 +65,7 @@ use crate::gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 use crate::gpu_cache::{GpuCacheDebugChunk, GpuCacheDebugCmd};
 use crate::gpu_types::{PrimitiveHeaderI, PrimitiveHeaderF, ScalingInstance, SvgFilterInstance, TransformData};
 use crate::gpu_types::{CompositeInstance, ResolveInstanceData};
-use crate::internal_types::{TextureSource, ORTHO_FAR_PLANE, ORTHO_NEAR_PLANE, ResourceCacheError};
+use crate::internal_types::{TextureSource, ResourceCacheError};
 use crate::internal_types::{CacheTextureId, DebugOutput, FastHashMap, FastHashSet, LayerIndex, RenderedDocument, ResultMsg};
 use crate::internal_types::{TextureCacheAllocationKind, TextureCacheUpdate, TextureUpdateList, TextureUpdateSource};
 use crate::internal_types::{RenderTargetInfo, SavedTargetIndex, Swizzle};
@@ -4427,13 +4427,12 @@ impl<B: hal::Backend> Renderer<B> {
                 .expect("BUG: invalid target texture");
             let target_size = texture.get_dimensions();
 
-            Transform3D::ortho(
+            create_projection(
                 0.0,
                 target_size.width as f32,
                 0.0,
                 target_size.height as f32,
-                ORTHO_NEAR_PLANE,
-                ORTHO_FAR_PLANE,
+                false,
             )
         };
 
@@ -4835,13 +4834,12 @@ impl<B: hal::Backend> Renderer<B> {
 
                         let offset = frame.content_origin.to_f32();
                         let size = frame.device_rect.size.to_f32();
-                        let projection = Transform3D::ortho(
+                        let projection = create_projection(
                             offset.x,
                             offset.x + size.width,
                             offset.y + size.height,
                             offset.y,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
+                            true,
                         );
 
                         let fb_scale = Scale::<_, _, FramebufferPixel>::new(1i32);
@@ -4921,13 +4919,12 @@ impl<B: hal::Backend> Renderer<B> {
                                 true,
                             );
 
-                            let projection = Transform3D::ortho(
+                            let projection = create_projection(
                                 0.0,
                                 draw_target.dimensions().width as f32,
                                 0.0,
                                 draw_target.dimensions().height as f32,
-                                ORTHO_NEAR_PLANE,
-                                ORTHO_FAR_PLANE,
+                                false
                             );
 
                             self.draw_picture_cache_target(
@@ -4949,13 +4946,12 @@ impl<B: hal::Backend> Renderer<B> {
                             false,
                         );
 
-                        let projection = Transform3D::ortho(
+                        let projection = create_projection(
                             0.0,
                             draw_target.dimensions().width as f32,
                             0.0,
                             draw_target.dimensions().height as f32,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
+                            false,
                         );
 
                         self.draw_alpha_target(
@@ -4975,13 +4971,12 @@ impl<B: hal::Backend> Renderer<B> {
                             target.needs_depth(),
                         );
 
-                        let projection = Transform3D::ortho(
+                        let projection = create_projection(
                             0.0,
                             draw_target.dimensions().width as f32,
                             0.0,
                             draw_target.dimensions().height as f32,
-                            ORTHO_NEAR_PLANE,
-                            ORTHO_FAR_PLANE,
+                            false,
                         );
 
                         let clear_depth = if target.needs_depth() {
