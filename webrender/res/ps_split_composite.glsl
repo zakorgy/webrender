@@ -4,7 +4,10 @@
 
 #include shared,prim_shared
 
-varying vec3 vUv;
+// interpolated UV coordinates to sample.
+varying vec2 vUv;
+// X = layer index to sample, Y = flag to allow perspective interpolation of UV.
+flat varying vec2 vLayerAndPerspective;
 flat varying vec4 vUvSampleBounds;
 
 #ifdef WR_VERTEX_SHADER
@@ -13,17 +16,14 @@ struct SplitGeometry {
 };
 
 SplitGeometry fetch_split_geometry(int address) {
-    ivec2 uv = get_gpu_cache_uv(address);
-
-    vec4 data0 = TEXEL_FETCH(sGpuCache, uv, 0, ivec2(0, 0));
-    vec4 data1 = TEXEL_FETCH(sGpuCache, uv, 0, ivec2(1, 0));
+    vec4[2] data = fetch_from_gpu_cache_2(address);
 
     SplitGeometry geo;
     geo.local = vec2[4](
-        data0.xy,
-        data0.zw,
-        data1.xy,
-        data1.zw
+        data[0].xy,
+        data[0].zw,
+        data[1].xy,
+        data[1].zw
     );
 
     return geo;
@@ -103,15 +103,18 @@ void main(void) {
         f.y, f.x
     );
     vec2 uv = mix(uv0, uv1, f);
+    float perspective_interpolate = float(ph.user_data.y);
 
-    vUv = vec3(uv / texture_size, res.layer);
+    vUv = uv / texture_size * mix(gl_Position.w, 1.0, perspective_interpolate);
+    vLayerAndPerspective = vec2(res.layer, perspective_interpolate);
 }
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
 void main(void) {
     float alpha = do_clip();
-    vec2 uv = clamp(vUv.xy, vUvSampleBounds.xy, vUvSampleBounds.zw);
-    oFragColor = alpha * textureLod(sPrevPassColor, vec3(uv, vUv.z), 0.0);
+    float perspective_divisor = mix(gl_FragCoord.w, 1.0, vLayerAndPerspective.y);
+    vec2 uv = clamp(vUv * perspective_divisor, vUvSampleBounds.xy, vUvSampleBounds.zw);
+    oFragColor = alpha * textureLod(sPrevPassColor, vec3(uv, vLayerAndPerspective.x), 0.0);
 }
 #endif

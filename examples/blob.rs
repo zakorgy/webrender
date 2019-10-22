@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#[cfg(feature = "gl")]
 extern crate gleam;
+#[cfg(feature = "gl")]
 extern crate glutin;
 extern crate rayon;
 extern crate webrender;
@@ -153,14 +155,14 @@ impl api::BlobImageHandler for CheckerboardRenderer {
 
     fn prepare_resources(
         &mut self,
-        _services: &api::BlobImageResources,
+        _services: &dyn api::BlobImageResources,
         _requests: &[api::BlobImageParams],
     ) {}
 
     fn delete_font(&mut self, _font: api::FontKey) {}
     fn delete_font_instance(&mut self, _instance: api::FontInstanceKey) {}
     fn clear_namespace(&mut self, _namespace: api::IdNamespace) {}
-    fn create_blob_rasterizer(&mut self) -> Box<api::AsyncBlobImageRasterizer> {
+    fn create_blob_rasterizer(&mut self) -> Box<dyn api::AsyncBlobImageRasterizer> {
         Box::new(Rasterizer {
             workers: Arc::clone(&self.workers),
             image_cmds: self.image_cmds.clone(),

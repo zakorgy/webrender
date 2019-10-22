@@ -4,6 +4,7 @@
 
 
 use app_units::Au;
+use back;
 use blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
@@ -22,7 +23,7 @@ use webrender;
 use webrender::api::*;
 use webrender::{DebugFlags, RendererStats, ShaderPrecacheFlags};
 use yaml_frame_writer::YamlFrameWriterReceiver;
-use {WindowWrapper, NotifierEvent};
+use NotifierEvent;
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -101,7 +102,7 @@ impl Notifier {
 }
 
 impl RenderNotifier for Notifier {
-    fn clone(&self) -> Box<RenderNotifier> {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
         Box::new(Notifier(self.0.clone()))
     }
 
@@ -150,7 +151,7 @@ pub struct Wrench {
     pub device_pixel_ratio: f32,
     page_zoom_factor: ZoomFactor,
 
-    pub renderer: webrender::Renderer,
+    pub renderer: webrender::Renderer<back::Backend>,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
@@ -169,7 +170,6 @@ pub struct Wrench {
 
 impl Wrench {
     pub fn new(
-        window: &mut WindowWrapper,
         proxy: Option<EventsLoopProxy>,
         shader_override_path: Option<PathBuf>,
         dp_ratio: f32,
@@ -184,21 +184,22 @@ impl Wrench {
         disable_dual_source_blending: bool,
         zoom_factor: f32,
         chase_primitive: webrender::ChasePrimitive,
-        notifier: Option<Box<RenderNotifier>>,
+        notifier: Option<Box<dyn RenderNotifier>>,
+        init: webrender::DeviceInit<back::Backend>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
         let recorder = save_type.map(|save_type| match save_type {
             SaveType::Yaml => Box::new(
                 YamlFrameWriterReceiver::new(&PathBuf::from("yaml_frames")),
-            ) as Box<webrender::ApiRecordingReceiver>,
+            ) as Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Json => Box::new(JsonFrameWriter::new(&PathBuf::from("json_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Ron => Box::new(RonFrameWriter::new(&PathBuf::from("ron_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Binary => Box::new(webrender::BinaryRecorder::new(
                 &PathBuf::from("wr-record.bin"),
-            )) as Box<webrender::ApiRecordingReceiver>,
+            )) as Box<dyn webrender::ApiRecordingReceiver>,
         });
 
         let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES;
@@ -209,6 +210,17 @@ impl Wrench {
             ShaderPrecacheFlags::FULL_COMPILE
         } else {
             ShaderPrecacheFlags::empty()
+        };
+
+        #[cfg(feature = "gfx")]
+        let heaps_config = {
+            let config_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("webrender/res/mem_config.ron");
+            let source = std::fs::read_to_string(&config_path)
+                .expect(&format!("Unable to open memory config file from {:?}", config_path));
+            ron::de::from_str(&source).expect("Unable to parse HeapsConfig")
         };
 
         let opts = webrender::RendererOptions {
@@ -223,6 +235,8 @@ impl Wrench {
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
             disable_dual_source_blending,
             chase_primitive,
+            #[cfg(feature = "gfx")]
+            heaps_config,
             ..Default::default()
         };
 
@@ -238,7 +252,7 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts, None).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(init, notifier, opts, None).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 
