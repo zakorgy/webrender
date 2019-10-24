@@ -13,6 +13,7 @@ extern crate winit;
 mod boilerplate;
 
 use crate::boilerplate::{Example, HandyDandyRectBuilder};
+#[cfg(feature = "gl")]
 use gleam::gl;
 use std::mem;
 use webrender::api::*;
@@ -298,9 +299,18 @@ impl Example for App {
         false
     }
 
+    #[cfg(feature = "gl")]
     fn get_image_handlers(
         &mut self,
         _gl: &dyn gl::Gl,
+    ) -> (Option<Box<dyn webrender::ExternalImageHandler>>,
+          Option<Box<dyn webrender::OutputImageHandler>>) {
+        (Some(Box::new(ImageGenerator::new())), None)
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn get_image_handlers(
+        &mut self,
     ) -> (Option<Box<dyn webrender::ExternalImageHandler>>,
           Option<Box<dyn webrender::OutputImageHandler>>) {
         (Some(Box::new(ImageGenerator::new())), None)

@@ -37,6 +37,8 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             device.destroy_render_pass(self.r8_depth);
             device.destroy_render_pass(self.bgra8);
             device.destroy_render_pass(self.bgra8_depth);
+            device.destroy_render_pass(self.rgbaf32);
+            device.destroy_render_pass(self.rgbaf32_depth);
         }
     }
 
