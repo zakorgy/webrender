@@ -64,8 +64,7 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate malloc_size_of_derive;
-//#[cfg(any(feature = "serde"))]
-#[macro_use]
+#[cfg_attr(any(any(feature = "serde"), not(feature = "gl")), macro_use)]
 extern crate serde;
 #[macro_use]
 extern crate thread_profiler;

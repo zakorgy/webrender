@@ -304,7 +304,7 @@ impl Drop for VAO {
     }
 }
 
-impl<'a, B> Drop for BoundPBO<'a, B> {
+impl<'a, B: hal::Backend> Drop for BoundPBO<'a, B> {
     fn drop(&mut self) {
         self.device.gl.unmap_buffer(gl::PIXEL_PACK_BUFFER);
         self.device.gl.bind_buffer(gl::PIXEL_PACK_BUFFER, 0);
@@ -312,7 +312,7 @@ impl<'a, B> Drop for BoundPBO<'a, B> {
 }
 
 impl ProgramSourceInfo {
-    fn new<B>(
+    fn new<B: hal::Backend>(
         device: &Device<B>,
         name: &'static str,
         features: String,
@@ -368,7 +368,7 @@ impl ProgramSourceInfo {
         }
     }
 
-    fn compute_source<B>(&self, device: &Device<B>, kind: &str) -> String {
+    fn compute_source<B: hal::Backend>(&self, device: &Device<B>, kind: &str) -> String {
         let mut src = String::new();
         device.build_shader_string(
             &self.features,
@@ -433,8 +433,9 @@ impl PrimitiveType for crate::gpu_types::SvgFilterInstance { }
 impl PrimitiveType for crate::gpu_types::ResolveInstanceData { }
 impl PrimitiveType for crate::gpu_types::CompositeInstance { }
 impl PrimitiveType for crate::render_target::LineDecorationJob { }
+impl PrimitiveType for crate::render_target::GradientJob { }
 
-pub struct DeviceInit<B> {
+pub struct DeviceInit<B: hal::Backend> {
     pub gl: Rc<dyn gl::Gl>,
     pub phantom_data: PhantomData<B>,
 }
@@ -448,7 +449,7 @@ impl<B: hal::Backend> From<Rc<dyn gl::Gl>> for DeviceInit<B> {
     }
 }
 
-pub struct Device<B> {
+pub struct Device<B: hal::Backend> {
     gl: Rc<dyn gl::Gl>,
 
     /// If non-None, |gl| points to a profiling wrapper, and this points to the
@@ -516,7 +517,7 @@ pub struct Device<B> {
     phantom_data: PhantomData<B>,
 }
 
-impl<B> Device<B> {
+impl<B: hal::Backend> Device<B> {
     pub fn new(
         init: DeviceInit<B>,
         resource_override_path: Option<PathBuf>,

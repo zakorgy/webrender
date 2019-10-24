@@ -346,8 +346,9 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
         };
 
         #[cfg(feature = "gl")]
+        let gl_type = device.gl().get_type();
+        #[cfg(feature = "gl")]
         let success = if let Some(bound_pbo) = device.map_pbo_for_readback(&pbo) {
-            let gl_type = device.gl().get_type();
             let src_buffer = &bound_pbo.data;
             let src_stride = buffer_stride;
             let src_width =

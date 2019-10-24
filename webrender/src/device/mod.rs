@@ -307,19 +307,19 @@ pub struct ExternalTexture {
     id: IdType,
     #[cfg_attr(not(feature = "gl"), allow(dead_code))]
     target: IdType,
-    swizzle: Swizzle,
+    _swizzle: Swizzle,
 }
 
 
 impl ExternalTexture {
-    pub fn new(id: u32, target: TextureTarget, swizzle: Swizzle) -> Self {
+    pub fn new(id: u32, target: TextureTarget, _swizzle: Swizzle) -> Self {
         ExternalTexture {
             id,
             #[cfg(feature = "gl")]
             target: get_gl_target(target),
             #[cfg(not(feature = "gl"))]
             target: target as _,
-            swizzle,
+            _swizzle,
         }
     }
 
