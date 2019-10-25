@@ -8,6 +8,8 @@ use api::units::*;
 use api;
 use crate::device::TextureFilter;
 use crate::renderer::PipelineInfo;
+#[cfg(not(feature="gl"))]
+use crate::gpu_cache::GpuCacheBufferUpdate;
 use crate::gpu_cache::GpuCacheUpdateList;
 use crate::frame_builder::Frame;
 use fxhash::FxHasher;
@@ -521,7 +523,7 @@ pub enum DebugOutput {
 }
 
 #[allow(dead_code)]
-pub enum ResultMsg {
+pub enum ResultMsg<B: hal::Backend> {
     DebugCommand(DebugCommand),
     DebugOutput(DebugOutput),
     RefreshShader(PathBuf),
@@ -540,6 +542,10 @@ pub enum ResultMsg {
     AppendNotificationRequests(Vec<NotificationRequest>),
     #[cfg(not(feature = "gl"))]
     UpdateWindowSize(DeviceIntSize),
+    #[cfg(not(feature="gl"))]
+    UpdateGpuCacheBuffer(GpuCacheBufferUpdate<B>),
+    #[cfg(feature="gl")]
+    Phantom(std::marker::PhantomData<B>),
 }
 
 #[derive(Clone, Debug)]
