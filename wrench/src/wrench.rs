@@ -22,7 +22,7 @@ use webrender::api::*;
 use webrender::api::units::*;
 use webrender::{DebugFlags, RenderResults, ShaderPrecacheFlags};
 use crate::yaml_frame_writer::YamlFrameWriterReceiver;
-use crate::{WindowWrapper, NotifierEvent};
+use crate::NotifierEvent;
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -166,7 +166,6 @@ pub struct Wrench {
 
 impl Wrench {
     pub fn new(
-        window: &mut WindowWrapper,
         proxy: Option<EventsLoopProxy>,
         shader_override_path: Option<PathBuf>,
         dp_ratio: f32,
@@ -184,6 +183,7 @@ impl Wrench {
         chase_primitive: webrender::ChasePrimitive,
         dump_shader_source: Option<String>,
         notifier: Option<Box<dyn RenderNotifier>>,
+        init: webrender::DeviceInit<back::Backend>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
@@ -210,6 +210,17 @@ impl Wrench {
             ShaderPrecacheFlags::empty()
         };
 
+        #[cfg(feature = "gfx")]
+        let heaps_config = {
+            let config_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("webrender/res/mem_config.ron");
+            let source = std::fs::read_to_string(&config_path)
+                .expect(&format!("Unable to open memory config file from {:?}", config_path));
+            ron::de::from_str(&source).expect("Unable to parse HeapsConfig")
+        };
+
         let opts = webrender::RendererOptions {
             device_pixel_ratio: dp_ratio,
             resource_override_path: shader_override_path,
@@ -221,12 +232,14 @@ impl Wrench {
             precache_flags,
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
             chase_primitive,
-            enable_picture_caching: !no_picture_caching,
+            enable_picture_caching: false, // !no_picture_caching
             testing: true,
             max_texture_size: Some(8196), // Needed for rawtest::test_resize_image.
             allow_dual_source_blending: !disable_dual_source_blending,
             allow_advanced_blend_equation: true,
             dump_shader_source,
+            #[cfg(feature = "gfx")]
+            heaps_config,
             ..Default::default()
         };
 
@@ -242,8 +255,6 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        #[cfg(feature = "gl")]
-        let init = window.clone_gl().into();
 
         let (renderer, sender) = webrender::Renderer::new(
             init,

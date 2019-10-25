@@ -10,6 +10,8 @@ pub(super) struct HalRenderPasses<B: hal::Backend> {
     pub(super) r8_depth: B::RenderPass,
     pub(super) bgra8: B::RenderPass,
     pub(super) bgra8_depth: B::RenderPass,
+    pub(super) rgba8: B::RenderPass,
+    pub(super) rgba8_depth: B::RenderPass,
     pub(super) rgbaf32: B::RenderPass,
     pub(super) rgbaf32_depth: B::RenderPass,
 }
@@ -25,6 +27,8 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             ImageFormat::R8 => &self.r8,
             ImageFormat::BGRA8 if depth_enabled => &self.bgra8_depth,
             ImageFormat::BGRA8 => &self.bgra8,
+            ImageFormat::RGBA8 if depth_enabled => &self.rgba8_depth,
+            ImageFormat::RGBA8 => &self.rgba8,
             ImageFormat::RGBAF32 if depth_enabled => &self.rgbaf32,
             ImageFormat::RGBAF32 => &self.rgbaf32_depth,
             f => unimplemented!("No render pass for image format {:?}", f),
@@ -61,6 +65,18 @@ impl<B: hal::Backend> HalRenderPasses<B> {
 
         let attachment_bgra8 = hal::pass::Attachment {
             format: Some(surface_format),
+            samples: 1,
+            ops: hal::pass::AttachmentOps::new(
+                hal::pass::AttachmentLoadOp::Load,
+                hal::pass::AttachmentStoreOp::Store,
+            ),
+            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
+            layouts: hal::image::Layout::ColorAttachmentOptimal
+                .. hal::image::Layout::ColorAttachmentOptimal,
+        };
+
+        let attachment_rgba8 = hal::pass::Attachment {
+            format: Some(hal::format::Format::Rgba8Unorm),
             samples: 1,
             ops: hal::pass::AttachmentOps::new(
                 hal::pass::AttachmentLoadOp::Load,
@@ -127,6 +143,22 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             preserves: &[],
         };
 
+        let subpass_rgba8 = hal::pass::SubpassDesc {
+            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
+            depth_stencil: None,
+            inputs: &[],
+            resolves: &[],
+            preserves: &[],
+        };
+
+        let subpass_depth_rgba8 = hal::pass::SubpassDesc {
+            colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
+            depth_stencil: Some(&(1, hal::image::Layout::DepthStencilAttachmentOptimal)),
+            inputs: &[],
+            resolves: &[],
+            preserves: &[],
+        };
+
         let subpass_rgbaf32 = hal::pass::SubpassDesc {
             colors: &[(0, hal::image::Layout::ColorAttachmentOptimal)],
             depth_stencil: None,
@@ -173,6 +205,22 @@ impl<B: hal::Backend> HalRenderPasses<B> {
                 device.create_render_pass(
                     iter::once(&attachment_rgbaf32).chain(iter::once(&attachment_depth)),
                     &[subpass_depth_rgbaf32],
+                    &[],
+                )
+            }
+            .expect("create_render_pass failed"),
+            rgba8: unsafe {
+                device.create_render_pass(
+                    iter::once(&attachment_rgba8),
+                    &[subpass_rgba8],
+                    &[],
+                )
+            }
+            .expect("create_render_pass failed"),
+            rgba8_depth: unsafe {
+                device.create_render_pass(
+                    iter::once(&attachment_rgba8).chain(iter::once(&attachment_depth)),
+                    &[subpass_depth_rgba8],
                     &[],
                 )
             }

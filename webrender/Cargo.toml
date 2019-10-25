@@ -9,7 +9,7 @@ build = "build.rs"
 edition = "2018"
 
 [features]
-default = ["freetype-lib"]
+default = ["freetype-lib", "serde"]
 gl = ["gleam"]
 freetype-lib = ["freetype/servo-freetype-sys"]
 profiler = ["thread_profiler/thread_profiler"]
@@ -47,7 +47,7 @@ malloc_size_of_derive = "0.1"
 num-traits = "0.2"
 plane-split = "0.15"
 png = { optional = true, version = "0.15" }
-serde = { version = "1.0", features = ["serde_derive"] }
+serde = { optional = true, version = "1.0", features = ["serde_derive"] }
 serde_json = { optional = true, version = "1.0" }
 rand ="0.4"
 rayon = "1"

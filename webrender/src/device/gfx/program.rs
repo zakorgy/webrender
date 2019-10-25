@@ -40,7 +40,7 @@ pub(super) enum RenderPassDepthState {
     Disabled,
 }
 
-type PipelineKey = (Option<hal::pso::BlendState>, RenderPassDepthState, Option<hal::pso::DepthTest>);
+type PipelineKey = (ImageFormat, Option<hal::pso::BlendState>, RenderPassDepthState, Option<hal::pso::DepthTest>);
 
 pub(crate) struct Program<B: hal::Backend> {
     pipelines: FastHashMap<PipelineKey, B::GraphicsPipeline>,
@@ -152,106 +152,105 @@ impl<B: hal::Backend> Program<B> {
             use self::RenderPassDepthState as RPDS;
 
             let pipeline_states = match shader_kind {
-                ShaderKind::Cache(VertexArrayKind::Gradient) | ShaderKind::Cache(VertexArrayKind::SvgFilter) => [
-                    (None, RPDS::Disabled, None)
-                ]
-                .into_iter(),
-                ShaderKind::Cache(VertexArrayKind::Scale) => [
-                    (None, RPDS::Enabled, None),
-                    (None, RPDS::Disabled, None),
-                    (Some(BlendState::MULTIPLY), RPDS::Enabled, None),
-                    (Some(BlendState::MULTIPLY), RPDS::Disabled, None),
-                ]
-                .into_iter(),
-                ShaderKind::Cache(VertexArrayKind::Blur) => [
-                    (None, RPDS::Enabled, None),
-                    (None, RPDS::Disabled, None),
-                    (None, RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                ]
-                .into_iter(),
+                ShaderKind::Cache(VertexArrayKind::Gradient) => vec![
+                    (surface_format, None, RPDS::Disabled, None)
+                ],
+                ShaderKind::Cache(VertexArrayKind::SvgFilter) => vec![
+                    (surface_format, None, RPDS::Disabled, None),
+                    (surface_format, None, RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                ],
+                ShaderKind::Cache(VertexArrayKind::Scale) => vec![
+                    (ImageFormat::R8, None, RPDS::Enabled, None),
+                    (ImageFormat::R8, None, RPDS::Disabled, None),
+                    (ImageFormat::R8, Some(BlendState::MULTIPLY), RPDS::Enabled, None),
+                    (ImageFormat::R8, Some(BlendState::MULTIPLY), RPDS::Disabled, None),
+                    (surface_format, None, RPDS::Enabled, None),
+                    (surface_format, None, RPDS::Disabled, None),
+                    (surface_format, Some(BlendState::MULTIPLY), RPDS::Enabled, None),
+                    (surface_format, Some(BlendState::MULTIPLY), RPDS::Disabled, None),
+                ],
+                ShaderKind::Cache(VertexArrayKind::Blur) => if features.contains(&"ALPHA_TARGET") {
+                    vec![
+                        (ImageFormat::R8, None, RPDS::Enabled, None),
+                        (ImageFormat::R8, None, RPDS::Disabled, None),
+                        (ImageFormat::R8, None, RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                    ]
+                } else {
+                    vec![
+                        (surface_format, None, RPDS::Enabled, None),
+                        (surface_format, None, RPDS::Disabled, None),
+                        (surface_format, None, RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                    ]
+                },
                 ShaderKind::Cache(VertexArrayKind::Border)
-                    | ShaderKind::Cache(VertexArrayKind::LineDecoration) => [
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
-                ].into_iter(),
-                ShaderKind::ClipCache => [
-                    (None, RPDS::Disabled, None),
-                    (Some(BlendState::MULTIPLY), RPDS::Enabled, None),
-                    (Some(BlendState::MULTIPLY), RPDS::Disabled, None),
-                ].into_iter(),
+                    | ShaderKind::Cache(VertexArrayKind::LineDecoration) => vec![
+                    (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
+                ],
+                ShaderKind::ClipCache => vec![
+                    (ImageFormat::R8, None, RPDS::Disabled, None),
+                    (ImageFormat::R8, Some(BlendState::MULTIPLY), RPDS::Enabled, None),
+                    (ImageFormat::R8, Some(BlendState::MULTIPLY), RPDS::Disabled, None),
+                ],
                 ShaderKind::Text => {
                     if features.contains(&"DUAL_SOURCE_BLENDING") {
-                        [
-                            (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
-                            (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
-                            (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_DUAL_SOURCE), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_DUAL_SOURCE), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_DUAL_SOURCE), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                        vec![
+                            (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
+                            (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
+                            (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_DUAL_SOURCE), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_DUAL_SOURCE), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_DUAL_SOURCE), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
                         ]
-                        .into_iter()
                     } else {
-                        [
-                            (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
-                            (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
-                            (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Disabled, None),
-                            (Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                        vec![
+                            (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
+                            (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
+                            (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_CONSTANT_TEXT_COLOR), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS0), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS1), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Disabled, None),
+                            (surface_format, Some(SUBPIXEL_WITH_BG_COLOR_PASS2), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
                         ]
-                        .into_iter()
                     }
                 }
-                ShaderKind::DebugColor | ShaderKind::DebugFont => [
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
-                ].into_iter(),
-                _ => [
-                    (None, RPDS::Enabled, Some(LESS_EQUAL_WRITE)),
-                    (Some(ALPHA), RPDS::Enabled, None),
-                    (Some(ALPHA), RPDS::Disabled, None),
-                    (Some(ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
-                    (Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                    (Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, None),
-                    (Some(PREMULTIPLIED_DEST_OUT), RPDS::Disabled, None),
-                    (Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
-                ]
-                .into_iter(),
+                ShaderKind::DebugColor | ShaderKind::DebugFont => vec![
+                    (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
+                ],
+                _ => vec![
+                    (surface_format, None, RPDS::Enabled, Some(LESS_EQUAL_WRITE)),
+                    (surface_format, Some(ALPHA), RPDS::Enabled, None),
+                    (surface_format, Some(ALPHA), RPDS::Disabled, None),
+                    (surface_format, Some(ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                    (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, None),
+                    (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Disabled, None),
+                    (surface_format, Some(BlendState::PREMULTIPLIED_ALPHA), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                    (surface_format, Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, None),
+                    (surface_format, Some(PREMULTIPLIED_DEST_OUT), RPDS::Disabled, None),
+                    (surface_format, Some(PREMULTIPLIED_DEST_OUT), RPDS::Enabled, Some(LESS_EQUAL_TEST)),
+                ],
             };
 
-            let format = match shader_kind {
-                ShaderKind::ClipCache => ImageFormat::R8,
-                ShaderKind::Cache(VertexArrayKind::Blur) if features.contains(&"ALPHA_TARGET") => {
-                    ImageFormat::R8
-                }
-                ShaderKind::Cache(VertexArrayKind::Scale) if features.contains(&"ALPHA_TARGET") => {
-                    ImageFormat::R8
-                }
-                _ => surface_format,
-            };
-
-            let create_desc = |(blend_state, render_pass_depth_state, depth_test)| {
+            let create_desc = |(format, blend_state, render_pass_depth_state, depth_test)| {
                 let depth_enabled = match depth_test {
                     Some(_) => true,
                     None => match render_pass_depth_state {
@@ -292,21 +291,22 @@ impl<B: hal::Backend> Program<B> {
                 pipeline_descriptor
             };
 
-            let pipelines_descriptors = pipeline_states
-                .clone()
-                .map(|ps| create_desc(*ps));
+            let cloned_states = pipeline_states.clone();
+            let pipelines_descriptors = cloned_states
+                .into_iter()
+                .map(|ps| create_desc(ps));
 
             let pipelines =
                 unsafe { device.create_graphics_pipelines(pipelines_descriptors, pipeline_cache) }
                     .into_iter();
 
             let mut states = pipeline_states
-                .cloned()
+                .into_iter()
                 .zip(pipelines.map(|pipeline| pipeline.expect("Pipeline creation failed")))
                 .collect::<FastHashMap<PipelineKey, B::GraphicsPipeline>>();
 
             if features.contains(&"DEBUG_OVERDRAW") {
-                let pipeline_state = (Some(OVERDRAW), RPDS::Enabled, Some(LESS_EQUAL_TEST));
+                let pipeline_state = (surface_format, Some(OVERDRAW), RPDS::Enabled, Some(LESS_EQUAL_TEST));
                 let pipeline_descriptor = create_desc(pipeline_state);
                 let pipeline = unsafe {
                     device.create_graphics_pipeline(&pipeline_descriptor, pipeline_cache)
@@ -375,6 +375,7 @@ impl<B: hal::Backend> Program<B> {
         vertex_buffer: &VertexBufferHandler<B>,
         instance_buffer: &InstanceBufferHandler<B>,
         instance_range: std::ops::Range<usize>,
+        format: ImageFormat,
     ) {
         let vertex_buffer = match &self.vertex_buffer {
             Some(ref vb) => vb.get(next_id).unwrap(),
@@ -405,10 +406,10 @@ impl<B: hal::Backend> Program<B> {
             cmd_buffer.bind_graphics_pipeline(
                 &self
                     .pipelines
-                    .get(&(blend_state, render_pass_depth_state, depth_test))
+                    .get(&(format, blend_state, render_pass_depth_state, depth_test))
                     .expect(&format!(
-                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} not found for {} program!",
-                        blend_state, depth_test, render_pass_depth_state, self.shader_name
+                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
+                        blend_state, depth_test, render_pass_depth_state, format, self.shader_name
                     )),
             );
 

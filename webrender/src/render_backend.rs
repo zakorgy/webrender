@@ -860,7 +860,7 @@ impl<B: hal::Backend> RenderBackend<B> {
             } => {
                 doc.view.device_rect = device_rect;
                 doc.view.device_pixel_ratio = device_pixel_ratio;
-                #[cfg(not(feature = "gleam"))] {
+                #[cfg(not(feature = "gl"))] {
                     self.result_tx.send(ResultMsg::UpdateWindowSize(device_rect.size)).unwrap();
                 }
             }
@@ -1706,7 +1706,7 @@ impl<B: hal::Backend> RenderBackend<B> {
         }
     }
 
-    #[cfg(all(not(feature = "gleam"), any(feature = "capture", feature = "replay")))]
+    #[cfg(all(not(feature = "gl"), any(feature = "capture", feature = "replay")))]
     fn ensure_buffer(&mut self) -> Option<PersistentlyMappedBuffer<B>> {
         let clear = self.gpu_cache.pending_clear;
         let resize = self.gpu_cache.height() > self.gpu_cache_buffer.height;
@@ -1725,7 +1725,7 @@ impl<B: hal::Backend> RenderBackend<B> {
                 },
             );
 
-            let old_buffer = replace(&mut self.gpu_cache_buffer, new_buffer);
+            let old_buffer = std::mem::replace(&mut self.gpu_cache_buffer, new_buffer);
             self.send_buffer_handle_to_renderer = true;
             if clear {
                 self.gpu_cache.pending_clear = false;
@@ -1909,7 +1909,34 @@ impl<B: hal::Backend> RenderBackend<B> {
                 let msg_update_gpu_cache = ResultMsg::UpdateGpuCache(self.gpu_cache.extract_updates());
                 #[cfg(not(feature = "gl"))]
                 let msg_update_gpu_cache = {
-                    let old_buffer = self.ensure_buffer();
+                    let old_buffer = {
+                        let clear = self.gpu_cache.pending_clear;
+                        let resize = self.gpu_cache.height() > self.gpu_cache_buffer.height;
+                        if clear || resize {
+                            let heaps_strong = self.heaps.upgrade().unwrap();
+                            let new_buffer = PersistentlyMappedBuffer::new::<GpuBlockData>(
+                                self.device.as_ref(),
+                                &mut heaps_strong.lock().unwrap(),
+                                self.gpu_cache_buffer.non_coherent_atom_size_mask,
+                                MAX_VERTEX_TEXTURE_WIDTH as _,
+                                self.gpu_cache.height(),
+                                if resize {
+                                    Some(&mut self.gpu_cache_buffer)
+                                } else {
+                                    None
+                                },
+                            );
+
+                            let old_buffer = std::mem::replace(&mut self.gpu_cache_buffer, new_buffer);
+                            self.send_buffer_handle_to_renderer = true;
+                            if clear {
+                                self.gpu_cache.pending_clear = false;
+                            }
+                            Some(old_buffer)
+                        } else {
+                            None
+                        }
+                    };
                     let msg = ResultMsg::UpdateGpuCacheBuffer(self.gpu_cache.write_updates(
                         &mut self.gpu_cache_buffer,
                         self.device.as_ref(),

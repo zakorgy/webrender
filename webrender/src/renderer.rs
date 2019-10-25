@@ -94,6 +94,8 @@ use crate::render_task_graph::RenderPassKind;
 use rendy_memory::HeapsConfig;
 #[cfg(not(feature="gl"))]
 use crate::device::{BufferMemorySlice, DrawTargetUsage};
+#[cfg(feature = "replay")]
+use crate::device::IdType;
 #[cfg(not(feature = "gl"))]
 use crate::gpu_cache::BufferInfo;
 use crate::util::drain_filter;
@@ -978,7 +980,10 @@ impl<B: hal::Backend> TextureResolver<B> {
         let dummy_cache_texture = device
             .create_texture(
                 TextureTarget::Array,
+                #[cfg(feature = "gl")]
                 ImageFormat::RGBA8,
+                #[cfg(not(feature = "gl"))]
+                ImageFormat::BGRA8,
                 1,
                 1,
                 TextureFilter::Linear,
@@ -4270,6 +4275,8 @@ impl<B: hal::Backend> Renderer<B> {
                 }
             }
         }
+        #[cfg(not(feature = "gl"))]
+        self.device.begin_render_pass();
 
         self.shaders.borrow_mut().composite.bind(
             &mut self.device,
@@ -4317,6 +4324,8 @@ impl<B: hal::Backend> Renderer<B> {
             );
             self.gpu_profile.finish_sampler(transparent_sampler);
         }
+        #[cfg(not(feature = "gl"))]
+        self.device.end_render_pass();
     }
 
     fn draw_color_target(

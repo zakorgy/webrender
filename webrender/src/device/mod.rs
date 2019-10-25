@@ -452,7 +452,7 @@ impl Texture {
         let ext = ExternalTexture {
             id: self.id,
             target: self.target,
-            swizzle: Swizzle::default(),
+            _swizzle: Swizzle::default(),
         };
         self.id = 0; // don't complain, moved out
         ext

@@ -1514,6 +1514,7 @@ impl<B: hal::Backend> Device<B> {
                 &self.quad_buffer,
                 &self.instance_buffers[self.next_id],
                 self.instance_range.clone(),
+                self.fbos.get(&self.bound_draw_fbo).map_or(self.surface_format, |fbo| fbo.format),
             );
     }
 
