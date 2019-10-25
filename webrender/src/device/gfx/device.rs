@@ -1620,12 +1620,12 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn bind_draw_target(&mut self, texture_target: DrawTarget, usage: DrawTargetUsage) {
-        let (fbo_id, dimensions, depth_available) = match texture_target {
+        let (fbo_id, rect, depth_available) = match texture_target {
             DrawTarget::Default{ rect, total_size } => {
                 if let DrawTargetUsage::CopyOnly = usage {
                     //panic!("We should not have default target with CopyOnly usage!");
                 }
-                (DEFAULT_DRAW_FBO, total_size.to_untyped(), true)
+                (DEFAULT_DRAW_FBO, rect, true)
             },
             DrawTarget::Texture {
                 dimensions,
@@ -1656,8 +1656,12 @@ impl<B: hal::Backend> Device<B> {
                         }
                     }
                 }
+                let rect = FramebufferIntRect::new(
+                    FramebufferIntPoint::zero(),
+                    FramebufferIntSize::from_untyped(dimensions.to_untyped()),
+                );
 
-                (fbo_id, dimensions.to_untyped(), with_depth)
+                (fbo_id, rect, with_depth)
             },
             DrawTarget::External { .. } => unimplemented!("External draw targets are not supported"),
         };
@@ -1665,10 +1669,10 @@ impl<B: hal::Backend> Device<B> {
         self.depth_available = depth_available;
         self.bind_draw_target_impl(fbo_id, usage);
         self.viewport.rect = hal::pso::Rect {
-            x: 0,
-            y: 0,
-            w: dimensions.width as _,
-            h: dimensions.height as _,
+            x: rect.origin.x as i16,
+            y: rect.origin.y as i16,
+            w: rect.size.width as i16,
+            h: rect.size.height as i16,
         };
     }
 

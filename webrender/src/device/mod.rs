@@ -946,7 +946,7 @@ pub(crate) fn create_projection(
         ORTHO_FAR_PLANE,
     );
     if main_frame_buffer && cfg!(not(feature = "gl")) {
-        return projection.post_scale(1.0, -1.0, 1.0);
+        return projection.post_scale(1.0, -1.0, 0.5);
     }
     projection
 }

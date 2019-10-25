@@ -5158,7 +5158,8 @@ impl<B: hal::Backend> Renderer<B> {
 
                         let fb_scale = Scale::<_, _, FramebufferPixel>::new(1i32);
                         let mut fb_rect = frame.device_rect * fb_scale;
-                        fb_rect.origin.y = device_size.height - fb_rect.origin.y - fb_rect.size.height;
+                        #[cfg(feature = "gl")]
+                        { fb_rect.origin.y = device_size.height - fb_rect.origin.y - fb_rect.size.height; }
 
                         let draw_target = DrawTarget::Default {
                             rect: fb_rect,
