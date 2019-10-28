@@ -20,12 +20,12 @@ varying vec2 vLocalPos;
 flat varying vec2 vLayerAndPerspective;
 flat varying float vAmount;
 flat varying int vOp;
-flat varying mat3 vColorMat;
 flat varying vec3 vColorOffset;
 flat varying vec4 vUvClipBounds;
 flat varying int vTableAddress;
-flat varying int vFuncs[4];
 flat varying vec4 vFloodColor;
+flat varying ivec4 vFuncs;
+flat varying mat3 vColorMat;
 
 #ifdef WR_VERTEX_SHADER
 
