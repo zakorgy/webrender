@@ -42,6 +42,7 @@ path = "image_resize.rs"
 [[bin]]
 name = "multiwindow"
 path = "multiwindow.rs"
+required-features = ["gl"]
 
 [[bin]]
 name = "scrolling"
