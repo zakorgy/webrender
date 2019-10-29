@@ -235,6 +235,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                     &mut new_data,
                     &mut vertex_offset,
                     write_ron,
+                    file_name,
                 );
         // Replacing sampler variables with the corresponding expression from sampler_mapping.
         } else if l.contains("TEX_SAMPLE(") || l.contains("TEXEL_FETCH(") || l.contains("TEX_SIZE(")
@@ -400,6 +401,7 @@ fn extend_non_uniform_variables_with_location_info(
     new_data: &mut String,
     vertex_offset: &mut u32,
     write_ron: bool,
+    file_name: &str,
 ) {
     let layout_str;
     let location_size = calculate_location_size(line);
@@ -412,6 +414,7 @@ fn extend_non_uniform_variables_with_location_info(
                 instance_offset,
                 line,
                 vertex_offset,
+                file_name,
             );
         }
         *in_location += location_size;
@@ -445,6 +448,7 @@ fn add_attribute_descriptors(
     instance_offset: &mut u32,
     line: &str,
     vertex_offset: &mut u32,
+    file_name: &str,
 ) {
     let def = split_code(line);
     let var_name = def[2].trim_end_matches(';');
@@ -459,7 +463,20 @@ fn add_attribute_descriptors(
         x => unimplemented!("Case: {} is missing!", x),
     };
     match var_name {
-        "aColor" | "aColorTexCoord" | "aPosition" => {
+        "aColor" if !file_name.starts_with("composite") => {
+            attribute_descriptors.push(
+                AttributeDesc {
+                    location: *in_location,
+                    binding: 0,
+                    element: Element {
+                        format,
+                        offset: *vertex_offset,
+                    }
+                }
+            );
+            *vertex_offset += offset;
+        }
+        "aColorTexCoord" | "aPosition" => {
             attribute_descriptors.push(
                 AttributeDesc {
                     location: *in_location,

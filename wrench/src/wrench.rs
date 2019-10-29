@@ -232,11 +232,11 @@ impl Wrench {
             precache_flags,
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
             chase_primitive,
-            enable_picture_caching: false, // !no_picture_caching
+            enable_picture_caching: !no_picture_caching,
             testing: true,
             max_texture_size: Some(8196), // Needed for rawtest::test_resize_image.
             allow_dual_source_blending: !disable_dual_source_blending,
-            allow_advanced_blend_equation: true,
+            allow_advanced_blend_equation: false, //true,
             dump_shader_source,
             #[cfg(feature = "gfx")]
             heaps_config,

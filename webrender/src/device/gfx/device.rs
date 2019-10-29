@@ -363,7 +363,7 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let limits = adapter.physical_device.limits();
-        let max_texture_size = 4400i32; // TODO use limits after it points to the correct texture size
+        let max_texture_size = limits.max_image_2d_size as i32;
 
         let (device, queue_group_family, queue_group_queues) = {
             use hal::Capability;
