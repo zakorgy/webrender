@@ -224,7 +224,6 @@ void main(void) {
     // to the nearest whole pixel, depending on subpixel direciton.
     switch (subpx_dir) {
         case SUBPX_DIR_NONE:
-        default:
             snap_bias = vec2(0.5);
             break;
         case SUBPX_DIR_HORIZONTAL:
@@ -239,6 +238,9 @@ void main(void) {
             break;
         case SUBPX_DIR_MIXED:
             snap_bias = vec2(0.125);
+            break;
+        default:
+            snap_bias = vec2(0.5);
             break;
     }
 
@@ -267,17 +269,29 @@ void main(void) {
 
     switch (color_mode) {
         case COLOR_MODE_ALPHA:
+            vMaskSwizzle = vec2(0.0, 1.0);
+            vColor = text.color;
+            break;
         case COLOR_MODE_BITMAP:
             vMaskSwizzle = vec2(0.0, 1.0);
             vColor = text.color;
             break;
         case COLOR_MODE_SUBPX_BG_PASS2:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = text.color;
+            break;
         case COLOR_MODE_SUBPX_DUAL_SOURCE:
             vMaskSwizzle = vec2(1.0, 0.0);
             vColor = text.color;
             break;
         case COLOR_MODE_SUBPX_CONST_COLOR:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = vec4(text.color.a);
+            break;
         case COLOR_MODE_SUBPX_BG_PASS0:
+            vMaskSwizzle = vec2(1.0, 0.0);
+            vColor = vec4(text.color.a);
+            break;
         case COLOR_MODE_COLOR_BITMAP:
             vMaskSwizzle = vec2(1.0, 0.0);
             vColor = vec4(text.color.a);

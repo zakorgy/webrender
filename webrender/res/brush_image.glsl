@@ -170,6 +170,8 @@ void brush_vs(
                 image_data.color.a *= opacity;
                 break;
             case BLEND_MODE_PREMUL_ALPHA:
+                image_data.color *= opacity;
+                break;
             default:
                 image_data.color *= opacity;
                 break;
@@ -177,18 +179,33 @@ void brush_vs(
 
         switch (color_mode) {
             case COLOR_MODE_ALPHA:
+                vMaskSwizzle = vec2(0.0, 1.0);
+                vColor = image_data.color;
+                break;
             case COLOR_MODE_BITMAP:
                 vMaskSwizzle = vec2(0.0, 1.0);
                 vColor = image_data.color;
                 break;
             case COLOR_MODE_SUBPX_BG_PASS2:
+                vMaskSwizzle = vec2(1.0, 0.0);
+                vColor = image_data.color;
+                break;
             case COLOR_MODE_SUBPX_DUAL_SOURCE:
+                vMaskSwizzle = vec2(1.0, 0.0);
+                vColor = image_data.color;
+                break;
             case COLOR_MODE_IMAGE:
                 vMaskSwizzle = vec2(1.0, 0.0);
                 vColor = image_data.color;
                 break;
             case COLOR_MODE_SUBPX_CONST_COLOR:
+                vMaskSwizzle = vec2(1.0, 0.0);
+                vColor = vec4(image_data.color.a);
+                break;
             case COLOR_MODE_SUBPX_BG_PASS0:
+                vMaskSwizzle = vec2(1.0, 0.0);
+                vColor = vec4(image_data.color.a);
+                break;
             case COLOR_MODE_COLOR_BITMAP:
                 vMaskSwizzle = vec2(1.0, 0.0);
                 vColor = vec4(image_data.color.a);

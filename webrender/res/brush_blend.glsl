@@ -203,7 +203,15 @@ vec4 ComponentTransfer(vec4 colora) {
         switch (vFuncs[i]) {
             case COMPONENT_TRANSFER_IDENTITY:
                 break;
-            case COMPONENT_TRANSFER_TABLE:
+            case COMPONENT_TRANSFER_TABLE: {
+                // fetch value from lookup table
+                k = int(floor(colora[i]*255.0));
+                texel = fetch_from_gpu_cache_1(vTableAddress + offset + k/4);
+                colora[i] = clamp(texel[k % 4], 0.0, 1.0);
+                // offset plus 256/4 blocks
+                offset = offset + 64;
+                break;
+            }
             case COMPONENT_TRANSFER_DISCRETE: {
                 // fetch value from lookup table
                 k = int(floor(colora[i]*255.0));

@@ -578,6 +578,7 @@ void main(void) {
         case FILTER_COMPOSITE:
             result = composite(Ca, Cb, vData.x);
             needsPremul = false;
+            break;
         default:
             break;
     }
