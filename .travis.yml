@@ -1,0 +1,73 @@
+dist: trusty
+language: rust
+rust:
+  - 1.35.0
+  - nightly
+matrix:
+  fast_finish: true
+  allow_failures:
+  - rust: nightly
+os:
+  - linux
+  - osx
+
+branches:
+  only:
+    - master
+
+addons:
+  apt:
+    sources:
+      - sourceline: 'deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-3.9 main'
+        keyurl: 'http://apt.llvm.org/llvm-snapshot.gpg.key'
+      - sourceline: 'ppa:jonathonf/python-2.7'
+    packages:
+      - libgl1-mesa-dev
+      - llvm-3.9-dev
+      - libedit-dev
+      - python
+env:
+  - BUILD_KIND=DEBUG_GL RUST_BACKTRACE=1 RUSTFLAGS='--deny warnings'
+  - BUILD_KIND=DEBUG_GFX RUST_BACKTRACE=1 RUSTFLAGS='--deny warnings'
+  - BUILD_KIND=RELEASE_GL RUST_BACKTRACE=1 RUSTFLAGS='--deny warnings'
+  - BUILD_KIND=RELEASE_GFX RUST_BACKTRACE=1 RUSTFLAGS='--deny warnings'
+before_install:
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then export LLVM_CONFIG=/usr/lib/llvm-3.9/bin/llvm-config; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew update; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install zlib; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PKG_CONFIG_PATH="/usr/local/opt/zlib/lib/pkgconfig:$PKG_CONFIG_PATH"; fi
+  - pip install virtualenv
+  - virtualenv ../venv
+  - source ../venv/bin/activate
+  - python --version
+  - pip install mako voluptuous PyYAML servo-tidy
+script:
+#  - servo-tidy
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender_api && cargo test --features "ipc"); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features capture,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --features profiler,capture,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --features replay,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features serialize_program,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd wrench && cargo check --features env_logger,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd examples && cargo check --features gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cargo test --all); fi
+
+  - if [ $BUILD_KIND = RELEASE_GL ]; then (cd wrench && python script/headless.py reftest); fi
+  - if [ $BUILD_KIND = RELEASE_GL ]; then (cd wrench && cargo build --release --features=gl); fi
+
+  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features); fi
+  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features --features capture); fi
+  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --features profiler,capture); fi
+  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --features replay); fi
+  # not supported with gfx-hal backend yet
+  # - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features --features serialize_program); fi
+  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd wrench && cargo check --features env_logger,vulkan); fi
+  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd wrench && cargo check --features env_logger,metal); fi
+  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd examples && cargo check --features vulkan); fi
+  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd examples && cargo check --features metal); fi
+  - if [[$BUILD_KIND = RELEASE_GFX] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd wrench && cargo build --release --features vulkan); fi
+  - if [[$BUILD_KIND = RELEASE_GFX] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd wrench && cargo build --release --features metal); fi
+
+  - if [[$TRAVIS_RUST_VERSION == "nightly"] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd webrender && cargo bench --features vulkan); fi
+  - if [[$TRAVIS_RUST_VERSION == "nightly"] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd webrender && cargo bench --features metal); fi
