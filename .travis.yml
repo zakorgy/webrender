@@ -43,6 +43,11 @@ before_install:
   - pip install mako voluptuous PyYAML servo-tidy
 script:
 #  - servo-tidy
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then export BACKEND_TYPE="vulkan"; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export BACKEND_TYPE="metal"; fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then export BACKEND_TYPE="gl"; fi
+  - if [ $BUILD_KIND = RELEASE_GL ]; then export BACKEND_TYPE="gl"; fi
+
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender_api && cargo test --features "ipc"); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features gl); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features capture,gl); fi
@@ -62,12 +67,8 @@ script:
   - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --features replay); fi
   # not supported with gfx-hal backend yet
   # - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features --features serialize_program); fi
-  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd wrench && cargo check --features env_logger,vulkan); fi
-  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd wrench && cargo check --features env_logger,metal); fi
-  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd examples && cargo check --features vulkan); fi
-  - if [[$BUILD_KIND = DEBUG_GFX] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd examples && cargo check --features metal); fi
-  - if [[$BUILD_KIND = RELEASE_GFX] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd wrench && cargo build --release --features vulkan); fi
-  - if [[$BUILD_KIND = RELEASE_GFX] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd wrench && cargo build --release --features metal); fi
+  - if [$BUILD_KIND = DEBUG_GFX]; then (cd wrench && cargo check --features env_logger,$BACKEND_TYPE); fi
+  - if [$BUILD_KIND = DEBUG_GFX]; then (cd examples && cargo check --features $BACKEND_TYPE); fi
+  - if [$BUILD_KIND = RELEASE_GFX]; then (cd wrench && cargo build --release --features $BACKEND_TYPE); fi
 
-  - if [[$TRAVIS_RUST_VERSION == "nightly"] AND [ "$TRAVIS_OS_NAME" == "linux" ]]; then (cd webrender && cargo bench --features vulkan); fi
-  - if [[$TRAVIS_RUST_VERSION == "nightly"] AND [ "$TRAVIS_OS_NAME" == "osx" ]]; then (cd webrender && cargo bench --features metal); fi
+  - if [$TRAVIS_RUST_VERSION == "nightly"]; then (cd webrender && cargo bench --features $BACKEND_TYPE); fi
