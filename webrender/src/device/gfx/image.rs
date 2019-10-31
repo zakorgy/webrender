@@ -220,8 +220,8 @@ impl<B: hal::Backend> Image<B> {
         image_data: &[u8],
         format_override: Option<ImageFormat>,
     ) {
-        if let Some(format_override) = format_override {
-            //panic!("We should use format override {:?}", format_override);
+        if format_override.is_some() {
+            warn!("Format override not implemented");
         }
         let pos = rect.origin;
         let size = rect.size;

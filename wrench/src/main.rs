@@ -39,7 +39,6 @@ cfg_if! {
         mod angle;
         mod egl;
         use gleam::gl;
-        use std::marker::PhantomData;
         use std::os::raw::c_void;
         use std::ptr;
         use std::rc::Rc;

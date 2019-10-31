@@ -305,10 +305,10 @@ impl<B: hal::Backend> Device<B> {
         resource_override_path: Option<PathBuf>,
         upload_method: UploadMethod,
         _cached_programs: Option<Rc<ProgramCache>>,
-        allow_pixel_local_storage_support: bool,
-        allow_texture_storage_support: bool,
-        allow_texture_swizzling: bool,
-        dump_shader_source: Option<String>,
+        _allow_pixel_local_storage_support: bool,
+        _allow_texture_storage_support: bool,
+        _allow_texture_swizzling: bool,
+        _dump_shader_source: Option<String>,
         heaps_config: HeapsConfig,
         instance_buffer_size: usize,
         texture_cache_size: usize,
@@ -766,7 +766,7 @@ impl<B: hal::Backend> Device<B> {
         false
     }
 
-    pub fn enable_pixel_local_storage(&mut self, enable: bool) {
+    pub fn enable_pixel_local_storage(&mut self, _enable: bool) {
         warn!("Pixel local storage not supported");
     }
 
@@ -786,18 +786,19 @@ impl<B: hal::Backend> Device<B> {
         self.optimal_pbo_stride
     }
 
-    pub fn map_pbo_for_readback<'a>(&'a mut self, pbo: &'a PBO) -> Option<BoundPBO<'a, B>> {
+    pub fn map_pbo_for_readback<'a>(&'a mut self, _pbo: &'a PBO) -> Option<BoundPBO<'a, B>> {
+        warn!("map_pbo_for_readback is not implemented");
         None
     }
 
     pub fn read_pixels_into_pbo(
         &mut self,
-        read_target: ReadTarget,
-        rect: DeviceIntRect,
-        format: ImageFormat,
-        pbo: &PBO,
+        _read_target: ReadTarget,
+        _rect: DeviceIntRect,
+        _format: ImageFormat,
+        _pbo: &PBO,
     ) {
-        panic!("read_pixels_into_pbo not implemented");
+        warn!("read_pixels_into_pbo not implemented");
     }
 
     fn load_pipeline_cache(
@@ -1531,7 +1532,7 @@ impl<B: hal::Backend> Device<B> {
         self.frame_id
     }
 
-    fn bind_texture_impl(&mut self, slot: TextureSlot, id: TextureId, sampler: TextureFilter, set_swizzle: Option<Swizzle>) {
+    fn bind_texture_impl(&mut self, slot: TextureSlot, id: TextureId, sampler: TextureFilter, _set_swizzle: Option<Swizzle>) {
         debug_assert!(self.inside_frame);
 
         if self.bound_textures[slot.0] != id {
@@ -1572,7 +1573,7 @@ impl<B: hal::Backend> Device<B> {
         let fbo_id = match read_target {
             ReadTarget::Default => DEFAULT_READ_FBO,
             ReadTarget::Texture { fbo_id } => fbo_id,
-            ReadTarget::External { fbo } => unimplemented!("Extrenal FBO id not supported"),
+            ReadTarget::External { .. } => unimplemented!("Extrenal FBO id not supported"),
         };
         self.bind_read_target_impl(fbo_id)
     }
@@ -1622,7 +1623,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_draw_target(&mut self, texture_target: DrawTarget, usage: DrawTargetUsage) {
         let (fbo_id, rect, depth_available) = match texture_target {
-            DrawTarget::Default{ rect, total_size } => {
+            DrawTarget::Default{ rect, .. } => {
                 if let DrawTargetUsage::CopyOnly = usage {
                     //panic!("We should not have default target with CopyOnly usage!");
                 }
@@ -1632,7 +1633,6 @@ impl<B: hal::Backend> Device<B> {
                 dimensions,
                 layer,
                 with_depth,
-                blit_workaround_buffer,
                 fbo_id,
                 id,
                 ..
@@ -3225,8 +3225,8 @@ impl<B: hal::Backend> Device<B> {
         self.current_blend_state.set(Some(OVERDRAW));
     }
 
-    pub fn set_blend_mode_advanced(&self, mode: MixBlendMode) {
-        panic!("Missing set_blend_mode_advanced");
+    pub fn set_blend_mode_advanced(&self, _mode: MixBlendMode) {
+        panic!("set_blend_mode_advanced is unimplemented");
     }
 
     pub fn supports_features(&self, features: hal::Features) -> bool {
