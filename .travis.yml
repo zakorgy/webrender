@@ -46,14 +46,16 @@ script:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then export BACKEND_TYPE="vulkan"; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export BACKEND_TYPE="metal"; fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then export BACKEND_TYPE="gl"; fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then export BENCH_FEATURES="--features gl"; fi
   - if [ $BUILD_KIND = RELEASE_GL ]; then export BACKEND_TYPE="gl"; fi
+  - if [ $BUILD_KIND = RELEASE_GL ]; then export BENCH_FEATURES="--features gl"; fi
 
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender_api && cargo test --features "ipc"); fi
-  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features gl); fi
-  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features capture,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features gl,serde); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features capture,gl,serde); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --features profiler,capture,gl); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --features replay,gl); fi
-  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features serialize_program,gl); fi
+  - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features serialize_program,gl,serde); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd wrench && cargo check --features env_logger,gl); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd examples && cargo check --features gl); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cargo test --all); fi
@@ -61,8 +63,8 @@ script:
   - if [ $BUILD_KIND = RELEASE_GL ]; then (cd wrench && python script/headless.py reftest); fi
   - if [ $BUILD_KIND = RELEASE_GL ]; then (cd wrench && cargo build --release --features=gl); fi
 
-  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features); fi
-  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features --features capture); fi
+  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features --features serde); fi
+  - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --no-default-features --features capture,serde); fi
   - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --features profiler,capture); fi
   - if [ $BUILD_KIND = DEBUG_GFX ]; then (cd webrender && cargo check --features replay); fi
   # not supported with gfx-hal backend yet
@@ -71,4 +73,4 @@ script:
   - if [$BUILD_KIND = DEBUG_GFX]; then (cd examples && cargo check --features $BACKEND_TYPE); fi
   - if [$BUILD_KIND = RELEASE_GFX]; then (cd wrench && cargo build --release --features $BACKEND_TYPE); fi
 
-  - if [$TRAVIS_RUST_VERSION == "nightly"]; then (cd webrender && cargo bench --features $BACKEND_TYPE); fi
+  - if [$TRAVIS_RUST_VERSION == "nightly"]; then (cd webrender && cargo bench $BENCH_FEATURES); fi
