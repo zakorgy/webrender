@@ -669,14 +669,16 @@ fn main() {
     let init = {
         let cache_dir = dirs::cache_dir().expect("User's cache directory not found");
         let cache_path = Some(PathBuf::from(&cache_dir).join("pipeline_cache.bin"));
-        let instance = back::Instance::create("gfx-rs instance", 1);
+        let instance = back::Instance::create("gfx-rs instance", 1).expect("Instance creation failed");
         let adapter = instance.enumerate_adapters().remove(0);
         let surface = if args.is_present("headless") {
             None
         } else {
-            let surface = instance.create_surface(window.get_window().unwrap());
+            let surface = Some(
+                unsafe { instance.create_surface(window.get_window().unwrap())}.expect("Surface creation failed")
+            );
             dim = window.get_inner_size();
-            Some(surface)
+            surface
         };
 
         #[cfg(feature = "vulkan")]
@@ -687,7 +689,7 @@ fn main() {
         let backend_api = webrender::BackendApiType::Dx12;
 
         webrender::DeviceInit {
-            instance: Box::new(instance),
+            instance,
             adapter,
             surface,
             window_size: (dim.width, dim.height),
