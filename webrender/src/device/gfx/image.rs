@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{units::DeviceIntRect, ImageFormat};
-use hal::{self, Device as BackendDevice};
-use hal::command::RawCommandBuffer;
+use hal::{self, device::Device as BackendDevice};
+use hal::command::CommandBuffer;
 use hal::image::{Layout, Access};
 use hal::pso::PipelineStage;
 use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
