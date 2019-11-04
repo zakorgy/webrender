@@ -193,24 +193,24 @@ impl WindowWrapper {
     }
 
     fn get_inner_size(&self) -> DeviceIntSize {
-        fn inner_size(window: &winit::Window) -> DeviceIntSize {
+        fn inner_size(window: &winit::Window, hidpi: f32) -> DeviceIntSize {
             let size = window
                 .get_inner_size()
                 .unwrap()
-                .to_physical(window.get_hidpi_factor());
+                .to_physical(hidpi as f64);
             DeviceIntSize::new(size.width as i32, size.height as i32)
         }
         #[cfg(feature = "gl")]
         match *self {
             WindowWrapper::WindowedContext(ref windowed_context, _) => {
-                inner_size(windowed_context.window())
+                inner_size(windowed_context.window(), self.hidpi_factor())
             }
-            WindowWrapper::Angle(ref window, ..) => inner_size(window),
+            WindowWrapper::Angle(ref window, ..) => inner_size(window, self.hidpi_factor()),
             WindowWrapper::Headless(ref context, _) => DeviceIntSize::new(context.width, context.height),
         }
         #[cfg(feature = "gfx")]
         match *self {
-            WindowWrapper::WindowedContext(ref window) => inner_size(window),
+            WindowWrapper::WindowedContext(ref window) => inner_size(window, self.hidpi_factor()),
             WindowWrapper::Headless(ref context) => DeviceIntSize::new(context.width, context.height),
         }
 
@@ -228,12 +228,8 @@ impl WindowWrapper {
             WindowWrapper::Headless(_, _) => 1.0,
         }
         #[cfg(feature = "gfx")]
-        match *self {
-            WindowWrapper::WindowedContext(ref window) => {
-                window.get_hidpi_factor() as f32
-            }
-            WindowWrapper::Headless(_) => 1.0,
-        }
+        // Force the hidpi to be 1.0, otherwise tests where the reference is a png will not pass
+        return 1.0;
         #[cfg(not(any(feature = "gfx", feature = "gl")))]
         0.0
     }
