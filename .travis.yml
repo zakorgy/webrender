@@ -58,7 +58,7 @@ script:
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd webrender && cargo check --no-default-features --features serialize_program,gl,serde); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd wrench && cargo check --features env_logger,gl); fi
   - if [ $BUILD_KIND = DEBUG_GL ]; then (cd examples && cargo check --features gl); fi
-  - if [ $BUILD_KIND = DEBUG_GL ]; then (cargo test --all); fi
+  #- if [ $BUILD_KIND = DEBUG_GL ]; then (cargo test --all); fi
 
   - if [ $BUILD_KIND = RELEASE_GL ]; then (cd wrench && python script/headless.py reftest); fi
   - if [ $BUILD_KIND = RELEASE_GL ]; then (cd wrench && cargo build --release --features=gl); fi
