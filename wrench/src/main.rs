@@ -774,6 +774,7 @@ fn main() {
         panic!("Should never have gotten here! {:?}", args);
     };
 
+    wrench.api.shut_down(true);
     wrench.renderer.deinit();
 }
 
