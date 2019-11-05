@@ -344,13 +344,13 @@ impl<B: hal::Backend> Framebuffer<B> {
         let fbo = unsafe {
             if rbo != RBOId(0) {
                 device.create_framebuffer(
-                    render_passes.get_render_pass(texture.format, true),
+                    render_passes.get_render_pass(texture.format, true, false),
                     Some(&image_view).into_iter().chain(depth.into_iter()),
                     extent,
                 )
             } else {
                 device.create_framebuffer(
-                    render_passes.get_render_pass(texture.format, false),
+                    render_passes.get_render_pass(texture.format, false, false),
                     Some(&image_view),
                     extent,
                 )

@@ -3531,7 +3531,9 @@ impl<B: hal::Backend> Renderer<B> {
                             self.device.clear_target(
                                 Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
                                 None,
-                                Some(draw_target.to_framebuffer_rect(rect.to_i32()))
+                                Some(draw_target.to_framebuffer_rect(rect.to_i32())),
+                                #[cfg(not(feature = "gl"))]
+                                false,
                             );
                             0
                         }
@@ -3855,6 +3857,8 @@ impl<B: hal::Backend> Renderer<B> {
                 target.clear_color.map(|c| c.to_array()),
                 Some(1.0),
                 scissor_rect,
+                #[cfg(not(feature = "gl"))]
+                false,
             );
 
             self.device.disable_depth_write();
@@ -4242,9 +4246,13 @@ impl<B: hal::Backend> Renderer<B> {
             match partial_present_mode {
                 Some(PartialPresentMode::Single { dirty_rect }) => {
                     // We have a single dirty rect, so clear only that
-                    self.device.clear_target(clear_color,
-                                             Some(1.0),
-                                             Some(draw_target.to_framebuffer_rect(dirty_rect.to_i32())));
+                    self.device.clear_target(
+                        clear_color,
+                        Some(1.0),
+                        Some(draw_target.to_framebuffer_rect(dirty_rect.to_i32())),
+                        #[cfg(not(feature = "gl"))]
+                        false,
+                    );
                 }
                 Some(PartialPresentMode::Multi) => {
                     // We have a dirty rect per tile, so clear each of them
@@ -4254,17 +4262,25 @@ impl<B: hal::Backend> Renderer<B> {
 
                     for tile in opaque_iter.chain(clear_iter.chain(alpha_iter)) {
                         if !tile.dirty_rect.is_empty() {
-                            self.device.clear_target(clear_color,
-                                                     Some(1.0),
-                                                     Some(draw_target.to_framebuffer_rect(tile.dirty_rect.to_i32())));
+                            self.device.clear_target(
+                                clear_color,
+                                Some(1.0),
+                                Some(draw_target.to_framebuffer_rect(tile.dirty_rect.to_i32())),
+                                #[cfg(not(feature = "gl"))]
+                                false,
+                            );
                         }
                     }
                 }
                 None => {
                     // Partial present is disabled, so clear the entire framebuffer
-                    self.device.clear_target(clear_color,
-                                             Some(1.0),
-                                             None);
+                    self.device.clear_target(
+                        clear_color,
+                        Some(1.0),
+                        None,
+                        #[cfg(not(feature = "gl"))]
+                        true,
+                    );
                 }
             }
         }
@@ -4394,6 +4410,8 @@ impl<B: hal::Backend> Renderer<B> {
                 clear_color,
                 clear_depth,
                 clear_rect,
+                #[cfg(not(feature = "gl"))]
+                target.blits.is_empty()
             );
 
             if clear_depth.is_some() {
@@ -4623,6 +4641,8 @@ impl<B: hal::Backend> Renderer<B> {
                     Some(zero_color),
                     None,
                     Some(draw_target.to_framebuffer_rect(rect)),
+                    #[cfg(not(feature = "gl"))]
+                    false,
                 );
             }
 
@@ -4633,6 +4653,8 @@ impl<B: hal::Backend> Renderer<B> {
                     Some(one_color),
                     None,
                     Some(draw_target.to_framebuffer_rect(rect)),
+                    #[cfg(not(feature = "gl"))]
+                    false,
                 );
             }
         }
@@ -4763,6 +4785,8 @@ impl<B: hal::Backend> Renderer<B> {
                     Some([0.0, 0.0, 0.0, 0.0]),
                     None,
                     Some(draw_target.to_framebuffer_rect(*rect)),
+                    #[cfg(not(feature = "gl"))]
+                    false,
                 );
             }
 
@@ -5188,9 +5212,13 @@ impl<B: hal::Backend> Renderer<B> {
                                     DrawTargetUsage::Draw,
                                 );
                                 self.device.enable_depth_write();
-                                self.device.clear_target(clear_color,
-                                                         Some(1.0),
-                                                         None);
+                                self.device.clear_target(
+                                    clear_color,
+                                    Some(1.0),
+                                    None,
+                                    #[cfg(not(feature = "gl"))]
+                                    true,
+                                );
                             }
 
                             self.draw_color_target(
@@ -5706,6 +5734,8 @@ impl<B: hal::Backend> Renderer<B> {
                     Some(tag_color),
                     None,
                     Some(FramebufferIntRect::from_untyped(&tag_rect.to_untyped())),
+                    #[cfg(not(feature = "gl"))]
+                    false,
                 );
 
                 // Draw the dimensions onto the tag.
@@ -6005,7 +6035,13 @@ impl<B: hal::Backend> Renderer<B> {
                 #[cfg(not(feature="gl"))]
                 DrawTargetUsage::Draw,
             );
-            self.device.clear_target(Some(color), None, None);
+            self.device.clear_target(
+                Some(color),
+                None,
+                None,
+                #[cfg(not(feature = "gl"))]
+                false
+            );
         }
     }
 }

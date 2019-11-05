@@ -188,6 +188,11 @@ impl<B: hal::Backend> Frame<B> {
     }
 }
 
+struct ClearValues {
+    color: ClearValue,
+    depth: Option<ClearValue>,
+}
+
 pub struct Device<B: hal::Backend> {
     pub device: Arc<B::Device>,
     pub heaps: Arc<Mutex<Heaps<B>>>,
@@ -213,6 +218,7 @@ pub struct Device<B: hal::Backend> {
     current_blend_state: Cell<Option<BlendState>>,
     blend_color: Cell<ColorF>,
     current_depth_test: Option<DepthTest>,
+    clear_values: FastHashMap<FBOId, ClearValues>,
     // device state
     programs: FastHashMap<ProgramId, Program<B>>,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
@@ -680,6 +686,7 @@ impl<B: hal::Backend> Device<B> {
             current_frame_id: 0,
             current_blend_state: Cell::new(None),
             current_depth_test: None,
+            clear_values: FastHashMap::default(),
             blend_color: Cell::new(ColorF::new(0.0, 0.0, 0.0, 0.0)),
             _resource_override_path: resource_override_path,
             // This is initialized to 1 by default, but it is reset
@@ -2893,6 +2900,11 @@ impl<B: hal::Backend> Device<B> {
         assert!(!self.inside_render_pass);
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
 
+        let (color_clear, depth_clear) = match self.clear_values.remove(&self.bound_draw_fbo) {
+            Some(ClearValues { color, depth } ) => (Some(color), depth),
+            None => (None, None),
+        };
+
         let (frame_buffer, format) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
             (
                 &self.fbos[&self.bound_draw_fbo].fbo,
@@ -2905,13 +2917,13 @@ impl<B: hal::Backend> Device<B> {
             }
         };
 
-        let render_pass = self.render_passes.get_render_pass(format, self.depth_available);
+        let render_pass = self.render_passes.get_render_pass(format, self.depth_available, color_clear.is_some());
         unsafe {
             self.command_buffer.begin_render_pass(
                 render_pass,
                 frame_buffer,
                 self.viewport.rect,
-                &[],
+                color_clear.into_iter().chain(depth_clear.into_iter()),
                 hal::command::SubpassContents::Inline,
             );
         }
@@ -2980,12 +2992,7 @@ impl<B: hal::Backend> Device<B> {
             };
             (&img.core, fbo.layer_index, dimg)
         } else {
-            let frame = &self.frames[self.current_frame_id];
-            (
-                &frame.image,
-                0,
-                Some(&frame.depth.core),
-            )
+            panic!("This should be handled by attachment load operations");
         };
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
@@ -3065,7 +3072,11 @@ impl<B: hal::Backend> Device<B> {
         color: Option<[f32; 4]>,
         depth: Option<f32>,
         rect: Option<FramebufferIntRect>,
+        can_use_load_op: bool,
     ) {
+        if color.is_none() && depth.is_none() {
+            return;
+        }
         if let Some(mut rect) = rect {
             let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
                 let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture_id]
@@ -3090,7 +3101,27 @@ impl<B: hal::Backend> Device<B> {
             } else {
                 self.clear_target_rect(rect, color, depth);
             }
-        } else {
+        } else if can_use_load_op {
+            let color = color.map(|c| ClearValue { color: ClearColor { float32: c} });
+            let depth = depth.map(|d| ClearValue { depth_stencil: ClearDepthStencil { depth: d, stencil: 0} });
+            if depth.is_some() {
+                assert!(color.is_some());
+            }
+            match self.clear_values.entry(self.bound_draw_fbo) {
+                Entry::Occupied(mut o) => {
+                    let ClearValues { color: old_color, depth: old_depth } = o.get_mut();
+                    if let Some(c) = color {
+                        *old_color = c;
+                    }
+                    if !depth.is_none() {
+                        *old_depth = depth;
+                    }
+                }
+                Entry::Vacant(v) => {
+                    v.insert(ClearValues { color: color.unwrap(), depth });
+                }
+            }
+        }  else {
             self.clear_target_image(color, depth);
         }
     }
