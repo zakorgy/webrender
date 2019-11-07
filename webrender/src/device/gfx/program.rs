@@ -261,7 +261,7 @@ impl<B: hal::Backend> Program<B> {
                 let subpass = hal::pass::Subpass {
                     index: 0,
                     main_pass: render_passes
-                        .get_render_pass(format, depth_enabled, false),
+                        .render_pass(format, depth_enabled, false),
                 };
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
                     shader_entries.clone(),
