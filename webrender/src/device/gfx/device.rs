@@ -843,7 +843,12 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub(crate) fn recreate_swapchain(&mut self, window_size: Option<(i32, i32)>) -> DeviceIntSize {
+    pub(crate) fn recreate_swapchain(&mut self, window_size: Option<(i32, i32)>) -> (bool, DeviceIntSize) {
+        if let Some((width, height)) = window_size {
+            if self.viewport.rect.w as i32 == width && self.viewport.rect.h as i32 == height {
+                return (false, DeviceIntSize::new(self.viewport.rect.w.into(), self.viewport.rect.h.into()))
+            }
+        }
         self.device.wait_idle().unwrap();
 
         let ref mut heaps = *self.heaps.lock().unwrap();
@@ -948,7 +953,7 @@ impl<B: hal::Backend> Device<B> {
         } else {
             self.pipeline_cache = Some(pipeline_cache);
         }
-        DeviceIntSize::new(self.viewport.rect.w.into(), self.viewport.rect.h.into())
+        (true, DeviceIntSize::new(self.viewport.rect.w.into(), self.viewport.rect.h.into()))
     }
 
     fn init_frames_with_surface(

@@ -2731,9 +2731,11 @@ impl<B: hal::Backend> Renderer<B> {
     #[cfg(not(feature = "gl"))]
     pub fn resize(&mut self, window_size: Option<(i32, i32)>) -> DeviceIntSize {
         self.shaders.borrow_mut().reset();
-        let size = self.device.recreate_swapchain(window_size);
-        if let Some(debug_renderer) = self.debug.take() {
-            debug_renderer.deinit(&mut self.device);
+        let (resized, size) = self.device.recreate_swapchain(window_size);
+        if resized {
+            if let Some(debug_renderer) = self.debug.take() {
+                debug_renderer.deinit(&mut self.device);
+            }
         }
         size
     }
