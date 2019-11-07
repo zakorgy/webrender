@@ -684,6 +684,13 @@ pub enum DrawTarget {
         fbo: FBOId,
         size: FramebufferIntSize,
     },
+    /// Used for reading back for gfx-backends
+    ReadBack {
+        /// Target rectangle to draw.
+        rect: FramebufferIntRect,
+        /// Total size of the target.
+        total_size: FramebufferIntSize,
+    },
 }
 
 impl DrawTarget {
@@ -754,7 +761,7 @@ impl DrawTarget {
     /// Returns the dimensions of this draw-target.
     pub fn dimensions(&self) -> DeviceIntSize {
         match *self {
-            DrawTarget::Default { total_size, .. } => DeviceIntSize::from_untyped(total_size.to_untyped()),
+            DrawTarget::Default { total_size, .. } | DrawTarget::ReadBack { total_size, .. }=> DeviceIntSize::from_untyped(total_size.to_untyped()),
             DrawTarget::Texture { dimensions, .. } => dimensions,
             DrawTarget::External { size, .. } => DeviceIntSize::from_untyped(size.to_untyped()),
         }
@@ -763,7 +770,7 @@ impl DrawTarget {
     pub fn to_framebuffer_rect(&self, device_rect: DeviceIntRect) -> FramebufferIntRect {
         let mut fb_rect = FramebufferIntRect::from_untyped(&device_rect.to_untyped());
         match *self {
-            DrawTarget::Default { ref rect, .. } => {
+            DrawTarget::Default { ref rect, .. } | DrawTarget::ReadBack { ref rect, .. } => {
                 if cfg!(feature = "gl") {
                     // perform a Y-flip here
                     fb_rect.origin.y = rect.origin.y + rect.size.height - fb_rect.origin.y - fb_rect.size.height;
@@ -787,7 +794,7 @@ impl DrawTarget {
 
         match scissor_rect {
             Some(scissor_rect) => match *self {
-                DrawTarget::Default { ref rect, .. } => {
+                DrawTarget::Default { ref rect, .. } | DrawTarget::ReadBack { ref rect, .. } => {
                     self.to_framebuffer_rect(scissor_rect.translate(-content_origin.to_vector()))
                         .intersection(rect)
                         .unwrap_or_else(FramebufferIntRect::zero)
@@ -841,6 +848,7 @@ impl From<DrawTarget> for ReadTarget {
                 ReadTarget::Texture { fbo_id },
             DrawTarget::External { fbo, .. } =>
                 ReadTarget::External { fbo },
+            _ => unimplemented!(),
         }
     }
 }
