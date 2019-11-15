@@ -258,6 +258,7 @@ pub struct Device<B: hal::Backend> {
     render_passes: HalRenderPasses<B>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
+    pub dimensions: (i32, i32),
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
     current_blend_state: Cell<Option<BlendState>>,
@@ -463,7 +464,7 @@ impl<B: hal::Backend> Device<B> {
         let (
             frame_depth,
             surface_format,
-            viewport,
+            dimensions,
             frame_count,
         ) = match surface.as_mut() {
             Some(surface) => {
@@ -501,6 +502,16 @@ impl<B: hal::Backend> Device<B> {
                 )*/
                 unimplemented!();
             }
+        };
+
+        let viewport = hal::pso::Viewport {
+            rect: hal::pso::Rect {
+                x: 0,
+                y: 0,
+                w: dimensions.0 as _,
+                h: dimensions.1 as _,
+            },
+            depth: 0.0 .. 1.0,
         };
 
         // Samplers
@@ -718,6 +729,7 @@ impl<B: hal::Backend> Device<B> {
             swapchain_image_layouts,
             frame_count,
             viewport,
+            dimensions,
             sampler_linear,
             sampler_nearest,
             current_blend_state: Cell::new(None),
@@ -813,8 +825,8 @@ impl<B: hal::Backend> Device<B> {
                 let texture = device.create_texture(
                     TextureTarget::Default,
                     ImageFormat::BGRA8,
-                    device.viewport.rect.w as i32,
-                    device.viewport.rect.h as i32,
+                    device.dimensions.0 as i32,
+                    device.dimensions.1 as i32,
                     TextureFilter::Nearest,
                     Some(RenderTargetInfo { has_depth: true }),
                     1,
@@ -898,9 +910,9 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub(crate) fn recreate_swapchain(&mut self, window_size: Option<(i32, i32)>) -> (bool, DeviceIntSize) {
-        if let Some((width, height)) = window_size {
-            if self.viewport.rect.w as i32 == width && self.viewport.rect.h as i32 == height {
-                return (false, DeviceIntSize::new(self.viewport.rect.w.into(), self.viewport.rect.h.into()))
+        if let Some(dimensions) = window_size {
+            if self.dimensions == dimensions {
+                return (false, DeviceIntSize::new(self.dimensions.0, self.dimensions.1))
             }
         }
         let ref mut heaps = *self.heaps.lock().unwrap();
@@ -924,7 +936,7 @@ impl<B: hal::Backend> Device<B> {
         let (
             frame_depth,
             surface_format,
-            viewport,
+            dimensions,
             _frame_count,
         ) = if let Some (ref mut surface) = self.surface {
             Self::init_with_surface(
@@ -973,7 +985,7 @@ impl<B: hal::Backend> Device<B> {
         }
         let old_depth = mem::replace(&mut self.frame_depth, frame_depth);
         old_depth.deinit(self.device.as_ref(), heaps);
-        self.viewport = viewport;
+        self.dimensions = dimensions;
         self.surface_format = surface_format;
         for layout in self.swapchain_image_layouts.iter_mut() {
             *layout = hal::image::Layout::Undefined;
@@ -991,7 +1003,7 @@ impl<B: hal::Backend> Device<B> {
         } else {
             self.pipeline_cache = Some(pipeline_cache);
         }
-        (true, DeviceIntSize::new(self.viewport.rect.w.into(), self.viewport.rect.h.into()))
+        (true, DeviceIntSize::new(self.dimensions.0, self.dimensions.1))
     }
 
     fn init_with_surface(
@@ -1003,7 +1015,7 @@ impl<B: hal::Backend> Device<B> {
     ) -> (
         DepthBuffer<B>,
         ImageFormat,
-        hal::pso::Viewport,
+        (i32, i32),
         usize,
     ) {
         let caps = surface.capabilities(&adapter.physical_device);
@@ -1053,16 +1065,6 @@ impl<B: hal::Backend> Device<B> {
                 .expect("Can't configure swapchain");
         };
 
-        let viewport = hal::pso::Viewport {
-            rect: hal::pso::Rect {
-                x: 0,
-                y: 0,
-                w: window_extent.width as _,
-                h: window_extent.height as _,
-            },
-            depth: 0.0 .. 1.0,
-        };
-
         let depth = DepthBuffer::new(
             device,
             heaps,
@@ -1074,7 +1076,7 @@ impl<B: hal::Backend> Device<B> {
         (
             depth,
             image_format,
-            viewport,
+            (window_extent.width as i32, window_extent.height as i32),
             frame_count,
         )
     }
@@ -2973,7 +2975,7 @@ impl<B: hal::Backend> Device<B> {
             None => (None, None),
         };
 
-        let (render_pass, frame_buffer) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO  {
+        let (render_pass, frame_buffer, rect) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO  {
             let new_layout = if last_main_fbo_pass {
                 self.last_rp_in_frame_reached = true;
                 hal::image::Layout::Present
@@ -2986,6 +2988,12 @@ impl<B: hal::Backend> Device<B> {
                 new_layout,
                 color_clear.is_some(),
             );
+            let rect = hal::pso::Rect {
+                x: 0,
+                y: 0,
+                w: self.dimensions.0 as _,
+                h: self.dimensions.1 as _,
+            };
 
             let frame_buffer = self.frame.as_mut().unwrap().get_or_create_fbo(
                 self.device.as_ref(),
@@ -2993,19 +3001,21 @@ impl<B: hal::Backend> Device<B> {
                 new_layout,
                 color_clear.is_some(),
                 &self.frame_depth.core.view,
-                self.viewport.rect,
+                rect,
                 &render_pass,
             );
             self.swapchain_image_layouts[self.next_id] = new_layout;
             (
                 render_pass,
                 frame_buffer,
+                rect,
             )
         } else {
             let format = self.fbos[&self.bound_draw_fbo].format;
             (
                 self.render_passes.render_pass(format, self.depth_available, color_clear.is_some()),
                 &self.fbos[&self.bound_draw_fbo].fbo,
+                self.viewport.rect,
             )
         };
         //println!("Clear color {:?}, depth clear {:?}", color_clear, depth_clear);
@@ -3014,7 +3024,7 @@ impl<B: hal::Backend> Device<B> {
             self.command_buffer.begin_render_pass(
                 render_pass,
                 frame_buffer,
-                self.viewport.rect,
+                rect,
                 color_clear.into_iter().chain(depth_clear.into_iter()),
                 hal::command::SubpassContents::Inline,
             );
