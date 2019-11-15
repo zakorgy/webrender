@@ -687,6 +687,7 @@ pub enum DrawTarget {
         size: FramebufferIntSize,
     },
     /// Used for reading back for gfx-backends
+    #[cfg(not(feature = "gl"))]
     ReadBack {
         /// Target rectangle to draw.
         rect: FramebufferIntRect,
@@ -763,16 +764,18 @@ impl DrawTarget {
     /// Returns the dimensions of this draw-target.
     pub fn dimensions(&self) -> DeviceIntSize {
         match *self {
-            DrawTarget::Default { total_size, .. } | DrawTarget::ReadBack { total_size, .. }=> DeviceIntSize::from_untyped(total_size.to_untyped()),
+            DrawTarget::Default { total_size, .. } => DeviceIntSize::from_untyped(total_size.to_untyped()),
             DrawTarget::Texture { dimensions, .. } => dimensions,
             DrawTarget::External { size, .. } => DeviceIntSize::from_untyped(size.to_untyped()),
+            #[cfg(not(feature = "gl"))]
+            DrawTarget::ReadBack { total_size, .. } => DeviceIntSize::from_untyped(total_size.to_untyped()),
         }
     }
 
     pub fn to_framebuffer_rect(&self, device_rect: DeviceIntRect) -> FramebufferIntRect {
         let mut fb_rect = FramebufferIntRect::from_untyped(&device_rect.to_untyped());
         match *self {
-            DrawTarget::Default { ref rect, .. } | DrawTarget::ReadBack { ref rect, .. } => {
+            DrawTarget::Default { ref rect, .. } => {
                 if cfg!(feature = "gl") {
                     // perform a Y-flip here
                     fb_rect.origin.y = rect.origin.y + rect.size.height - fb_rect.origin.y - fb_rect.size.height;
@@ -780,6 +783,10 @@ impl DrawTarget {
                 fb_rect.origin.x += rect.origin.x;
             }
             DrawTarget::Texture { .. } | DrawTarget::External { .. } => (),
+            #[cfg(not(feature = "gl"))]
+            DrawTarget::ReadBack { ref rect, .. } => {
+                fb_rect.origin.x += rect.origin.x;
+            }
         }
         fb_rect
     }
@@ -796,13 +803,19 @@ impl DrawTarget {
 
         match scissor_rect {
             Some(scissor_rect) => match *self {
-                DrawTarget::Default { ref rect, .. } | DrawTarget::ReadBack { ref rect, .. } => {
+                DrawTarget::Default { ref rect, .. } => {
                     self.to_framebuffer_rect(scissor_rect.translate(-content_origin.to_vector()))
                         .intersection(rect)
                         .unwrap_or_else(FramebufferIntRect::zero)
                 }
                 DrawTarget::Texture { .. } | DrawTarget::External { .. } => {
                     FramebufferIntRect::from_untyped(&scissor_rect.to_untyped())
+                }
+                #[cfg(not(feature = "gl"))]
+                DrawTarget::ReadBack { ref rect, .. } => {
+                    self.to_framebuffer_rect(scissor_rect.translate(-content_origin.to_vector()))
+                        .intersection(rect)
+                        .unwrap_or_else(FramebufferIntRect::zero)
                 }
             }
             None => {
