@@ -161,6 +161,7 @@ impl<B: hal::Backend> ImageCore<B> {
 pub(super) struct Image<B: hal::Backend> {
     pub(super) core: ImageCore<B>,
     pub(super) kind: hal::image::Kind,
+    pub(super) view_kind: hal::image::ViewKind,
     pub(super) format: ImageFormat,
 }
 
@@ -206,6 +207,7 @@ impl<B: hal::Backend> Image<B> {
         Image {
             core,
             kind,
+            view_kind,
             format: image_format,
         }
     }
