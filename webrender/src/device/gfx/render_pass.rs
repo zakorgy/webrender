@@ -22,8 +22,6 @@ pub(super) struct HalRenderPasses<B: hal::Backend> {
 
     // main target passes
     pub(super) cao_to_present: B::RenderPass,
-    pub(super) present_to_cao: B::RenderPass,
-    pub(super) present_to_present: B::RenderPass,
     pub(super) undef_to_cao: B::RenderPass,
     pub(super) undef_to_present: B::RenderPass,
 }
@@ -63,8 +61,8 @@ impl<B: hal::Backend> HalRenderPasses<B> {
         match (old_layout, new_layout, clear) {
             (Layout::ColorAttachmentOptimal, Layout::ColorAttachmentOptimal, false) => &self.bgra8_depth,
             (Layout::ColorAttachmentOptimal, Layout::Present, false) => &self.cao_to_present,
-            (Layout::Present, Layout::ColorAttachmentOptimal, true) => &self.present_to_cao,
-            (Layout::Present, Layout::Present, true) => &self.present_to_present,
+            (Layout::Present, Layout::ColorAttachmentOptimal, true) => &self.undef_to_cao,
+            (Layout::Present, Layout::Present, true) => &self.undef_to_present,
             (Layout::Undefined, Layout::ColorAttachmentOptimal, true) => &self.undef_to_cao,
             (Layout::Undefined, Layout::Present, true) => &self.undef_to_present,
             conf => unimplemented!("No render pass for configuration {:?}", conf),
@@ -84,8 +82,6 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             device.destroy_render_pass(self.rgbaf32_depth);
 
             device.destroy_render_pass(self.cao_to_present);
-            device.destroy_render_pass(self.present_to_cao);
-            device.destroy_render_pass(self.present_to_present);
             device.destroy_render_pass(self.undef_to_cao);
             device.destroy_render_pass(self.undef_to_present);
         }
@@ -189,30 +185,6 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             ),
             stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
             layouts: Layout::ColorAttachmentOptimal
-                .. Layout::Present,
-        };
-
-        let attachment_present_to_cao = hal::pass::Attachment {
-            format: Some(surface_format),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::Clear,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: Layout::Present
-                .. Layout::ColorAttachmentOptimal,
-        };
-
-        let attachment_present_to_present = hal::pass::Attachment {
-            format: Some(surface_format),
-            samples: 1,
-            ops: hal::pass::AttachmentOps::new(
-                hal::pass::AttachmentLoadOp::Clear,
-                hal::pass::AttachmentStoreOp::Store,
-            ),
-            stencil_ops: hal::pass::AttachmentOps::DONT_CARE,
-            layouts: Layout::Present
                 .. Layout::Present,
         };
 
@@ -368,22 +340,6 @@ impl<B: hal::Backend> HalRenderPasses<B> {
             cao_to_present: unsafe {
                 device.create_render_pass(
                     &[attachment_cao_to_present, attachment_depth],
-                    &[subpass_depth_bgra8.clone()],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            present_to_cao: unsafe {
-                device.create_render_pass(
-                    &[attachment_present_to_cao, attachment_depth_clear.clone()],
-                    &[subpass_depth_bgra8.clone()],
-                    &[],
-                )
-            }
-            .expect("create_render_pass failed"),
-            present_to_present: unsafe {
-                device.create_render_pass(
-                    &[attachment_present_to_present, attachment_depth_clear.clone()],
                     &[subpass_depth_bgra8.clone()],
                     &[],
                 )

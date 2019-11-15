@@ -76,12 +76,6 @@ const HEADLESS_FRAME_COUNT: usize = 1;
 const SURFACE_FORMAT: hal::format::Format = hal::format::Format::Bgra8Unorm;
 const DEPTH_FORMAT: hal::format::Format = hal::format::Format::D32Sfloat;
 
-const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
-    aspects: hal::format::Aspects::COLOR,
-    levels: 0 .. 1,
-    layers: 0 .. 1,
-};
-
 #[derive(PartialEq)]
 pub enum BackendApiType {
     Vulkan,
@@ -194,34 +188,23 @@ impl<B: hal::Backend> Frame<B> {
         viewport_rect: hal::pso::Rect,
         render_passe: &B::RenderPass,
     ) -> &B::Framebuffer {
-        /*if let Some(ref fbo) = self.framebuffers.get(&(
-            old_layout,
-            new_layout,
-            clear,
-        )) {
-            return fbo;
-        }*/
-
-        let image_extent = hal::image::Extent {
-            width: viewport_rect.w as _,
-            height: viewport_rect.h as _,
-            depth: 1,
-        };
-
-        let framebuffer = unsafe {
-            device.create_framebuffer(
-                &render_passe,
-                std::iter::once(self.swapchain_image.borrow()).chain(std::iter::once(depth)),
-                image_extent,
-            )
-        }.expect("Failed to create Framebuffer");
-
-        self.framebuffers.insert((old_layout, new_layout, clear), framebuffer);
-        self.framebuffers.get(&(
-            old_layout,
-            new_layout,
-            clear,
-        )).unwrap()
+        let key = (old_layout, new_layout, clear);
+        if let Entry::Vacant(v) = self.framebuffers.entry(key) {
+            let image_extent = hal::image::Extent {
+                width: viewport_rect.w as _,
+                height: viewport_rect.h as _,
+                depth: 1,
+            };
+            let framebuffer = unsafe {
+                device.create_framebuffer(
+                    &render_passe,
+                    std::iter::once(self.swapchain_image.borrow()).chain(std::iter::once(depth)),
+                    image_extent,
+                )
+            }.expect("Failed to create Framebuffer");
+            v.insert(framebuffer);
+        }
+        &self.framebuffers[&key]
     }
 
     fn deinit(self, device: &B::Device) {
@@ -951,7 +934,7 @@ impl<B: hal::Backend> Device<B> {
             unsafe {
                 self.device
                     .merge_pipeline_caches(&cache, Some(&pipeline_cache))
-                    .expect("merge_pipeline_caches failed");;
+                    .expect("merge_pipeline_caches failed");
                 self.device.destroy_pipeline_cache(pipeline_cache);
             }
         } else {
@@ -1002,10 +985,6 @@ impl<B: hal::Backend> Device<B> {
                     &caps,
                     available_surface_format,
                     window_extent,
-                )
-                .with_image_usage(
-                        hal::image::Usage::TRANSFER_DST
-                        | hal::image::Usage::COLOR_ATTACHMENT,
                 );
 
                 let frame_cunt = swap_config.image_count as usize;
@@ -1586,7 +1565,7 @@ impl<B: hal::Backend> Device<B> {
         let (fbo_id, rect, depth_available) = match texture_target {
             DrawTarget::Default{ rect, .. } => {
                 if let DrawTargetUsage::CopyOnly = usage {
-                    //panic!("We should not have default target with CopyOnly usage!");
+                    panic!("We should not have default target with CopyOnly usage!");
                 }
                 (DEFAULT_DRAW_FBO, rect, true)
             },
@@ -2190,25 +2169,17 @@ impl<B: hal::Backend> Device<B> {
         src_rect: FramebufferIntRect,
         dest_rect: FramebufferIntRect,
     ) {
-        let (src_format, src_layer, view_kind, texture_id, width, height) = if self.bound_read_fbo != DEFAULT_READ_FBO {
+        assert!(self.inside_render_pass);
+        let (src_layer, view_kind, texture_id, width, height) = if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
             let img = &self.images[&fbo.texture_id];
             let hal::image::Extent { width, height, .. } = img.kind.level_extent(0);
             let layer = fbo.layer_index;
-            (img.format, layer, img.view_kind, fbo.texture_id, width, height)
+            (layer, img.view_kind, fbo.texture_id, width, height)
         } else {
             error!("We should not use the main target as blit source");
             return;
         };
-
-        let dest_format = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            let fbo = &self.fbos[&self.bound_draw_fbo];
-            let img = &self.images[&fbo.texture_id];
-            img.format
-        } else {
-            self.surface_format
-        };
-        assert_eq!(src_format, dest_format);
 
         let descriptor_group = (ShaderKind::Service).into();
         let per_draw_bindings = PerDrawBindings(
@@ -2341,7 +2312,6 @@ impl<B: hal::Backend> Device<B> {
         dest_rect: FramebufferIntRect,
         filter: TextureFilter,
     ) {
-        assert!(!self.inside_render_pass);
         debug_assert!(self.inside_frame);
 
         let (src_format, src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
@@ -2353,19 +2323,14 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let (dest_format, dst_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
+            assert!(!self.inside_render_pass);
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
             let layer = fbo.layer_index;
             (img.format, &img.core, layer)
         } else {
             info!("Blitting to main target with shader.");
-            if !self.inside_render_pass {
-                self.begin_render_pass(false);
-                self.blit_with_shader(src_rect, dest_rect);
-                self.end_render_pass();
-            } else {
-                self.blit_with_shader(src_rect, dest_rect);
-            }
+            self.blit_with_shader(src_rect, dest_rect);
             return;
         };
 
@@ -2656,7 +2621,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
 
         match self.upload_method {
-            UploadMethod::Immediate => unimplemented!(),
+            UploadMethod::Immediate => unimplemented!("Immediate upload not implemented"),
             UploadMethod::PixelBuffer(..) => TextureUploader {
                 device: self,
                 texture,
@@ -2665,6 +2630,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn upload_texture_immediate<T: Texel>(&mut self, texture: &Texture, pixels: &[T]) {
+        assert!(!self.inside_render_pass);
         texture.bound_in_frame.set(self.frame_id);
         let len = pixels.len() / texture.layer_count as usize;
         for i in 0 .. texture.layer_count {
@@ -2925,7 +2891,7 @@ impl<B: hal::Backend> Device<B> {
         _format: ImageFormat,
         _output: &mut [u8],
     ) {
-        unimplemented!();
+        unimplemented!("get_tex_image_into not implemented");
     }
 
     /// Attaches the provided texture to the current Read FBO binding.
@@ -2941,7 +2907,7 @@ impl<B: hal::Backend> Device<B> {
         _target: TextureTarget,
         _layer_id: i32,
     ) {
-        unimplemented!();
+        unimplemented!("attach_read_texture_external not implemented");
     }
 
     #[cfg(feature = "capture")]
@@ -3041,6 +3007,12 @@ impl<B: hal::Backend> Device<B> {
         self.inside_frame = false;
 
         self.frame_id.0 += 1;
+    }
+
+    pub fn begin_render_pass_if_not_inside_one(&mut self) {
+        if !self.inside_render_pass {
+            self.begin_render_pass(true);
+        }
     }
 
     pub fn begin_render_pass(&mut self, last_main_fbo_pass: bool) {
@@ -3417,7 +3389,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn set_blend_mode_advanced(&self, _mode: MixBlendMode) {
-        panic!("set_blend_mode_advanced is unimplemented");
+        unimplemented!("set_blend_mode_advanced is unimplemented");
     }
 
     pub fn supports_features(&self, features: hal::Features) -> bool {
@@ -3692,6 +3664,7 @@ impl<'a, B: hal::Backend> TextureUploader<'a, B> {
         format_override: Option<ImageFormat>,
         data: &[T],
     ) -> usize {
+        assert!(!self.device.inside_render_pass);
         let data = unsafe {
             slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * mem::size_of::<T>())
         };

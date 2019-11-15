@@ -3131,7 +3131,7 @@ impl<B: hal::Backend> Renderer<B> {
                 self.owned_external_images.iter().map(|(key, value)| (*key, value.clone()))
             );
 
-            let last_document_index = active_documents.len() - 1;
+            let last_document_index = active_documents.len().max(1) - 1;
             for (doc_index, (document_id, RenderedDocument { ref mut frame, .. })) in active_documents.iter_mut().enumerate() {
                 if self.shared_texture_cache_cleared {
                     assert!(self.documents_seen.contains(&document_id),
@@ -3145,27 +3145,30 @@ impl<B: hal::Backend> Renderer<B> {
                     frame.gpu_cache_frame_id, self.gpu_cache_frame_id);
 
                 #[cfg(not(feature = "gl"))]
-                let has_debug_draw =
-                    self.debug.has_renderer() ||
-                    (
-                        device_size.is_some() &&
+                {
+                    let will_draw_debug =
+                        self.debug.has_renderer() ||
                         (
-                            self.debug_flags.contains(DebugFlags::RENDER_TARGET_DBG)
-                            || self.debug_flags.contains(DebugFlags::TEXTURE_CACHE_DBG)
-                            || self.debug_flags.contains(DebugFlags::GPU_CACHE_DBG)
-                            || self.debug_flags.contains(DebugFlags::ZOOM_DBG)
-                            || self.debug_flags.contains(DebugFlags::EPOCHS)
-                            || self.debug_flags.contains(DebugFlags::PROFILER_DBG)
-                        ) ||
-                        (
-                            self.debug_flags.contains(DebugFlags::NEW_FRAME_INDICATOR)
-                            || self.debug_flags.contains(DebugFlags::NEW_SCENE_INDICATOR)
-                            || self.debug_flags.contains(DebugFlags::SLOW_FRAME_INDICATOR)
-                        )
-                    );
-
-                #[cfg(feature = "gl")]
-                let has_debug_draw = false;
+                            device_size.is_some() &&
+                            (
+                                self.debug_flags.contains(DebugFlags::RENDER_TARGET_DBG)
+                                || self.debug_flags.contains(DebugFlags::TEXTURE_CACHE_DBG)
+                                || self.debug_flags.contains(DebugFlags::GPU_CACHE_DBG)
+                                || self.debug_flags.contains(DebugFlags::ZOOM_DBG)
+                                || self.debug_flags.contains(DebugFlags::EPOCHS)
+                                || self.debug_flags.contains(DebugFlags::PROFILER_DBG)
+                            ) ||
+                            (
+                                self.debug_flags.contains(DebugFlags::NEW_FRAME_INDICATOR)
+                                || self.debug_flags.contains(DebugFlags::NEW_SCENE_INDICATOR)
+                                || self.debug_flags.contains(DebugFlags::SLOW_FRAME_INDICATOR)
+                            )
+                        );
+                    // If we will use debug renderer we preinitilaize it to avoid texture uploads during the last render pass
+                    if will_draw_debug {
+                        let _ = self.debug.get_mut(&mut self.device);
+                    }
+                }
 
                 self.draw_frame(
                     frame,
@@ -3173,7 +3176,6 @@ impl<B: hal::Backend> Renderer<B> {
                     cpu_frame_id,
                     &mut results,
                     doc_index == 0,
-                    !has_debug_draw,
                 );
 
                 if let Some(_) = device_size {
@@ -3301,6 +3303,8 @@ impl<B: hal::Backend> Renderer<B> {
                 let scale = if small_screen { 1.6 } else { 1.0 };
                 debug_renderer.render(&mut self.device, device_size, scale);
             }
+            #[cfg(not(feature="gl"))]
+            self.device.end_render_pass();
             // See comment for texture_resolver.begin_frame() for explanation
             // of why this must be done after all rendering, including debug
             // overlays. The end_frame() call implicitly calls end_pass(), which
@@ -3920,7 +3924,7 @@ impl<B: hal::Backend> Renderer<B> {
         projection: &default::Transform3D<f32>,
         render_tasks: &RenderTaskGraph,
         stats: &mut RendererStats,
-        transit_to_present: bool,
+        _transit_to_present: bool,
     ) {
         let uses_scissor = alpha_batch_container.task_scissor_rect.is_some();
 
@@ -3933,6 +3937,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.set_scissor_rect(scissor_rect)
         }
 
+        #[cfg(not(feature = "gl"))]
+        let mut last_rp;
         if !alpha_batch_container.opaque_batches.is_empty()
             && !self.debug_flags.contains(DebugFlags::DISABLE_OPAQUE_PASS) {
             let _gl = self.gpu_profile.start_marker("opaque batches");
@@ -3943,7 +3949,10 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.enable_depth();
             self.device.enable_depth_write();
             #[cfg(not(feature = "gl"))]
-            self.device.begin_render_pass(transit_to_present && alpha_batch_container.alpha_batches.is_empty());
+            {
+                last_rp = _transit_to_present && alpha_batch_container.alpha_batches.is_empty();
+                self.device.begin_render_pass(last_rp);
+            }
 
             // Draw opaque batches front-to-back for maximum
             // z-buffer efficiency!
@@ -3971,6 +3980,13 @@ impl<B: hal::Backend> Renderer<B> {
                         stats
                     );
                 }
+
+            #[cfg(not(feature = "gl"))]
+            {
+                if !last_rp {
+                    self.device.end_render_pass();
+                }
+            }
             #[cfg(not(feature = "gl"))]
             self.device.end_render_pass();
 
@@ -4003,20 +4019,24 @@ impl<B: hal::Backend> Renderer<B> {
                 );
             }
 
+            #[cfg(not(feature = "gl"))]
             let last_batch_idx = alpha_batch_container.alpha_batches.len().max(1) -1;
-            for (batch_idx, batch) in alpha_batch_container.alpha_batches.iter().enumerate() {
+            for (_batch_idx, batch) in alpha_batch_container.alpha_batches.iter().enumerate() {
                 if should_skip_batch(&batch.key.kind, &self.debug_flags) {
                     continue;
                 }
+                #[cfg(not(feature = "gl"))]
                 let mut blit_in_batch = false;
-                if let BatchKind::Brush(BrushBatchKind::MixBlend { .. }) = batch.key.kind {
-                    blit_in_batch = true;
+                #[cfg(not(feature = "gl"))]
+                let last_batch = _batch_idx == last_batch_idx;
+                #[cfg(not(feature = "gl"))]
+                {
+                    if let BatchKind::Brush(BrushBatchKind::MixBlend { .. }) = batch.key.kind {
+                        blit_in_batch = true;
+                    }
+                    last_rp = last_batch && _transit_to_present && !blit_in_batch;
+                    self.device.begin_render_pass(last_rp);
                 }
-
-                #[cfg(not(feature = "gl"))]
-                let last_batch = batch_idx == last_batch_idx;
-                #[cfg(not(feature = "gl"))]
-                self.device.begin_render_pass(last_batch && transit_to_present && !blit_in_batch);
 
                 self.shaders.borrow_mut()
                     .get(&batch.key, batch.features | BatchFeatures::ALPHA_PASS, self.debug_flags)
@@ -4084,7 +4104,10 @@ impl<B: hal::Backend> Renderer<B> {
                         &render_tasks[backdrop_id],
                     );
                     #[cfg(not(feature = "gl"))]
-                    self.device.begin_render_pass(last_batch && transit_to_present);
+                    {
+                        last_rp = last_batch && _transit_to_present;
+                        self.device.begin_render_pass(last_batch && _transit_to_present);
+                    }
                 }
 
                 let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
@@ -4113,8 +4136,13 @@ impl<B: hal::Backend> Renderer<B> {
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                 }
+
                 #[cfg(not(feature = "gl"))]
-                self.device.end_render_pass();
+                {
+                    if !last_rp {
+                        self.device.end_render_pass();
+                    }
+                }
 
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     prev_blend_mode = BlendMode::None;
@@ -4226,7 +4254,7 @@ impl<B: hal::Backend> Renderer<B> {
         draw_target: DrawTarget,
         projection: &default::Transform3D<f32>,
         results: &mut RenderResults,
-        transit_to_present: bool,
+        _transit_to_present: bool,
     ) {
         let _gm = self.gpu_profile.start_marker("framebuffer");
         let _timer = self.gpu_profile.start_timer(GPU_TAG_COMPOSITE);
@@ -4329,7 +4357,7 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
         #[cfg(not(feature = "gl"))]
-        self.device.begin_render_pass(transit_to_present);
+        self.device.begin_render_pass(_transit_to_present);
 
         self.shaders.borrow_mut().composite.bind(
             &mut self.device,
@@ -4378,7 +4406,11 @@ impl<B: hal::Backend> Renderer<B> {
             self.gpu_profile.finish_sampler(transparent_sampler);
         }
         #[cfg(not(feature = "gl"))]
-        self.device.end_render_pass();
+        {
+            if !_transit_to_present {
+                self.device.end_render_pass();
+            }
+        }
     }
 
     fn draw_color_target(
@@ -4518,9 +4550,12 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
         #[cfg(not(feature = "gl"))]
-        self.device.end_render_pass();
-
-        let last_alpha_batch_index = target.alpha_batch_containers.len() - 1;
+        {
+            if !(transit_to_present && target.alpha_batch_containers.is_empty()) {
+                self.device.end_render_pass();
+            }
+        }
+        let last_alpha_batch_index = target.alpha_batch_containers.len().max(1) - 1;
         for (batch_idx, alpha_batch_container) in target.alpha_batch_containers.iter().enumerate() {
             self.draw_alpha_batch_container(
                 alpha_batch_container,
@@ -5183,7 +5218,6 @@ impl<B: hal::Backend> Renderer<B> {
         frame_id: GpuFrameId,
         results: &mut RenderResults,
         clear_framebuffer: bool,
-        transit_to_present: bool,
     ) {
         // These markers seem to crash a lot on Android, see bug 1559834
         #[cfg(not(target_os = "android"))]
@@ -5268,7 +5302,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 draw_target,
                                 &projection,
                                 results,
-                                transit_to_present,
+                                true,
                             );
                         } else {
                             #[cfg(not(feature = "gl"))] {
@@ -5329,7 +5363,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 &projection,
                                 frame_id,
                                 &mut results.stats,
-                                transit_to_present,
+                                true,
                             );
                         }
                     }
