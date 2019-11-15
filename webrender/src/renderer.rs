@@ -3144,6 +3144,7 @@ impl<B: hal::Backend> Renderer<B> {
                     "Received frame depends on a later GPU cache epoch ({:?}) than one we received last via `UpdateGpuCache` ({:?})",
                     frame.gpu_cache_frame_id, self.gpu_cache_frame_id);
 
+                #[cfg(not(feature = "gl"))]
                 let has_debug_draw =
                     self.debug.has_renderer() ||
                     (
@@ -3162,6 +3163,9 @@ impl<B: hal::Backend> Renderer<B> {
                             || self.debug_flags.contains(DebugFlags::SLOW_FRAME_INDICATOR)
                         )
                     );
+
+                #[cfg(feature = "gl")]
+                let has_debug_draw = false;
 
                 self.draw_frame(
                     frame,
@@ -5239,21 +5243,24 @@ impl<B: hal::Backend> Renderer<B> {
                             total_size: device_size * fb_scale,
                         };
 
+                        #[cfg(not(feature = "gl"))]
                         let draw_target_read_back = DrawTarget::ReadBack {
                             rect: fb_rect,
                             total_size: device_size * fb_scale,
                         };
 
                         if self.enable_picture_caching {
-                            if self.device.readback_supported {
-                                self.composite(
-                                    &frame.composite_state,
-                                    clear_framebuffer,
-                                    draw_target_read_back,
-                                    &projection,
-                                    results,
-                                    false,
-                                );
+                            #[cfg(not(feature = "gl"))] {
+                                if self.device.readback_supported {
+                                    self.composite(
+                                        &frame.composite_state,
+                                        clear_framebuffer,
+                                        draw_target_read_back,
+                                        &projection,
+                                        results,
+                                        false,
+                                    );
+                                }
                             }
                             self.composite(
                                 &frame.composite_state,
@@ -5264,36 +5271,37 @@ impl<B: hal::Backend> Renderer<B> {
                                 transit_to_present,
                             );
                         } else {
-                            if self.device.readback_supported {
-                                if clear_framebuffer {
-                                    let clear_color = self.clear_color.map(|color| color.to_array());
-                                    self.device.bind_draw_target(
+                            #[cfg(not(feature = "gl"))] {
+                                if self.device.readback_supported {
+                                    if clear_framebuffer {
+                                        let clear_color = self.clear_color.map(|color| color.to_array());
+                                        self.device.bind_draw_target(
+                                            draw_target_read_back,
+                                            #[cfg(not(feature="gl"))]
+                                            DrawTargetUsage::Draw,
+                                        );
+                                        self.device.enable_depth_write();
+                                        self.device.clear_target(
+                                            clear_color,
+                                            Some(1.0),
+                                            None,
+                                            #[cfg(not(feature = "gl"))]
+                                            true,
+                                        );
+                                    }
+                                    self.draw_color_target(
                                         draw_target_read_back,
-                                        #[cfg(not(feature="gl"))]
-                                        DrawTargetUsage::Draw,
-                                    );
-                                    self.device.enable_depth_write();
-                                    self.device.clear_target(
-                                        clear_color,
-                                        Some(1.0),
+                                        main_target,
+                                        frame.content_origin,
                                         None,
-                                        #[cfg(not(feature = "gl"))]
-                                        true,
+                                        None,
+                                        &frame.render_tasks,
+                                        &projection,
+                                        frame_id,
+                                        &mut results.stats,
+                                        false,
                                     );
                                 }
-
-                                self.draw_color_target(
-                                    draw_target_read_back,
-                                    main_target,
-                                    frame.content_origin,
-                                    None,
-                                    None,
-                                    &frame.render_tasks,
-                                    &projection,
-                                    frame_id,
-                                    &mut results.stats,
-                                    false,
-                                );
                             }
                             if clear_framebuffer {
                                 let clear_color = self.clear_color.map(|color| color.to_array());
@@ -5311,7 +5319,6 @@ impl<B: hal::Backend> Renderer<B> {
                                     true,
                                 );
                             }
-
                             self.draw_color_target(
                                 draw_target,
                                 main_target,

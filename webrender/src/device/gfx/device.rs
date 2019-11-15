@@ -72,6 +72,7 @@ pub const DEBUG_READ_FBO: FBOId = FBOId(2);
 
 // Frame count if present mode is mailbox
 const MAX_FRAME_COUNT: usize = 3;
+const HEADLESS_FRAME_COUNT: usize = 1;
 const SURFACE_FORMAT: hal::format::Format = hal::format::Format::Bgra8Unorm;
 const DEPTH_FORMAT: hal::format::Format = hal::format::Format::D32Sfloat;
 
@@ -121,7 +122,7 @@ pub struct DeviceInit<B: hal::Backend> {
     pub instance: B::Instance,
     pub adapter: hal::adapter::Adapter<B>,
     pub surface: Option<B::Surface>,
-    pub window_size: (i32, i32),
+    pub dimensions: (i32, i32),
     pub descriptor_count: Option<u32>,
     pub cache_path: Option<PathBuf>,
     pub save_cache: bool,
@@ -375,7 +376,7 @@ impl<B: hal::Backend> Device<B> {
             instance,
             adapter,
             mut surface,
-            window_size,
+            dimensions,
             descriptor_count,
             cache_path,
             save_cache,
@@ -467,43 +468,13 @@ impl<B: hal::Backend> Device<B> {
             surface_format,
             dimensions,
             frame_count,
-        ) = match surface.as_mut() {
-            Some(surface) => {
-                 Self::init_with_surface(
-                    &device,
-                    &mut heaps,
-                    &adapter,
-                    surface,
-                    Some(window_size),
-                )
-            }
-            None => {
-                /*let (
-                    frames,
-                    viewport,
-                ) = Device::init_frames(
-                    &device,
-                    &mut heaps,
-                    hal::image::Extent {
-                        width: window_size.0 as _,
-                        height: window_size.1 as _,
-                        depth: 1,
-                    },
-                    &render_passes,
-                    SURFACE_FORMAT,
-                    FRAME_COUNT_NOT_MAILBOX,
-                    None,
-                );
-                (
-                    None,
-                    ImageFormat::BGRA8,
-                    frames,
-                    viewport,
-                    FRAME_COUNT_NOT_MAILBOX,
-                )*/
-                unimplemented!();
-            }
-        };
+        ) = Self::init_drawables(
+            &device,
+            &mut heaps,
+            &adapter,
+            surface.as_mut(),
+            dimensions,
+        );
 
         let viewport = hal::pso::Viewport {
             rect: hal::pso::Rect {
@@ -821,7 +792,7 @@ impl<B: hal::Backend> Device<B> {
             readback_supported,
         };
 
-        if readback_supported {
+        if readback_supported || device.headless_mode() {
             device.inside_frame = true;
             for _ in 0 .. device.frame_count {
                 let texture = device.create_texture(
@@ -955,48 +926,14 @@ impl<B: hal::Backend> Device<B> {
             surface_format,
             dimensions,
             _frame_count,
-        ) = if let Some (ref mut surface) = self.surface {
-            Self::init_with_surface(
-                self.device.as_ref(),
-                heaps,
-                &self.adapter,
-                surface,
-                window_size,
-            )
-        } else {
-            /*let extent = window_size.map_or(
-                hal::image::Extent {
-                    width: 0,
-                    height: 0,
-                    depth: 1,
-                }, |w| {
-                    hal::image::Extent {
-                        width: w.0 as _,
-                        height: w.1 as _,
-                        depth: 1,
-                    }
-                });
-            let (
-                frames,
-                viewport,
-            ) = Device::init_frames(
-                self.device.as_ref(),
-                heaps,
-                extent,
-                &self.render_passes,
-                SURFACE_FORMAT,
-                FRAME_COUNT_NOT_MAILBOX,
-                None,
-            );
-            (
-                None,
-                ImageFormat::BGRA8,
-                frames,
-                viewport,
-                FRAME_COUNT_NOT_MAILBOX,
-            )*/
-            unimplemented!();
-        };
+        ) = Self::init_drawables(
+            self.device.as_ref(),
+            heaps,
+            &self.adapter,
+            self.surface.as_mut(),
+            window_size.unwrap_or(self.dimensions),
+        );
+
         if let Some(old_frame) = self.frame.take() {
             old_frame.deinit(self.device.as_ref());
         }
@@ -1023,176 +960,86 @@ impl<B: hal::Backend> Device<B> {
         (true, DeviceIntSize::new(self.dimensions.0, self.dimensions.1))
     }
 
-    fn init_with_surface(
+    fn init_drawables(
         device: &B::Device,
         heaps: &mut Heaps<B>,
         adapter: &hal::adapter::Adapter<B>,
-        surface: &mut B::Surface,
-        window_size: Option<(i32, i32)>,
+        mut surface: Option<&mut B::Surface>,
+        dimensions: (i32, i32),
     ) -> (
         DepthBuffer<B>,
         ImageFormat,
         (i32, i32),
         usize,
     ) {
-        let caps = surface.capabilities(&adapter.physical_device);
-        let formats = surface.supported_formats(&adapter.physical_device);
-        let available_surface_format = formats.map_or(SURFACE_FORMAT, |formats| {
-            formats
-                .into_iter()
-                .find(|format| format == &SURFACE_FORMAT)
-                .expect(&format!("{:?} surface is not supported!", SURFACE_FORMAT))
-        });
+        let (surface_format, extent, frame_count) = match surface.as_mut() {
+            Some(ref mut surface) => {
+                let caps = surface.capabilities(&adapter.physical_device);
+                let formats = surface.supported_formats(&adapter.physical_device);
+                let available_surface_format = formats.map_or(SURFACE_FORMAT, |formats| {
+                    formats
+                        .into_iter()
+                        .find(|format| format == &SURFACE_FORMAT)
+                        .expect(&format!("{:?} surface is not supported!", SURFACE_FORMAT))
+                });
+                let surface_format = match available_surface_format {
+                    SURFACE_FORMAT => ImageFormat::BGRA8,
+                    f => unimplemented!("Unsupported surface format: {:?}", f),
+                };
 
-        let image_format = match available_surface_format {
-            SURFACE_FORMAT => ImageFormat::BGRA8,
-            f => unimplemented!("Unsupported surface format: {:?}", f),
+                let window_extent = hal::window::Extent2D {
+                    width: (dimensions.0 as u32)
+                            .min(caps.extents.end().width)
+                            .max(caps.extents.start().width)
+                            .max(1),
+                    height: (dimensions.1 as u32)
+                            .min(caps.extents.end().height)
+                            .max(caps.extents.start().height)
+                            .max(1),
+                };
+
+                let swap_config = SwapchainConfig::from_caps(
+                    &caps,
+                    available_surface_format,
+                    window_extent,
+                )
+                .with_image_usage(
+                        hal::image::Usage::TRANSFER_DST
+                        | hal::image::Usage::COLOR_ATTACHMENT,
+                );
+
+                let frame_cunt = swap_config.image_count as usize;
+                unsafe {
+                    surface.configure_swapchain(&device, swap_config)
+                    .expect("Can't configure swapchain");
+                };
+                (surface_format, window_extent, frame_cunt)
+            }
+            None => {
+                let extent = hal::window::Extent2D {
+                    width: dimensions.0 as u32,
+                    height: dimensions.1 as u32,
+                };
+                (ImageFormat::BGRA8, extent, HEADLESS_FRAME_COUNT)
+            }
         };
-
-        let ext = caps.current_extent.unwrap_or(hal::window::Extent2D { width: 1, height: 1 });
-        let ext = (ext.width as i32, ext.height as i32);
-        let window_extent =
-            hal::window::Extent2D {
-                width: (window_size.unwrap_or(ext).0 as u32)
-                        .min(caps.extents.end().width)
-                        .max(caps.extents.start().width)
-                        .max(1),
-                height: (window_size.unwrap_or(ext).1 as u32)
-                        .min(caps.extents.end().height)
-                        .max(caps.extents.start().height)
-                        .max(1),
-            };
-
-        let swap_config = SwapchainConfig::from_caps(
-            &caps,
-            available_surface_format,
-            window_extent,
-        )
-        .with_image_usage(
-                hal::image::Usage::TRANSFER_DST
-                | hal::image::Usage::COLOR_ATTACHMENT,
-        );
-
-        let frame_count = swap_config.image_count as usize;
-
         info!("Frame count {}", frame_count);
-
-        unsafe {
-            surface.configure_swapchain(&device, swap_config)
-                .expect("Can't configure swapchain");
-        };
 
         let depth = DepthBuffer::new(
             device,
             heaps,
-            window_extent.width,
-            window_extent.height,
+            extent.width,
+            extent.height,
             DEPTH_FORMAT,
         );
 
         (
             depth,
-            image_format,
-            (window_extent.width as i32, window_extent.height as i32),
+            surface_format,
+            (extent.width as i32, extent.height as i32),
             frame_count,
         )
     }
-
-    /*fn init_frames(
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
-        extent: hal::image::Extent,
-        render_passes: &HalRenderPasses<B>,
-        surface_format: hal::format::Format,
-        frame_count: usize,
-        images: Option<Vec<B::Image>>
-    ) -> (
-        ArrayVec<[Frame<B>; MAX_FRAME_COUNT]>,
-        hal::pso::Viewport,
-    ) {
-        let kind = hal::image::Kind::D2(
-            extent.width as _,
-            extent.height as _,
-            extent.depth as _,
-            1,
-        );
-        let frame_images: ArrayVec<[ImageCore<B>; MAX_FRAME_COUNT]> = match images {
-            Some(images) => {
-                images.into_iter().map(|image| {
-                    ImageCore::from_image(
-                        device,
-                        image,
-                        hal::image::ViewKind::D2Array,
-                        kind,
-                        surface_format,
-                        COLOR_RANGE,
-                    )
-                }).collect()
-            },
-            None => {
-                (0 .. frame_count).into_iter().map(|_| {
-                    ImageCore::create(
-                        device,
-                        heaps,
-                        kind,
-                        hal::image::ViewKind::D2Array,
-                        1,
-                        surface_format,
-                        hal::image::Usage::TRANSFER_SRC
-                            | hal::image::Usage::TRANSFER_DST
-                            | hal::image::Usage::COLOR_ATTACHMENT,
-                        COLOR_RANGE,
-                    )
-                }).collect()
-            },
-        };
-        let frames = frame_images.into_iter().map(|image| {
-            let depth = DepthBuffer::new(
-                device,
-                heaps,
-                extent.width,
-                extent.height,
-                DEPTH_FORMAT,
-            );
-            let framebuffer = unsafe {
-                device.create_framebuffer(
-                    &render_passes.bgra8,
-                    Some(&image.view),
-                    extent,
-                )
-            }
-            .expect("create_framebuffer failed");
-
-            let framebuffer_depth = unsafe {
-                device.create_framebuffer(
-                    &render_passes.bgra8_depth,
-                    vec![&image.view, &depth.core.view],
-                    extent,
-                )
-            }
-            .expect("create_framebuffer failed");
-            Frame {
-                image,
-                depth,
-                framebuffer,
-                framebuffer_depth,
-            }
-        }).collect();
-        let viewport = hal::pso::Viewport {
-            rect: hal::pso::Rect {
-                x: 0,
-                y: 0,
-                w: extent.width as _,
-                h: extent.height as _,
-            },
-            depth: 0.0 .. 1.0,
-        };
-
-        (
-            frames,
-            viewport,
-        )
-    }*/
 
     pub fn set_device_pixel_ratio(&mut self, ratio: f32) {
         self.device_pixel_ratio = ratio;
@@ -1223,6 +1070,10 @@ impl<B: hal::Backend> Device<B> {
         &self.capabilities
     }
 
+    fn headless_mode(&self) -> bool {
+        self.surface.is_none()
+    }
+
     fn reset_next_frame_resources(&mut self) {
         let prev_id = self.next_id;
         self.next_id = (self.next_id + 1) % self.frame_count;
@@ -1242,11 +1093,13 @@ impl<B: hal::Backend> Device<B> {
         }
         unsafe {
             self.command_pools[self.next_id].reset();
-            let old_buffer = mem::replace(
-                &mut self.command_buffer,
-                self.command_pools[self.next_id].remove_cmd_buffer()
-            );
-            self.command_pools[prev_id].return_cmd_buffer(old_buffer);
+            if self.frame_count != 1 {
+                let old_buffer = mem::replace(
+                    &mut self.command_buffer,
+                    self.command_pools[self.next_id].remove_cmd_buffer()
+                );
+                self.command_pools[prev_id].return_cmd_buffer(old_buffer);
+            }
             Self::begin_cmd_buffer(&mut self.command_buffer);
         }
         self.staging_buffer_pool[self.next_id].reset();
@@ -1689,6 +1542,11 @@ impl<B: hal::Backend> Device<B> {
     fn bind_draw_target_impl(&mut self, fbo_id: FBOId, usage: DrawTargetUsage) {
         debug_assert!(self.inside_frame);
 
+        let fbo_id = if fbo_id == DEFAULT_DRAW_FBO && self.headless_mode() {
+            self.readback_textures[self.next_id].fbos_with_depth[0]
+        } else {
+            fbo_id
+        };
         self.draw_target_usage = usage;
         if self.bound_draw_fbo != fbo_id {
             let old_fbo_id = mem::replace(&mut self.bound_draw_fbo, fbo_id);
@@ -3238,7 +3096,6 @@ impl<B: hal::Backend> Device<B> {
                 self.viewport.rect,
             )
         };
-        //println!("Clear color {:?}, depth clear {:?}", color_clear, depth_clear);
 
         unsafe {
             self.command_buffer.begin_render_pass(
@@ -3590,27 +3447,21 @@ impl<B: hal::Backend> Device<B> {
             }
         }
         unsafe {
-            match self.surface.as_mut() {
-                Some(surface) => {
-                    if self.frame.is_some() {
-                        return;
-                    }
-                    match surface.acquire_image(!0) {
-                        Ok((swapchain_image, suboptimal)) => {
-                            if suboptimal.is_some() {
-                                warn!("The swapchain no longer matches the surface, but we still can use it.");
-                            }
-                            self.frame = Some(Frame::new(swapchain_image));
-                        }
-                        Err(acquire_error) => {
-                            error!("Acquire error {:?}, recrating swapchian.", acquire_error);
-                            self.recreate_swapchain(None);
-                        }
-                    }
+            if let Some(ref mut surface) = self.surface.as_mut() {
+                if self.frame.is_some() {
+                    return;
                 }
-                None => {
-                    //self.current_frame_id = (self.current_frame_id + 1) % self.frame_count;
-                     unimplemented!("Headless mode not yet implemented!!!");
+                match surface.acquire_image(!0) {
+                    Ok((swapchain_image, suboptimal)) => {
+                        if suboptimal.is_some() {
+                            warn!("The swapchain no longer matches the surface, but we still can use it.");
+                        }
+                        self.frame = Some(Frame::new(swapchain_image));
+                    }
+                    Err(acquire_error) => {
+                        error!("Acquire error {:?}, recrating swapchian.", acquire_error);
+                        self.recreate_swapchain(None);
+                    }
                 }
             }
         }
