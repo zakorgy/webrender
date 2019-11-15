@@ -612,10 +612,12 @@ pub enum ShaderKind {
     VectorCover,
     Resolve,
     Composite,
-    #[cfg(all(not(feature = "gl")))]
+    #[cfg(not(feature = "gl"))]
     DebugColor,
-    #[cfg(all(not(feature = "gl")))]
+    #[cfg(not(feature = "gl"))]
     DebugFont,
+    #[cfg(not(feature = "gleam"))]
+    Service,
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Copy, Clone)]
