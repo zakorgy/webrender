@@ -1054,7 +1054,11 @@ impl<B: hal::Backend> TextureResolver<B> {
                     return true;
                 }
             }
-            texture.used_recently(frame_id, 30)
+            #[cfg(not(feature = "gl"))]
+            let frame_treshold = 2;
+            #[cfg(feature = "gl")]
+            let frame_treshold = 30;
+            texture.used_recently(frame_id, frame_treshold)
         });
     }
 
