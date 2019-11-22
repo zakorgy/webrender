@@ -3176,6 +3176,7 @@ impl<B: hal::Backend> Renderer<B> {
                     cpu_frame_id,
                     &mut results,
                     doc_index == 0,
+                    doc_index == last_document_index,
                 );
 
                 if let Some(_) = device_size {
@@ -3987,8 +3988,6 @@ impl<B: hal::Backend> Renderer<B> {
                     self.device.end_render_pass();
                 }
             }
-            #[cfg(not(feature = "gl"))]
-            self.device.end_render_pass();
 
             self.device.disable_depth_write();
             self.gpu_profile.finish_sampler(opaque_sampler);
@@ -5218,6 +5217,7 @@ impl<B: hal::Backend> Renderer<B> {
         frame_id: GpuFrameId,
         results: &mut RenderResults,
         clear_framebuffer: bool,
+        last_document: bool,
     ) {
         // These markers seem to crash a lot on Android, see bug 1559834
         #[cfg(not(target_os = "android"))]
@@ -5286,6 +5286,7 @@ impl<B: hal::Backend> Renderer<B> {
                         if self.enable_picture_caching {
                             #[cfg(not(feature = "gl"))] {
                                 if self.device.readback_supported {
+                                    let draw_calls = results.stats.total_draw_calls;
                                     self.composite(
                                         &frame.composite_state,
                                         clear_framebuffer,
@@ -5294,6 +5295,7 @@ impl<B: hal::Backend> Renderer<B> {
                                         results,
                                         false,
                                     );
+                                    results.stats.total_draw_calls = draw_calls;
                                 }
                             }
                             self.composite(
@@ -5302,7 +5304,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 draw_target,
                                 &projection,
                                 results,
-                                true,
+                                last_document,
                             );
                         } else {
                             #[cfg(not(feature = "gl"))] {
@@ -5323,6 +5325,7 @@ impl<B: hal::Backend> Renderer<B> {
                                             true,
                                         );
                                     }
+                                    let draw_calls = results.stats.total_draw_calls;
                                     self.draw_color_target(
                                         draw_target_read_back,
                                         main_target,
@@ -5335,6 +5338,7 @@ impl<B: hal::Backend> Renderer<B> {
                                         &mut results.stats,
                                         false,
                                     );
+                                    results.stats.total_draw_calls = draw_calls;
                                 }
                             }
                             if clear_framebuffer {
@@ -5363,7 +5367,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 &projection,
                                 frame_id,
                                 &mut results.stats,
-                                true,
+                                last_document,
                             );
                         }
                     }
@@ -6411,7 +6415,7 @@ impl Default for RendererOptions {
             #[cfg(not(feature = "gl"))]
             texture_cache_size: 16 << 20,
             #[cfg(not(feature = "gl"))]
-            readback_supported: true,
+            readback_supported: false,
         }
     }
 }
