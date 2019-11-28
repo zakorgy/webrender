@@ -349,6 +349,7 @@ impl<B: hal::Backend> Buffer<B> {
         dst_offset: u64,
         size: u64,
     ) {
+        println!("\tSrc offset {}, dst offset {}, size {}", src_offset, dst_offset, size);
         let barriers = self.transit(hal::buffer::Access::TRANSFER_WRITE)
             .into_iter().chain(src.transit(hal::buffer::Access::TRANSFER_READ));
 
@@ -602,6 +603,7 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
             mask,
         );
         let mut src_offset = staging_buffer_pool.buffer_offset;
+        let mut dst_offset =
 
         let dst_buffer = staging_buffer_pool.buffer();
         let mut remaining_data = instance_data.len();
@@ -634,12 +636,13 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
 
             let update_size_in_bytes = update_size * data_stride;
 
+            println!("next_buffer_index {}, data stride {}", self.next_buffer_index, data_stride);
             self.current_buffer().buffer.copy_from(
                 device,
                 cmd_buffer,
                 staging_buffer_pool.buffer(),
                 src_offset as u64,
-                self.current_buffer().offset as u64,
+                (self.current_buffer().offset * data_stride) as u64,
                 update_size_in_bytes as u64,
             );
             src_offset += update_size_in_bytes;

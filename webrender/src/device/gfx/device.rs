@@ -1437,6 +1437,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn update_instances<T: Copy>(&mut self, instances: &[T]) {
+        println!("Next id {}", self.next_id);
         self.instance_buffer_range = self.instance_buffers[self.next_id].add(
             self.device.as_ref(),
             instances,
