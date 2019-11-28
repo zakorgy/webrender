@@ -4,6 +4,7 @@
 
 use hal;
 use hal::device::Device as BackendDevice;
+use hal::command::CommandBuffer;
 use rendy_memory::{Block, Heaps, Kind, MappedRange, MemoryBlock, MemoryUsage, MemoryUsageValue, Write};
 
 use std::cell::Cell;
@@ -339,6 +340,37 @@ impl<B: hal::Backend> Buffer<B> {
         size as usize
     }
 
+    fn copy_from(
+        &self,
+        device: &B::Device,
+        cmd_buffer: &mut B::CommandBuffer,
+        src: &Buffer<B>,
+        src_offset: u64,
+        dst_offset: u64,
+        size: u64,
+    ) {
+        let barriers = self.transit(hal::buffer::Access::TRANSFER_WRITE)
+            .into_iter().chain(src.transit(hal::buffer::Access::TRANSFER_READ));
+
+        unsafe {
+            cmd_buffer.pipeline_barrier(
+                hal::pso::PipelineStage::TRANSFER..hal::pso::PipelineStage::TRANSFER,
+                hal::memory::Dependencies::empty(),
+                barriers,
+            );
+
+            cmd_buffer.copy_buffer(
+                &src.buffer,
+                &self.buffer,
+                Some(hal::command::BufferCopy {
+                    src: src_offset,
+                    dst: dst_offset,
+                    size,
+                }),
+            );
+        }
+    }
+
     pub(super) fn transit(&self, access: hal::buffer::Access) -> Option<hal::memory::Barrier<B>> {
         let src_state = self.state.get();
         if src_state == access {
@@ -465,7 +497,7 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         let buffer = Buffer::new(
             device,
             heaps,
-            MemoryUsageValue::Dynamic,
+            MemoryUsageValue::Data,
             buffer_usage,
             alignment_mask,
             size,
@@ -480,15 +512,9 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         }
     }
 
-    fn update(&mut self, device: &B::Device, data: &[u8], last_data_stride: usize) {
-        self.buffer.update(
-            device,
-            data,
-            self.offset,
-            self.non_coherent_atom_size_mask as u64,
-        );
+    fn update(&mut self, device: &B::Device, data_len: usize, last_data_stride: usize) {
         self.last_data_stride = last_data_stride;
-        self.last_update_size = data.len();
+        self.last_update_size = data_len;
         self.offset += self.last_update_size;
     }
 
@@ -552,6 +578,8 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
         mut instance_data: &[T],
         heaps: &mut Heaps<B>,
         free_buffers: &mut Vec<InstancePoolBuffer<B>>,
+        cmd_buffer: &mut B::CommandBuffer,
+        staging_buffer_pool: &mut BufferPool<B>,
     ) -> std::ops::Range<usize> {
         fn instance_data_to_u8_slice<T: Copy>(data: &[T]) -> &[u8] {
             unsafe {
@@ -565,7 +593,19 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
         let data_stride = mem::size_of::<T>();
         let mut range = 0..0;
         let mut first_iteration = true;
-        while !instance_data.is_empty() {
+
+        let mask = (data_stride - 1).next_power_of_two() - 1;
+
+        staging_buffer_pool.add(
+            device,
+            instance_data_to_u8_slice(instance_data),
+            mask,
+        );
+        let mut src_offset = staging_buffer_pool.buffer_offset;
+
+        let dst_buffer = staging_buffer_pool.buffer();
+        let mut remaining_data = instance_data.len();
+        while remaining_data != 0 {
             let need_new_buffer =
                 self.buffers.is_empty() || !self.current_buffer().can_store_data(data_stride);
             if need_new_buffer {
@@ -590,13 +630,26 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
                 first_iteration = false;
             }
             let update_size =
-                (self.current_buffer().space_left() / data_stride).min(instance_data.len());
+                (self.current_buffer().space_left() / data_stride).min(remaining_data);
+
+            let update_size_in_bytes = update_size * data_stride;
+
+            self.current_buffer().buffer.copy_from(
+                device,
+                cmd_buffer,
+                staging_buffer_pool.buffer(),
+                src_offset as u64,
+                self.current_buffer().offset as u64,
+                update_size_in_bytes as u64,
+            );
+            src_offset += update_size_in_bytes;
+
             self.current_buffer_mut().update(
                 device,
-                instance_data_to_u8_slice(&instance_data[0..update_size]),
+                update_size, //instance_data_to_u8_slice(&instance_data[0..update_size]),
                 data_stride,
             );
-            instance_data = &instance_data[update_size..];
+            remaining_data -= update_size;
         }
         range.end = self.next_buffer_index;
         range

@@ -1442,6 +1442,8 @@ impl<B: hal::Backend> Device<B> {
             instances,
             &mut *self.heaps.lock().unwrap(),
             &mut self.free_instance_buffers,
+            &mut self.command_buffer,
+            &mut self.staging_buffer_pool[self.next_id],
         );
     }
 
