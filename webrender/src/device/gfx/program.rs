@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorF, ImageFormat, units::FramebufferIntRect};
+use api::{ColorF, ImageFormat};
 use hal::{self, device::Device as BackendDevice};
 use hal::command::CommandBuffer;
 use crate::internal_types::FastHashMap;
@@ -608,7 +608,6 @@ impl<B: hal::Backend> Program<B> {
     pub(super) fn submit(
         &mut self,
         cmd_buffer: &mut B::CommandBuffer,
-        viewport: hal::pso::Viewport,
         desc_set_per_draw: &B::DescriptorSet,
         desc_set_per_pass: Option<&B::DescriptorSet>,
         desc_set_per_frame: &B::DescriptorSet,
@@ -617,7 +616,6 @@ impl<B: hal::Backend> Program<B> {
         blend_color: ColorF,
         depth_test: Option<hal::pso::DepthTest>,
         render_pass_depth_state: RenderPassDepthState,
-        scissor_rect: Option<FramebufferIntRect>,
         next_id: usize,
         pipeline_layout: &B::PipelineLayout,
         use_push_consts: bool,
@@ -638,19 +636,6 @@ impl<B: hal::Backend> Program<B> {
                     0,
                     &self.constants,
                 );
-            }
-            cmd_buffer.set_viewports(0, &[viewport.clone()]);
-            match scissor_rect {
-                Some(r) => cmd_buffer.set_scissors(
-                    0,
-                    &[hal::pso::Rect {
-                        x: r.origin.x as _,
-                        y: r.origin.y as _,
-                        w: r.size.width as _,
-                        h: r.size.height as _,
-                    }],
-                ),
-                None => cmd_buffer.set_scissors(0, &[viewport.rect]),
             }
             cmd_buffer.bind_graphics_pipeline(
                 &self

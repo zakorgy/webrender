@@ -248,6 +248,8 @@ pub struct Device<B: hal::Backend> {
     render_passes: HalRenderPasses<B>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
+    scissor_rect: hal::pso::Rect,
+    scissor_enabled: bool,
     pub dimensions: (i32, i32),
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
@@ -293,7 +295,6 @@ pub struct Device<B: hal::Backend> {
     bound_read_fbo: FBOId,
     bound_draw_fbo: FBOId,
     draw_target_usage: DrawTargetUsage,
-    scissor_rect: Option<FramebufferIntRect>,
     //default_read_fbo: FBOId,
     //default_draw_fbo: FBOId,
     device_pixel_ratio: f32,
@@ -727,7 +728,9 @@ impl<B: hal::Backend> Device<B> {
             frame_depth,
             swapchain_image_layouts,
             frame_count,
+            scissor_rect: viewport.rect,
             viewport,
+            scissor_enabled: false,
             dimensions,
             sampler_linear,
             sampler_nearest,
@@ -787,7 +790,6 @@ impl<B: hal::Backend> Device<B> {
             bound_read_texture: (INVALID_TEXTURE_ID, 0),
             bound_draw_fbo: DEFAULT_DRAW_FBO,
             draw_target_usage: DrawTargetUsage::Draw,
-            scissor_rect: None,
 
             max_texture_size,
             _renderer_name: renderer_name,
@@ -1485,7 +1487,6 @@ impl<B: hal::Backend> Device<B> {
             .expect("Program not found")
             .submit(
                 &mut self.command_buffer,
-                self.viewport.clone(),
                 desc_set_per_draw,
                 desc_set_per_pass,
                 desc_set_per_group,
@@ -1494,7 +1495,6 @@ impl<B: hal::Backend> Device<B> {
                 self.blend_color.get(),
                 self.current_depth_test,
                 self.render_pass_depth_state,
-                self.scissor_rect,
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 self.use_push_consts,
@@ -2352,6 +2352,7 @@ impl<B: hal::Backend> Device<B> {
             },
             depth: 0.0..1.0,
         };
+        unsafe { self.command_buffer.set_viewports(0, &[viewport.clone()]) };
         self.update_instances(&[data]);
 
         self.ensure_blit_program(view_kind);
@@ -2368,7 +2369,6 @@ impl<B: hal::Backend> Device<B> {
 
         self.blit_programs.get_mut(&view_kind).unwrap().submit(
             &mut self.command_buffer,
-            viewport,
             desc_set_per_draw,
             None,
             desc_set_per_group,
@@ -2377,7 +2377,6 @@ impl<B: hal::Backend> Device<B> {
             self.blend_color.get(),
             None,
             self.render_pass_depth_state,
-            None,
             self.next_id,
             self.descriptor_data.pipeline_layout(&descriptor_group),
             self.use_push_consts,
@@ -2386,6 +2385,7 @@ impl<B: hal::Backend> Device<B> {
             self.instance_buffer_range.clone(),
             self.surface_format,
         );
+        unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
     }
 
     /// Perform a blit between self.bound_read_fbo and self.bound_draw_fbo.
@@ -3164,6 +3164,12 @@ impl<B: hal::Backend> Device<B> {
                 color_clear.into_iter().chain(depth_clear.into_iter()),
                 hal::command::SubpassContents::Inline,
             );
+            self.command_buffer.set_viewports(0, &[self.viewport.clone()]);
+            if self.scissor_enabled {
+                self.command_buffer.set_scissors(0, &[self.scissor_rect]);
+            } else {
+                self.command_buffer.set_scissors(0, &[self.viewport.rect]);
+            }
         }
         self.inside_render_pass = true;
         self.render_pass_depth_state = match self.depth_available {
@@ -3427,13 +3433,20 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn set_scissor_rect(&mut self, rect: FramebufferIntRect) {
-        self.scissor_rect = Some(rect);
+        self.scissor_rect = hal::pso::Rect {
+            x: rect.origin.x as _,
+            y: rect.origin.y as _,
+            w: rect.size.width as _,
+            h: rect.size.height as _,
+        };
     }
 
-    pub fn enable_scissor(&self) {}
+    pub fn enable_scissor(&mut self) {
+        self.scissor_enabled = true;
+    }
 
     pub fn disable_scissor(&mut self) {
-        self.scissor_rect = None;
+        self.scissor_enabled = false;
     }
 
     pub fn set_blend(&self, enable: bool) {
