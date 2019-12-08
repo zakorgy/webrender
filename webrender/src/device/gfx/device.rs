@@ -347,7 +347,6 @@ pub struct Device<B: hal::Backend> {
     swizzle_settings: SwizzleSettings,
     color_formats: TextureFormatPair<ImageFormat>,
     optimal_pbo_stride: NonZeroUsize,
-    last_main_fbo_pass: bool,
     last_rp_in_frame_reached: bool,
     pub readback_supported: bool,
 }
@@ -817,7 +816,6 @@ impl<B: hal::Backend> Device<B> {
             },
             color_formats: TextureFormatPair::from(ImageFormat::BGRA8),
             optimal_pbo_stride: NonZeroUsize::new(4).unwrap(),
-            last_main_fbo_pass: false,
             last_rp_in_frame_reached: false,
             readback_supported,
         };
@@ -1448,9 +1446,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn draw(&mut self) {
-        if !self.inside_render_pass {
-            self.begin_render_pass_impl(self.last_main_fbo_pass);
-        }
+        assert!(self.inside_render_pass);
         self.bind_textures();
         self.bind_uniforms();
 
@@ -2264,9 +2260,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn blit_with_shader(&mut self, src_rect: FramebufferIntRect, dest_rect: FramebufferIntRect) {
-        if !self.inside_render_pass {
-            self.begin_render_pass_impl(self.last_main_fbo_pass);
-        }
+        assert!(self.inside_render_pass);
         let (src_layer, view_kind, texture_id, width, height) =
             if self.bound_read_fbo != DEFAULT_READ_FBO {
                 let fbo = &self.fbos[&self.bound_read_fbo];
@@ -3099,13 +3093,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn begin_render_pass(&mut self, last_main_fbo_pass: bool) {
-        self.last_main_fbo_pass = last_main_fbo_pass;
-        if last_main_fbo_pass || (self.clear_values.contains_key(&self.bound_draw_fbo) && self.bound_draw_fbo == DEFAULT_DRAW_FBO) {
-            self.begin_render_pass_impl(last_main_fbo_pass);
-        }
-    }
-
-    pub fn begin_render_pass_impl(&mut self, last_main_fbo_pass: bool) {
         assert!(!self.last_rp_in_frame_reached);
         assert!(!self.inside_render_pass);
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
@@ -3182,10 +3169,6 @@ impl<B: hal::Backend> Device<B> {
         if self.inside_render_pass {
             unsafe { self.command_buffer.end_render_pass() };
             self.inside_render_pass = false;
-        } else if let Some(ClearValues { color, depth }) = self.clear_values.remove(&self.bound_draw_fbo) {
-            unsafe {
-                self.clear_target_image(Some(color.color.float32), depth.map(|d| d.depth_stencil.depth));
-            }
         }
     }
 
@@ -3195,9 +3178,7 @@ impl<B: hal::Backend> Device<B> {
         color: Option<[f32; 4]>,
         depth: Option<f32>,
     ) {
-        if !self.inside_render_pass {
-            self.begin_render_pass_impl(self.last_main_fbo_pass);
-        }
+        assert!(self.inside_render_pass);
         if color.is_none() && depth.is_none() {
             return;
         }
@@ -3290,6 +3271,7 @@ impl<B: hal::Backend> Device<B> {
             }
 
             if let (Some(depth), Some(dimg)) = (depth, dimg) {
+                assert_ne!(self.current_depth_test, None);
                 let prev_dimg_state = dimg.state.get();
                 if let Some((barrier, pipeline_stages)) = dimg.transit(
                     (
@@ -3395,6 +3377,13 @@ impl<B: hal::Backend> Device<B> {
         } else {
             self.clear_target_image(color, depth);
         }
+    }
+
+    pub fn clear_rt_if_needed(&mut self) {
+        assert!(!self.inside_render_pass);
+        if let Some(ClearValues { color, depth }) = self.clear_values.remove(&self.bound_draw_fbo) {
+            unsafe { self.clear_target_image(Some(color.color.float32), depth.map(|d| d.depth_stencil.depth)) };
+        };
     }
 
     pub fn enable_depth(&mut self) {

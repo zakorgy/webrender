@@ -4358,8 +4358,14 @@ impl<B: hal::Backend> Renderer<B> {
                 }
             }
         }
-        #[cfg(not(feature = "gl"))]
-        self.device.begin_render_pass(_transit_to_present);
+        #[cfg(not(feature = "gl"))]{
+            if !composite_state.opaque_tiles.is_empty()
+                || !composite_state.clear_tiles.is_empty()
+                || !composite_state.alpha_tiles.is_empty()
+                || partial_present_mode.is_none() {
+                self.device.begin_render_pass(_transit_to_present);
+            }
+        }
 
         self.shaders.borrow_mut().composite.bind(
             &mut self.device,
@@ -4427,6 +4433,7 @@ impl<B: hal::Backend> Renderer<B> {
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
         transit_to_present: bool,
+        _main_target: bool,
     ) {
         self.profile_counters.color_targets.inc();
         let _gm = self.gpu_profile.start_marker("color target");
@@ -4503,7 +4510,17 @@ impl<B: hal::Backend> Renderer<B> {
             &target.blits, render_tasks, draw_target, &content_origin,
         );
         #[cfg(not(feature = "gl"))]
-        self.device.begin_render_pass(transit_to_present && target.alpha_batch_containers.is_empty());
+        {
+            if _main_target
+                || !target.vertical_blurs.is_empty()
+                || !target.horizontal_blurs.is_empty()
+                || !target.scalings.is_empty()
+                || !target.svg_filters.is_empty() {
+                self.device.begin_render_pass(transit_to_present && target.alpha_batch_containers.is_empty());
+            } else {
+                self.device.clear_rt_if_needed();
+            }
+        }
 
         // Draw any blurs for this target.
         // Blurs are rendered as a standard 2-pass
@@ -4710,7 +4727,17 @@ impl<B: hal::Backend> Renderer<B> {
             self.set_blend(false, FramebufferKind::Other);
 
             #[cfg(not(feature = "gl"))]
-            self.device.begin_render_pass(false);
+            {
+                if !target.vertical_blurs.is_empty()
+                    || !target.horizontal_blurs.is_empty()
+                    || !target.scalings.is_empty()
+                    || !target.clip_batcher.primary_clips.is_empty()
+                    || !target.clip_batcher.secondary_clips.is_empty() {
+                    self.device.begin_render_pass(false);
+                } else {
+                    self.device.clear_rt_if_needed();
+                }
+            }
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -4881,7 +4908,17 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         #[cfg(not(feature = "gl"))]
-        self.device.begin_render_pass(false);
+        {
+            if !target.border_segments_solid.is_empty()
+                || !target.border_segments_complex.is_empty()
+                || !target.line_decorations.is_empty()
+                || !target.gradients.is_empty()
+                || !target.horizontal_blurs.is_empty() {
+                self.device.begin_render_pass(false);
+            } else {
+                self.device.clear_rt_if_needed();
+            }
+        }
 
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
@@ -5340,6 +5377,7 @@ impl<B: hal::Backend> Renderer<B> {
                                         frame_id,
                                         &mut results.stats,
                                         false,
+                                        false,
                                     );
                                     results.stats.total_draw_calls = draw_calls;
                                 }
@@ -5371,6 +5409,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 frame_id,
                                 &mut results.stats,
                                 last_document,
+                                true,
                             );
                         }
                     }
@@ -5493,6 +5532,7 @@ impl<B: hal::Backend> Renderer<B> {
                             &projection,
                             frame_id,
                             &mut results.stats,
+                            false,
                             false,
                         );
                     }
