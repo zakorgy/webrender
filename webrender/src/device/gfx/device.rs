@@ -309,6 +309,7 @@ pub struct Device<B: hal::Backend> {
     quad_buffer: VertexBufferHandler<B>,
     instance_buffers: ArrayVec<[InstanceBufferHandler<B>; MAX_FRAME_COUNT]>,
     free_instance_buffers: Vec<InstancePoolBuffer<B>>,
+    received_instance_buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>,
     download_buffer: Option<Buffer<B>>,
     instance_buffer_range: std::ops::Range<usize>,
 
@@ -352,7 +353,6 @@ pub struct Device<B: hal::Backend> {
     swizzle_settings: SwizzleSettings,
     color_formats: TextureFormatPair<ImageFormat>,
     optimal_pbo_stride: NonZeroUsize,
-    last_main_fbo_pass: bool,
     last_rp_in_frame_reached: bool,
     pub readback_supported: bool,
 }
@@ -817,6 +817,7 @@ impl<B: hal::Backend> Device<B> {
             quad_buffer,
             instance_buffers,
             free_instance_buffers: Vec::new(),
+            received_instance_buffers: FastHashMap::default(),
             download_buffer: None,
             instance_buffer_range: 0..0,
 
@@ -826,7 +827,6 @@ impl<B: hal::Backend> Device<B> {
             },
             color_formats: TextureFormatPair::from(ImageFormat::BGRA8),
             optimal_pbo_stride: NonZeroUsize::new(4).unwrap(),
-            last_main_fbo_pass: false,
             last_rp_in_frame_reached: false,
             readback_supported,
         };
@@ -851,6 +851,10 @@ impl<B: hal::Backend> Device<B> {
             device.bind_uniforms(Locals::default());
         }
         device
+    }
+
+    pub fn add_instance_buffers(&mut self, buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>) {
+        self.received_instance_buffers.extend(buffers);
     }
 
     pub fn supports_extension(&self, _extension: &str) -> bool {
@@ -1198,6 +1202,7 @@ impl<B: hal::Backend> Device<B> {
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
+        self.delete_unused_instance_buffers();
     }
 
     pub fn reset_state(&mut self) {
@@ -1554,10 +1559,8 @@ impl<B: hal::Backend> Device<B> {
         );
     }
 
-    fn draw(&mut self) {
-        if !self.inside_render_pass {
-            self.begin_render_pass_impl(self.last_main_fbo_pass);
-        }
+    pub fn draw(&mut self, instance_locations: Option<&[InstanceLocation]>) {
+        assert!(self.inside_render_pass);
         self.update_push_constants();
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
@@ -1578,6 +1581,19 @@ impl<B: hal::Backend> Device<B> {
             _ => None,
         };
 
+        let instances = match instance_locations {
+            Some(locations) => {
+                let mut buffer_ids = locations.iter().map(|l| l.buffer_id).collect::<Vec<_>>();
+                buffer_ids.sort();
+                buffer_ids.dedup();
+                for id in buffer_ids {
+                    self.received_instance_buffers.get_mut(&id).unwrap().bound_in_frame = self.frame_id;
+                }
+                (&self.received_instance_buffers, locations).into()
+            },
+            None => (&self.instance_buffers[self.next_id], self.instance_buffer_range.clone()).into(),
+        };
+
         self.programs
             .get_mut(&self.bound_program)
             .expect("Program not found")
@@ -1595,8 +1611,7 @@ impl<B: hal::Backend> Device<B> {
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 self.use_push_consts,
                 &self.quad_buffer,
-                &self.instance_buffers[self.next_id],
-                self.instance_buffer_range.clone(),
+                instances,
                 self.fbos
                     .get(&self.bound_draw_fbo)
                     .map_or(self.surface_format, |fbo| fbo.format),
@@ -2354,9 +2369,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn blit_with_shader(&mut self, src_rect: FramebufferIntRect, dest_rect: FramebufferIntRect) {
-        if !self.inside_render_pass {
-            self.begin_render_pass_impl(self.last_main_fbo_pass);
-        }
+        assert!(self.inside_render_pass);
         let (src_layer, view_kind, texture_id, width, height) =
             if self.bound_read_fbo != DEFAULT_READ_FBO {
                 let fbo = &self.fbos[&self.bound_read_fbo];
@@ -2455,8 +2468,10 @@ impl<B: hal::Backend> Device<B> {
             self.descriptor_data.pipeline_layout(&descriptor_group),
             self.use_push_consts,
             &self.quad_buffer,
-            &self.instance_buffers[self.next_id],
-            self.instance_buffer_range.clone(),
+            (
+                &self.instance_buffers[self.next_id],
+                self.instance_buffer_range.clone(),
+            ).into(),
             self.surface_format,
         );
         unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
@@ -2681,12 +2696,15 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn free_texture(&mut self, mut texture: Texture) {
+    fn free_texture(&mut self, texture: Texture) {
         if texture.still_in_flight(self.frame_id, self.frame_count) {
             self.retained_textures.push(texture);
             return;
         }
+        self.free_texture_inner(texture);
+    }
 
+    fn free_texture_inner(&mut self, mut texture: Texture) {
         if texture.supports_depth() {
             self.release_depth_target(texture.get_dimensions());
         }
@@ -2730,9 +2748,23 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn delete_texture(&mut self, texture: Texture) {
-        //debug_assert!(self.inside_frame);
-        if texture.size.width + texture.size.height == 0 {
+    fn delete_unused_instance_buffers(&mut self) {
+        let mut buffers_to_remove = Vec::new();
+        for (id, buffer) in self.received_instance_buffers.iter() {
+            if !buffer.still_in_flight(self.frame_id, self.frame_count) {
+                buffers_to_remove.push(*id);
+            }
+        }
+
+        for id in buffers_to_remove {
+            let buffer = self.received_instance_buffers.remove(&id).unwrap();
+            buffer.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
+        }
+    }
+
+    pub fn delete_texture(&mut self, mut texture: Texture) {
+        if texture.size_in_bytes() == 0 {
+            texture.id = 0;
             return;
         }
 
@@ -3145,17 +3177,17 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn draw_triangles_u16(&mut self, _first_vertex: i32, _index_count: i32) {
         debug_assert!(self.inside_frame);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn draw_triangles_u32(&mut self, _first_vertex: i32, _index_count: i32) {
         debug_assert!(self.inside_frame);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn draw_nonindexed_lines(&mut self, _first_vertex: i32, _vertex_count: i32) {
         debug_assert!(self.inside_frame);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn draw_indexed_triangles_instanced_u16(
@@ -3164,7 +3196,7 @@ impl<B: hal::Backend> Device<B> {
         _instance_count: i32,
     ) {
         debug_assert!(self.inside_frame);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn end_frame(&mut self) {
@@ -3178,13 +3210,6 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn begin_render_pass(&mut self, last_main_fbo_pass: bool) {
-        self.last_main_fbo_pass = last_main_fbo_pass;
-        if last_main_fbo_pass || (self.clear_values.contains_key(&self.bound_draw_fbo) && self.bound_draw_fbo == DEFAULT_DRAW_FBO) {
-            self.begin_render_pass_impl(last_main_fbo_pass);
-        }
-    }
-
-    pub fn begin_render_pass_impl(&mut self, last_main_fbo_pass: bool) {
         assert!(!self.last_rp_in_frame_reached);
         assert!(!self.inside_render_pass);
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
@@ -3262,10 +3287,6 @@ impl<B: hal::Backend> Device<B> {
         if self.inside_render_pass {
             unsafe { self.command_buffer.end_render_pass() };
             self.inside_render_pass = false;
-        } else if let Some(ClearValues { color, depth }) = self.clear_values.remove(&self.bound_draw_fbo) {
-            unsafe {
-                self.clear_target_image(Some(color.color.float32), depth.map(|d| d.depth_stencil.depth));
-            }
         }
     }
 
@@ -3277,7 +3298,7 @@ impl<B: hal::Backend> Device<B> {
     ) {
         let mut end_pass = false;
         if !self.inside_render_pass {
-            self.begin_render_pass_impl(self.last_main_fbo_pass);
+            self.begin_render_pass(false);
             end_pass = true;
         }
 
@@ -3374,6 +3395,7 @@ impl<B: hal::Backend> Device<B> {
             }
 
             if let (Some(depth), Some(dimg)) = (depth, dimg) {
+                assert_ne!(self.current_depth_test, None);
                 let prev_dimg_state = dimg.state.get();
                 if let Some((barrier, pipeline_stages)) = dimg.transit(
                     (
@@ -3457,6 +3479,13 @@ impl<B: hal::Backend> Device<B> {
         } else {
             self.clear_target_image(color, depth);
         }
+    }
+
+    pub fn clear_rt_if_needed(&mut self) {
+        assert!(!self.inside_render_pass);
+        if let Some(ClearValues { color, depth }) = self.clear_values.remove(&self.bound_draw_fbo) {
+            unsafe { self.clear_target_image(Some(color.color.float32), depth.map(|d| d.depth_stencil.depth)) };
+        };
     }
 
     pub fn enable_depth(&mut self) {
@@ -3719,10 +3748,10 @@ impl<B: hal::Backend> Device<B> {
     pub fn deinit(mut self) {
         self.device.wait_idle().unwrap();
         for texture in self.retained_textures.drain(..).collect::<Vec<_>>() {
-            self.free_texture(texture);
+            self.free_texture_inner(texture);
         }
         for texture in self.readback_textures.drain(..).collect::<Vec<_>>() {
-            self.free_texture(texture);
+            self.free_texture_inner(texture);
         }
         unsafe {
             if self.save_cache && self.cache_path.is_some() {
@@ -3837,6 +3866,9 @@ impl<B: hal::Backend> Device<B> {
             }
 
             for (_, buffer) in self.gpu_cache_buffers.into_iter() {
+                buffer.deinit(self.device.as_ref(), &mut heaps);
+            }
+            for (_, buffer) in self.received_instance_buffers.into_iter() {
                 buffer.deinit(self.device.as_ref(), &mut heaps);
             }
             self.device.destroy_sampler(self.sampler_linear);

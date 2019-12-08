@@ -7,6 +7,8 @@ use api::{YuvColorSpace, YuvFormat, ColorDepth, ColorRange, PremultipliedColorF,
 use api::units::*;
 use crate::clip::{ClipDataStore, ClipNodeFlags, ClipNodeRange, ClipItemKind, ClipStore};
 use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex, CoordinateSystemId};
+#[cfg(not(feature = "gl"))]
+use crate::device::{InstanceBufferManager, InstanceLocation, PrimitiveType};
 use crate::composite::{CompositeState, CompositeTile, CompositeTileSurface};
 use crate::glyph_rasterizer::GlyphFormat;
 use crate::gpu_cache::{GpuBlockData, GpuCache, GpuCacheHandle, GpuCacheAddress};
@@ -27,8 +29,11 @@ use crate::render_task::RenderTaskAddress;
 use crate::renderer::{BlendMode, ImageBufferKind, ShaderColorMode};
 use crate::renderer::{BLOCKS_PER_UV_RECT, MAX_VERTEX_TEXTURE_WIDTH};
 use crate::resource_cache::{CacheItem, GlyphFetchResult, ImageRequest, ResourceCache, ImageProperties};
+#[cfg(not(feature = "gl"))]
+use rendy_memory::Heaps;
 use smallvec::SmallVec;
 use std::{f32, i32, usize};
+use std::sync::{Arc, Mutex};
 use crate::util::{project_rect, TransformedRectKind};
 
 // Special sentinel value recognized by the shader. It is considered to be
@@ -337,6 +342,7 @@ impl OpaqueBatchList {
 pub struct PrimitiveBatch {
     pub key: BatchKey,
     pub instances: Vec<PrimitiveInstanceData>,
+    pub instance_locations: Vec<InstanceLocation>,
     pub features: BatchFeatures,
 }
 
@@ -363,6 +369,7 @@ impl PrimitiveBatch {
         PrimitiveBatch {
             key,
             instances: Vec::new(),
+            instance_locations: Vec::new(),
             features: BatchFeatures::empty(),
         }
     }
@@ -370,6 +377,20 @@ impl PrimitiveBatch {
     fn merge(&mut self, other: PrimitiveBatch) {
         self.instances.extend(other.instances);
         self.features |= other.features;
+    }
+
+    fn build<B: hal::Backend>(
+        &mut self,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
+    ) {
+        let instances = self.instances.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
+        self.instance_locations = buffer_manager.add(
+            device,
+            &instances,
+            &mut heaps.lock().unwrap(),
+        );
     }
 }
 
@@ -439,6 +460,17 @@ impl AlphaBatchContainer {
                     min_batch_index = self.alpha_batches.len();
                 }
             }
+         }
+    }
+
+    pub fn build<B: hal::Backend>(
+        &mut self,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
+    ) {
+        for batch in self.opaque_batches.iter_mut().chain(self.alpha_batches.iter_mut()) {
+            batch.build(buffer_manager, device, heaps.clone());
         }
     }
 }
@@ -2793,20 +2825,76 @@ pub fn resolve_image(
 pub struct ClipBatchList {
     /// Rectangle draws fill up the rectangles with rounded corners.
     pub slow_rectangles: Vec<ClipMaskInstance>,
+    pub slow_rectangle_locations: Vec<InstanceLocation>,
     pub fast_rectangles: Vec<ClipMaskInstance>,
+    pub fast_rectangle_locations: Vec<InstanceLocation>,
     /// Image draws apply the image masking.
     pub images: FastHashMap<TextureSource, Vec<ClipMaskInstance>>,
+    pub image_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
     pub box_shadows: FastHashMap<TextureSource, Vec<ClipMaskInstance>>,
+    pub box_shadow_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
 }
 
 impl ClipBatchList {
     fn new() -> Self {
         ClipBatchList {
             slow_rectangles: Vec::new(),
+            slow_rectangle_locations: Vec::new(),
             fast_rectangles: Vec::new(),
+            fast_rectangle_locations: Vec::new(),
             images: FastHashMap::default(),
+            image_locations: FastHashMap::default(),
             box_shadows: FastHashMap::default(),
+            box_shadow_locations: FastHashMap::default(),
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    fn build<B: hal::Backend>(
+        &mut self,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
+    ) {
+        let slow_rects = self.slow_rectangles.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
+        self.slow_rectangle_locations = buffer_manager.add(
+            device,
+            &slow_rects,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let fast_rects = self.fast_rectangles.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
+        self.fast_rectangle_locations = buffer_manager.add(
+            device,
+            &fast_rects,
+            &mut heaps.lock().unwrap(),
+        );
+
+        for (source, instances) in self.images.drain() {
+            let locations = buffer_manager.add(
+                device,
+                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &mut heaps.lock().unwrap(),
+            );
+            self.image_locations.insert(source, locations);
+        }
+
+        for (source, instances) in self.box_shadows.drain() {
+            let locations = buffer_manager.add(
+                device,
+                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &mut heaps.lock().unwrap(),
+            );
+            self.box_shadow_locations.insert(source, locations);
+        }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn is_empty(&self) -> bool {
+        self.slow_rectangle_locations.is_empty()
+            && self.fast_rectangle_locations.is_empty()
+            && self.image_locations.is_empty()
+            && self.box_shadow_locations.is_empty()
     }
 }
 
@@ -2835,6 +2923,22 @@ impl ClipBatcher {
             secondary_clips: ClipBatchList::new(),
             gpu_supports_fast_clears,
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn is_empty(&self) -> bool {
+        self.primary_clips.is_empty() && self.secondary_clips.is_empty()
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn build<B: hal::Backend>(
+        &mut self,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
+    ) {
+        self.primary_clips.build(buffer_manager, device, heaps.clone());
+        self.secondary_clips.build(buffer_manager, device, heaps.clone());
     }
 
     pub fn add_clip_region(
