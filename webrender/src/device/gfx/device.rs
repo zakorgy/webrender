@@ -78,6 +78,7 @@ const MAX_FRAME_COUNT: usize = 3;
 const HEADLESS_FRAME_COUNT: usize = 1;
 const SURFACE_FORMAT: hal::format::Format = hal::format::Format::Bgra8Unorm;
 const DEPTH_FORMAT: hal::format::Format = hal::format::Format::D32Sfloat;
+const DITHER_BINDING: usize = 8;
 
 #[derive(PartialEq)]
 pub enum BackendApiType {
@@ -1127,12 +1128,17 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn reset_state(&mut self) {
-        self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
-        self.bound_program = INVALID_PROGRAM_ID;
-        self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
+        for i in 0..RENDERER_TEXTURE_COUNT {
+            // Don't reset the dither texture and sampler, those are set at the start only
+            if i != DITHER_BINDING {
+                self.bound_textures[i] = INVALID_TEXTURE_ID;
+                self.bound_sampler[i] = TextureFilter::Linear;
+            }
+        }
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
         self.draw_target_usage = DrawTargetUsage::Draw;
+        self.bound_program = INVALID_PROGRAM_ID;
     }
 
     fn reset_program_buffer_offsets(&mut self) {
@@ -1237,7 +1243,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_uniforms(&mut self) {
+    fn update_push_constants(&mut self) {
         if self.use_push_consts {
             self.programs
                 .get_mut(&self.bound_program)
@@ -1247,7 +1253,9 @@ impl<B: hal::Backend> Device<B> {
                     std::mem::transmute::<_, &[u32; 17]>(&self.bound_locals)
                 });
         }
+    }
 
+    fn bind_uniforms(&mut self) {
         self.locals_descriptors.bind_locals(
             if self.use_push_consts {
                 Locals::default()
@@ -1267,7 +1275,10 @@ impl<B: hal::Backend> Device<B> {
         _program_id: &ProgramId,
         projection: &Transform3D<f32, euclid::UnknownUnit, euclid::UnknownUnit>,
     ) {
-        self.bound_locals.uTransform = projection.to_row_arrays();
+        if self.bound_locals.uTransform != projection.to_row_arrays() {
+            self.bound_locals.uTransform = projection.to_row_arrays();
+            self.bind_uniforms();
+        }
     }
 
     unsafe fn begin_cmd_buffer(cmd_buffer: &mut B::CommandBuffer) {
@@ -1275,7 +1286,7 @@ impl<B: hal::Backend> Device<B> {
         cmd_buffer.begin(flags, CommandBufferInheritanceInfo::default());
     }
 
-    fn bind_per_draw_textures(
+    fn bind_per_draw_textures_impl(
         &mut self,
         descriptor_group: DescriptorGroup,
         per_draw_bindings: Option<PerDrawBindings>,
@@ -1323,7 +1334,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_per_pass_textures(&mut self) {
+    pub fn bind_per_pass_textures(&mut self) {
         let per_pass_bindings = PerPassBindings([self.bound_textures[3], self.bound_textures[4]]);
 
         self.per_pass_descriptors.bind_textures(
@@ -1344,7 +1355,7 @@ impl<B: hal::Backend> Device<B> {
         self.bound_per_pass_textures = per_pass_bindings;
     }
 
-    fn bind_per_group_textures(&mut self, descriptor_group: DescriptorGroup, store: bool) {
+    fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, store: bool) {
         let per_group_bindings = PerGroupBindings([
             self.bound_textures[5],
             self.bound_textures[6],
@@ -1381,24 +1392,24 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_textures(&mut self) {
+    pub fn bind_per_draw_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
 
         let descriptor_group = {
             let program = self
                 .programs
-                .get_mut(&self.bound_program)
+                .get(&self.bound_program)
                 .expect("Program not found.");
             program.shader_kind.into()
         };
-        self.bind_per_draw_textures(descriptor_group, None, true);
+        self.bind_per_draw_textures_impl(descriptor_group, None, true);
+    }
 
-        if descriptor_group == DescriptorGroup::Primitive {
-            self.bind_per_pass_textures();
+    pub fn bind_per_group_textures(&mut self) {
+        for descriptor_group in [DescriptorGroup::Clip, DescriptorGroup::Default, DescriptorGroup::Primitive].iter() {
+            self.bind_per_group_textures_impl(*descriptor_group, true);
         }
-
-        self.bind_per_group_textures(descriptor_group, true);
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
@@ -1452,8 +1463,8 @@ impl<B: hal::Backend> Device<B> {
         if !self.inside_render_pass {
             self.begin_render_pass_impl(self.last_main_fbo_pass);
         }
-        self.bind_textures();
-        self.bind_uniforms();
+        self.bind_per_draw_textures();
+        self.update_push_constants();
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
         let descriptor_group = self
@@ -1511,11 +1522,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn begin_frame(&mut self) -> GpuFrameId {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
-        self.bound_textures = [INVALID_TEXTURE_ID; RENDERER_TEXTURE_COUNT];
-        self.bound_sampler = [TextureFilter::Linear; RENDERER_TEXTURE_COUNT];
-        self.bound_read_fbo = DEFAULT_READ_FBO;
-        self.bound_draw_fbo = DEFAULT_DRAW_FBO;
-        self.draw_target_usage = DrawTargetUsage::Draw;
+        self.reset_state();
         self.bound_locals.uMode = 0;
 
         self.frame_id
@@ -2299,9 +2306,7 @@ impl<B: hal::Backend> Device<B> {
             self.bound_textures[10],
         ]);
 
-        self.bind_per_draw_textures(descriptor_group, Some(per_draw_bindings), false);
-        self.bind_per_group_textures(descriptor_group, false);
-        self.bind_uniforms();
+        self.bind_per_draw_textures_impl(descriptor_group, Some(per_draw_bindings), false);
 
         let src_bounds = hal::image::Offset {
             x: src_rect.origin.x as i32,
@@ -2678,6 +2683,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn switch_mode(&mut self, mode: i32) {
         debug_assert!(self.inside_frame);
         self.bound_locals.uMode = mode;
+        self.bind_uniforms();
     }
 
     pub fn create_pbo(&mut self) -> PBO {
