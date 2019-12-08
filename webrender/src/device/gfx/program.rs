@@ -53,7 +53,6 @@ pub(crate) struct Program<B: hal::Backend> {
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
-    pub(super) constants: [u32; PUSH_CONSTANT_BLOCK_SIZE / 4],
 }
 
 impl<B: hal::Backend> Program<B> {
@@ -601,7 +600,6 @@ impl<B: hal::Backend> Program<B> {
             index_buffer,
             shader_name: String::from(shader_name),
             shader_kind,
-            constants: [0; PUSH_CONSTANT_BLOCK_SIZE / 4],
         }
     }
 
@@ -629,14 +627,6 @@ impl<B: hal::Backend> Program<B> {
             None => vertex_buffer,
         };
         unsafe {
-            if use_push_consts {
-                cmd_buffer.push_graphics_constants(
-                    pipeline_layout,
-                    hal::pso::ShaderStageFlags::VERTEX | hal::pso::ShaderStageFlags::FRAGMENT,
-                    0,
-                    &self.constants,
-                );
-            }
             cmd_buffer.bind_graphics_pipeline(
                 &self
                     .pipelines

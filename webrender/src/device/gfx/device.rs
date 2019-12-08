@@ -286,6 +286,7 @@ pub struct Device<B: hal::Backend> {
     // Locals related things
     locals_descriptors: DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>,
     bound_locals: Locals,
+    locals_per_group: FastHashMap<DescriptorGroup, Locals>,
 
     descriptor_data: DescriptorData<B>,
     bound_textures: [u32; RENDERER_TEXTURE_COUNT],
@@ -780,6 +781,7 @@ impl<B: hal::Backend> Device<B> {
 
             locals_descriptors,
             bound_locals: Locals::default(),
+            locals_per_group: FastHashMap::default(),
             descriptor_data,
 
             bound_textures: [0; RENDERER_TEXTURE_COUNT],
@@ -1241,13 +1243,40 @@ impl<B: hal::Backend> Device<B> {
 
     fn update_push_constants(&mut self) {
         if self.use_push_consts {
-            self.programs
-                .get_mut(&self.bound_program)
-                .expect("Invalid bound program")
-                .constants[..]
-                .copy_from_slice(unsafe {
-                    std::mem::transmute::<_, &[u32; 17]>(&self.bound_locals)
-                });
+            let descriptor_group = self
+                .programs
+                .get(&self.bound_program)
+                .expect("Program not found")
+                .shader_kind
+                .into();
+
+            let update_constants = match self.locals_per_group.entry(descriptor_group) {
+                Entry::Occupied(mut o) => {
+                    let bound = o.get_mut();
+                    if *bound != self.bound_locals {
+                        *bound = self.bound_locals;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                Entry::Vacant(v) => {
+                    v.insert(self.bound_locals);
+                    true
+                },
+            };
+
+            if update_constants {
+                let pipeline_layout = self.descriptor_data.pipeline_layout(&descriptor_group);
+                unsafe {
+                    self.command_buffer.push_graphics_constants(
+                        pipeline_layout,
+                        hal::pso::ShaderStageFlags::VERTEX | hal::pso::ShaderStageFlags::FRAGMENT,
+                        0,
+                        std::mem::transmute::<_, &[u32; 17]>(&self.bound_locals),
+                    );
+                }
+            }
         }
     }
 
@@ -1275,6 +1304,7 @@ impl<B: hal::Backend> Device<B> {
             self.bound_locals.uTransform = projection.to_row_arrays();
             self.bind_uniforms();
         }
+        self.update_push_constants();
     }
 
     unsafe fn begin_cmd_buffer(cmd_buffer: &mut B::CommandBuffer) {
@@ -1458,7 +1488,6 @@ impl<B: hal::Backend> Device<B> {
     fn draw(&mut self) {
         assert!(self.inside_render_pass);
         self.bind_per_draw_textures();
-        self.update_push_constants();
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
         let descriptor_group = self
@@ -2689,6 +2718,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         self.bound_locals.uMode = mode;
         self.bind_uniforms();
+        self.update_push_constants();
     }
 
     pub fn create_pbo(&mut self) -> PBO {
