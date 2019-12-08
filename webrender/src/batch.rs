@@ -2808,6 +2808,14 @@ impl ClipBatchList {
             box_shadows: FastHashMap::default(),
         }
     }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn is_empty(&self) -> bool {
+        self.slow_rectangles.is_empty()
+            && self.fast_rectangles.is_empty()
+            && self.images.is_empty()
+            && self.box_shadows.is_empty()
+    }
 }
 
 /// Batcher managing draw calls into the clip mask (in the RT cache).
@@ -2835,6 +2843,11 @@ impl ClipBatcher {
             secondary_clips: ClipBatchList::new(),
             gpu_supports_fast_clears,
         }
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn is_empty(&self) -> bool {
+        self.primary_clips.is_empty() && self.secondary_clips.is_empty()
     }
 
     pub fn add_clip_region(
