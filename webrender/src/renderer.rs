@@ -2156,7 +2156,7 @@ impl<B: hal::Backend> Renderer<B> {
                 1,
             );
             device.upload_texture_immediate(&texture, &dither_matrix);
-
+            device.bind_texture(TextureSampler::Dither, &texture, Swizzle::default());
             Some(texture)
         } else {
             None
@@ -3620,9 +3620,12 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
-        // TODO: this probably isn't the best place for this.
-        if let Some(ref texture) = self.dither_matrix_texture {
-            self.device.bind_texture(TextureSampler::Dither, texture, Swizzle::default());
+        #[cfg(feature = "gl")]
+        {
+            // TODO: this probably isn't the best place for this.
+            if let Some(ref texture) = self.dither_matrix_texture {
+                self.device.bind_texture(TextureSampler::Dither, texture, Swizzle::default());
+            }
         }
 
         self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
@@ -5281,6 +5284,10 @@ impl<B: hal::Backend> Renderer<B> {
         self.device.disable_stencil();
 
         self.bind_frame_data(frame);
+        #[cfg(not(feature = "gl"))]
+        {
+            self.device.bind_per_group_textures();
+        }
 
         for (_pass_index, pass) in frame.passes.iter_mut().enumerate() {
             #[cfg(not(target_os = "android"))]
@@ -5296,6 +5303,10 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureSampler::PrevPassColor,
                 &mut self.device,
             );
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_per_pass_textures();
+            }
 
             match pass.kind {
                 RenderPassKind::MainFramebuffer { ref main_target, .. } => {
