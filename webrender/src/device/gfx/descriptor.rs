@@ -344,6 +344,10 @@ where
             .raw()
     }
 
+    pub(super) fn push_back_descriptor_set(&mut self, key: K, rendy_descriptor: DescriptorSet<B>) {
+        assert!(self.descriptor_bindings.insert(key, rendy_descriptor).is_none())
+    }
+
     pub(super) fn retain(&mut self, id: &TextureId) {
         let keys_to_remove: Vec<_> = self
             .descriptor_bindings
@@ -377,10 +381,10 @@ where
         range: std::ops::Range<usize>,
         sampler_linear: &B::Sampler,
         sampler_nearest: &B::Sampler,
-    ) {
-        let new_set = match self.descriptor_bindings.entry(bindings) {
-            Entry::Occupied(_) => return,
-            Entry::Vacant(v) => {
+    ) -> DescriptorSet<B> {
+        let new_set = match self.descriptor_bindings.remove(&bindings) {
+            Some(set) => return set,
+            None => {
                 let free_sets = self.free_sets.get_mut(group);
                 let desc_set = match free_sets.pop() {
                     Some(ds) => ds,
@@ -398,7 +402,7 @@ where
                         free_sets.pop().unwrap()
                     }
                 };
-                v.insert(desc_set)
+                desc_set
             }
         };
         let mut descriptor_writes: SmallVec<
@@ -437,6 +441,7 @@ where
             });
         }
         unsafe { device.write_descriptor_sets(descriptor_writes) };
+        new_set
     }
 
     pub(super) fn bind_locals(
