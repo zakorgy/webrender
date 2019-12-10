@@ -272,10 +272,12 @@ pub struct Device<B: hal::Backend> {
     desc_allocator: DescriptorAllocator<B>,
 
     per_draw_descriptors: DescriptorSetHandler<PerDrawBindings, B, Vec<DescriptorSet<B>>>,
-    bound_per_draw_bindings: PerDrawBindings,
+    bound_per_draw_textures: PerDrawBindings,
+    bound_per_draw_descriptor: Option<DescriptorSet<B>>,
 
     per_pass_descriptors: DescriptorSetHandler<PerPassBindings, B, Vec<DescriptorSet<B>>>,
     bound_per_pass_textures: PerPassBindings,
+    bound_per_pass_descriptor: Option<DescriptorSet<B>>,
 
     per_group_descriptors: DescriptorSetHandler<
         (DescriptorGroup, PerGroupBindings),
@@ -283,6 +285,7 @@ pub struct Device<B: hal::Backend> {
         FastHashMap<DescriptorGroup, Vec<DescriptorSet<B>>>,
     >,
     bound_per_group_textures: PerGroupBindings,
+    bound_per_group_descriptors: [Option<DescriptorSet<B>>; 3],
 
     // Locals related things
     locals_descriptors: DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>,
@@ -772,13 +775,16 @@ impl<B: hal::Backend> Device<B> {
             desc_allocator,
 
             per_draw_descriptors,
-            bound_per_draw_bindings: PerDrawBindings::default(),
+            bound_per_draw_textures: PerDrawBindings::default(),
+            bound_per_draw_descriptor: None,
 
             per_pass_descriptors,
             bound_per_pass_textures: PerPassBindings::default(),
+            bound_per_pass_descriptor: None,
 
             per_group_descriptors: DescriptorSetHandler::from_existing(per_group_descriptor_sets),
             bound_per_group_textures: PerGroupBindings::default(),
+            bound_per_group_descriptors: [None, None, None],
 
             locals_descriptors,
             bound_locals: Locals::default(),
@@ -942,12 +948,23 @@ impl<B: hal::Backend> Device<B> {
         }
         let ref mut heaps = *self.heaps.lock().unwrap();
 
-        self.bound_per_draw_bindings = PerDrawBindings::default();
+        if let Some(descriptor) = self.bound_per_draw_descriptor.take() {
+            self.per_draw_descriptors.push_back_descriptor_set(self.bound_per_draw_textures, descriptor);
+        }
+        self.bound_per_draw_textures = PerDrawBindings::default();
         self.per_draw_descriptors.reset();
 
+        if let Some(descriptor) = self.bound_per_pass_descriptor.take() {
+            self.per_pass_descriptors.push_back_descriptor_set(self.bound_per_pass_textures, descriptor);
+        }
         self.bound_per_pass_textures = PerPassBindings::default();
         self.per_pass_descriptors.reset();
 
+        for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+            if let Some(descriptor) = self.bound_per_group_descriptors[*descriptor_group as usize].take() {
+                self.per_group_descriptors.push_back_descriptor_set((*descriptor_group, self.bound_per_group_textures), descriptor);
+            }
+        }
         self.bound_per_group_textures = PerGroupBindings::default();
         self.per_group_descriptors.reset();
 
@@ -1275,8 +1292,9 @@ impl<B: hal::Backend> Device<B> {
         _program_id: &ProgramId,
         projection: &Transform3D<f32, euclid::UnknownUnit, euclid::UnknownUnit>,
     ) {
-        if self.bound_locals.uTransform != projection.to_row_arrays() {
-            self.bound_locals.uTransform = projection.to_row_arrays();
+        let projection = projection.to_row_arrays();
+        if self.bound_locals.uTransform != projection {
+            self.bound_locals.uTransform = projection;
             self.bind_uniforms();
         }
     }
@@ -1289,22 +1307,8 @@ impl<B: hal::Backend> Device<B> {
     fn bind_per_draw_textures_impl(
         &mut self,
         descriptor_group: DescriptorGroup,
-        per_draw_bindings: Option<PerDrawBindings>,
-        store: bool,
-    ) {
-        let per_draw_bindings = per_draw_bindings.unwrap_or(PerDrawBindings(
-            [
-                self.bound_textures[0],
-                self.bound_textures[1],
-                self.bound_textures[2],
-            ],
-            [
-                self.bound_sampler[0],
-                self.bound_sampler[1],
-                self.bound_sampler[2],
-            ],
-        ));
-
+        per_draw_bindings: PerDrawBindings,
+    ) -> DescriptorSet<B> {
         let mut bound_textures = self.bound_textures;
         bound_textures[0] = per_draw_bindings.0[0];
         bound_textures[1] = per_draw_bindings.0[1];
@@ -1328,16 +1332,15 @@ impl<B: hal::Backend> Device<B> {
             0..PER_DRAW_TEXTURE_COUNT,
             &self.sampler_linear,
             &self.sampler_nearest,
-        );
-        if store {
-            self.bound_per_draw_bindings = per_draw_bindings;
-        }
+        )
     }
 
     pub fn bind_per_pass_textures(&mut self) {
         let per_pass_bindings = PerPassBindings([self.bound_textures[3], self.bound_textures[4]]);
-
-        self.per_pass_descriptors.bind_textures(
+        if per_pass_bindings == self.bound_per_pass_textures {
+            return;
+        }
+        let descriptor = self.per_pass_descriptors.bind_textures(
             &self.bound_textures,
             &self.bound_sampler,
             per_pass_bindings,
@@ -1352,20 +1355,17 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_linear,
             &self.sampler_nearest,
         );
+        if let Some(desc) = mem::replace(
+            &mut self.bound_per_pass_descriptor,
+            Some(descriptor),
+        ) {
+            self.per_pass_descriptors.push_back_descriptor_set(self.bound_per_pass_textures, desc);
+        }
         self.bound_per_pass_textures = per_pass_bindings;
     }
 
-    fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, store: bool) {
-        let per_group_bindings = PerGroupBindings([
-            self.bound_textures[5],
-            self.bound_textures[6],
-            self.bound_textures[7],
-            self.bound_textures[8],
-            self.bound_textures[9],
-            self.bound_textures[10],
-        ]);
-
-        self.per_group_descriptors.bind_textures(
+    fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, per_group_bindings: PerGroupBindings) {
+        let descriptor = self.per_group_descriptors.bind_textures(
             &self.bound_textures,
             &self.bound_sampler,
             (descriptor_group, per_group_bindings),
@@ -1387,12 +1387,16 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_linear,
             &self.sampler_nearest,
         );
-        if store {
-            self.bound_per_group_textures = per_group_bindings;
+
+        if let Some(desc) = mem::replace(
+            &mut self.bound_per_group_descriptors[descriptor_group as usize],
+            Some(descriptor),
+        ) {
+            self.per_group_descriptors.push_back_descriptor_set((descriptor_group, self.bound_per_group_textures), desc);
         }
     }
 
-    pub fn bind_per_draw_textures(&mut self) {
+    fn bind_per_draw_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
 
@@ -1403,13 +1407,48 @@ impl<B: hal::Backend> Device<B> {
                 .expect("Program not found.");
             program.shader_kind.into()
         };
-        self.bind_per_draw_textures_impl(descriptor_group, None, true);
+        let per_draw_bindings = PerDrawBindings(
+            [
+                self.bound_textures[0],
+                self.bound_textures[1],
+                self.bound_textures[2],
+            ],
+            [
+                self.bound_sampler[0],
+                self.bound_sampler[1],
+                self.bound_sampler[2],
+            ],
+        );
+
+        if self.bound_per_draw_textures == per_draw_bindings {
+            return;
+        }
+        let descriptor = self.bind_per_draw_textures_impl(descriptor_group, per_draw_bindings);
+        if let Some(desc) = mem::replace(
+            &mut self.bound_per_draw_descriptor,
+            Some(descriptor),
+        ) {
+            self.per_draw_descriptors.push_back_descriptor_set(self.bound_per_draw_textures, desc);
+        }
+        self.bound_per_draw_textures = per_draw_bindings;
     }
 
     pub fn bind_per_group_textures(&mut self) {
-        for descriptor_group in [DescriptorGroup::Clip, DescriptorGroup::Default, DescriptorGroup::Primitive].iter() {
-            self.bind_per_group_textures_impl(*descriptor_group, true);
+        let per_group_bindings = PerGroupBindings([
+            self.bound_textures[5],
+            self.bound_textures[6],
+            self.bound_textures[7],
+            self.bound_textures[8],
+            self.bound_textures[9],
+            self.bound_textures[10],
+        ]);
+        if per_group_bindings == self.bound_per_group_textures {
+            return;
         }
+        for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+            self.bind_per_group_textures_impl(*descriptor_group, per_group_bindings);
+        }
+        self.bound_per_group_textures = per_group_bindings;
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
@@ -1475,18 +1514,15 @@ impl<B: hal::Backend> Device<B> {
             .into();
 
         let ref desc_set_per_group = self
-            .per_group_descriptors
-            .descriptor_set(&(descriptor_group, self.bound_per_group_textures));
+            .bound_per_group_descriptors[descriptor_group as usize]
+            .as_ref()
+            .unwrap()
+            .raw();
         let desc_set_per_pass = match descriptor_group {
-            DescriptorGroup::Primitive => Some(
-                self.per_pass_descriptors
-                    .descriptor_set(&self.bound_per_pass_textures),
-            ),
+            DescriptorGroup::Primitive => self.bound_per_pass_descriptor.as_ref().map(|d| d.raw()),
             _ => None,
         };
-        let ref desc_set_per_draw = self
-            .per_draw_descriptors
-            .descriptor_set(&self.bound_per_draw_bindings);
+        let ref desc_set_per_draw = self.bound_per_draw_descriptor.as_ref().unwrap().raw();
         let locals = if self.use_push_consts {
             Locals::default()
         } else {
@@ -2306,7 +2342,7 @@ impl<B: hal::Backend> Device<B> {
             self.bound_textures[10],
         ]);
 
-        self.bind_per_draw_textures_impl(descriptor_group, Some(per_draw_bindings), false);
+        let descriptor = self.bind_per_draw_textures_impl(descriptor_group, per_draw_bindings);
 
         let src_bounds = hal::image::Offset {
             x: src_rect.origin.x as i32,
@@ -2362,7 +2398,6 @@ impl<B: hal::Backend> Device<B> {
         self.update_instances(&[data]);
 
         self.ensure_blit_program(view_kind);
-        let ref desc_set_per_draw = self.per_draw_descriptors.descriptor_set(&per_draw_bindings);
         let locals = if self.use_push_consts {
             Locals::default()
         } else {
@@ -2375,7 +2410,7 @@ impl<B: hal::Backend> Device<B> {
 
         self.blit_programs.get_mut(&view_kind).unwrap().submit(
             &mut self.command_buffer,
-            desc_set_per_draw,
+            descriptor.raw(),
             None,
             desc_set_per_group,
             Some(*desc_set_locals),
@@ -2392,6 +2427,7 @@ impl<B: hal::Backend> Device<B> {
             self.surface_format,
         );
         unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
+        self.per_draw_descriptors.push_back_descriptor_set(per_draw_bindings, descriptor);
     }
 
     /// Perform a blit between self.bound_read_fbo and self.bound_draw_fbo.
@@ -3705,6 +3741,21 @@ impl<B: hal::Backend> Device<B> {
                     self.device.destroy_pipeline_cache(cache);
                 }
             }
+
+            if let Some(descriptor) = self.bound_per_draw_descriptor.take() {
+                self.per_draw_descriptors.push_back_descriptor_set(self.bound_per_draw_textures, descriptor);
+            }
+
+            if let Some(desc) = self.bound_per_pass_descriptor.take() {
+                self.per_pass_descriptors.push_back_descriptor_set(self.bound_per_pass_textures, desc);
+            }
+
+            for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+                if let Some(descriptor) = self.bound_per_group_descriptors[*descriptor_group as usize].take() {
+                    self.per_group_descriptors.push_back_descriptor_set((*descriptor_group, self.bound_per_group_textures), descriptor);
+                }
+            }
+
             let mut heaps = Arc::try_unwrap(self.heaps).unwrap().into_inner().unwrap();
 
             self.command_pools[self.next_id].return_cmd_buffer(self.command_buffer);
