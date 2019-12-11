@@ -151,12 +151,7 @@ impl ShaderKind {
 
 impl Texture {
     pub fn still_in_flight(&self, frame_id: GpuFrameId, frame_count: usize) -> bool {
-        for i in 0..frame_count {
-            if self.bound_in_frame.get() == GpuFrameId(frame_id.0 - i) {
-                return true;
-            }
-        }
-        false
+        self.bound_in_frame.get().0 + frame_count >= frame_id.0
     }
 }
 
@@ -1195,7 +1190,10 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
-        self.delete_retained_textures();
+        if self.frame_id.0 % 20 == 0 {
+            self.delete_retained_textures();
+        }
+
     }
 
     pub fn reset_state(&mut self) {
@@ -2750,15 +2748,16 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn delete_retained_textures(&mut self) {
-        let textures: SmallVec<[Texture; 16]> = self.retained_textures.drain(..).collect();
+        let textures: SmallVec<[Texture; 32]> = self.retained_textures.drain(..).collect();
         for texture in textures {
             self.free_texture(texture);
         }
     }
 
-    pub fn delete_texture(&mut self, texture: Texture) {
+    pub fn delete_texture(&mut self, mut texture: Texture) {
         //debug_assert!(self.inside_frame);
-        if texture.size.width + texture.size.height == 0 {
+        if texture.size.width * texture.size.height == 0 {
+            texture.id = 0;
             return;
         }
 
