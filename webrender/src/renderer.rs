@@ -4334,15 +4334,30 @@ impl<B: hal::Backend> Renderer<B> {
                     let clear_iter = composite_state.clear_tiles.iter();
                     let alpha_iter = composite_state.alpha_tiles.iter();
 
-                    for tile in opaque_iter.chain(clear_iter.chain(alpha_iter)) {
-                        if !tile.dirty_rect.is_empty() {
-                            self.device.clear_target(
+                    #[cfg(feature = "gl")]
+                    {
+                        for tile in opaque_iter.chain(clear_iter.chain(alpha_iter)) {
+                            if !tile.dirty_rect.is_empty() {
+                                self.device.clear_target(
+                                    clear_color,
+                                    Some(1.0),
+                                    Some(draw_target.to_framebuffer_rect(tile.dirty_rect.to_i32())),
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "gl"))]
+                    {
+                        let rects = opaque_iter.chain(clear_iter.chain(alpha_iter))
+                            .filter(|tile| !tile.dirty_rect.is_empty())
+                            .map(|tile| draw_target.to_framebuffer_rect(tile.dirty_rect.to_i32()))
+                            .collect::<SmallVec<[FramebufferIntRect; 16]>>();
+                        if !rects.is_empty() {
+                            self.device.clear_target_rects(
                                 clear_color,
                                 Some(1.0),
-                                Some(draw_target.to_framebuffer_rect(tile.dirty_rect.to_i32())),
-                                #[cfg(not(feature = "gl"))]
-                                false,
-                            );
+                                rects,
+                            )
                         }
                     }
                 }
@@ -4719,27 +4734,56 @@ impl<B: hal::Backend> Renderer<B> {
             // and consider different code paths.
 
             let zero_color = [0.0, 0.0, 0.0, 0.0];
-            for &task_id in &target.zero_clears {
-                let (rect, _) = render_tasks[task_id].get_target_rect();
-                self.device.clear_target(
-                    Some(zero_color),
-                    None,
-                    Some(draw_target.to_framebuffer_rect(rect)),
-                    #[cfg(not(feature = "gl"))]
-                    false,
-                );
+            #[cfg(feature = "gl")]
+            {
+                for &task_id in &target.zero_clears {
+                    let (rect, _) = render_tasks[task_id].get_target_rect();
+                    self.device.clear_target(
+                        Some(zero_color),
+                        None,
+                        Some(draw_target.to_framebuffer_rect(rect)),
+                    );
+                }
+            }
+            #[cfg(not(feature = "gl"))]
+            {
+                if !target.zero_clears.is_empty() {
+                    self.device.clear_target_rects(
+                        Some(zero_color),
+                        None,
+                        target.zero_clears.iter().map(|task_id| {
+                            let (rect, _) = render_tasks[*task_id].get_target_rect();
+                            draw_target.to_framebuffer_rect(rect)
+                        }),
+                    )
+                }
             }
 
             let one_color = [1.0, 1.0, 1.0, 1.0];
-            for &task_id in &target.one_clears {
-                let (rect, _) = render_tasks[task_id].get_target_rect();
-                self.device.clear_target(
-                    Some(one_color),
-                    None,
-                    Some(draw_target.to_framebuffer_rect(rect)),
-                    #[cfg(not(feature = "gl"))]
-                    false,
-                );
+            #[cfg(feature = "gl")]
+            {
+                for &task_id in &target.one_clears {
+                    let (rect, _) = render_tasks[task_id].get_target_rect();
+                    self.device.clear_target(
+                        Some(one_color),
+                        None,
+                        Some(draw_target.to_framebuffer_rect(rect)),
+                    );
+                }
+            }
+
+            #[cfg(not(feature = "gl"))]
+            {
+                if !target.one_clears.is_empty() {
+                    self.device.clear_target_rects(
+                        Some(one_color),
+                        None,
+                        target.one_clears.iter().map(|task_id| {
+                            let (rect, _) = render_tasks[*task_id].get_target_rect();
+                            draw_target.to_framebuffer_rect(rect)
+                        }),
+                    )
+                }
             }
         }
 
@@ -4864,14 +4908,28 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.disable_depth_write();
             self.set_blend(false, FramebufferKind::Other);
 
-            for rect in &target.clears {
-                self.device.clear_target(
-                    Some([0.0, 0.0, 0.0, 0.0]),
-                    None,
-                    Some(draw_target.to_framebuffer_rect(*rect)),
-                    #[cfg(not(feature = "gl"))]
-                    false,
-                );
+            #[cfg(feature = "gl")]
+            {
+                for rect in &target.clears {
+                    self.device.clear_target(
+                        Some([0.0, 0.0, 0.0, 0.0]),
+                        None,
+                        Some(draw_target.to_framebuffer_rect(*rect)),
+                    );
+                }
+            }
+
+            #[cfg(not(feature = "gl"))]
+            {
+                if !target.clears.is_empty() {
+                    self.device.clear_target_rects(
+                        Some([0.0, 0.0, 0.0, 0.0]),
+                        None,
+                        target.clears.iter().map(|rect| {
+                            draw_target.to_framebuffer_rect(*rect)
+                        }),
+                    )
+                }
             }
 
             // Handle any blits to this texture from child tasks.
