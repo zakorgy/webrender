@@ -1155,15 +1155,6 @@ impl<B: hal::Backend> Device<B> {
         self.bound_program = INVALID_PROGRAM_ID;
     }
 
-    fn reset_program_buffer_offsets(&mut self) {
-        for program in self.programs.values_mut() {
-            if let Some(ref mut index_buffer) = program.index_buffer {
-                index_buffer[self.next_id].reset();
-                program.vertex_buffer.as_mut().unwrap()[self.next_id].reset();
-            }
-        }
-    }
-
     pub fn delete_program(&mut self, mut _program: ProgramId) {
         // TODO delete program
         _program = INVALID_PROGRAM_ID;
