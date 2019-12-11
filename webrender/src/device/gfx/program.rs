@@ -54,6 +54,7 @@ pub(crate) struct Program<B: hal::Backend> {
     pub(super) shader_name: String,
     pub(super) shader_kind: ShaderKind,
     pub(super) constants: [u32; PUSH_CONSTANT_BLOCK_SIZE / 4],
+    last_frame_used: usize,
 }
 
 impl<B: hal::Backend> Program<B> {
@@ -602,6 +603,7 @@ impl<B: hal::Backend> Program<B> {
             shader_name: String::from(shader_name),
             shader_kind,
             constants: [0; PUSH_CONSTANT_BLOCK_SIZE / 4],
+            last_frame_used: 0,
         }
     }
 
@@ -624,6 +626,13 @@ impl<B: hal::Backend> Program<B> {
         instance_buffer_range: std::ops::Range<usize>,
         format: ImageFormat,
     ) {
+        if self.shader_kind.is_debug() {
+            if self.last_frame_used != next_id {
+                self.vertex_buffer.as_mut().unwrap()[next_id].reset();
+                self.index_buffer.as_mut().unwrap()[next_id].reset();
+                self.last_frame_used = next_id;
+            }
+        }
         let vertex_buffer = match &self.vertex_buffer {
             Some(ref vb) => vb.get(next_id).unwrap(),
             None => vertex_buffer,
