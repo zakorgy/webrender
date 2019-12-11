@@ -290,6 +290,7 @@ pub struct Device<B: hal::Backend> {
     // Locals related things
     locals_descriptors: DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>,
     bound_locals: Locals,
+    bound_locals_descriptor: Option<DescriptorSet<B>>,
 
     descriptor_data: DescriptorData<B>,
     bound_textures: [u32; RENDERER_TEXTURE_COUNT],
@@ -788,6 +789,7 @@ impl<B: hal::Backend> Device<B> {
 
             locals_descriptors,
             bound_locals: Locals::default(),
+            bound_locals_descriptor: None,
             descriptor_data,
 
             bound_textures: [0; RENDERER_TEXTURE_COUNT],
@@ -844,6 +846,9 @@ impl<B: hal::Backend> Device<B> {
                 device.readback_textures.push(texture);
             }
             device.inside_frame = false;
+        }
+        if device.use_push_consts {
+            device.bind_uniforms(Locals::default());
         }
         device
     }
@@ -969,6 +974,9 @@ impl<B: hal::Backend> Device<B> {
         self.per_group_descriptors.reset();
 
         if !self.use_push_consts {
+            if let Some(descriptor) = self.bound_locals_descriptor.take() {
+                self.locals_descriptors.push_back_descriptor_set(self.bound_locals, descriptor);
+            }
             self.bound_locals = Locals::default();
             self.locals_descriptors.reset();
         }
@@ -1262,19 +1270,22 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_uniforms(&mut self) {
-        self.locals_descriptors.bind_locals(
-            if self.use_push_consts {
-                Locals::default()
-            } else {
-                self.bound_locals
-            },
+    fn bind_uniforms(&mut self, locals: Locals) {
+        let descriptor = self.locals_descriptors.bind_locals(
+            locals,
             self.device.as_ref(),
             &mut self.desc_allocator,
             &self.descriptor_data,
             &mut self.locals_buffer,
             &mut *self.heaps.lock().unwrap(),
         );
+
+        if let Some(desc) = mem::replace(
+            &mut self.bound_locals_descriptor,
+            Some(descriptor),
+        ) {
+            self.locals_descriptors.push_back_descriptor_set(self.bound_locals, desc);
+        }
     }
 
     pub fn set_uniforms(
@@ -1284,8 +1295,12 @@ impl<B: hal::Backend> Device<B> {
     ) {
         let projection = projection.to_row_arrays();
         if self.bound_locals.uTransform != projection {
-            self.bound_locals.uTransform = projection;
-            self.bind_uniforms();
+            let mut new_locals = self.bound_locals;
+            new_locals.uTransform = projection;
+            if !self.use_push_consts {
+                self.bind_uniforms(new_locals);
+            }
+            self.bound_locals = new_locals;
         }
     }
 
@@ -1512,23 +1527,16 @@ impl<B: hal::Backend> Device<B> {
             DescriptorGroup::Primitive => self.bound_per_pass_descriptor.as_ref().map(|d| d.raw()),
             _ => None,
         };
-        let ref desc_set_per_draw = self.bound_per_draw_descriptor.as_ref().unwrap().raw();
-        let locals = if self.use_push_consts {
-            Locals::default()
-        } else {
-            self.bound_locals
-        };
-        let ref desc_set_locals = self.locals_descriptors.descriptor_set(&locals);
 
         self.programs
             .get_mut(&self.bound_program)
             .expect("Program not found")
             .submit(
                 &mut self.command_buffer,
-                desc_set_per_draw,
+                self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
                 desc_set_per_pass,
                 desc_set_per_group,
-                Some(*desc_set_locals),
+                self.bound_locals_descriptor.as_ref().map(|d| d.raw()),
                 self.current_blend_state.get(),
                 self.blend_color.get(),
                 self.current_depth_test,
@@ -1549,7 +1557,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
         self.reset_state();
-        self.bound_locals.uMode = 0;
+        self.switch_mode(0);
 
         self.frame_id
     }
@@ -2323,15 +2331,6 @@ impl<B: hal::Backend> Device<B> {
             ],
         );
 
-        let per_group_bindings = PerGroupBindings([
-            self.bound_textures[5],
-            self.bound_textures[6],
-            self.bound_textures[7],
-            self.bound_textures[8],
-            self.bound_textures[9],
-            self.bound_textures[10],
-        ]);
-
         let descriptor = self.bind_per_draw_textures_impl(descriptor_group, per_draw_bindings);
 
         let src_bounds = hal::image::Offset {
@@ -2388,22 +2387,18 @@ impl<B: hal::Backend> Device<B> {
         self.update_instances(&[data]);
 
         self.ensure_blit_program(view_kind);
-        let locals = if self.use_push_consts {
-            Locals::default()
-        } else {
-            self.bound_locals
-        };
-        let ref desc_set_locals = self.locals_descriptors.descriptor_set(&locals);
         let ref desc_set_per_group = self
-            .per_group_descriptors
-            .descriptor_set(&(descriptor_group, per_group_bindings));
+            .bound_per_group_descriptors[descriptor_group as usize]
+            .as_ref()
+            .unwrap()
+            .raw();
 
         self.blit_programs.get_mut(&view_kind).unwrap().submit(
             &mut self.command_buffer,
             descriptor.raw(),
             None,
             desc_set_per_group,
-            Some(*desc_set_locals),
+            self.bound_locals_descriptor.as_ref().map(|d| d.raw()),
             None,
             self.blend_color.get(),
             None,
@@ -2708,8 +2703,15 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn switch_mode(&mut self, mode: i32) {
         debug_assert!(self.inside_frame);
-        self.bound_locals.uMode = mode;
-        self.bind_uniforms();
+        if self.bound_locals.uMode == mode {
+            return;
+        }
+        let mut new_locals = self.bound_locals;
+        new_locals.uMode = mode;
+        if !self.use_push_consts {
+            self.bind_uniforms(new_locals);
+        }
+        self.bound_locals = new_locals;
     }
 
     pub fn create_pbo(&mut self) -> PBO {
@@ -3726,6 +3728,10 @@ impl<B: hal::Backend> Device<B> {
                 if let Some(descriptor) = self.bound_per_group_descriptors[*descriptor_group as usize].take() {
                     self.per_group_descriptors.push_back_descriptor_set((*descriptor_group, self.bound_per_group_textures), descriptor);
                 }
+            }
+
+            if let Some(descriptor) = self.bound_locals_descriptor.take() {
+                self.locals_descriptors.push_back_descriptor_set(self.bound_locals, descriptor);
             }
 
             let mut heaps = Arc::try_unwrap(self.heaps).unwrap().into_inner().unwrap();

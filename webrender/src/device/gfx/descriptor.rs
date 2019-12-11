@@ -11,7 +11,6 @@ use rendy_memory::Heaps;
 use smallvec::SmallVec;
 use std::clone::Clone;
 use std::cmp::Eq;
-use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::marker::Copy;
@@ -337,13 +336,6 @@ where
         }
     }
 
-    pub(super) fn descriptor_set(&self, key: &K) -> &B::DescriptorSet {
-        self.descriptor_bindings
-            .get(&key)
-            .expect(&format!("Descriptor set not found for key {:?}", key))
-            .raw()
-    }
-
     pub(super) fn push_back_descriptor_set(&mut self, key: K, rendy_descriptor: DescriptorSet<B>) {
         assert!(self.descriptor_bindings.insert(key, rendy_descriptor).is_none())
     }
@@ -452,41 +444,45 @@ where
         group_data: &DescriptorData<B>,
         locals_buffer: &mut UniformBufferHandler<B>,
         heaps: &mut Heaps<B>,
-    ) {
-        if let Entry::Vacant(v) = self.descriptor_bindings.entry(bindings) {
-            locals_buffer.add(&device, &[bindings], heaps);
-            let free_sets = self.free_sets.get_mut(&DescriptorGroup::Default);
-            let desc_set = match free_sets.pop() {
-                Some(ds) => ds,
-                None => {
-                    unsafe {
-                        desc_allocator.allocate(
-                            device,
-                            group_data.descriptor_layout(
-                                &DescriptorGroup::Default,
-                                DESCRIPTOR_SET_LOCALS,
-                            ),
-                            group_data.ranges(&DescriptorGroup::Default, DESCRIPTOR_SET_LOCALS),
-                            DESCRIPTOR_COUNT,
-                            free_sets,
-                        )
+    ) -> DescriptorSet<B> {
+        let desc_set = match self.descriptor_bindings.remove(&bindings) {
+            Some(set) => return set,
+            None => {
+                locals_buffer.add(&device, &[bindings], heaps);
+                let free_sets = self.free_sets.get_mut(&DescriptorGroup::Default);
+                match free_sets.pop() {
+                    Some(ds) => ds,
+                    None => {
+                        unsafe {
+                            desc_allocator.allocate(
+                                device,
+                                group_data.descriptor_layout(
+                                    &DescriptorGroup::Default,
+                                    DESCRIPTOR_SET_LOCALS,
+                                ),
+                                group_data.ranges(&DescriptorGroup::Default, DESCRIPTOR_SET_LOCALS),
+                                DESCRIPTOR_COUNT,
+                                free_sets,
+                            )
+                        }
+                        .expect("Allocate descriptor sets failed");
+                        free_sets.pop().unwrap()
                     }
-                    .expect("Allocate descriptor sets failed");
-                    free_sets.pop().unwrap()
                 }
-            };
-            let desc_set = v.insert(desc_set);
-            unsafe {
-                device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                    set: desc_set.raw(),
-                    binding: 0,
-                    array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Buffer(
-                        &locals_buffer.buffer().buffer,
-                        Some(0)..None,
-                    )),
-                }));
             }
+        };
+
+        unsafe {
+            device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
+                set: desc_set.raw(),
+                binding: 0,
+                array_offset: 0,
+                descriptors: Some(hal::pso::Descriptor::Buffer(
+                    &locals_buffer.buffer().buffer,
+                    Some(0)..None,
+                )),
+            }));
         }
+        desc_set
     }
 }
