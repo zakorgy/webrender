@@ -1121,7 +1121,6 @@ impl<B: hal::Backend> Device<B> {
             Self::begin_cmd_buffer(&mut self.command_buffer);
         }
         self.staging_buffer_pool[self.next_id].reset();
-        self.reset_program_buffer_offsets();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
     }
@@ -1133,15 +1132,6 @@ impl<B: hal::Backend> Device<B> {
         self.bound_read_fbo = DEFAULT_READ_FBO;
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
         self.draw_target_usage = DrawTargetUsage::Draw;
-    }
-
-    fn reset_program_buffer_offsets(&mut self) {
-        for program in self.programs.values_mut() {
-            if let Some(ref mut index_buffer) = program.index_buffer {
-                index_buffer[self.next_id].reset();
-                program.vertex_buffer.as_mut().unwrap()[self.next_id].reset();
-            }
-        }
     }
 
     pub fn delete_program(&mut self, mut _program: ProgramId) {
