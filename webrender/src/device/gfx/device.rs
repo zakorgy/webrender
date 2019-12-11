@@ -3229,28 +3229,29 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn clear_target_rect(
+    pub fn clear_target_rects(
         &mut self,
-        rect: FramebufferIntRect,
         color: Option<[f32; 4]>,
         depth: Option<f32>,
+        rects: impl IntoIterator<Item = FramebufferIntRect>,
     ) {
+        let mut end_pass = false;
         if !self.inside_render_pass {
             self.begin_render_pass_impl(self.last_main_fbo_pass);
-        }
-        if color.is_none() && depth.is_none() {
-            return;
+            end_pass = true;
         }
 
-        let rect = hal::pso::ClearRect {
-            rect: hal::pso::Rect {
-                x: rect.origin.x as i16,
-                y: rect.origin.y as i16,
-                w: rect.size.width as i16,
-                h: rect.size.height as i16,
-            },
-            layers: 0..1,
-        };
+        let rects = rects.into_iter().map(|rect| {
+            hal::pso::ClearRect {
+                rect: hal::pso::Rect {
+                    x: rect.origin.x as i16,
+                    y: rect.origin.y as i16,
+                    w: rect.size.width as i16,
+                    h: rect.size.height as i16,
+                },
+                layers: 0..1,
+            }
+        });
 
         let color_clear = color.map(|c| hal::command::AttachmentClear::Color {
             index: 0,
@@ -3264,7 +3265,10 @@ impl<B: hal::Backend> Device<B> {
 
         unsafe {
             self.command_buffer
-                .clear_attachments(color_clear.into_iter().chain(depth_clear), Some(rect));
+                .clear_attachments(color_clear.into_iter().chain(depth_clear), rects);
+        }
+        if end_pass {
+            self.end_render_pass();
         }
     }
 
@@ -3375,30 +3379,8 @@ impl<B: hal::Backend> Device<B> {
         if color.is_none() && depth.is_none() {
             return;
         }
-        if let Some(mut rect) = rect {
-            let target_rect = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-                let extent = &self.images[&self.fbos[&self.bound_draw_fbo].texture_id]
-                    .kind
-                    .extent();
-                FramebufferIntRect::new(
-                    FramebufferIntPoint::zero(),
-                    FramebufferIntSize::new(extent.width as _, extent.height as _),
-                )
-            } else {
-                FramebufferIntRect::new(
-                    FramebufferIntPoint::zero(),
-                    FramebufferIntSize::new(self.viewport.rect.w as _, self.viewport.rect.h as _),
-                )
-            };
-            rect.size.width = rect.size.width.min(target_rect.size.width);
-            rect.size.height = rect.size.height.min(target_rect.size.height);
-            if !self.inside_render_pass {
-                self.begin_render_pass(false);
-                self.clear_target_rect(rect, color, depth);
-                self.end_render_pass();
-            } else {
-                self.clear_target_rect(rect, color, depth);
-            }
+        if rect.is_some() {
+            self.clear_target_rects(color, depth, rect);
         } else if can_use_load_op {
             let color = color.map(|c| ClearValue {
                 color: ClearColor { float32: c },
