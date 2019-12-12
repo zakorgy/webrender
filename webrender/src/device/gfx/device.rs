@@ -1280,10 +1280,7 @@ impl<B: hal::Backend> Device<B> {
             &mut *self.heaps.lock().unwrap(),
         );
 
-        if let Some(desc) = mem::replace(
-            &mut self.bound_locals_descriptor,
-            Some(descriptor),
-        ) {
+        if let Some(desc) = self.bound_locals_descriptor.replace(descriptor) {
             self.locals_descriptors.push_back_descriptor_set(self.bound_locals, desc);
         }
     }
@@ -1360,10 +1357,7 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_linear,
             &self.sampler_nearest,
         );
-        if let Some(desc) = mem::replace(
-            &mut self.bound_per_pass_descriptor,
-            Some(descriptor),
-        ) {
+        if let Some(desc) = self.bound_per_pass_descriptor.replace(descriptor) {
             self.per_pass_descriptors.push_back_descriptor_set(self.bound_per_pass_textures, desc);
         }
         self.bound_per_pass_textures = per_pass_bindings;
@@ -1393,10 +1387,7 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_nearest,
         );
 
-        if let Some(desc) = mem::replace(
-            &mut self.bound_per_group_descriptors[descriptor_group as usize],
-            Some(descriptor),
-        ) {
+        if let Some(desc) = self.bound_per_group_descriptors[descriptor_group as usize].replace(descriptor) {
             self.per_group_descriptors.push_back_descriptor_set((descriptor_group, self.bound_per_group_textures), desc);
         }
     }
@@ -1429,10 +1420,7 @@ impl<B: hal::Backend> Device<B> {
             return;
         }
         let descriptor = self.bind_per_draw_textures_impl(descriptor_group, per_draw_bindings);
-        if let Some(desc) = mem::replace(
-            &mut self.bound_per_draw_descriptor,
-            Some(descriptor),
-        ) {
+        if let Some(desc) = self.bound_per_draw_descriptor.replace(descriptor) {
             self.per_draw_descriptors.push_back_descriptor_set(self.bound_per_draw_textures, desc);
         }
         self.bound_per_draw_textures = per_draw_bindings;
