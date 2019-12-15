@@ -4188,7 +4188,6 @@ impl<B: hal::Backend> Renderer<B> {
                         &mut self.renderer_errors,
                     );
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
-
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                 }
@@ -4742,6 +4741,14 @@ impl<B: hal::Backend> Renderer<B> {
                 stats,
             );
         }
+
+        #[cfg(not(feature = "gl"))]
+        {
+            if !list.box_shadows.is_empty() {
+                self.shaders.borrow_mut().cs_clip_box_shadow
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+            }
+        }
         // draw box-shadow clips
         for (mask_texture_id, items) in list.box_shadows.iter() {
             let _gm2 = self.gpu_profile.start_marker("box-shadows");
@@ -4752,8 +4759,11 @@ impl<B: hal::Backend> Renderer<B> {
                     TextureSource::Invalid,
                 ],
             };
-            self.shaders.borrow_mut().cs_clip_box_shadow
-                .bind(&mut self.device, projection, &mut self.renderer_errors);
+            #[cfg(feature = "gl")]
+            {
+                self.shaders.borrow_mut().cs_clip_box_shadow
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+            }
             self.draw_instanced_batch(
                 items,
                 VertexArrayKind::Clip,
@@ -4762,6 +4772,13 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
 
+        #[cfg(not(feature = "gl"))]
+        {
+            if !list.images.is_empty() {
+                self.shaders.borrow_mut().cs_clip_image
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+            }
+        }
         // draw image masks
         for (mask_texture_id, items) in list.images.iter() {
             let _gm2 = self.gpu_profile.start_marker("clip images");
@@ -4772,8 +4789,11 @@ impl<B: hal::Backend> Renderer<B> {
                     TextureSource::Invalid,
                 ],
             };
-            self.shaders.borrow_mut().cs_clip_image
-                .bind(&mut self.device, projection, &mut self.renderer_errors);
+            #[cfg(feature = "gl")]
+            {
+                self.shaders.borrow_mut().cs_clip_image
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+            }
             self.draw_instanced_batch(
                 items,
                 VertexArrayKind::Clip,

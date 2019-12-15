@@ -134,8 +134,8 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
                 }
                 #[cfg(not(feature = "gl"))]
                 {
-                    device.set_uniforms(program, projection);
                     device.bind_program(program);
+                    device.set_uniforms(program, projection);
                 }
             },
             Err(e) => {

@@ -254,8 +254,8 @@ pub struct Device<B: hal::Backend> {
     pub dimensions: (i32, i32),
     pub sampler_linear: B::Sampler,
     pub sampler_nearest: B::Sampler,
-    current_blend_state: Cell<Option<BlendState>>,
-    blend_color: Cell<ColorF>,
+    current_blend_state: Option<BlendState>,
+    blend_color: ColorF,
     current_depth_test: Option<DepthTest>,
     clear_values: FastHashMap<FBOId, ClearValues>,
     // device state
@@ -354,6 +354,8 @@ pub struct Device<B: hal::Backend> {
     optimal_pbo_stride: NonZeroUsize,
     last_rp_in_frame_reached: bool,
     pub readback_supported: bool,
+    #[cfg(debug_assertions)]
+    shader_is_ready: bool,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -738,10 +740,10 @@ impl<B: hal::Backend> Device<B> {
             dimensions,
             sampler_linear,
             sampler_nearest,
-            current_blend_state: Cell::new(None),
+            current_blend_state: None,
             current_depth_test: None,
             clear_values: FastHashMap::default(),
-            blend_color: Cell::new(ColorF::new(0.0, 0.0, 0.0, 0.0)),
+            blend_color: ColorF::new(0.0, 0.0, 0.0, 0.0),
             _resource_override_path: resource_override_path,
             // This is initialized to 1 by default, but it is reset
             // at the beginning of each frame in `Renderer::bind_frame_data`.
@@ -827,6 +829,9 @@ impl<B: hal::Backend> Device<B> {
             optimal_pbo_stride: NonZeroUsize::new(4).unwrap(),
             last_rp_in_frame_reached: false,
             readback_supported,
+
+            #[cfg(debug_assertions)]
+            shader_is_ready: false,
         };
 
         if readback_supported || device.headless_mode() {
@@ -1299,9 +1304,33 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_program(&mut self, program_id: &ProgramId) {
         debug_assert!(self.inside_frame);
+        self.bound_program = *program_id;
+        let program = self.programs
+            .get(&self.bound_program)
+            .expect("Program not found");
 
-        if self.bound_program != *program_id {
-            self.bound_program = *program_id;
+        let format = self.fbos
+            .get(&self.bound_draw_fbo)
+            .map_or(self.surface_format, |fbo| fbo.format);
+
+        let blend_state = self.current_blend_state;
+        unsafe {
+            self.command_buffer.bind_graphics_pipeline(
+                &program
+                    .pipelines
+                    .get(&(format, blend_state, self.render_pass_depth_state, self.current_depth_test))
+                    .expect(&format!(
+                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
+                        blend_state, self.current_depth_test, self.render_pass_depth_state, format, program.shader_name
+                    )),
+            );
+            if let Some(SUBPIXEL_CONSTANT_TEXT_COLOR) = blend_state  {
+                self.command_buffer.set_blend_constants(self.blend_color.to_array());
+            }
+        }
+        #[cfg(debug_assertions)]
+        {
+            self.shader_is_ready = true;
         }
     }
 
@@ -1583,25 +1612,22 @@ impl<B: hal::Backend> Device<B> {
                 desc_set_per_pass,
                 desc_set_per_group,
                 self.bound_locals_descriptor.as_ref().map(|d| d.raw()),
-                self.current_blend_state.get(),
-                self.blend_color.get(),
-                self.current_depth_test,
-                self.render_pass_depth_state,
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 self.use_push_consts,
                 &self.quad_buffer,
                 &self.instance_buffers[self.next_id],
                 self.instance_buffer_range.clone(),
-                self.fbos
-                    .get(&self.bound_draw_fbo)
-                    .map_or(self.surface_format, |fbo| fbo.format),
             );
     }
 
     pub fn begin_frame(&mut self) -> GpuFrameId {
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
+        #[cfg(debug_assertions)]
+        {
+            self.shader_is_ready = false;
+        }
         self.reset_state();
         self.switch_mode(0);
 
@@ -1715,6 +1741,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn reset_draw_target(&mut self) {
         self.bind_draw_target_impl(DEFAULT_DRAW_FBO, DrawTargetUsage::Draw);
         self.depth_available = true;
+        self.render_pass_depth_state = RenderPassDepthState::Enabled;
     }
 
     pub fn bind_draw_target(&mut self, texture_target: DrawTarget, usage: DrawTargetUsage) {
@@ -1800,6 +1827,10 @@ impl<B: hal::Backend> Device<B> {
         };
 
         self.depth_available = depth_available;
+        self.render_pass_depth_state = match self.depth_available {
+            true => RenderPassDepthState::Enabled,
+            false => RenderPassDepthState::Disabled,
+        };
         self.bind_draw_target_impl(fbo_id, usage);
         self.viewport.rect = hal::pso::Rect {
             x: rect.origin.x as i16,
@@ -2435,23 +2466,32 @@ impl<B: hal::Backend> Device<B> {
             .unwrap()
             .raw();
 
-        self.blit_programs.get_mut(&view_kind).unwrap().submit(
+        let program = self.blit_programs.get_mut(&view_kind).unwrap();
+        unsafe {
+            self.command_buffer.bind_graphics_pipeline(
+                &program
+                    .pipelines
+                    .get(&(self.surface_format, None, self.render_pass_depth_state, None))
+                    .expect(&format!(
+                        "Can't find blit program with render_pass_depth_state {:?} and format {:?}",
+                        self.render_pass_depth_state, self.surface_format,
+                    )),
+            );
+        }
+
+
+        program.submit(
             &mut self.command_buffer,
             descriptor.raw(),
             None,
             desc_set_per_group,
             self.bound_locals_descriptor.as_ref().map(|d| d.raw()),
-            None,
-            self.blend_color.get(),
-            None,
-            self.render_pass_depth_state,
             self.next_id,
             self.descriptor_data.pipeline_layout(&descriptor_group),
             self.use_push_consts,
             &self.quad_buffer,
             &self.instance_buffers[self.next_id],
             self.instance_buffer_range.clone(),
-            self.surface_format,
         );
         unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
         self.per_draw_descriptors.push_back_descriptor_set(per_draw_bindings, descriptor);
@@ -3141,16 +3181,22 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn draw_triangles_u16(&mut self, _first_vertex: i32, _index_count: i32) {
         debug_assert!(self.inside_frame);
+        #[cfg(debug_assertions)]
+        debug_assert!(self.shader_is_ready);
         self.draw();
     }
 
     pub fn draw_triangles_u32(&mut self, _first_vertex: i32, _index_count: i32) {
         debug_assert!(self.inside_frame);
+        #[cfg(debug_assertions)]
+        debug_assert!(self.shader_is_ready);
         self.draw();
     }
 
     pub fn draw_nonindexed_lines(&mut self, _first_vertex: i32, _vertex_count: i32) {
         debug_assert!(self.inside_frame);
+        #[cfg(debug_assertions)]
+        debug_assert!(self.shader_is_ready);
         self.draw();
     }
 
@@ -3160,6 +3206,8 @@ impl<B: hal::Backend> Device<B> {
         _instance_count: i32,
     ) {
         debug_assert!(self.inside_frame);
+        #[cfg(debug_assertions)]
+        debug_assert!(self.shader_is_ready);
         self.draw();
     }
 
@@ -3241,10 +3289,6 @@ impl<B: hal::Backend> Device<B> {
             self.command_buffer.set_scissors(0, &[scissor_rect]);
         }
         self.inside_render_pass = true;
-        self.render_pass_depth_state = match self.depth_available {
-            true => RenderPassDepthState::Enabled,
-            false => RenderPassDepthState::Disabled,
-        }
     }
 
     pub fn end_render_pass(&mut self) {
@@ -3497,77 +3541,83 @@ impl<B: hal::Backend> Device<B> {
         self.scissor_enabled = false;
     }
 
-    pub fn set_blend(&self, enable: bool) {
+    pub fn set_blend(&mut self, enable: bool) {
         if !enable {
-            self.current_blend_state.set(None)
+            self.current_blend_state = None;
+        }
+        #[cfg(debug_assertions)]
+        {
+            self.shader_is_ready = false;
         }
     }
 
-    pub fn set_blend_mode_alpha(&self) {
-        self.current_blend_state.set(Some(ALPHA));
+    fn set_blend_state(&mut self, blend_state: Option<BlendState>) {
+        self.current_blend_state = blend_state;
+        #[cfg(debug_assertions)]
+        {
+            self.shader_is_ready = false;
+        }
     }
 
-    pub fn set_blend_mode_premultiplied_alpha(&self) {
-        self.current_blend_state
-            .set(Some(BlendState::PREMULTIPLIED_ALPHA));
+    pub fn set_blend_mode_alpha(&mut self) {
+        self.set_blend_state(Some(ALPHA));
     }
 
-    pub fn set_blend_mode_premultiplied_dest_out(&self) {
-        self.current_blend_state.set(Some(PREMULTIPLIED_DEST_OUT));
+    pub fn set_blend_mode_premultiplied_alpha(&mut self) {
+        self.set_blend_state(Some(BlendState::PREMULTIPLIED_ALPHA));
     }
 
-    pub fn set_blend_mode_multiply(&self) {
-        self.current_blend_state.set(Some(BlendState::MULTIPLY));
+    pub fn set_blend_mode_premultiplied_dest_out(&mut self) {
+        self.set_blend_state(Some(PREMULTIPLIED_DEST_OUT));
     }
 
-    pub fn set_blend_mode_max(&self) {
-        self.current_blend_state.set(Some(MAX));
+    pub fn set_blend_mode_multiply(&mut self) {
+        self.set_blend_state(Some(BlendState::MULTIPLY));
     }
 
-    pub fn set_blend_mode_min(&self) {
-        self.current_blend_state.set(Some(MIN));
+    pub fn set_blend_mode_max(&mut self) {
+        self.set_blend_state(Some(MAX));
     }
 
-    pub fn set_blend_mode_subpixel_pass0(&self) {
-        self.current_blend_state.set(Some(SUBPIXEL_PASS0));
+    pub fn set_blend_mode_min(&mut self) {
+        self.set_blend_state(Some(MIN));
     }
 
-    pub fn set_blend_mode_subpixel_pass1(&self) {
-        self.current_blend_state.set(Some(SUBPIXEL_PASS1));
+    pub fn set_blend_mode_subpixel_pass0(&mut self) {
+        self.set_blend_state(Some(SUBPIXEL_PASS0));
     }
 
-    pub fn set_blend_mode_subpixel_with_bg_color_pass0(&self) {
-        self.current_blend_state
-            .set(Some(SUBPIXEL_WITH_BG_COLOR_PASS0));
+    pub fn set_blend_mode_subpixel_pass1(&mut self) {
+        self.set_blend_state(Some(SUBPIXEL_PASS1));
     }
 
-    pub fn set_blend_mode_subpixel_with_bg_color_pass1(&self) {
-        self.current_blend_state
-            .set(Some(SUBPIXEL_WITH_BG_COLOR_PASS1));
+    pub fn set_blend_mode_subpixel_with_bg_color_pass0(&mut self) {
+        self.set_blend_state(Some(SUBPIXEL_WITH_BG_COLOR_PASS0));
     }
 
-    pub fn set_blend_mode_subpixel_with_bg_color_pass2(&self) {
-        self.current_blend_state
-            .set(Some(SUBPIXEL_WITH_BG_COLOR_PASS2));
+    pub fn set_blend_mode_subpixel_with_bg_color_pass1(&mut self) {
+        self.set_blend_state(Some(SUBPIXEL_WITH_BG_COLOR_PASS1));
     }
 
-    pub fn set_blend_mode_subpixel_constant_text_color(&self, color: ColorF) {
-        self.current_blend_state
-            .set(Some(SUBPIXEL_CONSTANT_TEXT_COLOR));
+    pub fn set_blend_mode_subpixel_with_bg_color_pass2(&mut self) {
+        self.set_blend_state(Some(SUBPIXEL_WITH_BG_COLOR_PASS2));
+    }
+
+    pub fn set_blend_mode_subpixel_constant_text_color(&mut self, color: ColorF) {
+        self.set_blend_state(Some(SUBPIXEL_CONSTANT_TEXT_COLOR));
         // color is an unpremultiplied color.
-        self.blend_color
-            .set(ColorF::new(color.r, color.g, color.b, 1.0));
+        self.blend_color = ColorF::new(color.r, color.g, color.b, 1.0);
     }
 
-    pub fn set_blend_mode_subpixel_dual_source(&self) {
-        self.current_blend_state.set(Some(SUBPIXEL_DUAL_SOURCE));
+    pub fn set_blend_mode_subpixel_dual_source(&mut self) {
+        self.set_blend_state(Some(SUBPIXEL_DUAL_SOURCE));
     }
 
-    pub fn set_blend_mode_show_overdraw(&self) {
-        self.current_blend_state.set(Some(OVERDRAW));
+    pub fn set_blend_mode_show_overdraw(&mut self) {
+        self.set_blend_state(Some(OVERDRAW));
     }
 
-    pub fn set_blend_mode_advanced(&self, _mode: MixBlendMode) {
+    pub fn set_blend_mode_advanced(&mut self, _mode: MixBlendMode) {
         unimplemented!("set_blend_mode_advanced is unimplemented");
     }
 
