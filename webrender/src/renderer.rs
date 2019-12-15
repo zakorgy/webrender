@@ -3841,6 +3841,11 @@ impl<B: hal::Backend> Renderer<B> {
                 &mut self.renderer_errors,
             );
 
+        #[cfg(not(feature = "gl"))]
+        {
+            self.device.bind_pipeline();
+        }
+
         for (source, instances) in scalings {
             self.draw_instanced_batch(
                 instances,
@@ -3869,6 +3874,11 @@ impl<B: hal::Backend> Renderer<B> {
             &projection,
             &mut self.renderer_errors
         );
+
+        #[cfg(not(feature = "gl"))]
+        {
+            self.device.bind_pipeline();
+        }
 
         self.draw_instanced_batch(
             &svg_filters,
@@ -4018,6 +4028,11 @@ impl<B: hal::Backend> Renderer<B> {
                             &mut self.renderer_errors,
                         );
 
+                    #[cfg(not(feature = "gl"))]
+                    {
+                        self.device.bind_pipeline();
+                    }
+
                     let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
                     self.draw_instanced_batch(
                         &batch.instances,
@@ -4142,6 +4157,7 @@ impl<B: hal::Backend> Renderer<B> {
                     let last_batch = _batch_idx == last_batch_idx;
                     last_rp = last_batch && transit_to_present;
                     self.device.begin_render_pass(last_batch && transit_to_present);
+                    self.device.bind_pipeline();
                 }
                 self.draw_instanced_batch(
                     &batch.instances,
@@ -4158,12 +4174,19 @@ impl<B: hal::Backend> Renderer<B> {
                     // are all set up from the previous draw_instanced_batch call,
                     // so just issue a draw call here to avoid re-uploading the
                     // instances and re-binding textures etc.
+                    #[cfg(not(feature = "gl"))]
+                    {
+                        self.device.bind_pipeline();
+                    }
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                     self.set_blend_mode_subpixel_with_bg_color_pass2(framebuffer_kind);
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
-
+                    #[cfg(not(feature = "gl"))]
+                    {
+                        self.device.bind_pipeline();
+                    }
                     self.device
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
                 }
@@ -4428,6 +4451,10 @@ impl<B: hal::Backend> Renderer<B> {
             let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
             self.device.enable_depth_write();
             self.set_blend(false, FramebufferKind::Main);
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
             self.draw_tile_list(
                 composite_state.opaque_tiles.iter().rev(),
                 partial_present_mode,
@@ -4441,6 +4468,10 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.disable_depth_write();
             self.set_blend(true, FramebufferKind::Main);
             self.device.set_blend_mode_premultiplied_dest_out();
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
             self.draw_tile_list(
                 composite_state.clear_tiles.iter(),
                 partial_present_mode,
@@ -4455,6 +4486,10 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.disable_depth_write();
             self.set_blend(true, FramebufferKind::Main);
             self.set_blend_mode_premultiplied_alpha(FramebufferKind::Main);
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
             self.draw_tile_list(
                 composite_state.alpha_tiles.iter(),
                 partial_present_mode,
@@ -4584,6 +4619,11 @@ impl<B: hal::Backend> Renderer<B> {
             self.shaders.borrow_mut().cs_blur_rgba8
                 .bind(&mut self.device, projection, &mut self.renderer_errors);
 
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
+
             if !target.vertical_blurs.is_empty() {
                 self.draw_instanced_batch(
                     &target.vertical_blurs,
@@ -4692,6 +4732,10 @@ impl<B: hal::Backend> Renderer<B> {
                 projection,
                 &mut self.renderer_errors,
             );
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
             self.draw_instanced_batch(
                 &list.slow_rectangles,
                 VertexArrayKind::Clip,
@@ -4706,12 +4750,25 @@ impl<B: hal::Backend> Renderer<B> {
                 projection,
                 &mut self.renderer_errors,
             );
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
             self.draw_instanced_batch(
                 &list.fast_rectangles,
                 VertexArrayKind::Clip,
                 &BatchTextures::no_texture(),
                 stats,
             );
+        }
+
+        #[cfg(not(feature = "gl"))]
+        {
+            if !list.box_shadows.is_empty() {
+                self.shaders.borrow_mut().cs_clip_box_shadow
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+                self.device.bind_pipeline();
+            }
         }
         // draw box-shadow clips
         for (mask_texture_id, items) in list.box_shadows.iter() {
@@ -4723,8 +4780,11 @@ impl<B: hal::Backend> Renderer<B> {
                     TextureSource::Invalid,
                 ],
             };
-            self.shaders.borrow_mut().cs_clip_box_shadow
-                .bind(&mut self.device, projection, &mut self.renderer_errors);
+            #[cfg(feature = "gl")]
+            {
+                self.shaders.borrow_mut().cs_clip_box_shadow
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+            }
             self.draw_instanced_batch(
                 items,
                 VertexArrayKind::Clip,
@@ -4733,6 +4793,14 @@ impl<B: hal::Backend> Renderer<B> {
             );
         }
 
+        #[cfg(not(feature = "gl"))]
+        {
+            if !list.images.is_empty() {
+                self.shaders.borrow_mut().cs_clip_image
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+                self.device.bind_pipeline();
+            }
+        }
         // draw image masks
         for (mask_texture_id, items) in list.images.iter() {
             let _gm2 = self.gpu_profile.start_marker("clip images");
@@ -4743,8 +4811,11 @@ impl<B: hal::Backend> Renderer<B> {
                     TextureSource::Invalid,
                 ],
             };
-            self.shaders.borrow_mut().cs_clip_image
-                .bind(&mut self.device, projection, &mut self.renderer_errors);
+            #[cfg(feature = "gl")]
+            {
+                self.shaders.borrow_mut().cs_clip_image
+                    .bind(&mut self.device, projection, &mut self.renderer_errors);
+            }
             self.draw_instanced_batch(
                 items,
                 VertexArrayKind::Clip,
@@ -4857,6 +4928,11 @@ impl<B: hal::Backend> Renderer<B> {
 
             self.shaders.borrow_mut().cs_blur_a8
                 .bind(&mut self.device, projection, &mut self.renderer_errors);
+
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
 
             if !target.vertical_blurs.is_empty() {
                 self.draw_instanced_batch(
@@ -5016,6 +5092,10 @@ impl<B: hal::Backend> Renderer<B> {
                     &projection,
                     &mut self.renderer_errors,
                 );
+                #[cfg(not(feature = "gl"))]
+                {
+                    self.device.bind_pipeline();
+                }
 
                 self.draw_instanced_batch(
                     &target.border_segments_solid,
@@ -5031,6 +5111,10 @@ impl<B: hal::Backend> Renderer<B> {
                     &projection,
                     &mut self.renderer_errors,
                 );
+                #[cfg(not(feature = "gl"))]
+                {
+                    self.device.bind_pipeline();
+                }
 
                 self.draw_instanced_batch(
                     &target.border_segments_complex,
@@ -5055,6 +5139,10 @@ impl<B: hal::Backend> Renderer<B> {
                 &projection,
                 &mut self.renderer_errors,
             );
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
 
             self.draw_instanced_batch(
                 &target.line_decorations,
@@ -5077,6 +5165,10 @@ impl<B: hal::Backend> Renderer<B> {
                 &projection,
                 &mut self.renderer_errors,
             );
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
+            }
 
             self.draw_instanced_batch(
                 &target.gradients,
@@ -5096,6 +5188,10 @@ impl<B: hal::Backend> Renderer<B> {
                     RenderTargetKind::Alpha => &mut shaders.cs_blur_a8,
                     RenderTargetKind::Color => &mut shaders.cs_blur_rgba8,
                 }.bind(&mut self.device, &projection, &mut self.renderer_errors);
+            }
+            #[cfg(not(feature = "gl"))]
+            {
+                self.device.bind_pipeline();
             }
 
             self.draw_instanced_batch(
