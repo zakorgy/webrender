@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorF, ImageFormat};
+use api::ImageFormat;
 use hal::{self, device::Device as BackendDevice};
 use hal::command::CommandBuffer;
 use crate::internal_types::FastHashMap;
@@ -11,7 +11,6 @@ use rendy_memory::Heaps;
 use std::borrow::Cow::{Borrowed};
 
 use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
-use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
 use super::render_pass::HalRenderPasses;
 use super::PipelineRequirements;
 use super::super::{ShaderKind, VertexArrayKind};
@@ -48,7 +47,7 @@ type PipelineKey = (
 );
 
 pub(crate) struct Program<B: hal::Backend> {
-    pipelines: FastHashMap<PipelineKey, B::GraphicsPipeline>,
+    pub(super) pipelines: FastHashMap<PipelineKey, B::GraphicsPipeline>,
     pub(super) vertex_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) shader_name: String,
@@ -614,17 +613,12 @@ impl<B: hal::Backend> Program<B> {
         desc_set_per_pass: Option<&B::DescriptorSet>,
         desc_set_per_frame: &B::DescriptorSet,
         desc_set_locals: Option<&B::DescriptorSet>,
-        blend_state: Option<hal::pso::BlendState>,
-        blend_color: ColorF,
-        depth_test: Option<hal::pso::DepthTest>,
-        render_pass_depth_state: RenderPassDepthState,
         next_id: usize,
         pipeline_layout: &B::PipelineLayout,
         use_push_consts: bool,
         vertex_buffer: &VertexBufferHandler<B>,
         instance_buffer: &InstanceBufferHandler<B>,
         instance_buffer_range: std::ops::Range<usize>,
-        format: ImageFormat,
     ) {
         if self.shader_kind.is_debug() {
             if self.last_frame_used != next_id {
@@ -646,15 +640,6 @@ impl<B: hal::Backend> Program<B> {
                     &self.constants,
                 );
             }
-            cmd_buffer.bind_graphics_pipeline(
-                &self
-                    .pipelines
-                    .get(&(format, blend_state, render_pass_depth_state, depth_test))
-                    .expect(&format!(
-                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
-                        blend_state, depth_test, render_pass_depth_state, format, self.shader_name
-                    )),
-            );
 
             if !use_push_consts {
                 assert!(desc_set_locals.is_some());
@@ -670,10 +655,6 @@ impl<B: hal::Backend> Program<B> {
                     .chain(desc_set_locals),
                 &[],
             );
-
-            if blend_state == Some(SUBPIXEL_CONSTANT_TEXT_COLOR) {
-                cmd_buffer.set_blend_constants(blend_color.to_array());
-            }
 
             match &self.index_buffer {
                 // Debug shaders
