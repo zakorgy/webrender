@@ -48,7 +48,7 @@ type PipelineKey = (
 );
 
 pub(crate) struct Program<B: hal::Backend> {
-    pipelines: FastHashMap<PipelineKey, B::GraphicsPipeline>,
+    pub(super) pipelines: FastHashMap<PipelineKey, B::GraphicsPipeline>,
     pub(super) vertex_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) index_buffer: Option<SmallVec<[VertexBufferHandler<B>; 1]>>,
     pub(super) shader_name: String,
@@ -646,15 +646,6 @@ impl<B: hal::Backend> Program<B> {
                     &self.constants,
                 );
             }
-            cmd_buffer.bind_graphics_pipeline(
-                &self
-                    .pipelines
-                    .get(&(format, blend_state, render_pass_depth_state, depth_test))
-                    .expect(&format!(
-                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
-                        blend_state, depth_test, render_pass_depth_state, format, self.shader_name
-                    )),
-            );
 
             if !use_push_consts {
                 assert!(desc_set_locals.is_some());

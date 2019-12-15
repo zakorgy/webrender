@@ -1248,9 +1248,29 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_program(&mut self, program_id: &ProgramId) {
         debug_assert!(self.inside_frame);
+        self.bound_program = *program_id;
+    }
 
-        if self.bound_program != *program_id {
-            self.bound_program = *program_id;
+    pub fn bind_pipeline(&mut self) {
+        let program = self.programs
+            .get(&self.bound_program)
+            .expect("Program not found");
+
+        let format = self.fbos
+            .get(&self.bound_draw_fbo)
+            .map_or(self.surface_format, |fbo| fbo.format);
+
+        let blend_state = self.current_blend_state.get();
+        unsafe {
+            self.command_buffer.bind_graphics_pipeline(
+                &program
+                    .pipelines
+                    .get(&(format, blend_state, self.render_pass_depth_state, self.current_depth_test))
+                    .expect(&format!(
+                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
+                        blend_state, self.current_depth_test, self.render_pass_depth_state, format, program.shader_name
+                    )),
+            );
         }
     }
 
@@ -1665,6 +1685,7 @@ impl<B: hal::Backend> Device<B> {
     pub fn reset_draw_target(&mut self) {
         self.bind_draw_target_impl(DEFAULT_DRAW_FBO, DrawTargetUsage::Draw);
         self.depth_available = true;
+        self.render_pass_depth_state = RenderPassDepthState::Enabled;
     }
 
     pub fn bind_draw_target(&mut self, texture_target: DrawTarget, usage: DrawTargetUsage) {
@@ -1750,6 +1771,10 @@ impl<B: hal::Backend> Device<B> {
         };
 
         self.depth_available = depth_available;
+        self.render_pass_depth_state = match self.depth_available {
+            true => RenderPassDepthState::Enabled,
+            false => RenderPassDepthState::Disabled,
+        };
         self.bind_draw_target_impl(fbo_id, usage);
         self.viewport.rect = hal::pso::Rect {
             x: rect.origin.x as i16,
@@ -2385,7 +2410,21 @@ impl<B: hal::Backend> Device<B> {
             .unwrap()
             .raw();
 
-        self.blit_programs.get_mut(&view_kind).unwrap().submit(
+        let program = self.blit_programs.get_mut(&view_kind).unwrap();
+        unsafe {
+            self.command_buffer.bind_graphics_pipeline(
+                &program
+                    .pipelines
+                    .get(&(self.surface_format, None, self.render_pass_depth_state, None))
+                    .expect(&format!(
+                        "Can't find blit program with render_pass_depth_state {:?} and format {:?}",
+                        self.render_pass_depth_state, self.surface_format,
+                    )),
+            );
+        }
+
+
+        program.submit(
             &mut self.command_buffer,
             descriptor.raw(),
             None,
@@ -3190,10 +3229,6 @@ impl<B: hal::Backend> Device<B> {
             self.command_buffer.set_scissors(0, &[scissor_rect]);
         }
         self.inside_render_pass = true;
-        self.render_pass_depth_state = match self.depth_available {
-            true => RenderPassDepthState::Enabled,
-            false => RenderPassDepthState::Disabled,
-        }
     }
 
     pub fn end_render_pass(&mut self) {

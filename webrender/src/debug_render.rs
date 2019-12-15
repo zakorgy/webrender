@@ -398,6 +398,10 @@ impl DebugRenderer {
                     &self.tri_vertices,
                     VertexUsageHint::Dynamic,
                 );
+                #[cfg(not(feature = "gl"))]
+                {
+                    device.bind_pipeline();
+                }
                 device.draw_triangles_u32(0, self.tri_indices.len() as i32);
             }
 
@@ -411,6 +415,10 @@ impl DebugRenderer {
                     &self.line_vertices,
                     VertexUsageHint::Dynamic,
                 );
+                #[cfg(not(feature = "gl"))]
+                {
+                    device.bind_pipeline();
+                }
                 device.draw_nonindexed_lines(0, self.line_vertices.len() as i32);
             }
 
@@ -426,6 +434,10 @@ impl DebugRenderer {
                     &self.font_vertices,
                     VertexUsageHint::Dynamic,
                 );
+                #[cfg(not(feature = "gl"))]
+                {
+                    device.bind_pipeline();
+                }
                 device.draw_triangles_u32(0, self.font_indices.len() as i32);
             }
         }
