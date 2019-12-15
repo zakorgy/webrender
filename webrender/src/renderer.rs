@@ -4040,18 +4040,6 @@ impl<B: hal::Backend> Renderer<B> {
                 if should_skip_batch(&batch.key.kind, &self.debug_flags) {
                     continue;
                 }
-                #[cfg(not(feature = "gl"))]
-                let mut blit_in_batch = false;
-                #[cfg(not(feature = "gl"))]
-                let last_batch = _batch_idx == last_batch_idx;
-                #[cfg(not(feature = "gl"))]
-                {
-                    if let BatchKind::Brush(BrushBatchKind::MixBlend { .. }) = batch.key.kind {
-                        blit_in_batch = true;
-                    }
-                    last_rp = last_batch && transit_to_present && !blit_in_batch;
-                    self.device.begin_render_pass(last_rp);
-                }
 
                 self.shaders.borrow_mut()
                     .get(&batch.key, batch.features | BatchFeatures::ALPHA_PASS, self.debug_flags)
@@ -4109,8 +4097,6 @@ impl<B: hal::Backend> Renderer<B> {
                     // composites can't be grouped together because
                     // they may overlap and affect each other.
                     debug_assert_eq!(batch.instances.len(), 1);
-                    #[cfg(not(feature = "gl"))]
-                    self.device.end_render_pass();
                     self.handle_readback_composite(
                         draw_target,
                         uses_scissor,
@@ -4118,15 +4104,17 @@ impl<B: hal::Backend> Renderer<B> {
                         &render_tasks[task_id],
                         &render_tasks[backdrop_id],
                     );
-                    #[cfg(not(feature = "gl"))]
-                    {
-                        last_rp = last_batch && transit_to_present;
-                        self.device.begin_render_pass(last_batch && transit_to_present);
-                    }
                 }
 
                 let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
 
+                #[cfg(not(feature = "gl"))]
+                {
+                    let last_batch = _batch_idx == last_batch_idx;
+                    last_rp = last_batch && transit_to_present;
+                    self.device.begin_render_pass(last_batch && transit_to_present);
+                    self.device.bind_pipeline();
+                }
                 self.draw_instanced_batch(
                     &batch.instances,
                     VertexArrayKind::Primitive,
