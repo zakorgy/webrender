@@ -273,7 +273,7 @@ pub struct Device<B: hal::Backend> {
 
     per_draw_descriptors: DescriptorSetHandler<PerDrawBindings, B, Vec<DescriptorSet<B>>>,
     bound_per_draw_textures: PerDrawBindings,
-    bound_per_draw_descriptor: Option<DescriptorSet<B>>,
+    pub(crate) bound_per_draw_descriptor: Option<DescriptorSet<B>>,
 
     per_pass_descriptors: DescriptorSetHandler<PerPassBindings, B, Vec<DescriptorSet<B>>>,
     bound_per_pass_textures: PerPassBindings,
@@ -1451,7 +1451,7 @@ impl<B: hal::Backend> Device<B> {
         );
     }
 
-    fn bind_per_draw_textures(&mut self) {
+    pub fn bind_per_draw_textures(&mut self) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
 
@@ -1558,7 +1558,6 @@ impl<B: hal::Backend> Device<B> {
         if !self.inside_render_pass {
             self.begin_render_pass_impl(self.last_main_fbo_pass);
         }
-        self.bind_per_draw_textures();
         self.update_push_constants();
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
@@ -1620,8 +1619,6 @@ impl<B: hal::Backend> Device<B> {
         sampler: TextureFilter,
         _set_swizzle: Option<Swizzle>,
     ) {
-        debug_assert!(self.inside_frame);
-
         if self.bound_textures[slot.0] != id {
             self.bound_textures[slot.0] = id;
             self.bound_sampler[slot.0] = sampler;
