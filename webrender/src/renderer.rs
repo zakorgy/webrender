@@ -2493,7 +2493,6 @@ impl<B: hal::Backend> Renderer<B> {
         // We initially set the flags to default and then now call set_debug_flags
         // to ensure any potential transition when enabling a flag is run.
         renderer.set_debug_flags(debug_flags);
-
         let sender = RenderApiSender::new(api_tx, payload_tx);
         Ok((renderer, sender))
     }
@@ -3623,6 +3622,14 @@ impl<B: hal::Backend> Renderer<B> {
                         error!("Swizzling conflict in {:?}", textures);
                     }
                 }
+            }
+        }
+        #[cfg(not(feature = "gl"))]
+        {
+            let can_skip_bind = *textures == BatchTextures::no_texture()
+                && self.device.bound_per_draw_descriptor.is_some();
+            if !can_skip_bind {
+                self.device.bind_per_draw_textures();
             }
         }
 
