@@ -1113,6 +1113,9 @@ impl<B: hal::Backend> TextureResolver<B> {
         // as inputs to the next pass.
         self.prev_pass_color = rgba8_texture;
         self.prev_pass_alpha = a8_texture;
+
+        #[cfg(not(feature = "gl"))]
+        device.submit();
     }
 
     // Bind a source texture to the device.
@@ -5387,6 +5390,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.bind_per_group_textures();
         }
 
+        println!("## Passes {:?}", frame.passes.len());
         for (_pass_index, pass) in frame.passes.iter_mut().enumerate() {
             #[cfg(not(target_os = "android"))]
             let _gm = self.gpu_profile.start_marker(&format!("pass {}", _pass_index));

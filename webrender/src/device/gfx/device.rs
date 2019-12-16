@@ -336,7 +336,8 @@ pub struct Device<B: hal::Backend> {
 
     next_id: usize,
     frame_fence: ArrayVec<[Fence<B>; MAX_FRAME_COUNT]>,
-    render_finished_semaphores: ArrayVec<[B::Semaphore; MAX_FRAME_COUNT]>,
+    render_finished_semaphores: ArrayVec<[ArrayVec<[B::Semaphore; 20]>; MAX_FRAME_COUNT]>,
+    next_semaphore: [usize; MAX_FRAME_COUNT],
     pipeline_requirements: FastHashMap<String, PipelineRequirements>,
     pipeline_cache: Option<B::PipelineCache>,
     cache_path: Option<PathBuf>,
@@ -513,7 +514,30 @@ impl<B: hal::Backend> Device<B> {
             });
 
             render_finished_semaphores
-                .push(device.create_semaphore().expect("create_semaphore failed"));
+                .push(
+                    ArrayVec::from([
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                        device.create_semaphore().expect("create_semaphore failed"),
+                    ])
+                );
 
             let mut hal_cp = unsafe {
                 device.create_command_pool(
@@ -523,8 +547,7 @@ impl<B: hal::Backend> Device<B> {
             }
             .expect("create_command_pool failed");
             unsafe { hal_cp.reset(false) };
-            let mut cp = CommandPool::new(hal_cp);
-            cp.create_command_buffer();
+            let cp = CommandPool::new(hal_cp);
             command_pools.push(cp);
             staging_buffer_pool.push(BufferPool::new(
                 &device,
@@ -803,6 +826,7 @@ impl<B: hal::Backend> Device<B> {
             next_id: 0,
             frame_fence,
             render_finished_semaphores,
+            next_semaphore: [0; MAX_FRAME_COUNT],
             pipeline_requirements,
             pipeline_cache,
             cache_path,
@@ -1114,15 +1138,21 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn reset_next_frame_resources(&mut self) {
+        use time::precise_time_ns;
         let prev_id = self.next_id;
         self.next_id = (self.next_id + 1) % self.frame_count;
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
+            let t0 = precise_time_ns();
             unsafe {
                 self.device
-                    .wait_for_fence(&self.frame_fence[self.next_id].inner, !0)
+                .wait_for_fence(&self.frame_fence[self.next_id].inner, !0)
             }
             .expect("wait_for_fence failed");
+            let t1 = precise_time_ns();
+            let ns = (t1 - t0) as f32 / 1000_000_000f32;
+            println!("## Wait time on fence {:?} sec", ns);
+
             unsafe {
                 self.device
                     .reset_fence(&self.frame_fence[self.next_id].inner)
@@ -1143,6 +1173,7 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
+        self.next_semaphore[self.next_id] = 0;
         if self.frame_id.0 % 20 == 0 {
             self.delete_retained_textures();
         }
@@ -3617,6 +3648,34 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub fn submit(&mut self) {
+        unsafe {
+            self.command_buffer.finish();
+            let submission = hal::queue::Submission {
+                command_buffers: &[&self.command_buffer],
+                wait_semaphores: if self.next_semaphore[self.next_id] == 0 {
+                    None
+                } else {
+                    Some((
+                        &self.render_finished_semaphores[self.next_id][self.next_semaphore[self.next_id] - 1],
+                        hal::pso::PipelineStage::FRAGMENT_SHADER,
+                    ))
+                },
+                signal_semaphores: Some(&self.render_finished_semaphores[self.next_id][self.next_semaphore[self.next_id]]),
+            };
+            self.queue_group_queues[0].submit(submission, None);
+            self.next_semaphore[self.next_id] += 1;
+
+            let old_buffer = mem::replace(
+                &mut self.command_buffer,
+                self.command_pools[self.next_id].remove_cmd_buffer(),
+            );
+
+            self.command_pools[self.next_id].return_cmd_buffer(old_buffer);
+            Self::begin_cmd_buffer(&mut self.command_buffer);
+        }
+    }
+
     pub fn submit_to_gpu(&mut self) {
         unsafe {
             self.command_buffer.finish();
@@ -3624,8 +3683,15 @@ impl<B: hal::Backend> Device<B> {
                 Some(surface) => {
                     let submission = hal::queue::Submission {
                         command_buffers: &[&self.command_buffer],
-                        wait_semaphores: None,
-                        signal_semaphores: Some(&self.render_finished_semaphores[self.next_id]),
+                        wait_semaphores: if self.next_semaphore[self.next_id] == 0 {
+                            None
+                        } else {
+                            Some((
+                                &self.render_finished_semaphores[self.next_id][self.next_semaphore[self.next_id] - 1],
+                                hal::pso::PipelineStage::FRAGMENT_SHADER,
+                            ))
+                        },
+                        signal_semaphores: Some(&self.render_finished_semaphores[self.next_id][self.next_semaphore[self.next_id]]),
                     };
                     self.queue_group_queues[0]
                         .submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
@@ -3637,7 +3703,7 @@ impl<B: hal::Backend> Device<B> {
                     match self.queue_group_queues[0].present_surface(
                         surface,
                         frame.swapchain_image,
-                        Some(&self.render_finished_semaphores[self.next_id]),
+                        Some(&self.render_finished_semaphores[self.next_id][self.next_semaphore[self.next_id]]),
                     ) {
                         Ok(suboptimal) => {
                             if suboptimal.is_some() {
@@ -3838,8 +3904,10 @@ impl<B: hal::Backend> Device<B> {
             for fence in self.frame_fence {
                 self.device.destroy_fence(fence.inner);
             }
-            for semaphore in self.render_finished_semaphores {
-                self.device.destroy_semaphore(semaphore);
+            for semaphores in self.render_finished_semaphores.drain(..) {
+                for s in semaphores.into_iter() {
+                    self.device.destroy_semaphore(s);
+                }
             }
         }
         // We must ensure these are dropped before `self._instance` or we segfault with Vulkan

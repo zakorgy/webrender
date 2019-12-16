@@ -8,34 +8,45 @@ use hal::pool::CommandPool as HalCommandPool;
 pub struct CommandPool<B: hal::Backend> {
     command_pool: B::CommandPool,
     command_buffers: Vec<B::CommandBuffer>,
+    next_id: usize,
 }
 
 impl<B: hal::Backend> CommandPool<B> {
-    pub(super) fn new(command_pool: B::CommandPool) -> Self {
+    pub(super) fn new(mut command_pool: B::CommandPool) -> Self {
+        let command_buffer =
+            unsafe { command_pool.allocate_one(hal::command::Level::Primary) };
         CommandPool {
             command_pool,
-            command_buffers: vec![],
+            command_buffers: vec![command_buffer],
+            next_id: 0,
         }
     }
 
-    pub(super) fn create_command_buffer(&mut self) {
-        if self.command_buffers.is_empty() {
+    /*pub fn step(&mut self) {
+        if self.next_id >= self.command_buffers.len() {
             let command_buffer =
                 unsafe { self.command_pool.allocate_one(hal::command::Level::Primary) };
             self.command_buffers.push(command_buffer);
         }
-    }
+        self.next_id += 1;
+    }*/
 
     pub fn remove_cmd_buffer(&mut self) -> B::CommandBuffer {
-        self.command_buffers.remove(0)
+        if self.next_id >= self.command_buffers.len() {
+            unsafe { self.command_pool.allocate_one(hal::command::Level::Primary) }
+        } else {
+            self.command_buffers.pop().unwrap()
+        }
     }
 
     pub fn return_cmd_buffer(&mut self, cmd_buffer: B::CommandBuffer) {
-        self.command_buffers.insert(0, cmd_buffer);
+        self.command_buffers.insert(self.next_id, cmd_buffer);
+        self.next_id += 1;
     }
 
     pub(super) unsafe fn reset(&mut self) {
         self.command_pool.reset(false);
+        self.next_id = 0;
     }
 
     pub(super) unsafe fn destroy(self, device: &B::Device) {
