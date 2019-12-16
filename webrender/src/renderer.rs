@@ -339,12 +339,6 @@ impl PrimitiveType for PackedVertex {
     fn to_primitive_type(&self) -> [f32; 2] { self.pos }
 }
 
-#[derive(Eq, PartialEq)]
-enum TargetKind {
-    Main,
-    OffScreen,
-}
-
 pub(crate) mod desc {
     #![cfg_attr(not(feature = "gl"), allow(dead_code))]
     use crate::device::{VertexAttribute, VertexAttributeKind, VertexDescriptor};
@@ -3954,7 +3948,7 @@ impl<B: hal::Backend> Renderer<B> {
         projection: &default::Transform3D<f32>,
         render_tasks: &RenderTaskGraph,
         stats: &mut RendererStats,
-        transit_to_present: bool,
+        _transit_to_present: bool,
     ) {
         let uses_scissor = alpha_batch_container.task_scissor_rect.is_some();
 
@@ -3980,12 +3974,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.enable_depth_write();
             #[cfg(not(feature = "gl"))]
             {
-                last_rp = transit_to_present && alpha_batch_container.alpha_batches.is_empty();
+                last_rp = _transit_to_present && alpha_batch_container.alpha_batches.is_empty();
                 self.device.begin_render_pass(last_rp);
-            }
-            #[cfg(feature = "gl")]
-            {
-                let _ = transit_to_present;
             }
 
             // Draw opaque batches front-to-back for maximum
@@ -4134,8 +4124,8 @@ impl<B: hal::Backend> Renderer<B> {
                 #[cfg(not(feature = "gl"))]
                 {
                     let last_batch = _batch_idx == last_batch_idx;
-                    last_rp = last_batch && transit_to_present;
-                    self.device.begin_render_pass(last_batch && transit_to_present);
+                    last_rp = last_batch && _transit_to_present;
+                    self.device.begin_render_pass(last_batch && _transit_to_present);
                     self.device.bind_pipeline();
                 }
                 self.draw_instanced_batch(
@@ -4287,7 +4277,7 @@ impl<B: hal::Backend> Renderer<B> {
         draw_target: DrawTarget,
         projection: &default::Transform3D<f32>,
         results: &mut RenderResults,
-        transit_to_present: bool,
+        _transit_to_present: bool,
     ) {
         let _gm = self.gpu_profile.start_marker("framebuffer");
         let _timer = self.gpu_profile.start_timer(GPU_TAG_COMPOSITE);
@@ -4405,15 +4395,7 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
         #[cfg(not(feature = "gl"))]
-        {
-            if !composite_state.is_empty() || partial_present_mode.is_none() {
-                self.device.begin_render_pass(transit_to_present);
-            }
-        }
-        #[cfg(feature = "gl")]
-        {
-            let _ = transit_to_present;
-        }
+        self.device.begin_render_pass(_transit_to_present);
 
         self.shaders.borrow_mut().composite.bind(
             &mut self.device,
@@ -4475,7 +4457,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
         #[cfg(not(feature = "gl"))]
         {
-            if !transit_to_present {
+            if !_transit_to_present {
                 self.device.end_render_pass();
             }
         }
@@ -4493,7 +4475,6 @@ impl<B: hal::Backend> Renderer<B> {
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
         transit_to_present: bool,
-        target_kind: TargetKind,
     ) {
         self.profile_counters.color_targets.inc();
         let _gm = self.gpu_profile.start_marker("color target");
@@ -4570,17 +4551,7 @@ impl<B: hal::Backend> Renderer<B> {
             &target.blits, render_tasks, draw_target, &content_origin,
         );
         #[cfg(not(feature = "gl"))]
-        {
-            if target_kind == TargetKind::Main || !target.empty_without_batches() {
-                self.device.begin_render_pass(transit_to_present && target.alpha_batch_containers.is_empty());
-            } else {
-                self.device.clear_rt_if_needed();
-            }
-        }
-        #[cfg(feature = "gl")]
-        {
-            let _ = target_kind;
-        }
+        self.device.begin_render_pass(transit_to_present && target.alpha_batch_containers.is_empty());
 
         // Draw any blurs for this target.
         // Blurs are rendered as a standard 2-pass
@@ -4817,13 +4788,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.set_blend(false, FramebufferKind::Other);
 
             #[cfg(not(feature = "gl"))]
-            {
-                if !target.is_empty() {
-                    self.device.begin_render_pass(false);
-                } else {
-                    self.device.clear_rt_if_needed();
-                }
-            }
+            self.device.begin_render_pass(false);
 
             // TODO(gw): Applying a scissor rect and minimal clear here
             // is a very large performance win on the Intel and nVidia
@@ -5042,13 +5007,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
 
         #[cfg(not(feature = "gl"))]
-        {
-            if !target.is_empty() {
-                self.device.begin_render_pass(false);
-            } else {
-                self.device.clear_rt_if_needed();
-            }
-        }
+        self.device.begin_render_pass(false);
 
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
@@ -5535,7 +5494,6 @@ impl<B: hal::Backend> Renderer<B> {
                                         frame_id,
                                         &mut results.stats,
                                         false,
-                                        TargetKind::OffScreen,
                                     );
                                     results.stats.total_draw_calls = draw_calls;
                                 }
@@ -5567,7 +5525,6 @@ impl<B: hal::Backend> Renderer<B> {
                                 frame_id,
                                 &mut results.stats,
                                 last_document,
-                                TargetKind::Main,
                             );
                         }
                     }
@@ -5691,7 +5648,6 @@ impl<B: hal::Backend> Renderer<B> {
                             frame_id,
                             &mut results.stats,
                             false,
-                            TargetKind::OffScreen,
                         );
                     }
 
