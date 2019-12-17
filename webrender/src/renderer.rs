@@ -5390,7 +5390,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.bind_per_group_textures();
         }
 
-        println!("## Passes {:?}", frame.passes.len());
+        //println!("## Passes {:?}", frame.passes.len());
         for (_pass_index, pass) in frame.passes.iter_mut().enumerate() {
             #[cfg(not(target_os = "android"))]
             let _gm = self.gpu_profile.start_marker(&format!("pass {}", _pass_index));

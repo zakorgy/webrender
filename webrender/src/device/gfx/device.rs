@@ -1138,20 +1138,20 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn reset_next_frame_resources(&mut self) {
-        use time::precise_time_ns;
+        //use time::precise_time_ns;
         let prev_id = self.next_id;
         self.next_id = (self.next_id + 1) % self.frame_count;
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
-            let t0 = precise_time_ns();
+            //let t0 = precise_time_ns();
             unsafe {
                 self.device
                 .wait_for_fence(&self.frame_fence[self.next_id].inner, !0)
             }
             .expect("wait_for_fence failed");
-            let t1 = precise_time_ns();
-            let ns = (t1 - t0) as f32 / 1000_000_000f32;
-            println!("## Wait time on fence {:?} sec", ns);
+            //let t1 = precise_time_ns();
+            //let ns = (t1 - t0) as f32 / 1000_000_000f32;
+            //println!("## Wait time on fence {:?} sec", ns);
 
             unsafe {
                 self.device
