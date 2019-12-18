@@ -779,6 +779,8 @@ impl TextureCacheRenderTarget {
         && self.border_segments_solid.is_empty()
         && self.line_decorations.is_empty()
         && self.gradients.is_empty()
+        && self.clears.is_empty()
+        && self.blits.is_empty()
     }
 
     pub fn add_task(

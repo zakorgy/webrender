@@ -3911,6 +3911,10 @@ impl<B: hal::Backend> Renderer<B> {
                 )
             });
 
+            // Unfortunatelly this clear rect must executed in a separate render pass
+            // because it has a different setup than the subsequent draw calls in draw_alpha_batch_container
+            #[cfg(not(feature = "gl"))]
+            self.device.begin_render_pass(false);
             self.device.clear_target(
                 target.clear_color.map(|c| c.to_array()),
                 Some(1.0),
@@ -3918,6 +3922,8 @@ impl<B: hal::Backend> Renderer<B> {
                 #[cfg(not(feature = "gl"))]
                 false,
             );
+            #[cfg(not(feature = "gl"))]
+            self.device.end_render_pass();
 
             self.device.disable_depth_write();
         }
@@ -4321,9 +4327,11 @@ impl<B: hal::Backend> Renderer<B> {
             self.force_redraw = false;
         }
 
+        #[cfg(not(feature = "gl"))]
+        let mut clear_rects: SmallVec<[FramebufferIntRect; 16]> = SmallVec::new();
+        let clear_color = self.clear_color.map(|color| color.to_array());
         // Clear the framebuffer, if required
         if clear_framebuffer {
-            let clear_color = self.clear_color.map(|color| color.to_array());
 
             match partial_present_mode {
                 Some(PartialPresentMode::Single { dirty_rect }) => {
@@ -4356,17 +4364,10 @@ impl<B: hal::Backend> Renderer<B> {
                     }
                     #[cfg(not(feature = "gl"))]
                     {
-                        let rects = opaque_iter.chain(clear_iter.chain(alpha_iter))
+                        clear_rects = opaque_iter.chain(clear_iter.chain(alpha_iter))
                             .filter(|tile| !tile.dirty_rect.is_empty())
                             .map(|tile| draw_target.to_framebuffer_rect(tile.dirty_rect.to_i32()))
-                            .collect::<SmallVec<[FramebufferIntRect; 16]>>();
-                        if !rects.is_empty() {
-                            self.device.clear_target_rects(
-                                clear_color,
-                                Some(1.0),
-                                rects,
-                            )
-                        }
+                            .collect::<_>();
                     }
                 }
                 None => {
@@ -4383,8 +4384,16 @@ impl<B: hal::Backend> Renderer<B> {
         }
         #[cfg(not(feature = "gl"))]
         {
-            if !composite_state.is_empty() || partial_present_mode.is_none() {
+            let has_clear_attachments = !clear_rects.is_empty();
+            if !composite_state.is_empty() || partial_present_mode.is_none() || has_clear_attachments {
                 self.device.begin_render_pass(transit_to_present);
+                if has_clear_attachments {
+                    self.device.clear_target_rects(
+                        clear_color,
+                        Some(1.0),
+                        clear_rects,
+                    )
+                }
             }
         }
         #[cfg(feature = "gl")]
@@ -4954,6 +4963,11 @@ impl<B: hal::Backend> Renderer<B> {
 
             #[cfg(not(feature = "gl"))]
             {
+                if !target.is_empty() {
+                    self.device.begin_render_pass(false);
+                } else {
+                    self.device.clear_rt_if_needed();
+                }
                 if !target.clears.is_empty() {
                     self.device.clear_target_rects(
                         Some([0.0, 0.0, 0.0, 0.0]),
@@ -4970,16 +4984,6 @@ impl<B: hal::Backend> Renderer<B> {
                 &target.blits, render_tasks, draw_target, &DeviceIntPoint::zero(),
             );
         }
-
-        #[cfg(not(feature = "gl"))]
-        {
-            if !target.is_empty() {
-                self.device.begin_render_pass(false);
-            } else {
-                self.device.clear_rt_if_needed();
-            }
-        }
-
         // Draw any borders for this target.
         if !target.border_segments_solid.is_empty() ||
            !target.border_segments_complex.is_empty()
