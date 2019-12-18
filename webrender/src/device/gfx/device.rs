@@ -3312,7 +3312,10 @@ impl<B: hal::Backend> Device<B> {
         unsafe {
             self.command_buffer
                 .clear_attachments(color_clear.into_iter().chain(depth_clear), rects);
+            #[cfg(target_os = "macos")]
+            self.command_buffer.set_viewports(0, &[self.viewport.clone()]);
         }
+
     }
 
     fn clear_target_image(&mut self, color: Option<[f32; 4]>, depth: Option<f32>) {
