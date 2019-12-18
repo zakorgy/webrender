@@ -2465,6 +2465,9 @@ impl<B: hal::Backend> Device<B> {
         filter: TextureFilter,
     ) {
         debug_assert!(self.inside_frame);
+        if self.inside_render_pass || self.bound_draw_fbo == DEFAULT_DRAW_FBO {
+            return self.blit_with_shader(src_rect, dest_rect);
+        }
 
         let (src_format, src_img, src_layer) = if self.bound_read_fbo != DEFAULT_READ_FBO {
             let fbo = &self.fbos[&self.bound_read_fbo];
@@ -2475,15 +2478,12 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let (dest_format, dst_img, dest_layer) = if self.bound_draw_fbo != DEFAULT_DRAW_FBO {
-            assert!(!self.inside_render_pass);
             let fbo = &self.fbos[&self.bound_draw_fbo];
             let img = &self.images[&fbo.texture_id];
             let layer = fbo.layer_index;
             (img.format, &img.core, layer)
         } else {
-            info!("Blitting to main target with shader.");
-            self.blit_with_shader(src_rect, dest_rect);
-            return;
+            panic!("Blitting to default draw fbo should be handled by now")
         };
 
         // let src_range = hal::image::SubresourceRange {
@@ -2624,7 +2624,9 @@ impl<B: hal::Backend> Device<B> {
     ) {
         debug_assert!(self.inside_frame);
         self.bind_read_target(src_target);
-        self.bind_draw_target(dest_target, DrawTargetUsage::Draw);
+        if !self.inside_render_pass {
+            self.bind_draw_target(dest_target, DrawTargetUsage::Draw);
+        }
         self.blit_render_target_impl(src_rect, dest_rect, filter);
     }
 
@@ -3258,11 +3260,7 @@ impl<B: hal::Backend> Device<B> {
         depth: Option<f32>,
         rects: impl IntoIterator<Item = FramebufferIntRect>,
     ) {
-        let mut end_pass = false;
-        if !self.inside_render_pass {
-            self.begin_render_pass(false);
-            end_pass = true;
-        }
+        assert!(self.inside_render_pass);
 
         let rects = rects.into_iter().map(|rect| {
             hal::pso::ClearRect {
@@ -3289,9 +3287,6 @@ impl<B: hal::Backend> Device<B> {
         unsafe {
             self.command_buffer
                 .clear_attachments(color_clear.into_iter().chain(depth_clear), rects);
-        }
-        if end_pass {
-            self.end_render_pass();
         }
     }
 
