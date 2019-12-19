@@ -2628,6 +2628,7 @@ impl<B: hal::Backend> Renderer<B> {
                     self.pending_texture_updates.push(texture_update_list);
                     self.backend_profile_counters = profile_counters;
                     self.documents_seen.insert(document_id);
+                    #[cfg(not(feature="gl"))]
                     self.device.add_instance_buffers(instance_buffers);
                 }
                 ResultMsg::UpdateGpuCache(mut list) => {
@@ -3620,7 +3621,10 @@ impl<B: hal::Backend> Renderer<B> {
 
     pub(crate) fn draw_instanced_batch<T: PrimitiveType>(
         &mut self,
+        #[cfg(feature = "gl")]
         data: &[T],
+        #[cfg(not(feature = "gl"))]
+        instance_locations: &[InstanceLocation],
         vertex_array_kind: VertexArrayKind,
         textures: &BatchTextures,
         stats: &mut RendererStats,
@@ -3659,101 +3663,60 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
-        self.draw_instanced_batch_with_previously_bound_textures(data, vertex_array_kind, stats)
+        self.draw_instanced_batch_with_previously_bound_textures(
+            #[cfg(feature = "gl")]
+            data,
+            #[cfg(not(feature = "gl"))]
+            instance_locations,
+            vertex_array_kind,
+            stats,
+        )
     }
 
     pub(crate) fn draw_instanced_batch_with_previously_bound_textures<T: PrimitiveType>(
         &mut self,
+        #[cfg(feature = "gl")]
         data: &[T],
-        vertex_array_kind: VertexArrayKind,
-        stats: &mut RendererStats,
-    ) {
-        // If we end up with an empty draw call here, that means we have
-        // probably introduced unnecessary batch breaks during frame
-        // building - so we should be catching this earlier and removing
-        // the batch.
-        debug_assert!(!data.is_empty());
-        let vao = get_vao(vertex_array_kind, &self.vaos);
-        self.device.bind_vao(vao);
-        let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
-        if batched {
-            self.device
-                .update_vao_instances(vao, data, VertexUsageHint::Stream);
-            self.device
-                .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
-            self.profile_counters.draw_calls.inc();
-            stats.total_draw_calls += 1;
-        } else {
-            for i in 0 .. data.len() {
-                self.device
-                .update_vao_instances(vao, &data[i .. i + 1], VertexUsageHint::Stream);
-                self.device.draw_triangles_u16(0, 6);
-                self.profile_counters.draw_calls.inc();
-                stats.total_draw_calls += 1;
-            }
-        }
-        self.profile_counters.vertices.add(6 * data.len());
-    }
-
-    pub(crate) fn draw_instanced_batch_from_buffer(
-        &mut self,
-        //data_len: usize,
+        #[cfg(not(feature = "gl"))]
         instance_locations: &[InstanceLocation],
         vertex_array_kind: VertexArrayKind,
-        textures: &BatchTextures,
         stats: &mut RendererStats,
     ) {
-        let mut swizzles = [Swizzle::default(); 3];
-        for i in 0 .. textures.colors.len() {
-            let swizzle = self.texture_resolver.bind(
-                &textures.colors[i],
-                TextureSampler::color(i),
-                &mut self.device,
-            );
-            if cfg!(debug_assertions) {
-                swizzles[i] = swizzle;
-                for j in 0 .. i {
-                    if textures.colors[j] == textures.colors[i] && swizzles[j] != swizzle {
-                        error!("Swizzling conflict in {:?}", textures);
-                    }
+        #[cfg(feature = "gl")]
+        {
+            // If we end up with an empty draw call here, that means we have
+            // probably introduced unnecessary batch breaks during frame
+            // building - so we should be catching this earlier and removing
+            // the batch.
+            debug_assert!(!data.is_empty());
+    
+            let vao = get_vao(vertex_array_kind, &self.vaos);
+            self.device.bind_vao(vao);
+            let batched = !self.debug_flags.contains(DebugFlags::DISABLE_BATCHING);
+            if batched {
+                self.device
+                    .update_vao_instances(vao, data, VertexUsageHint::Stream);
+                self.device
+                    .draw_indexed_triangles_instanced_u16(6, data.len() as i32);
+                self.profile_counters.draw_calls.inc();
+                stats.total_draw_calls += 1;
+            } else {
+                for i in 0 .. data.len() {
+                    self.device
+                    .update_vao_instances(vao, &data[i .. i + 1], VertexUsageHint::Stream);
+                    self.device.draw_triangles_u16(0, 6);
+                    self.profile_counters.draw_calls.inc();
+                    stats.total_draw_calls += 1;
                 }
             }
+            self.profile_counters.vertices.add(6 * data.len());
         }
 
         #[cfg(not(feature = "gl"))]
         {
-            let can_skip_bind = *textures == BatchTextures::no_texture()
-                && self.device.bound_per_draw_descriptor.is_some()
-                && cfg!(not(debug_assertions));
-            if !can_skip_bind {
-                self.device.bind_per_draw_textures();
-            }
+            debug_assert!(!instance_locations.is_empty());
+            self.device.draw(Some(instance_locations));
         }
-        self.draw_instanced_batch_with_previously_bound_textures_from_buffer(/*data_len,*/ instance_locations, vertex_array_kind, stats)
-    }
-
-    pub(crate) fn draw_instanced_batch_with_previously_bound_textures_from_buffer(
-        &mut self,
-        //data_len: usize,
-        instance_locations: &[InstanceLocation],
-        vertex_array_kind: VertexArrayKind,
-        stats: &mut RendererStats,
-    ) {
-        // If we end up with an empty draw call here, that means we have
-        // probably introduced unnecessary batch breaks during frame
-        // building - so we should be catching this earlier and removing
-        // the batch.
-        debug_assert!(!instance_locations.is_empty());
-
-        let vao = get_vao(vertex_array_kind, &self.vaos);
-
-        self.device.bind_vao(vao);
-
-        self.device.draw(Some(instance_locations));
-        self.profile_counters.draw_calls.inc();
-        stats.total_draw_calls += 1;
-
-        //self.profile_counters.vertices.add(6 * data_len);
     }
 
     fn handle_readback_composite(
@@ -3895,14 +3858,16 @@ impl<B: hal::Backend> Renderer<B> {
 
     fn handle_scaling(
         &mut self,
+        #[cfg(feature = "gl")]
         scalings: &FastHashMap<TextureSource, Vec<ScalingInstance>>,
+        #[cfg(not(feature = "gl"))]
+        scalings: &FastHashMap<TextureSource, Vec<InstanceLocation>>,
         projection: &default::Transform3D<f32>,
         stats: &mut RendererStats,
     ) {
         if scalings.is_empty() {
             return
         }
-
         let _timer = self.gpu_profile.start_timer(GPU_TAG_SCALE);
 
         self.shaders
@@ -3924,42 +3889,13 @@ impl<B: hal::Backend> Renderer<B> {
         }
     }
 
-
-    fn handle_scaling_from_buffer(
-        &mut self,
-        scaling_instances: &FastHashMap<TextureSource, Vec<InstanceLocation>>,
-        projection: &default::Transform3D<f32>,
-        stats: &mut RendererStats,
-    ) {
-        if scaling_instances.is_empty() {
-            return
-        }
-
-        let _timer = self.gpu_profile.start_timer(GPU_TAG_SCALE);
-
-        self.shaders
-            .borrow_mut()
-            .cs_scale
-            .bind(
-                &mut self.device,
-                &projection,
-                &mut self.renderer_errors,
-            );
-
-        for (source, instances) in scaling_instances {
-            self.draw_instanced_batch_from_buffer(
-                instances,
-                VertexArrayKind::Scale,
-                &BatchTextures::color(*source),
-                stats,
-            );
-        }
-    }
-
     fn handle_svg_filters(
         &mut self,
         textures: &BatchTextures,
+        #[cfg(feature = "gl")]
         svg_filters: &[SvgFilterInstance],
+        #[cfg(not(feature = "gl"))]
+        svg_filters: &[InstanceLocation],
         projection: &default::Transform3D<f32>,
         stats: &mut RendererStats,
     ) {
@@ -3977,33 +3913,6 @@ impl<B: hal::Backend> Renderer<B> {
 
         self.draw_instanced_batch(
             &svg_filters,
-            VertexArrayKind::SvgFilter,
-            textures,
-            stats,
-        );
-    }
-
-    fn handle_svg_filters_from_buffer(
-        &mut self,
-        textures: &BatchTextures,
-        locations: &[InstanceLocation],
-        projection: &default::Transform3D<f32>,
-        stats: &mut RendererStats,
-    ) {
-        if locations.is_empty() {
-            return;
-        }
-
-        let _timer = self.gpu_profile.start_timer(GPU_TAG_SVG_FILTER);
-
-        self.shaders.borrow_mut().cs_svg_filter.bind(
-            &mut self.device,
-            &projection,
-            &mut self.renderer_errors
-        );
-
-        self.draw_instanced_batch_from_buffer(
-            &locations,
             VertexArrayKind::SvgFilter,
             textures,
             stats,
@@ -4130,18 +4039,15 @@ impl<B: hal::Backend> Renderer<B> {
                         );
 
                     let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
-                    self.draw_instanced_batch_from_buffer(
+                    self.draw_instanced_batch(
+                        #[cfg(feature = "gl")]
+                        &batch.instances,
+                        #[cfg(not(feature = "gl"))]
                         &batch.instance_locations,
                         VertexArrayKind::Primitive,
                         &batch.key.textures,
                         stats
                     );
-                    /*self.draw_instanced_batch(
-                        &batch.instances,
-                        VertexArrayKind::Primitive,
-                        &batch.key.textures,
-                        stats
-                    );*/
                 }
 
             #[cfg(not(feature = "gl"))]
@@ -4262,18 +4168,15 @@ impl<B: hal::Backend> Renderer<B> {
                     self.device.begin_render_pass(last_batch && transit_to_present);
                 }
 
-                self.draw_instanced_batch_from_buffer(
+                self.draw_instanced_batch(
+                    #[cfg(feature = "gl")]
+                    &batch.instances,
+                    #[cfg(not(feature = "gl"))]
                     &batch.instance_locations,
                     VertexArrayKind::Primitive,
                     &batch.key.textures,
                     stats
                 );
-                /*self.draw_instanced_batch(
-                    &batch.instances,
-                    VertexArrayKind::Primitive,
-                    &batch.key.textures,
-                    stats
-                );*/
 
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     self.set_blend_mode_subpixel_with_bg_color_pass1(framebuffer_kind);
@@ -4283,16 +4186,20 @@ impl<B: hal::Backend> Renderer<B> {
                     // are all set up from the previous draw_instanced_batch call,
                     // so just issue a draw call here to avoid re-uploading the
                     // instances and re-binding textures etc.
+                    #[cfg(feature = "gl")]
+                    self.device
+                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                    #[cfg(not(feature = "gl"))]
                     self.device.draw(Some(&batch.instance_locations));
-                    /*self.device
-                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);*/
 
                     self.set_blend_mode_subpixel_with_bg_color_pass2(framebuffer_kind);
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
 
+                    #[cfg(feature = "gl")]
+                    self.device
+                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
+                    #[cfg(not(feature = "gl"))]
                     self.device.draw(Some(&batch.instance_locations));
-                    /*self.device
-                        .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);*/
                 }
 
                 #[cfg(not(feature = "gl"))]
@@ -4702,25 +4609,28 @@ impl<B: hal::Backend> Renderer<B> {
         //           fast path blur shaders for common
         //           blur radii with fixed weights.
 
-        // if !target.vertical_blurs.is_empty() || !target.horizontal_blurs.is_empty() {
-        if !target.vertical_blur_location.is_empty() || !target.horizontal_blur_location.is_empty() {
+        #[cfg(feature = "gl")]
+        let has_vertical_blur = !target.vertical_blurs.is_empty();
+        #[cfg(not(feature = "gl"))]
+        let has_vertical_blur = !target.vertical_blur_location.is_empty();
+
+        let has_horizontal_blur = !target.horizontal_blurs.is_empty();
+        #[cfg(not(feature = "gl"))]
+        let has_horizontal_blur = !target.horizontal_blur_location.is_empty();
+
+
+        if has_vertical_blur || has_horizontal_blur {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_BLUR);
 
             self.set_blend(false, framebuffer_kind);
             self.shaders.borrow_mut().cs_blur_rgba8
                 .bind(&mut self.device, projection, &mut self.renderer_errors);
 
-            /*if !target.vertical_blurs.is_empty() {
+            if has_vertical_blur {
                 self.draw_instanced_batch(
+                    #[cfg(feature = "gl")]
                     &target.vertical_blurs,
-                    VertexArrayKind::Blur,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
-            }*/
-
-            if !target.vertical_blur_location.is_empty() {
-                self.draw_instanced_batch_from_buffer(
+                    #[cfg(not(feature = "gl"))]
                     &target.vertical_blur_location,
                     VertexArrayKind::Blur,
                     &BatchTextures::no_texture(),
@@ -4728,17 +4638,11 @@ impl<B: hal::Backend> Renderer<B> {
                 );
             }
 
-            /*if !target.horizontal_blurs.is_empty() {
+            if has_horizontal_blur {
                 self.draw_instanced_batch(
+                    #[cfg(feature = "gl")]
                     &target.horizontal_blurs,
-                    VertexArrayKind::Blur,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
-            }*/
-
-            if !target.horizontal_blur_location.is_empty() {
-                self.draw_instanced_batch_from_buffer(
+                    #[cfg(not(feature = "gl"))]
                     &target.horizontal_blur_location,
                     VertexArrayKind::Blur,
                     &BatchTextures::no_texture(),
@@ -4747,31 +4651,24 @@ impl<B: hal::Backend> Renderer<B> {
             }
         }
 
-        /*self.handle_scaling(
+        self.handle_scaling(
+            #[cfg(feature = "gl")]
             &target.scalings,
-            projection,
-            stats,
-        );*/
-
-        self.handle_scaling_from_buffer(
+            #[cfg(not(feature = "gl"))]
             &target.scaling_locations,
             projection,
             stats,
         );
 
-        /*for (ref textures, ref filters) in &target.svg_filters {
+        #[cfg(feature = "gl")]
+        let svg_filters = &target.svg_filters;
+        #[cfg(not(feature = "gl"))]
+        let svg_filters = &target.svg_filter_locations;
+
+        for (ref textures, ref filters) in svg_filters.iter() {
             self.handle_svg_filters(
                 textures,
                 filters,
-                projection,
-                stats,
-            );
-        }*/
-
-        for (ref textures, ref locations) in &target.svg_filter_locations {
-            self.handle_svg_filters_from_buffer(
-                textures,
-                locations,
                 projection,
                 stats,
             );
@@ -4851,7 +4748,7 @@ impl<B: hal::Backend> Renderer<B> {
                 &mut self.renderer_errors,
             );
 
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 &list.slow_rectangle_locations,
                 VertexArrayKind::Clip,
                 &BatchTextures::no_texture(),
@@ -4873,7 +4770,7 @@ impl<B: hal::Backend> Renderer<B> {
                 &mut self.renderer_errors,
             );
 
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 &list.fast_rectangle_locations,
                 VertexArrayKind::Clip,
                 &BatchTextures::no_texture(),
@@ -4898,7 +4795,7 @@ impl<B: hal::Backend> Renderer<B> {
             };
             self.shaders.borrow_mut().cs_clip_box_shadow
                 .bind(&mut self.device, projection, &mut self.renderer_errors);
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 locations,
                 VertexArrayKind::Clip,
                 &textures,
@@ -4936,7 +4833,7 @@ impl<B: hal::Backend> Renderer<B> {
             };
             self.shaders.borrow_mut().cs_clip_image
                 .bind(&mut self.device, projection, &mut self.renderer_errors);
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 locations,
                 VertexArrayKind::Clip,
                 &textures,
@@ -5079,7 +4976,7 @@ impl<B: hal::Backend> Renderer<B> {
             }*/
 
             if !target.vertical_blur_location.is_empty() {
-                self.draw_instanced_batch_from_buffer(
+                self.draw_instanced_batch(
                     &target.vertical_blur_location,
                     VertexArrayKind::Blur,
                     &BatchTextures::no_texture(),
@@ -5097,7 +4994,7 @@ impl<B: hal::Backend> Renderer<B> {
             }*/
 
             if !target.horizontal_blur_location.is_empty() {
-                self.draw_instanced_batch_from_buffer(
+                self.draw_instanced_batch(
                     &target.horizontal_blur_location,
                     VertexArrayKind::Blur,
                     &BatchTextures::no_texture(),
@@ -5265,7 +5162,7 @@ impl<B: hal::Backend> Renderer<B> {
                     stats,
                 );*/
 
-                self.draw_instanced_batch_from_buffer(
+                self.draw_instanced_batch(
                     &target.border_segment_solid_location,
                     VertexArrayKind::Border,
                     &BatchTextures::no_texture(),
@@ -5288,7 +5185,7 @@ impl<B: hal::Backend> Renderer<B> {
                     stats,
                 );*/
 
-                self.draw_instanced_batch_from_buffer(
+                self.draw_instanced_batch(
                     &target.border_segment_complex_location,
                     VertexArrayKind::Border,
                     &BatchTextures::no_texture(),
@@ -5320,7 +5217,7 @@ impl<B: hal::Backend> Renderer<B> {
                 stats,
             );*/
 
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 &target.line_decoration_location,
                 VertexArrayKind::LineDecoration,
                 &BatchTextures::no_texture(),
@@ -5349,7 +5246,7 @@ impl<B: hal::Backend> Renderer<B> {
                 &BatchTextures::no_texture(),
                 stats,
             );*/
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 &target.gradient_location,
                 VertexArrayKind::Gradient,
                 &BatchTextures::no_texture(),
@@ -5376,7 +5273,7 @@ impl<B: hal::Backend> Renderer<B> {
                 &BatchTextures::no_texture(),
                 stats,
             );*/
-            self.draw_instanced_batch_from_buffer(
+            self.draw_instanced_batch(
                 &target.horizontal_blur_location,
                 VertexArrayKind::Blur,
                 &BatchTextures::no_texture(),

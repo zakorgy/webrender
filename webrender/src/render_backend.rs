@@ -539,8 +539,11 @@ impl Document {
         gpu_cache: &mut GpuCache,
         resource_profile: &mut ResourceProfileCounters,
         debug_flags: DebugFlags,
+        #[cfg(not(feature="gl"))]
         buffer_manager: &mut InstanceBufferManager<B>,
+        #[cfg(not(feature="gl"))]
         device: &B::Device,
+        #[cfg(not(feature="gl"))]
         heaps: Arc<Mutex<Heaps<B>>>,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
@@ -569,8 +572,11 @@ impl Document {
                 &mut self.scratch,
                 &mut self.render_task_counters,
                 debug_flags,
+                #[cfg(not(feature="gl"))]
                 buffer_manager,
+                #[cfg(not(feature="gl"))]
                 device,
+                #[cfg(not(feature="gl"))]
                 heaps,
             );
             self.hit_tester = Some(self.scene.create_hit_tester(&self.data_stores.clip));
@@ -1624,8 +1630,11 @@ impl<B: hal::Backend> RenderBackend<B> {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    #[cfg(not(feature="gl"))]
                     &mut self.buffer_manager,
+                    #[cfg(not(feature="gl"))]
                     &self.device,
+                    #[cfg(not(feature="gl"))]
                     self.heaps.upgrade().unwrap(),
                 );
 
@@ -1691,6 +1700,7 @@ impl<B: hal::Backend> RenderBackend<B> {
                 rendered_document,
                 pending_update,
                 profile_counters.clone(),
+                #[cfg(not(feature="gl"))]
                 self.buffer_manager.recorded_buffers(),
             );
             self.result_tx.send(msg).unwrap();
@@ -1927,8 +1937,11 @@ impl<B: hal::Backend> RenderBackend<B> {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    #[cfg(not(feature="gl"))]
                     &mut self.buffer_manager,
+                    #[cfg(not(feature="gl"))]
                     &self.device,
+                    #[cfg(not(feature="gl"))]
                     self.heaps.upgrade().unwrap(),
                 );
                 // After we rendered the frames, there are pending updates to both
@@ -2149,6 +2162,7 @@ impl<B: hal::Backend> RenderBackend<B> {
                         RenderedDocument { frame, is_new_scene: true },
                         self.resource_cache.pending_updates(),
                         profile_counters.clone(),
+                        #[cfg(not(feature="gl"))]
                         self.buffer_manager.recorded_buffers(),
                     );
                     self.result_tx.send(msg_publish).unwrap();

@@ -33,6 +33,7 @@ use crate::resource_cache::{CacheItem, GlyphFetchResult, ImageRequest, ResourceC
 use rendy_memory::Heaps;
 use smallvec::SmallVec;
 use std::{f32, i32, usize};
+#[cfg(not(feature="gl"))]
 use std::sync::{Arc, Mutex};
 use crate::util::{project_rect, TransformedRectKind};
 
@@ -342,6 +343,7 @@ impl OpaqueBatchList {
 pub struct PrimitiveBatch {
     pub key: BatchKey,
     pub instances: Vec<PrimitiveInstanceData>,
+    #[cfg(not(feature="gl"))]
     pub instance_locations: Vec<InstanceLocation>,
     pub features: BatchFeatures,
 }
@@ -369,6 +371,7 @@ impl PrimitiveBatch {
         PrimitiveBatch {
             key,
             instances: Vec::new(),
+            #[cfg(not(feature="gl"))]
             instance_locations: Vec::new(),
             features: BatchFeatures::empty(),
         }
@@ -379,6 +382,7 @@ impl PrimitiveBatch {
         self.features |= other.features;
     }
 
+    #[cfg(not(feature="gl"))]
     fn build<B: hal::Backend>(
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
@@ -463,6 +467,7 @@ impl AlphaBatchContainer {
          }
     }
 
+    #[cfg(not(feature="gl"))]
     pub fn build<B: hal::Backend>(
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
@@ -2825,13 +2830,17 @@ pub fn resolve_image(
 pub struct ClipBatchList {
     /// Rectangle draws fill up the rectangles with rounded corners.
     pub slow_rectangles: Vec<ClipMaskInstance>,
+    #[cfg(not(feature="gl"))]
     pub slow_rectangle_locations: Vec<InstanceLocation>,
     pub fast_rectangles: Vec<ClipMaskInstance>,
+    #[cfg(not(feature="gl"))]
     pub fast_rectangle_locations: Vec<InstanceLocation>,
     /// Image draws apply the image masking.
     pub images: FastHashMap<TextureSource, Vec<ClipMaskInstance>>,
+    #[cfg(not(feature="gl"))]
     pub image_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
     pub box_shadows: FastHashMap<TextureSource, Vec<ClipMaskInstance>>,
+    #[cfg(not(feature="gl"))]
     pub box_shadow_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
 }
 
@@ -2839,12 +2848,16 @@ impl ClipBatchList {
     fn new() -> Self {
         ClipBatchList {
             slow_rectangles: Vec::new(),
+            #[cfg(not(feature="gl"))]
             slow_rectangle_locations: Vec::new(),
             fast_rectangles: Vec::new(),
+            #[cfg(not(feature="gl"))]
             fast_rectangle_locations: Vec::new(),
             images: FastHashMap::default(),
+            #[cfg(not(feature="gl"))]
             image_locations: FastHashMap::default(),
             box_shadows: FastHashMap::default(),
+            #[cfg(not(feature="gl"))]
             box_shadow_locations: FastHashMap::default(),
         }
     }

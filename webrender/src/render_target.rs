@@ -108,8 +108,11 @@ pub trait RenderTarget {
         _transforms: &mut TransformPalette,
         _z_generator: &mut ZBufferIdGenerator,
         _composite_state: &mut CompositeState,
+        #[cfg(not(feature="gl"))]
         _buffer_manager: &mut InstanceBufferManager<B>,
+        #[cfg(not(feature="gl"))]
         _device: &B::Device,
+        #[cfg(not(feature="gl"))]
         _heaps: Arc<Mutex<Heaps<B>>>,
     ) {
     }
@@ -212,8 +215,11 @@ impl<T: RenderTarget> RenderTargetList<T> {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        #[cfg(not(feature="gl"))]
         buffer_manager: &mut InstanceBufferManager<B>,
+        #[cfg(not(feature="gl"))]
         device: &B::Device,
+        #[cfg(not(feature="gl"))]
         heaps: Arc<Mutex<Heaps<B>>>,
     ) {
         debug_assert_eq!(None, self.saved_index);
@@ -229,8 +235,11 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 transforms,
                 z_generator,
                 composite_state,
+                #[cfg(not(feature="gl"))]
                 buffer_manager,
+                #[cfg(not(feature="gl"))]
                 device,
+                #[cfg(not(feature="gl"))]
                 heaps.clone(),
             );
         }
@@ -306,13 +315,17 @@ pub struct ColorRenderTarget {
     pub alpha_batch_containers: Vec<AlphaBatchContainer>,
     // List of blur operations to apply for this render target.
     pub vertical_blurs: Vec<BlurInstance>,
+    #[cfg(not(feature="gl"))]
     pub vertical_blur_location: Vec<InstanceLocation>,
     pub horizontal_blurs: Vec<BlurInstance>,
+    #[cfg(not(feature="gl"))]
     pub horizontal_blur_location: Vec<InstanceLocation>,
     pub readbacks: Vec<DeviceIntRect>,
     pub scalings: FastHashMap<TextureSource, Vec<ScalingInstance>>,
+    #[cfg(not(feature="gl"))]
     pub scaling_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
     pub svg_filters: Vec<(BatchTextures, Vec<SvgFilterInstance>)>,
+    #[cfg(not(feature="gl"))]
     pub svg_filter_locations: Vec<(BatchTextures, Vec<InstanceLocation>)>,
     pub blits: Vec<BlitJob>,
     // List of frame buffer outputs for this render target.
@@ -343,13 +356,17 @@ impl RenderTarget for ColorRenderTarget {
         ColorRenderTarget {
             alpha_batch_containers: Vec::new(),
             vertical_blurs: Vec::new(),
+            #[cfg(not(feature="gl"))]
             vertical_blur_location: Vec::new(),
             horizontal_blurs: Vec::new(),
+            #[cfg(not(feature="gl"))]
             horizontal_blur_location: Vec::new(),
             readbacks: Vec::new(),
             scalings: FastHashMap::default(),
+            #[cfg(not(feature="gl"))]
             scaling_locations: FastHashMap::default(),
             svg_filters: Vec::new(),
+            #[cfg(not(feature="gl"))]
             svg_filter_locations: Vec::new(),
             blits: Vec::new(),
             outputs: Vec::new(),
@@ -369,8 +386,11 @@ impl RenderTarget for ColorRenderTarget {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        #[cfg(not(feature="gl"))]
         buffer_manager: &mut InstanceBufferManager<B>,
+        #[cfg(not(feature="gl"))]
         device: &B::Device,
+        #[cfg(not(feature="gl"))]
         heaps: Arc<Mutex<Heaps<B>>>,
     ) {
         let mut merged_batches = AlphaBatchContainer::new(None);
@@ -463,44 +483,47 @@ impl RenderTarget for ColorRenderTarget {
             self.alpha_batch_containers.push(merged_batches);
         }
 
-        let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
-        self.vertical_blur_location = buffer_manager.add(
-            device,
-            &vertical_blurs,
-            &mut heaps.lock().unwrap(),
-        );
-
-        let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
-        self.horizontal_blur_location = buffer_manager.add(
-            device,
-            &horizontal_blurs,
-            &mut heaps.lock().unwrap(),
-        );
-
-        for container in self.alpha_batch_containers.iter_mut() {
-            container.build(
-                buffer_manager,
+        #[cfg(not(feature="gl"))]
+        {
+            let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
+            self.vertical_blur_location = buffer_manager.add(
                 device,
-                heaps.clone(),
-            );
-        }
-
-        for(source, instances) in self.scalings.drain() {
-            let location = buffer_manager.add(
-                device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &vertical_blurs,
                 &mut heaps.lock().unwrap(),
             );
-            self.scaling_locations.insert(source, location);
-        }
-
-        for (batch_textures, instances) in self.svg_filters.drain(..) {
-            let location = buffer_manager.add(
+    
+            let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
+            self.horizontal_blur_location = buffer_manager.add(
                 device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &horizontal_blurs,
                 &mut heaps.lock().unwrap(),
             );
-            self.svg_filter_locations.push((batch_textures, location));
+    
+            for container in self.alpha_batch_containers.iter_mut() {
+                container.build(
+                    buffer_manager,
+                    device,
+                    heaps.clone(),
+                );
+            }
+    
+            for(source, instances) in self.scalings.drain() {
+                let location = buffer_manager.add(
+                    device,
+                    &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                    &mut heaps.lock().unwrap(),
+                );
+                self.scaling_locations.insert(source, location);
+            }
+    
+            for (batch_textures, instances) in self.svg_filters.drain(..) {
+                let location = buffer_manager.add(
+                    device,
+                    &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                    &mut heaps.lock().unwrap(),
+                );
+                self.svg_filter_locations.push((batch_textures, location));
+            }
         }
     }
 
@@ -653,10 +676,13 @@ pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
     // List of blur operations to apply for this render target.
     pub vertical_blurs: Vec<BlurInstance>,
+    #[cfg(not(feature="gl"))]
     pub vertical_blur_location: Vec<InstanceLocation>,
     pub horizontal_blurs: Vec<BlurInstance>,
+    #[cfg(not(feature="gl"))]
     pub horizontal_blur_location: Vec<InstanceLocation>,
     pub scalings: FastHashMap<TextureSource, Vec<ScalingInstance>>,
+    #[cfg(not(feature="gl"))]
     pub scaling_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
     pub zero_clears: Vec<RenderTaskId>,
     pub one_clears: Vec<RenderTaskId>,
@@ -684,10 +710,13 @@ impl RenderTarget for AlphaRenderTarget {
         AlphaRenderTarget {
             clip_batcher: ClipBatcher::new(gpu_supports_fast_clears),
             vertical_blurs: Vec::new(),
+            #[cfg(not(feature="gl"))]
             vertical_blur_location: Vec::new(),
             horizontal_blurs: Vec::new(),
+            #[cfg(not(feature="gl"))]
             horizontal_blur_location: Vec::new(),
             scalings: FastHashMap::default(),
+            #[cfg(not(feature="gl"))]
             scaling_locations: FastHashMap::default(),
             zero_clears: Vec::new(),
             one_clears: Vec::new(),
@@ -806,6 +835,7 @@ impl RenderTarget for AlphaRenderTarget {
         self.used_rect = self.used_rect.union(&rect);
     }
 
+    #[cfg(not(feature="gl"))]
     fn build<B: hal::Backend>(
         &mut self,
         _ctx: &mut RenderTargetContext,
@@ -861,16 +891,21 @@ pub struct PictureCacheTarget {
 pub struct TextureCacheRenderTarget {
     pub target_kind: RenderTargetKind,
     pub horizontal_blurs: Vec<BlurInstance>,
+    #[cfg(not(feature="gl"))]
     pub horizontal_blur_location: Vec<InstanceLocation>,
     pub blits: Vec<BlitJob>,
     pub border_segments_complex: Vec<BorderInstance>,
+    #[cfg(not(feature="gl"))]
     pub border_segment_complex_location: Vec<InstanceLocation>,
     pub border_segments_solid: Vec<BorderInstance>,
+    #[cfg(not(feature="gl"))]
     pub border_segment_solid_location: Vec<InstanceLocation>,
     pub clears: Vec<DeviceIntRect>,
     pub line_decorations: Vec<LineDecorationJob>,
+    #[cfg(not(feature="gl"))]
     pub line_decoration_location: Vec<InstanceLocation>,
     pub gradients: Vec<GradientJob>,
+    #[cfg(not(feature="gl"))]
     pub gradient_location: Vec<InstanceLocation>,
 }
 
@@ -879,16 +914,21 @@ impl TextureCacheRenderTarget {
         TextureCacheRenderTarget {
             target_kind,
             horizontal_blurs: vec![],
+            #[cfg(not(feature="gl"))]
             horizontal_blur_location: vec![],
             blits: vec![],
             border_segments_complex: vec![],
+            #[cfg(not(feature="gl"))]
             border_segment_complex_location: vec![],
             border_segments_solid: vec![],
+            #[cfg(not(feature="gl"))]
             border_segment_solid_location: vec![],
             clears: vec![],
             line_decorations: vec![],
+            #[cfg(not(feature="gl"))]
             line_decoration_location: vec![],
             gradients: vec![],
+            #[cfg(not(feature="gl"))]
             gradient_location: vec![],
         }
     }

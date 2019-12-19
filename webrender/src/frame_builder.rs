@@ -453,8 +453,11 @@ impl FrameBuilder {
         scratch: &mut PrimitiveScratchBuffer,
         render_task_counters: &mut RenderTaskGraphCounters,
         debug_flags: DebugFlags,
+        #[cfg(not(feature="gl"))]
         buffer_manager: &mut InstanceBufferManager<B>,
+        #[cfg(not(feature="gl"))]
         device: &B::Device,
+        #[cfg(not(feature="gl"))]
         heaps: Arc<Mutex<Heaps<B>>>,
     ) -> Frame {
         profile_scope!("build");
@@ -553,8 +556,11 @@ impl FrameBuilder {
                     &mut prim_headers,
                     &mut z_generator,
                     &mut composite_state,
+                    #[cfg(not(feature="gl"))]
                     buffer_manager,
+                    #[cfg(not(feature="gl"))]
                     device,
+                    #[cfg(not(feature="gl"))]
                     heaps.clone(),
                 );
 
@@ -618,8 +624,11 @@ pub fn build_render_pass<B: hal::Backend>(
     prim_headers: &mut PrimitiveHeaders,
     z_generator: &mut ZBufferIdGenerator,
     composite_state: &mut CompositeState,
+    #[cfg(not(feature="gl"))]
     buffer_manager: &mut InstanceBufferManager<B>,
+    #[cfg(not(feature="gl"))]
     device: &B::Device,
+    #[cfg(not(feature="gl"))]
     heaps: Arc<Mutex<Heaps<B>>>,
 ) {
     profile_scope!("RenderPass::build");
@@ -647,8 +656,11 @@ pub fn build_render_pass<B: hal::Backend>(
                 transforms,
                 z_generator,
                 composite_state,
+                #[cfg(not(feature="gl"))]
                 buffer_manager,
+                #[cfg(not(feature="gl"))]
                 device,
+                #[cfg(not(feature="gl"))]
                 heaps.clone(),
             );
         }
@@ -877,6 +889,7 @@ pub fn build_render_pass<B: hal::Backend>(
                             );
                             debug_assert!(batch_containers.is_empty());
 
+                            #[cfg(not(feature="gl"))]
                             alpha_batch_container.build(
                                 buffer_manager,
                                 &device,
@@ -899,6 +912,7 @@ pub fn build_render_pass<B: hal::Backend>(
             }
 
             for (_, ref mut cache) in texture_cache.iter_mut() {
+                #[cfg(not(feature="gl"))]
                 cache.build(
                     buffer_manager,
                     device,
@@ -916,8 +930,11 @@ pub fn build_render_pass<B: hal::Backend>(
                 transforms,
                 z_generator,
                 composite_state,
+                #[cfg(not(feature="gl"))]
                 buffer_manager,
+                #[cfg(not(feature="gl"))]
                 device,
+                #[cfg(not(feature="gl"))]
                 heaps.clone(),
             );
             alpha.build(
@@ -930,8 +947,11 @@ pub fn build_render_pass<B: hal::Backend>(
                 transforms,
                 z_generator,
                 composite_state,
+                #[cfg(not(feature="gl"))]
                 buffer_manager,
+                #[cfg(not(feature="gl"))]
                 device,
+                #[cfg(not(feature="gl"))]
                 heaps.clone(),
             );
         }

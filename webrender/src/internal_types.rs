@@ -7,6 +7,7 @@ use api::{ImageFormat, ItemTag, NotificationRequest, Shadow, FilterOp, MAX_BLUR_
 use api::units::*;
 use api;
 use crate::device::TextureFilter;
+#[cfg(not(feature="gl"))]
 use crate::device::buffer::{BufferId, InstancePoolBuffer};
 use crate::renderer::PipelineInfo;
 #[cfg(not(feature="gl"))]
@@ -534,6 +535,14 @@ pub enum ResultMsg<B: hal::Backend> {
         memory_pressure: bool,
     },
     PublishPipelineInfo(PipelineInfo),
+    #[cfg(feature="gl")]
+    PublishDocument(
+        DocumentId,
+        RenderedDocument,
+        TextureUpdateList,
+        BackendProfileCounters,
+    ),
+    #[cfg(not(feature="gl"))]
     PublishDocument(
         DocumentId,
         RenderedDocument,
