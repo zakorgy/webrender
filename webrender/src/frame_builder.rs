@@ -10,6 +10,8 @@ use crate::clip::{ClipStore, ClipChainStack};
 use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use crate::composite::CompositeState;
 use crate::debug_render::DebugItem;
+#[cfg(not(feature = "gl"))]
+use crate::device::InstanceBufferManager;
 use crate::gpu_cache::{GpuCache, GpuCacheHandle};
 use crate::gpu_types::{PrimitiveHeaders, TransformPalette, UvRectKind, ZBufferIdGenerator};
 use crate::gpu_types::TransformData;
@@ -28,8 +30,10 @@ use crate::render_task::{RenderTask, RenderTaskLocation, RenderTaskKind};
 use crate::resource_cache::{ResourceCache};
 use crate::scene::{BuiltScene, ScenePipeline, SceneProperties};
 use crate::segment::SegmentBuilder;
+#[cfg(not(feature = "gl"))]
+use rendy_memory::Heaps;
 use std::{f32, mem};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use crate::util::MaxRect;
 
 
@@ -432,7 +436,7 @@ impl FrameBuilder {
         Some(root_render_task_id)
     }
 
-    pub fn build(
+    pub fn build<B: hal::Backend>(
         &mut self,
         scene: &mut BuiltScene,
         resource_cache: &mut ResourceCache,
@@ -449,6 +453,9 @@ impl FrameBuilder {
         scratch: &mut PrimitiveScratchBuffer,
         render_task_counters: &mut RenderTaskGraphCounters,
         debug_flags: DebugFlags,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
     ) -> Frame {
         profile_scope!("build");
         profile_marker!("BuildFrame");
@@ -546,6 +553,9 @@ impl FrameBuilder {
                     &mut prim_headers,
                     &mut z_generator,
                     &mut composite_state,
+                    buffer_manager,
+                    device,
+                    heaps.clone(),
                 );
 
                 match pass.kind {
@@ -597,7 +607,7 @@ impl FrameBuilder {
 /// Among other things, this allocates output regions for each of our tasks
 /// (added via `add_render_task`) in a RenderTarget and assigns it into that
 /// target.
-pub fn build_render_pass(
+pub fn build_render_pass<B: hal::Backend>(
     pass: &mut RenderPass,
     ctx: &mut RenderTargetContext,
     gpu_cache: &mut GpuCache,
@@ -608,6 +618,9 @@ pub fn build_render_pass(
     prim_headers: &mut PrimitiveHeaders,
     z_generator: &mut ZBufferIdGenerator,
     composite_state: &mut CompositeState,
+    buffer_manager: &mut InstanceBufferManager<B>,
+    device: &B::Device,
+    heaps: Arc<Mutex<Heaps<B>>>,
 ) {
     profile_scope!("RenderPass::build");
 
@@ -634,6 +647,9 @@ pub fn build_render_pass(
                 transforms,
                 z_generator,
                 composite_state,
+                buffer_manager,
+                device,
+                heaps.clone(),
             );
         }
         RenderPassKind::OffScreen {
@@ -861,6 +877,11 @@ pub fn build_render_pass(
                             );
                             debug_assert!(batch_containers.is_empty());
 
+                            alpha_batch_container.build(
+                                buffer_manager,
+                                &device,
+                                heaps.clone()
+                            );
                             let target = PictureCacheTarget {
                                 texture,
                                 layer: layer as usize,
@@ -877,6 +898,14 @@ pub fn build_render_pass(
                 }
             }
 
+            for (_, ref mut cache) in texture_cache.iter_mut() {
+                cache.build(
+                    buffer_manager,
+                    device,
+                    heaps.clone(),
+                );
+            }
+
             color.build(
                 ctx,
                 gpu_cache,
@@ -887,6 +916,9 @@ pub fn build_render_pass(
                 transforms,
                 z_generator,
                 composite_state,
+                buffer_manager,
+                device,
+                heaps.clone(),
             );
             alpha.build(
                 ctx,
@@ -898,6 +930,9 @@ pub fn build_render_pass(
                 transforms,
                 z_generator,
                 composite_state,
+                buffer_manager,
+                device,
+                heaps.clone(),
             );
         }
     }

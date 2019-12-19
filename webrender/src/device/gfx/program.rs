@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 use rendy_memory::Heaps;
 use std::borrow::Cow::{Borrowed};
 
-use super::buffer::{InstanceBufferHandler, VertexBufferHandler};
+use super::buffer::{BufferId, InstanceBufferHandler, InstancePoolBuffer, InstanceLocation, VertexBufferHandler};
 use super::blend_state::SUBPIXEL_CONSTANT_TEXT_COLOR;
 use super::render_pass::HalRenderPasses;
 use super::PipelineRequirements;
@@ -38,6 +38,35 @@ const SPECIALIZATION_FEATURES: &'static [&'static str] = &[
 pub(super) enum RenderPassDepthState {
     Enabled,
     Disabled,
+}
+
+pub(super) enum InstanceSource<'a, B: hal::Backend> {
+    Handler {
+        handler: &'a InstanceBufferHandler<B>,
+        range: std::ops::Range<usize>,
+    },
+    Uploaded {
+        buffers: &'a FastHashMap<BufferId, InstancePoolBuffer<B>>,
+        locations: &'a [InstanceLocation]
+    },
+}
+
+impl<'a, B: hal::Backend> From<(&'a InstanceBufferHandler<B>, std::ops::Range<usize>)> for InstanceSource<'a, B> {
+    fn from((handler, range): (&'a InstanceBufferHandler<B>, std::ops::Range<usize>)) -> InstanceSource<'a, B> {
+        InstanceSource::Handler {
+            handler,
+            range,
+        }
+    }
+}
+
+impl<'a, B: hal::Backend> From<(&'a FastHashMap<BufferId, InstancePoolBuffer<B>>, &'a [InstanceLocation])> for InstanceSource<'a, B> {
+    fn from((buffers, locations): (&'a FastHashMap<BufferId, InstancePoolBuffer<B>>, &'a [InstanceLocation])) -> InstanceSource<'a, B> {
+        InstanceSource::Uploaded {
+            buffers,
+            locations,
+        }
+    }
 }
 
 type PipelineKey = (
@@ -622,8 +651,7 @@ impl<B: hal::Backend> Program<B> {
         pipeline_layout: &B::PipelineLayout,
         use_push_consts: bool,
         vertex_buffer: &VertexBufferHandler<B>,
-        instance_buffer: &InstanceBufferHandler<B>,
-        instance_buffer_range: std::ops::Range<usize>,
+        instances: InstanceSource<B>,
         format: ImageFormat,
     ) {
         if self.shader_kind.is_debug() {
@@ -693,22 +721,37 @@ impl<B: hal::Backend> Program<B> {
                 }
                 // Default WR shaders
                 None => {
-                    let number_of_vertices = match self.shader_kind {
-                        ShaderKind::Service => 3,
-                        _ => vertex_buffer.buffer_len,
-                    };
-                    for i in instance_buffer_range.into_iter() {
-                        cmd_buffer.bind_vertex_buffers(
-                            0,
-                            Some((&vertex_buffer.buffer().buffer, 0))
-                                .into_iter()
-                                .chain(Some((&instance_buffer.buffers[i].buffer.buffer, 0))),
-                        );
+                    match instances {
+                        InstanceSource::Handler {handler, range} => {
+                            let number_of_vertices = match self.shader_kind {
+                                ShaderKind::Service => 3,
+                                _ => vertex_buffer.buffer_len,
+                            };
+                            for i in range.into_iter() {
+                                cmd_buffer.bind_vertex_buffers(
+                                    0,
+                                    Some((&vertex_buffer.buffer().buffer, 0))
+                                        .into_iter()
+                                        .chain(Some((&handler.buffers[i].buffer.buffer, 0))),
+                                );
 
-                        let data_stride = instance_buffer.buffers[i].last_data_stride;
-                        let end = instance_buffer.buffers[i].offset / data_stride;
-                        let start = end - instance_buffer.buffers[i].last_update_size / data_stride;
-                        cmd_buffer.draw(0..number_of_vertices as u32, start as u32..end as u32);
+                                let data_stride = handler.buffers[i].last_data_stride;
+                                let end = handler.buffers[i].offset / data_stride;
+                                let start = end - handler.buffers[i].last_update_size / data_stride;
+                                cmd_buffer.draw(0..number_of_vertices as u32, start as u32..end as u32);
+                            }
+                        }
+                        InstanceSource::Uploaded {buffers, locations} => {
+                            for InstanceLocation {buffer_id, range} in locations {
+                                cmd_buffer.bind_vertex_buffers(
+                                    0,
+                                    Some((&vertex_buffer.buffer().buffer, 0))
+                                        .into_iter()
+                                        .chain(Some((&buffers[&buffer_id].buffer.buffer, 0))),
+                                );
+                                cmd_buffer.draw(0..vertex_buffer.buffer_len as u32, range.clone());
+                            }
+                        }
                     }
                 }
             }
