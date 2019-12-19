@@ -26,7 +26,7 @@ use crate::clip_scroll_tree::SpatialNodeIndex;
 #[cfg(feature = "debugger")]
 use crate::debug_server;
 #[cfg(not(feature = "gl"))]
-use crate::device::PersistentlyMappedBuffer;
+use crate::device::{PersistentlyMappedBuffer, InstanceBufferManager};
 use crate::frame_builder::{FrameBuilder, FrameBuilderConfig};
 use crate::glyph_rasterizer::{FontInstance};
 use crate::gpu_cache::GpuCache;
@@ -533,12 +533,15 @@ impl Document {
         DocumentOps::nop()
     }
 
-    fn build_frame(
+    fn build_frame<B: hal::Backend>(
         &mut self,
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         resource_profile: &mut ResourceProfileCounters,
         debug_flags: DebugFlags,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
@@ -566,6 +569,9 @@ impl Document {
                 &mut self.scratch,
                 &mut self.render_task_counters,
                 debug_flags,
+                buffer_manager,
+                device,
+                heaps,
             );
             self.hit_tester = Some(self.scene.create_hit_tester(&self.data_stores.clip));
             frame
@@ -700,6 +706,8 @@ pub struct RenderBackend<B: hal::Backend> {
     gpu_cache_buffer: Option<PersistentlyMappedBuffer<B>>,
     #[cfg(not(feature = "gl"))]
     send_buffer_handle_to_renderer: bool,
+    #[cfg(not(feature = "gl"))]
+    buffer_manager: InstanceBufferManager<B>,
 
     api_rx: MsgReceiver<ApiMsg>,
     payload_rx: Receiver<Payload>,
@@ -792,6 +800,7 @@ impl<B: hal::Backend> RenderBackend<B> {
         device: Arc<B::Device>,
         heaps: Weak<Mutex<Heaps<B>>>,
         non_coherent_atom_size_mask: u64,
+        buffer_manager: InstanceBufferManager<B>,
     ) -> RenderBackend<B> {
         let heaps_strong = heaps.upgrade().unwrap();
         let gpu_cache_buffer = Some(PersistentlyMappedBuffer::new::<GpuBlockData>(
@@ -827,15 +836,18 @@ impl<B: hal::Backend> RenderBackend<B> {
             debug_flags,
             namespace_alloc_by_client,
             recycler: Recycler::new(),
+            buffer_manager,
         }
     }
 
     pub fn deinit(&mut self) {
         #[cfg(not(feature = "gl"))]
         {
+            let heaps_strong = self.heaps.upgrade().unwrap();
+            let mut heaps_locked = heaps_strong.lock().unwrap();
+            self.buffer_manager.deinit(self.device.as_ref(), &mut *heaps_locked);
             if let Some(buffer) = self.gpu_cache_buffer.take() {
-                let heaps_strong = self.heaps.upgrade().unwrap();
-                heaps_strong.lock().unwrap().free(self.device.as_ref(), buffer.memory_block);
+                heaps_locked.free(self.device.as_ref(), buffer.memory_block);
             }
         }
     }
@@ -1612,6 +1624,9 @@ impl<B: hal::Backend> RenderBackend<B> {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    &mut self.buffer_manager,
+                    &self.device,
+                    self.heaps.upgrade().unwrap(),
                 );
 
                 debug!("generated frame for document {:?} with {} passes",
@@ -1675,7 +1690,8 @@ impl<B: hal::Backend> RenderBackend<B> {
                 document_id,
                 rendered_document,
                 pending_update,
-                profile_counters.clone()
+                profile_counters.clone(),
+                self.buffer_manager.recorded_buffers(),
             );
             self.result_tx.send(msg).unwrap();
             profile_counters.reset();
@@ -1911,6 +1927,9 @@ impl<B: hal::Backend> RenderBackend<B> {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    &mut self.buffer_manager,
+                    &self.device,
+                    self.heaps.upgrade().unwrap(),
                 );
                 // After we rendered the frames, there are pending updates to both
                 // GPU cache and resources. Instead of serializing them, we are going to make sure
@@ -2130,6 +2149,7 @@ impl<B: hal::Backend> RenderBackend<B> {
                         RenderedDocument { frame, is_new_scene: true },
                         self.resource_cache.pending_updates(),
                         profile_counters.clone(),
+                        self.buffer_manager.recorded_buffers(),
                     );
                     self.result_tx.send(msg_publish).unwrap();
                     profile_counters.reset();

@@ -11,6 +11,8 @@ use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX};
 use crate::clip::ClipStore;
 use crate::composite::CompositeState;
 use crate::device::Texture;
+#[cfg(not(feature = "gl"))]
+use crate::device::{InstanceBufferManager, InstanceLocation, PrimitiveType};
 use crate::frame_builder::{FrameGlobalResources};
 use crate::gpu_cache::{GpuCache, GpuCacheAddress};
 use crate::gpu_types::{BorderInstance, SvgFilterInstance, BlurDirection, BlurInstance, PrimitiveHeaders, ScalingInstance};
@@ -25,7 +27,10 @@ use crate::render_task::{RenderTask, ScalingTask, SvgFilterInfo};
 use crate::render_task_graph::{RenderTaskGraph, RenderTaskId};
 use crate::resource_cache::ResourceCache;
 use crate::texture_allocator::{ArrayAllocationTracker, FreeRectSlice};
+#[cfg(not(feature = "gl"))]
+use rendy_memory::Heaps;
 use std::{cmp, mem};
+use std::sync::{Arc, Mutex};
 
 
 const STYLE_SOLID: i32 = ((BorderStyle::Solid as i32) << 8) | ((BorderStyle::Solid as i32) << 16);
@@ -93,7 +98,7 @@ pub trait RenderTarget {
 
     /// Optional hook to provide additional processing for the target at the
     /// end of the build phase.
-    fn build(
+    fn build<B: hal::Backend>(
         &mut self,
         _ctx: &mut RenderTargetContext,
         _gpu_cache: &mut GpuCache,
@@ -103,6 +108,9 @@ pub trait RenderTarget {
         _transforms: &mut TransformPalette,
         _z_generator: &mut ZBufferIdGenerator,
         _composite_state: &mut CompositeState,
+        _buffer_manager: &mut InstanceBufferManager<B>,
+        _device: &B::Device,
+        _heaps: Arc<Mutex<Heaps<B>>>,
     ) {
     }
 
@@ -193,7 +201,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         }
     }
 
-    pub fn build(
+    pub fn build<B: hal::Backend>(
         &mut self,
         ctx: &mut RenderTargetContext,
         gpu_cache: &mut GpuCache,
@@ -204,6 +212,9 @@ impl<T: RenderTarget> RenderTargetList<T> {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
     ) {
         debug_assert_eq!(None, self.saved_index);
         self.saved_index = saved_index;
@@ -218,6 +229,9 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 transforms,
                 z_generator,
                 composite_state,
+                buffer_manager,
+                device,
+                heaps.clone(),
             );
         }
     }
@@ -292,10 +306,14 @@ pub struct ColorRenderTarget {
     pub alpha_batch_containers: Vec<AlphaBatchContainer>,
     // List of blur operations to apply for this render target.
     pub vertical_blurs: Vec<BlurInstance>,
+    pub vertical_blur_location: Vec<InstanceLocation>,
     pub horizontal_blurs: Vec<BlurInstance>,
+    pub horizontal_blur_location: Vec<InstanceLocation>,
     pub readbacks: Vec<DeviceIntRect>,
     pub scalings: FastHashMap<TextureSource, Vec<ScalingInstance>>,
+    pub scaling_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
     pub svg_filters: Vec<(BatchTextures, Vec<SvgFilterInstance>)>,
+    pub svg_filter_locations: Vec<(BatchTextures, Vec<InstanceLocation>)>,
     pub blits: Vec<BlitJob>,
     // List of frame buffer outputs for this render target.
     pub outputs: Vec<FrameOutput>,
@@ -310,10 +328,10 @@ pub struct ColorRenderTarget {
 #[cfg(not(feature = "gl"))]
 impl ColorRenderTarget {
     pub fn empty_without_batches(&self) -> bool {
-        self.vertical_blurs.is_empty()
-        && self.horizontal_blurs.is_empty()
-        && self.scalings.is_empty()
-        && self.svg_filters.is_empty()
+        self.vertical_blur_location.is_empty()
+        && self.horizontal_blur_location.is_empty()
+        && self.scaling_locations.is_empty()
+        && self.svg_filter_locations.is_empty()
     }
 }
 
@@ -325,10 +343,14 @@ impl RenderTarget for ColorRenderTarget {
         ColorRenderTarget {
             alpha_batch_containers: Vec::new(),
             vertical_blurs: Vec::new(),
+            vertical_blur_location: Vec::new(),
             horizontal_blurs: Vec::new(),
+            horizontal_blur_location: Vec::new(),
             readbacks: Vec::new(),
             scalings: FastHashMap::default(),
+            scaling_locations: FastHashMap::default(),
             svg_filters: Vec::new(),
+            svg_filter_locations: Vec::new(),
             blits: Vec::new(),
             outputs: Vec::new(),
             alpha_tasks: Vec::new(),
@@ -337,7 +359,7 @@ impl RenderTarget for ColorRenderTarget {
         }
     }
 
-    fn build(
+    fn build<B: hal::Backend>(
         &mut self,
         ctx: &mut RenderTargetContext,
         gpu_cache: &mut GpuCache,
@@ -347,6 +369,9 @@ impl RenderTarget for ColorRenderTarget {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
     ) {
         let mut merged_batches = AlphaBatchContainer::new(None);
 
@@ -436,6 +461,46 @@ impl RenderTarget for ColorRenderTarget {
 
         if !merged_batches.is_empty() {
             self.alpha_batch_containers.push(merged_batches);
+        }
+
+        let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
+        self.vertical_blur_location = buffer_manager.add(
+            device,
+            &vertical_blurs,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
+        self.horizontal_blur_location = buffer_manager.add(
+            device,
+            &horizontal_blurs,
+            &mut heaps.lock().unwrap(),
+        );
+
+        for container in self.alpha_batch_containers.iter_mut() {
+            container.build(
+                buffer_manager,
+                device,
+                heaps.clone(),
+            );
+        }
+
+        for(source, instances) in self.scalings.drain() {
+            let location = buffer_manager.add(
+                device,
+                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &mut heaps.lock().unwrap(),
+            );
+            self.scaling_locations.insert(source, location);
+        }
+
+        for (batch_textures, instances) in self.svg_filters.drain(..) {
+            let location = buffer_manager.add(
+                device,
+                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &mut heaps.lock().unwrap(),
+            );
+            self.svg_filter_locations.push((batch_textures, location));
         }
     }
 
@@ -588,8 +653,11 @@ pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
     // List of blur operations to apply for this render target.
     pub vertical_blurs: Vec<BlurInstance>,
+    pub vertical_blur_location: Vec<InstanceLocation>,
     pub horizontal_blurs: Vec<BlurInstance>,
+    pub horizontal_blur_location: Vec<InstanceLocation>,
     pub scalings: FastHashMap<TextureSource, Vec<ScalingInstance>>,
+    pub scaling_locations: FastHashMap<TextureSource, Vec<InstanceLocation>>,
     pub zero_clears: Vec<RenderTaskId>,
     pub one_clears: Vec<RenderTaskId>,
     // Track the used rect of the render target, so that
@@ -602,9 +670,9 @@ pub struct AlphaRenderTarget {
 impl AlphaRenderTarget {
     pub fn is_empty(&self) -> bool {
         self.clip_batcher.is_empty()
-            && self.vertical_blurs.is_empty()
-            && self.horizontal_blurs.is_empty()
-            && self.scalings.is_empty()
+            && self.vertical_blur_location.is_empty()
+            && self.horizontal_blur_location.is_empty()
+            && self.scaling_locations.is_empty()
     }
 }
 
@@ -616,8 +684,11 @@ impl RenderTarget for AlphaRenderTarget {
         AlphaRenderTarget {
             clip_batcher: ClipBatcher::new(gpu_supports_fast_clears),
             vertical_blurs: Vec::new(),
+            vertical_blur_location: Vec::new(),
             horizontal_blurs: Vec::new(),
+            horizontal_blur_location: Vec::new(),
             scalings: FastHashMap::default(),
+            scaling_locations: FastHashMap::default(),
             zero_clears: Vec::new(),
             one_clears: Vec::new(),
             used_rect: DeviceIntRect::zero(),
@@ -734,6 +805,46 @@ impl RenderTarget for AlphaRenderTarget {
     fn add_used(&mut self, rect: DeviceIntRect) {
         self.used_rect = self.used_rect.union(&rect);
     }
+
+    fn build<B: hal::Backend>(
+        &mut self,
+        _ctx: &mut RenderTargetContext,
+        _gpu_cache: &mut GpuCache,
+        _render_tasks: &mut RenderTaskGraph,
+        _deferred_resolves: &mut Vec<DeferredResolve>,
+        _prim_headers: &mut PrimitiveHeaders,
+        _transforms: &mut TransformPalette,
+        _z_generator: &mut ZBufferIdGenerator,
+        _composite_state: &mut CompositeState,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
+    ) {
+        self.clip_batcher.build(buffer_manager, device, heaps.clone());
+
+        let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
+        self.vertical_blur_location = buffer_manager.add(
+            device,
+            &vertical_blurs,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
+        self.horizontal_blur_location = buffer_manager.add(
+            device,
+            &horizontal_blurs,
+            &mut heaps.lock().unwrap(),
+        );
+
+        for (source, instances) in self.scalings.drain() {
+            let locations = buffer_manager.add(
+                device,
+                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
+                &mut heaps.lock().unwrap(),
+            );
+            self.scaling_locations.insert(source, locations);
+        }
+    }
 }
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -750,12 +861,17 @@ pub struct PictureCacheTarget {
 pub struct TextureCacheRenderTarget {
     pub target_kind: RenderTargetKind,
     pub horizontal_blurs: Vec<BlurInstance>,
+    pub horizontal_blur_location: Vec<InstanceLocation>,
     pub blits: Vec<BlitJob>,
     pub border_segments_complex: Vec<BorderInstance>,
+    pub border_segment_complex_location: Vec<InstanceLocation>,
     pub border_segments_solid: Vec<BorderInstance>,
+    pub border_segment_solid_location: Vec<InstanceLocation>,
     pub clears: Vec<DeviceIntRect>,
     pub line_decorations: Vec<LineDecorationJob>,
+    pub line_decoration_location: Vec<InstanceLocation>,
     pub gradients: Vec<GradientJob>,
+    pub gradient_location: Vec<InstanceLocation>,
 }
 
 impl TextureCacheRenderTarget {
@@ -763,24 +879,70 @@ impl TextureCacheRenderTarget {
         TextureCacheRenderTarget {
             target_kind,
             horizontal_blurs: vec![],
+            horizontal_blur_location: vec![],
             blits: vec![],
             border_segments_complex: vec![],
+            border_segment_complex_location: vec![],
             border_segments_solid: vec![],
+            border_segment_solid_location: vec![],
             clears: vec![],
             line_decorations: vec![],
+            line_decoration_location: vec![],
             gradients: vec![],
+            gradient_location: vec![],
         }
     }
 
     #[cfg(not(feature = "gl"))]
     pub fn is_empty(&self) -> bool {
-        self.horizontal_blurs.is_empty()
-        && self.border_segments_complex.is_empty()
-        && self.border_segments_solid.is_empty()
-        && self.line_decorations.is_empty()
-        && self.gradients.is_empty()
-        && self.clears.is_empty()
-        && self.blits.is_empty()
+        self.horizontal_blur_location.is_empty()
+        && self.border_segment_complex_location.is_empty()
+        && self.border_segment_solid_location.is_empty()
+        && self.line_decoration_location.is_empty()
+        && self.gradient_location.is_empty()
+    }
+
+    #[cfg(not(feature = "gl"))]
+    pub fn build<B: hal::Backend>(
+        &mut self,
+        buffer_manager: &mut InstanceBufferManager<B>,
+        device: &B::Device,
+        heaps: Arc<Mutex<Heaps<B>>>,
+    ) {
+        let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
+        self.horizontal_blur_location = buffer_manager.add(
+            device,
+            &horizontal_blurs,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let border_segments = self.border_segments_complex.drain(..).map(|bs| bs.to_primitive_type()).collect::<Vec<_>>();
+        self.border_segment_complex_location = buffer_manager.add(
+            device,
+            &border_segments,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let border_segments = self.border_segments_solid.drain(..).map(|bs| bs.to_primitive_type()).collect::<Vec<_>>();
+        self.border_segment_solid_location = buffer_manager.add(
+            device,
+            &border_segments,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let line_decorations = self.line_decorations.drain(..).map(|ld| ld.to_primitive_type()).collect::<Vec<_>>();
+        self.line_decoration_location = buffer_manager.add(
+            device,
+            &line_decorations,
+            &mut heaps.lock().unwrap(),
+        );
+
+        let gradients = self.gradients.drain(..).map(|g| g.to_primitive_type()).collect::<Vec<_>>();
+        self.gradient_location = buffer_manager.add(
+            device,
+            &gradients,
+            &mut heaps.lock().unwrap(),
+        );
     }
 
     pub fn add_task(

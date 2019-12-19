@@ -11,6 +11,9 @@ use rendy_memory::{Block, Heaps, Kind, MappedRange, MemoryBlock, MemoryUsage, Me
 use std::cell::Cell;
 use std::sync::Arc;
 use std::mem;
+use super::super::GpuFrameId;
+
+use crate::internal_types::FastHashMap;
 
 use super::{MAX_FRAME_COUNT};
 use super::descriptor::{DescriptorData, DescriptorGroup};
@@ -20,6 +23,7 @@ pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
 // Projections are bound on a per render target basis, so those should fit in the 96 limit.
 // We need this limit to define a fixed size for our uniform buffers.
 pub const PROJECTION_PER_FRAME: usize = 96;
+pub const INVALID_BUFFER_ID: BufferId = BufferId(0);
 
 #[derive(MallocSizeOf)]
 pub struct BufferMemorySlice {
@@ -245,7 +249,7 @@ impl<B: hal::Backend> PersistentlyMappedBuffer<B> {
     }
 }
 
-pub(super) struct Buffer<B: hal::Backend> {
+pub struct Buffer<B: hal::Backend> {
     pub(super) memory_block: MemoryBlock<B>,
     pub(super) buffer: B::Buffer,
     pub(super) buffer_size: usize,
@@ -455,11 +459,12 @@ impl<B: hal::Backend> BufferPool<B> {
     }
 }
 
-pub(super) struct InstancePoolBuffer<B: hal::Backend> {
+pub struct InstancePoolBuffer<B: hal::Backend> {
     pub(super) buffer: Buffer<B>,
     pub(super) offset: usize,
     pub(super) last_update_size: usize,
     pub(super) last_data_stride: usize,
+    pub(super) bound_in_frame: GpuFrameId,
     non_coherent_atom_size_mask: usize,
 }
 
@@ -487,6 +492,7 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
             last_update_size: 0,
             last_data_stride: 0,
             non_coherent_atom_size_mask,
+            bound_in_frame: GpuFrameId(0),
         }
     }
 
@@ -530,6 +536,15 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
             0 => self.offset,
             _ => self.offset + stride - remainder,
         }
+    }
+
+    pub(super) fn still_in_flight(&self, frame_id: GpuFrameId, frame_count: usize) -> bool {
+        for i in 0..frame_count {
+            if self.bound_in_frame == GpuFrameId(frame_id.0 - i) {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -849,6 +864,130 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
     pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>, allocator: &mut DescriptorAllocator<B>) {
         for bundle in self.buffer_bundles {
             bundle.deinit(device, heaps, allocator);
+        }
+    }
+}
+
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct BufferId(i32);
+
+#[derive(Debug)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct InstanceLocation {
+    pub buffer_id: BufferId,
+    pub range: std::ops::Range<u32>,
+}
+
+impl Default for InstanceLocation {
+    fn default() -> InstanceLocation {
+        InstanceLocation {
+            buffer_id: INVALID_BUFFER_ID,
+            range: 0..0,
+        }
+    }
+}
+
+impl InstanceLocation {
+    pub fn is_valid(&self) -> bool {
+        self.buffer_id != INVALID_BUFFER_ID
+    }
+}
+
+pub struct InstanceBufferManager<B: hal::Backend> {
+    pub(super) buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>,
+    alignment_mask: usize,
+    non_coherent_atom_size_mask: usize,
+    buffer_size: usize,
+    next_id: BufferId,
+}
+
+impl<B: hal::Backend> InstanceBufferManager<B> {
+    pub fn new(
+        non_coherent_atom_size_mask: usize,
+        alignment_mask: usize,
+        buffer_size: usize,
+    ) -> Self {
+        InstanceBufferManager {
+            buffers: FastHashMap::default(),
+            alignment_mask,
+            non_coherent_atom_size_mask,
+            buffer_size,
+            next_id: BufferId(1),
+        }
+    }
+
+    pub fn add<T: Copy>(
+        &mut self,
+        device: &B::Device,
+        mut instance_data: &[T],
+        heaps: &mut Heaps<B>,
+    ) -> Vec<InstanceLocation> {
+        fn instance_data_to_u8_slice<T: Copy>(data: &[T]) -> &[u8] {
+            unsafe {
+                std::slice::from_raw_parts(
+                    data.as_ptr() as *const u8,
+                    data.len() * mem::size_of::<T>(),
+                )
+            }
+        }
+
+        let data_stride = mem::size_of::<T>();
+        let mut locations = Vec::new();
+        while !instance_data.is_empty() {
+            let need_new_buffer =
+                self.buffers.is_empty() || !self.current_buffer().can_store_data(data_stride);
+            if need_new_buffer {
+                let buffer = InstancePoolBuffer::new(
+                    device,
+                    heaps,
+                    hal::buffer::Usage::VERTEX,
+                    self.alignment_mask,
+                    self.non_coherent_atom_size_mask,
+                    self.buffer_size,
+                );
+                self.buffers.insert(self.next_id, buffer);
+                self.next_id = BufferId(self.next_id.0 + 1);
+            } else {
+                self.current_buffer_mut().align_offset_to(data_stride);
+            }
+            let update_size =
+            (self.current_buffer().space_left() / data_stride).min(instance_data.len());
+            self.current_buffer_mut().update(
+                device,
+                instance_data_to_u8_slice(&instance_data[0..update_size]),
+                data_stride,
+            );
+
+            // TODO(zakorgy): I don't think after this we still have to store last_update_size in the instance buffers
+            let end = self.current_buffer().offset / data_stride;
+            let start = end - self.current_buffer().last_update_size / data_stride;
+            locations.push(InstanceLocation {
+                buffer_id: BufferId(self.next_id.0 - 1),
+                range: start as u32 ..end as u32,
+            });
+            instance_data = &instance_data[update_size..];
+        }
+        locations
+    }
+
+    fn current_buffer(&self) -> &InstancePoolBuffer<B> {
+        &self.buffers[&BufferId(self.next_id.0 - 1)]
+    }
+
+    fn current_buffer_mut(&mut self) -> &mut InstancePoolBuffer<B> {
+        self.buffers.get_mut(&BufferId(self.next_id.0 - 1)).unwrap()
+    }
+
+    pub fn recorded_buffers(&mut self) -> FastHashMap<BufferId, InstancePoolBuffer<B>> {
+        mem::replace(&mut self.buffers, FastHashMap::default())
+    }
+
+    pub fn deinit(&mut self, device: &B::Device, heaps: &mut Heaps<B>) {
+        for (_, buffer) in self.buffers.drain() {
+            buffer.deinit(device, heaps);
         }
     }
 }
