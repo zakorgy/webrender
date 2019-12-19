@@ -7,6 +7,7 @@ use api::{ImageFormat, ItemTag, NotificationRequest, Shadow, FilterOp, MAX_BLUR_
 use api::units::*;
 use api;
 use crate::device::TextureFilter;
+use crate::device::buffer::{BufferId, InstancePoolBuffer};
 use crate::renderer::PipelineInfo;
 #[cfg(not(feature="gl"))]
 use crate::gpu_cache::GpuCacheBufferUpdate;
@@ -588,6 +589,7 @@ pub enum ResultMsg<B: hal::Backend> {
         TextureUpdateList,
         BackendProfileCounters,
         HashMap<CacheTextureId, Option<PreAllocatedImage<B>>>,
+        FastHashMap<BufferId, InstancePoolBuffer<B>>,
     ),
     AppendNotificationRequests(Vec<NotificationRequest>),
     #[cfg(not(feature = "gl"))]

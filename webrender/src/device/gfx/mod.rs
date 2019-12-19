@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 mod blend_state;
-mod buffer;
+pub mod buffer;
 mod command;
 mod descriptor;
 mod device;
@@ -12,7 +12,7 @@ mod program;
 mod render_pass;
 pub(crate) mod vertex_types;
 
-pub use self::buffer::{BufferMemorySlice, GpuCacheBuffer, PersistentlyMappedBuffer};
+pub use self::buffer::{BufferMemorySlice, InstanceBufferManager, InstanceLocation, GpuCacheBuffer, PersistentlyMappedBuffer};
 pub use self::device::*;
 pub use self::image::PreAllocatedImage;
 pub use self::render_pass::HalRenderPasses;

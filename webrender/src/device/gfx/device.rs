@@ -306,6 +306,7 @@ pub struct Device<B: hal::Backend> {
     quad_buffer: VertexBufferHandler<B>,
     instance_buffers: ArrayVec<[InstanceBufferHandler<B>; MAX_FRAME_COUNT]>,
     free_instance_buffers: Vec<InstancePoolBuffer<B>>,
+    received_instance_buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>,
     download_buffer: Option<Buffer<B>>,
     instance_buffer_range: std::ops::Range<usize>,
 
@@ -805,6 +806,7 @@ impl<B: hal::Backend> Device<B> {
             quad_buffer,
             instance_buffers,
             free_instance_buffers: Vec::new(),
+            received_instance_buffers: FastHashMap::default(),
             download_buffer: None,
             instance_buffer_range: 0..0,
 
@@ -840,6 +842,10 @@ impl<B: hal::Backend> Device<B> {
             device.inside_frame = false;
         }
         device
+    }
+
+    pub fn add_instance_buffers(&mut self, buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>) {
+        self.received_instance_buffers.extend(buffers);
     }
 
     pub fn supports_extension(&self, _extension: &str) -> bool {
@@ -1170,6 +1176,7 @@ impl<B: hal::Backend> Device<B> {
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
         self.linear_memory.reset();
+        self.delete_unused_instance_buffers();
     }
 
     pub fn reset_state(&mut self) {
@@ -1559,10 +1566,22 @@ impl<B: hal::Backend> Device<B> {
         );
     }
 
-    fn draw(&mut self) {
+    pub fn draw(&mut self, instance_locations: Option<&[InstanceLocation]>) {
         assert!(self.inside_render_pass);
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
+        let instances = match instance_locations {
+            Some(locations) => {
+                let mut buffer_ids = locations.iter().map(|l| l.buffer_id).collect::<Vec<_>>();
+                buffer_ids.sort();
+                buffer_ids.dedup();
+                for id in buffer_ids {
+                    self.received_instance_buffers.get_mut(&id).unwrap().bound_in_frame = self.frame_id;
+                }
+                (&self.received_instance_buffers, locations).into()
+            },
+            None => (&self.instance_buffers[self.next_id], self.instance_buffer_range.clone()).into(),
+        };
         self.programs
             .get_mut(&self.bound_program)
             .expect("Program not found")
@@ -1570,8 +1589,7 @@ impl<B: hal::Backend> Device<B> {
                 &mut self.command_buffer,
                 self.next_id,
                 &self.quad_buffer,
-                &self.instance_buffers[self.next_id],
-                self.instance_buffer_range.clone(),
+                instances,
             );
     }
 
@@ -2528,8 +2546,10 @@ impl<B: hal::Backend> Device<B> {
             &mut self.command_buffer,
             self.next_id,
             &self.quad_buffer,
-            &self.instance_buffers[self.next_id],
-            self.instance_buffer_range.clone(),
+            (
+                &self.instance_buffers[self.next_id],
+                self.instance_buffer_range.clone(),
+            ).into(),
         );
 
         // Reset states after the draw
@@ -2812,6 +2832,20 @@ impl<B: hal::Backend> Device<B> {
         let textures: SmallVec<[Texture; 16]> = self.retained_textures.drain(..).collect();
         for texture in textures {
             self.free_texture(texture);
+        }
+    }
+
+    fn delete_unused_instance_buffers(&mut self) {
+        let mut buffers_to_remove = Vec::new();
+        for (id, buffer) in self.received_instance_buffers.iter() {
+            if !buffer.still_in_flight(self.frame_id, self.frame_count) {
+                buffers_to_remove.push(*id);
+            }
+        }
+
+        for id in buffers_to_remove {
+            let buffer = self.received_instance_buffers.remove(&id).unwrap();
+            buffer.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
         }
     }
 
@@ -3223,21 +3257,21 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         #[cfg(debug_assertions)]
         debug_assert!(self.shader_is_ready);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn draw_triangles_u32(&mut self, _first_vertex: i32, _index_count: i32) {
         debug_assert!(self.inside_frame);
         #[cfg(debug_assertions)]
         debug_assert!(self.shader_is_ready);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn draw_nonindexed_lines(&mut self, _first_vertex: i32, _vertex_count: i32) {
         debug_assert!(self.inside_frame);
         #[cfg(debug_assertions)]
         debug_assert!(self.shader_is_ready);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn draw_indexed_triangles_instanced_u16(
@@ -3248,7 +3282,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         #[cfg(debug_assertions)]
         debug_assert!(self.shader_is_ready);
-        self.draw();
+        self.draw(None);
     }
 
     pub fn end_frame(&mut self) {
@@ -3906,6 +3940,9 @@ impl<B: hal::Backend> Device<B> {
             }
 
             for (_, buffer) in self.gpu_cache_buffers.into_iter() {
+                buffer.deinit(self.device.as_ref(), &mut heaps);
+            }
+            for (_, buffer) in self.received_instance_buffers.into_iter() {
                 buffer.deinit(self.device.as_ref(), &mut heaps);
             }
             self.device.destroy_sampler(self.sampler_linear);

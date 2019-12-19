@@ -112,7 +112,6 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
                 features
             );
         }
-
         Ok(shader)
     }
 
