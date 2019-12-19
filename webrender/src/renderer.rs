@@ -4043,7 +4043,9 @@ impl<B: hal::Backend> Renderer<B> {
             let _gl = self.gpu_profile.start_marker("alpha batches");
             let transparent_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
             self.set_blend(true, framebuffer_kind);
+
             let mut prev_blend_mode = BlendMode::None;
+            let shaders_rc = self.shaders.clone();
 
             // If the device supports pixel local storage, initialize the PLS buffer for
             // the transparent pass. This involves reading the current framebuffer value
@@ -4070,12 +4072,12 @@ impl<B: hal::Backend> Renderer<B> {
                     continue;
                 }
 
-                self.shaders.borrow_mut()
-                    .get(&batch.key, batch.features | BatchFeatures::ALPHA_PASS, self.debug_flags)
-                    .bind(
-                        &mut self.device, projection,
-                        &mut self.renderer_errors,
-                    );
+                let mut shaders = shaders_rc.borrow_mut();
+                let shader = shaders.get(
+                    &batch.key,
+                    batch.features | BatchFeatures::ALPHA_PASS,
+                    self.debug_flags,
+                );
 
                 if batch.key.blend_mode != prev_blend_mode {
                     match batch.key.blend_mode {
@@ -4108,6 +4110,12 @@ impl<B: hal::Backend> Renderer<B> {
                             // /webrender/doc/text-rendering.md
                             //
                             self.device.set_blend_mode_subpixel_with_bg_color_pass0();
+                            // need to make sure the shader is bound
+                            shader.bind(
+                                &mut self.device,
+                                projection,
+                                &mut self.renderer_errors,
+                            );
                             self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass0 as _);
                         }
                         BlendMode::Advanced(mode) => {
@@ -4136,6 +4144,11 @@ impl<B: hal::Backend> Renderer<B> {
                 }
 
                 let _timer = self.gpu_profile.start_timer(batch.key.kind.sampler_tag());
+                shader.bind(
+                    &mut self.device,
+                    projection,
+                    &mut self.renderer_errors,
+                );
 
                 #[cfg(not(feature = "gl"))]
                 {
@@ -4152,6 +4165,12 @@ impl<B: hal::Backend> Renderer<B> {
 
                 if batch.key.blend_mode == BlendMode::SubpixelWithBgColor {
                     self.set_blend_mode_subpixel_with_bg_color_pass1(framebuffer_kind);
+                    // re-binding the shader after the blend mode change
+                    shader.bind(
+                        &mut self.device,
+                        projection,
+                        &mut self.renderer_errors,
+                    );
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass1 as _);
 
                     // When drawing the 2nd and 3rd passes, we know that the VAO, textures etc
@@ -4162,6 +4181,12 @@ impl<B: hal::Backend> Renderer<B> {
                         .draw_indexed_triangles_instanced_u16(6, batch.instances.len() as i32);
 
                     self.set_blend_mode_subpixel_with_bg_color_pass2(framebuffer_kind);
+                    // re-binding the shader after the blend mode change
+                    shader.bind(
+                        &mut self.device,
+                        projection,
+                        &mut self.renderer_errors,
+                    );
                     self.device.switch_mode(ShaderColorMode::SubpixelWithBgColorPass2 as _);
 
                     self.device
@@ -4206,9 +4231,16 @@ impl<B: hal::Backend> Renderer<B> {
     fn draw_tile_list<'a, I: Iterator<Item = &'a CompositeTile>>(
         &mut self,
         tiles_iter: I,
+        projection: &default::Transform3D<f32>,
         partial_present_mode: Option<PartialPresentMode>,
         stats: &mut RendererStats,
     ) {
+        self.shaders.borrow_mut().composite.bind(
+            &mut self.device,
+            projection,
+            &mut self.renderer_errors
+        );
+
         let mut current_textures = BatchTextures::no_texture();
         let mut instances = Vec::new();
 
@@ -4416,12 +4448,6 @@ impl<B: hal::Backend> Renderer<B> {
             let _ = transit_to_present;
         }
 
-        self.shaders.borrow_mut().composite.bind(
-            &mut self.device,
-            &projection,
-            &mut self.renderer_errors
-        );
-
         // Draw opaque tiles first, front-to-back to get maxmum
         // z-reject efficiency.
         if !composite_state.opaque_tiles.is_empty() {
@@ -4430,6 +4456,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.set_blend(false, FramebufferKind::Main);
             self.draw_tile_list(
                 composite_state.opaque_tiles.iter().rev(),
+                projection,
                 partial_present_mode,
                 &mut results.stats,
             );
@@ -4443,6 +4470,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.device.set_blend_mode_premultiplied_dest_out();
             self.draw_tile_list(
                 composite_state.clear_tiles.iter(),
+                projection,
                 partial_present_mode,
                 &mut results.stats,
             );
@@ -4457,6 +4485,7 @@ impl<B: hal::Backend> Renderer<B> {
             self.set_blend_mode_premultiplied_alpha(FramebufferKind::Main);
             self.draw_tile_list(
                 composite_state.alpha_tiles.iter(),
+                projection,
                 partial_present_mode,
                 &mut results.stats,
             );
@@ -6247,7 +6276,7 @@ impl<B: hal::Backend> Renderer<B> {
 
     // Sets the blend mode. Blend is unconditionally set if the "show overdraw" debugging mode is
     // enabled.
-    fn set_blend(&self, mut blend: bool, framebuffer_kind: FramebufferKind) {
+    fn set_blend(&mut self, mut blend: bool, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             blend = true
@@ -6255,7 +6284,7 @@ impl<B: hal::Backend> Renderer<B> {
         self.device.set_blend(blend)
     }
 
-    fn set_blend_mode_multiply(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_multiply(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6264,7 +6293,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
     }
 
-    fn set_blend_mode_premultiplied_alpha(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_premultiplied_alpha(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6273,7 +6302,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
     }
 
-    fn set_blend_mode_subpixel_with_bg_color_pass1(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_subpixel_with_bg_color_pass1(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();
@@ -6282,7 +6311,7 @@ impl<B: hal::Backend> Renderer<B> {
         }
     }
 
-    fn set_blend_mode_subpixel_with_bg_color_pass2(&self, framebuffer_kind: FramebufferKind) {
+    fn set_blend_mode_subpixel_with_bg_color_pass2(&mut self, framebuffer_kind: FramebufferKind) {
         if framebuffer_kind == FramebufferKind::Main &&
                 self.debug_flags.contains(DebugFlags::SHOW_OVERDRAW) {
             self.device.set_blend_mode_show_overdraw();

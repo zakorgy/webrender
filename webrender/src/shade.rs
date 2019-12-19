@@ -78,6 +78,7 @@ pub struct LazilyCompiledShader<B: hal::Backend> {
     program: Option<Program>,
     name: &'static str,
     kind: ShaderKind,
+    cached_projection: Transform3D<f32>,
     features: Vec<&'static str>,
     phantom_data: PhantomData<B>,
 }
@@ -94,6 +95,9 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             program: None,
             name,
             kind,
+            //Note: this isn't really the default state, but there is no chance
+            // an actual projection passed here would accidentally match.
+            cached_projection: Transform3D::identity(),
             features: features.to_vec(),
             phantom_data: PhantomData,
         };
@@ -118,7 +122,8 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         projection: &Transform3D<f32>,
         renderer_errors: &mut Vec<RendererError>,
     ) {
-        let program = match self.get(device) {
+        let update_projection = self.cached_projection != *projection;
+        let program = match self.get_internal(device, ShaderPrecacheFlags::FULL_COMPILE) {
             Ok(program) => program,
             Err(e) => {
                 renderer_errors.push(RendererError::from(e));
@@ -126,7 +131,11 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
             }
         };
         device.bind_program(program);
-        device.set_uniforms(program, projection);
+        if update_projection {
+            device.set_uniforms(program, projection);
+            // thanks NLL for this (`program` technically borrows `self`)
+            self.cached_projection = *projection;
+        }
     }
 
     fn get_internal(
@@ -147,10 +156,6 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         let program = self.program.as_mut().unwrap();
 
         Ok(program)
-    }
-
-    fn get(&mut self, device: &mut Device<B>) -> Result<&mut Program, ShaderError> {
-        self.get_internal(device, ShaderPrecacheFlags::FULL_COMPILE)
     }
 
     fn deinit(self, device: &mut Device<B>) {
