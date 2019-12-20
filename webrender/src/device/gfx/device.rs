@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use api::channel::{MsgSender, MsgReceiver};
 use api::{ColorF, ImageFormat, MemoryReport, MixBlendMode};
 use api::round_to_int;
 use api::units::{
@@ -31,11 +32,13 @@ use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::slice;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 use super::blend_state::*;
 use super::buffer::*;
 use super::command::*;
 use super::descriptor::*;
+use super::dispose::{Destroyer, DeviceMessage};
 use super::image::*;
 use super::program::{Program, RenderPassDepthState, PUSH_CONSTANT_BLOCK_SIZE};
 use super::render_pass::*;
@@ -354,6 +357,9 @@ pub struct Device<B: hal::Backend> {
     optimal_pbo_stride: NonZeroUsize,
     last_rp_in_frame_reached: bool,
     pub readback_supported: bool,
+
+    destroy_thread_handle: std::thread::JoinHandle<()>,
+    dispose_sender: MsgSender<DeviceMessage<B>>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -712,9 +718,20 @@ impl<B: hal::Backend> Device<B> {
             None
         };
 
+        let device = Arc::new(device);
+        let heaps = Arc::new(Mutex::new(heaps));
+        let (dispose_sender, dispose_receiver) = api::channel::msg_channel().unwrap();
+        let destroy_thread_handle = unsafe {
+            Destroyer::start(
+                device.clone(),
+                heaps.clone(),
+                dispose_receiver,
+            )
+        };
+
         let mut device = Device {
-            device: Arc::new(device),
-            heaps: Arc::new(Mutex::new(heaps)),
+            device,
+            heaps,
             limits,
             surface_format,
             adapter,
@@ -827,6 +844,8 @@ impl<B: hal::Backend> Device<B> {
             optimal_pbo_stride: NonZeroUsize::new(4).unwrap(),
             last_rp_in_frame_reached: false,
             readback_supported,
+            destroy_thread_handle,
+            dispose_sender,
         };
 
         if readback_supported || device.headless_mode() {
@@ -1042,7 +1061,8 @@ impl<B: hal::Backend> Device<B> {
             old_frame.deinit(self.device.as_ref());
         }
         let old_depth = mem::replace(&mut self.frame_depth, frame_depth);
-        old_depth.deinit(self.device.as_ref(), heaps);
+        //old_depth.deinit(self.device.as_ref(), heaps);
+        old_depth.dispose(&self.dispose_sender);
         self.dimensions = dimensions;
         self.surface_format = surface_format;
         for layout in self.swapchain_image_layouts.iter_mut() {
@@ -2365,7 +2385,8 @@ impl<B: hal::Backend> Device<B> {
         if entry.get().refcount == 0 {
             let t = entry.remove();
             let old_rbo = self.rbos.remove(&t.rbo_id).unwrap();
-            old_rbo.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
+            //old_rbo.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
+            old_rbo.dispose(&self.dispose_sender);
             record_gpu_free(depth_target_size_in_bytes(&dimensions));
         }
     }
@@ -2707,6 +2728,10 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub fn destroy_resources(&self) {
+        self.dispose_sender.send(DeviceMessage::Free).unwrap();
+    }
+
     fn free_texture_unconditionaly(&mut self, mut texture: Texture) {
         if texture.supports_depth() {
             self.release_depth_target(texture.get_dimensions());
@@ -2734,11 +2759,11 @@ impl<B: hal::Backend> Device<B> {
 
         if texture.is_buffer {
             if let Some(buffer) = self.gpu_cache_buffers.remove(&texture.id) {
-                buffer.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
+                buffer.dispose(&self.dispose_sender);
             }
         } else {
             let image = self.images.remove(&texture.id).expect("Texture not found.");
-            image.deinit(self.device.as_ref(), &mut *self.heaps.lock().unwrap());
+            image.dispose(&self.dispose_sender);
         }
         record_gpu_free(texture.size_in_bytes());
         texture.id = 0;
@@ -2756,6 +2781,9 @@ impl<B: hal::Backend> Device<B> {
         let textures: SmallVec<[Texture; 16]> = self.retained_textures.drain(..).collect();
         for texture in textures {
             self.free_texture(texture);
+        }
+        if self.frame_id.0 % 20 == 0 {
+            self.destroy_resources();
         }
     }
 
@@ -3739,6 +3767,7 @@ impl<B: hal::Backend> Device<B> {
         for texture in self.readback_textures.drain(..).collect::<Vec<_>>() {
             self.free_texture_unconditionaly(texture);
         }
+        self.dispose_sender.send(DeviceMessage::Exit).unwrap();
         unsafe {
             if self.save_cache && self.cache_path.is_some() {
                 let pipeline_cache = self
@@ -3808,6 +3837,7 @@ impl<B: hal::Backend> Device<B> {
                 &self.bound_locals,
                 &mut self.locals_descriptors,
             );
+            let _ = self.destroy_thread_handle.join().unwrap();
 
             let mut heaps = Arc::try_unwrap(self.heaps).unwrap().into_inner().unwrap();
 

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+ use api::channel::MsgSender;
 use hal;
 use hal::device::Device as BackendDevice;
 use rendy_memory::{Block, Heaps, Kind, MappedRange, MemoryBlock, MemoryUsage, MemoryUsageValue, Write};
@@ -9,6 +10,7 @@ use rendy_memory::{Block, Heaps, Kind, MappedRange, MemoryBlock, MemoryUsage, Me
 use std::cell::Cell;
 use std::sync::Arc;
 use std::mem;
+use super::dispose::{DeviceMessage, Disposable};
 
 pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
 
@@ -227,6 +229,13 @@ impl<B: hal::Backend> PersistentlyMappedBuffer<B> {
         }
     }
 
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        sender.send(DeviceMessage::Dispose(Disposable::Buffer {
+            memory: self.memory_block,
+            buffer: Arc::try_unwrap(self.buffer).unwrap(),
+        })).unwrap()
+    }
+
     pub fn get_buffer_info(&self, transit_range_end: u64) -> GpuCacheBuffer<B> {
         GpuCacheBuffer {
             buffer: Arc::clone(&self.buffer),
@@ -360,6 +369,13 @@ impl<B: hal::Backend> Buffer<B> {
             heaps.free(device, self.memory_block);
         }
     }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        sender.send(DeviceMessage::Dispose(Disposable::Buffer {
+            memory: self.memory_block,
+            buffer: self.buffer,
+        })).unwrap()
+    }
 }
 
 pub(super) struct BufferPool<B: hal::Backend> {
@@ -443,6 +459,10 @@ impl<B: hal::Backend> BufferPool<B> {
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         self.buffer.deinit(device, heaps);
     }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        self.buffer.dispose(sender);
+    }
 }
 
 pub(super) struct InstancePoolBuffer<B: hal::Backend> {
@@ -499,6 +519,10 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         self.buffer.deinit(device, heaps);
+    }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        self.buffer.dispose(sender);
     }
 
     fn space_left(&self) -> usize {
@@ -626,6 +650,12 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
             buffer.deinit(device, heaps);
         }
     }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        for buffer in self.buffers {
+            buffer.dispose(sender);
+        }
+    }
 }
 
 pub(super) struct VertexBufferHandler<B: hal::Backend> {
@@ -701,6 +731,10 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         self.buffer.deinit(device, heaps);
     }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        self.buffer.dispose(sender);
+    }
 }
 
 pub(super) struct UniformBufferHandler<B: hal::Backend> {
@@ -753,6 +787,12 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         for buffer in self.buffers {
             buffer.deinit(device, heaps);
+        }
+    }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        for buffer in self.buffers {
+            buffer.dispose(sender);
         }
     }
 }

@@ -7,6 +7,7 @@ mod buffer;
 mod command;
 mod descriptor;
 mod device;
+mod dispose;
 mod image;
 mod program;
 mod render_pass;

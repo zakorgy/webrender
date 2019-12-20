@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{units::DeviceIntRect, ImageFormat};
+use api::{channel::MsgSender, units::DeviceIntRect, ImageFormat};
 use hal::{self, device::Device as BackendDevice};
 use hal::command::CommandBuffer;
 use hal::image::{Layout, Access};
@@ -11,6 +11,7 @@ use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
 
 use std::cell::Cell;
 use super::buffer::BufferPool;
+use super::dispose::{DeviceMessage, Disposable};
 use super::render_pass::HalRenderPasses;
 use super::TextureId;
 use super::super::{RBOId, Texture};
@@ -121,6 +122,16 @@ impl<B: hal::Backend> ImageCore<B> {
                 device.destroy_image(self.image);
                 heaps.free(device, memory_block);
             }
+        }
+    }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        if let Some(memory_block) = self.memory_block {
+            sender.send(DeviceMessage::Dispose(Disposable::Image {
+                memory: memory_block,
+                image: self.image,
+                view: self.view,
+            })).unwrap()
         }
     }
 
@@ -302,6 +313,10 @@ impl<B: hal::Backend> Image<B> {
     pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         self.core.deinit(device, heaps);
     }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        self.core.dispose(sender)
+    }
 }
 
 pub(super) struct Framebuffer<B: hal::Backend> {
@@ -412,5 +427,9 @@ impl<B: hal::Backend> DepthBuffer<B> {
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         self.core.deinit(device, heaps);
+    }
+
+    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        self.core.dispose(sender)
     }
 }
