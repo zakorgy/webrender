@@ -3891,6 +3891,8 @@ impl<B: hal::Backend> Renderer<B> {
         let _gm = self.gpu_profile.start_marker("picture cache target");
         let framebuffer_kind = FramebufferKind::Other;
 
+        let clear_rect;
+        let clear_color = target.clear_color.map(|c| c.to_array());
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
             self.device.bind_draw_target(
@@ -3911,20 +3913,21 @@ impl<B: hal::Backend> Renderer<B> {
                 )
             });
 
-            // Unfortunatelly this clear rect must executed in a separate render pass
-            // because it has a different setup than the subsequent draw calls in draw_alpha_batch_container
+            #[cfg(feature = "gl")]
+            {
+                clear_rect = None;
+                self.device.clear_target(
+                    clear_color,
+                    Some(1.0),
+                    scissor_rect,
+                    #[cfg(not(feature = "gl"))]
+                    false,
+                );
+            }
             #[cfg(not(feature = "gl"))]
-            self.device.begin_render_pass(false);
-            self.device.clear_target(
-                target.clear_color.map(|c| c.to_array()),
-                Some(1.0),
-                scissor_rect,
-                #[cfg(not(feature = "gl"))]
-                false,
-            );
-            #[cfg(not(feature = "gl"))]
-            self.device.end_render_pass();
-
+            {
+                clear_rect = scissor_rect;
+            }
             self.device.disable_depth_write();
         }
 
@@ -3937,6 +3940,8 @@ impl<B: hal::Backend> Renderer<B> {
             render_tasks,
             stats,
             false,
+            clear_rect,
+            clear_color,
         );
     }
 
@@ -3952,6 +3957,8 @@ impl<B: hal::Backend> Renderer<B> {
         render_tasks: &RenderTaskGraph,
         stats: &mut RendererStats,
         transit_to_present: bool,
+        clear_rect: Option<FramebufferIntRect>,
+        clear_color: Option<[f32; 4]>,
     ) {
         let uses_scissor = alpha_batch_container.task_scissor_rect.is_some();
 
@@ -3966,7 +3973,7 @@ impl<B: hal::Backend> Renderer<B> {
 
         #[cfg(not(feature = "gl"))]
         let mut last_rp;
-        if !alpha_batch_container.opaque_batches.is_empty()
+        if !alpha_batch_container.opaque_batches.is_empty() || clear_rect.is_some()
             && !self.debug_flags.contains(DebugFlags::DISABLE_OPAQUE_PASS) {
             let _gl = self.gpu_profile.start_marker("opaque batches");
             let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
@@ -3979,10 +3986,18 @@ impl<B: hal::Backend> Renderer<B> {
             {
                 last_rp = transit_to_present && alpha_batch_container.alpha_batches.is_empty();
                 self.device.begin_render_pass(last_rp);
+                if clear_rect.is_some() {
+                    self.device.clear_target_rects(
+                        clear_color,
+                        Some(1.0),
+                        clear_rect,
+                    );
+                }
             }
             #[cfg(feature = "gl")]
             {
                 let _ = transit_to_present;
+                let _ = clear_color;
             }
 
             // Draw opaque batches front-to-back for maximum
@@ -4619,6 +4634,8 @@ impl<B: hal::Backend> Renderer<B> {
                 render_tasks,
                 stats,
                 transit_to_present && batch_idx == last_alpha_batch_index,
+                None,
+                None,
             );
         }
 
