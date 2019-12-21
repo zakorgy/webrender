@@ -2676,12 +2676,7 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn free_texture(&mut self, mut texture: Texture) {
-        if texture.still_in_flight(self.frame_id, self.frame_count) {
-            self.retained_textures.push(texture);
-            return;
-        }
-
+    fn free_texture_unconditionaly(&mut self, mut texture: Texture) {
         if texture.supports_depth() {
             self.release_depth_target(texture.get_dimensions());
         }
@@ -2718,6 +2713,14 @@ impl<B: hal::Backend> Device<B> {
         texture.id = 0;
     }
 
+    fn free_texture(&mut self, texture: Texture) {
+        if texture.still_in_flight(self.frame_id, self.frame_count) {
+            self.retained_textures.push(texture);
+            return;
+        }
+        self.free_texture_unconditionaly(texture);
+    }
+
     fn delete_retained_textures(&mut self) {
         let textures: SmallVec<[Texture; 16]> = self.retained_textures.drain(..).collect();
         for texture in textures {
@@ -2725,9 +2728,9 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn delete_texture(&mut self, texture: Texture) {
-        //debug_assert!(self.inside_frame);
-        if texture.size.width + texture.size.height == 0 {
+    pub fn delete_texture(&mut self, mut texture: Texture) {
+        if texture.size_in_bytes() == 0 {
+            texture.id = 0;
             return;
         }
 
@@ -3705,10 +3708,10 @@ impl<B: hal::Backend> Device<B> {
     pub fn deinit(mut self) {
         self.device.wait_idle().unwrap();
         for texture in self.retained_textures.drain(..).collect::<Vec<_>>() {
-            self.free_texture(texture);
+            self.free_texture_unconditionaly(texture);
         }
         for texture in self.readback_textures.drain(..).collect::<Vec<_>>() {
-            self.free_texture(texture);
+            self.free_texture_unconditionaly(texture);
         }
         unsafe {
             if self.save_cache && self.cache_path.is_some() {
