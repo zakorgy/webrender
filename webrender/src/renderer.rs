@@ -2559,6 +2559,8 @@ impl<B: hal::Backend> Renderer<B> {
     /// Should be called before `render()`, as texture cache updates are done here.
     pub fn update(&mut self) {
         profile_scope!("update");
+        #[cfg(not(feature = "gl"))]
+        self.device.destroy_resources();
         // Pull any pending results and return the most recent.
         while let Ok(msg) = self.result_rx.try_recv() {
             match msg {

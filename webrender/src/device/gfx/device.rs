@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::channel::{MsgSender, MsgReceiver};
+use api::channel::MsgSender;
 use api::{ColorF, ImageFormat, MemoryReport, MixBlendMode};
 use api::round_to_int;
 use api::units::{
@@ -38,7 +38,7 @@ use super::blend_state::*;
 use super::buffer::*;
 use super::command::*;
 use super::descriptor::*;
-use super::dispose::{Destroyer, DeviceMessage};
+use super::dispose::{Destroyer, DeviceMessage, Disposable};
 use super::image::*;
 use super::program::{Program, RenderPassDepthState, PUSH_CONSTANT_BLOCK_SIZE};
 use super::render_pass::*;
@@ -358,7 +358,7 @@ pub struct Device<B: hal::Backend> {
     last_rp_in_frame_reached: bool,
     pub readback_supported: bool,
 
-    destroy_thread_handle: std::thread::JoinHandle<()>,
+    destroy_thread_handle: JoinHandle<()>,
     dispose_sender: MsgSender<DeviceMessage<B>>,
 }
 
@@ -2737,22 +2737,23 @@ impl<B: hal::Backend> Device<B> {
             self.release_depth_target(texture.get_dimensions());
         }
 
-        if !texture.fbos_with_depth.is_empty() {
-            for old in texture.fbos_with_depth.drain(..) {
-                debug_assert!(self.bound_draw_fbo != old || self.bound_read_fbo != old);
-                let old_fbo = self.fbos.remove(&old).unwrap();
-                old_fbo.deinit(self.device.as_ref());
-            }
+        let mut fbos: SmallVec<[Framebuffer<B>; 32]> = SmallVec::new();
+        for old in texture.fbos_with_depth.drain(..).chain(texture.fbos.drain(..)) {
+            debug_assert!(self.bound_draw_fbo != old || self.bound_read_fbo != old);
+            fbos.push(self.fbos.remove(&old).unwrap());
         }
 
-        if !texture.fbos.is_empty() {
-            for old in texture.fbos.drain(..) {
-                debug_assert!(self.bound_draw_fbo != old || self.bound_read_fbo != old);
-                let old_fbo = self.fbos.remove(&old).unwrap();
-                old_fbo.deinit(self.device.as_ref());
-            }
+        if !fbos.is_empty() {
+            let frame_buffers_dispose = fbos.into_iter().map(|fb| {
+                Disposable::Framebuffer {
+                    frame_buffer: fb.fbo,
+                    image_view: Some(fb.image_view),
+                }
+            }).collect();
+            self.dispose_sender.send(
+                DeviceMessage::DisposeMultiple(frame_buffers_dispose)
+            ).unwrap();
         }
-
         self.per_draw_descriptors.retain(&texture.id);
         self.per_pass_descriptors.retain(&texture.id);
         self.per_group_descriptors.retain(&texture.id);
@@ -2781,9 +2782,6 @@ impl<B: hal::Backend> Device<B> {
         let textures: SmallVec<[Texture; 16]> = self.retained_textures.drain(..).collect();
         for texture in textures {
             self.free_texture(texture);
-        }
-        if self.frame_id.0 % 20 == 0 {
-            self.destroy_resources();
         }
     }
 
@@ -3707,9 +3705,15 @@ impl<B: hal::Backend> Device<B> {
                             self.recreate_swapchain(None);
                         }
                     }
-                    for (_, fb) in frame.framebuffers {
-                        self.device.destroy_framebuffer(fb);
-                    }
+                    let frame_buffers_dispose = frame.framebuffers.into_iter().map(|(_, fb)| {
+                        Disposable::Framebuffer {
+                            frame_buffer: fb,
+                            image_view: None,
+                        }
+                    }).collect();
+                    self.dispose_sender.send(
+                        DeviceMessage::DisposeMultiple(frame_buffers_dispose)
+                    ).unwrap();
                 }
                 None => {
                     let submission = hal::queue::Submission {

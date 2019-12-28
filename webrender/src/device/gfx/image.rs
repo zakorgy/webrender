@@ -323,7 +323,7 @@ pub(super) struct Framebuffer<B: hal::Backend> {
     pub(super) texture_id: TextureId,
     pub(super) layer_index: u16,
     pub(super) format: ImageFormat,
-    image_view: B::ImageView,
+    pub(super) image_view: B::ImageView,
     pub(super) fbo: B::Framebuffer,
     pub(super) rbo: RBOId,
 }
@@ -397,6 +397,13 @@ impl<B: hal::Backend> Framebuffer<B> {
             device.destroy_image_view(self.image_view);
         }
     }
+
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+        sender.send(DeviceMessage::Dispose(Disposable::Framebuffer {
+            frame_buffer: self.fbo,
+            image_view: Some(self.image_view),
+        })).unwrap()
+    }*/
 }
 
 #[derive(Debug)]

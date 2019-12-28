@@ -2,18 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
- use hal::device::Device as _;
- use api::channel::{MsgSender, MsgReceiver};
- use rendy_memory::{Heaps, MemoryBlock};
- use std::thread;
- use std::sync::{Arc, Mutex};
+use hal::device::Device as _;
+use api::channel::MsgReceiver;
+use rendy_memory::{Heaps, MemoryBlock};
+use smallvec::SmallVec;
+use std::thread;
+use std::sync::{Arc, Mutex};
 
- pub enum DeviceMessage<B: hal::Backend> {
-     // TODO: maybe add a vector of disposable
-     Dispose(Disposable<B>),
-     Free,
-     Exit,
- }
+pub enum DeviceMessage<B: hal::Backend> {
+    // TODO: maybe add a vector of disposable
+    Dispose(Disposable<B>),
+    DisposeMultiple(SmallVec<[Disposable<B>; 32]>),
+    Free,
+    Exit,
+}
 
 pub enum Disposable<B: hal::Backend> {
     Image {
@@ -25,7 +27,10 @@ pub enum Disposable<B: hal::Backend> {
         buffer: B::Buffer,
         memory: MemoryBlock<B>,
     },
-    _FrameBuffer,
+    Framebuffer {
+        frame_buffer: B::Framebuffer,
+        image_view: Option<B::ImageView>,
+    },
 }
 
 impl<B: hal::Backend> Disposable<B> {
@@ -40,7 +45,13 @@ impl<B: hal::Backend> Disposable<B> {
                 device.destroy_buffer(buffer);
                 memory
             },
-            _ => unimplemented!(),
+            Disposable::Framebuffer {frame_buffer, image_view} => {
+                device.destroy_framebuffer(frame_buffer);
+                if let Some(view) = image_view {
+                    device.destroy_image_view(view);
+                }
+                return
+            },
         };
         heaps.free(device, memory);
     }
@@ -71,6 +82,7 @@ impl<B: hal::Backend> Destroyer<B> {
         loop {
             match self.receiver.recv() {
                 Ok(DeviceMessage::Dispose(d)) => self.disposable.push(d),
+                Ok(DeviceMessage::DisposeMultiple(d)) => self.disposable.extend(d),
                 Ok(DeviceMessage::Free) => self.dispose(),
                 Err(_) | Ok(DeviceMessage::Exit) => {
                     self.dispose();

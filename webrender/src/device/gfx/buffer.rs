@@ -370,12 +370,12 @@ impl<B: hal::Backend> Buffer<B> {
         }
     }
 
-    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
         sender.send(DeviceMessage::Dispose(Disposable::Buffer {
             memory: self.memory_block,
             buffer: self.buffer,
         })).unwrap()
-    }
+    }*/
 }
 
 pub(super) struct BufferPool<B: hal::Backend> {
@@ -460,9 +460,9 @@ impl<B: hal::Backend> BufferPool<B> {
         self.buffer.deinit(device, heaps);
     }
 
-    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
         self.buffer.dispose(sender);
-    }
+    }*/
 }
 
 pub(super) struct InstancePoolBuffer<B: hal::Backend> {
@@ -521,9 +521,9 @@ impl<B: hal::Backend> InstancePoolBuffer<B> {
         self.buffer.deinit(device, heaps);
     }
 
-    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
         self.buffer.dispose(sender);
-    }
+    }*/
 
     fn space_left(&self) -> usize {
         self.buffer.buffer_size - self.offset
@@ -651,11 +651,11 @@ impl<B: hal::Backend> InstanceBufferHandler<B> {
         }
     }
 
-    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
         for buffer in self.buffers {
             buffer.dispose(sender);
         }
-    }
+    }*/
 }
 
 pub(super) struct VertexBufferHandler<B: hal::Backend> {
@@ -732,9 +732,9 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
         self.buffer.deinit(device, heaps);
     }
 
-    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
         self.buffer.dispose(sender);
-    }
+    }*/
 }
 
 pub(super) struct UniformBufferHandler<B: hal::Backend> {
@@ -790,9 +790,9 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
         }
     }
 
-    pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
+    /*pub(super) fn dispose(self, sender: &MsgSender<DeviceMessage<B>>) {
         for buffer in self.buffers {
             buffer.dispose(sender);
         }
-    }
+    }*/
 }
