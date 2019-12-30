@@ -268,7 +268,7 @@ pub struct Device<B: hal::Backend> {
     images: FastHashMap<TextureId, Image<B>>,
     pub(crate) gpu_cache_buffer: Option<GpuCacheBuffer<B>>,
     pub(crate) gpu_cache_buffers: FastHashMap<TextureId, PersistentlyMappedBuffer<B>>,
-    retained_textures: Vec<Texture>,
+    pub retained_textures: Vec<Texture>,
     fbos: FastHashMap<FBOId, Framebuffer<B>>,
     rbos: FastHashMap<RBOId, DepthBuffer<B>>,
 
@@ -1215,7 +1215,6 @@ impl<B: hal::Backend> Device<B> {
         }
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
-        self.delete_retained_textures();
     }
 
     pub fn reset_state(&mut self) {
@@ -2728,7 +2727,10 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    pub fn destroy_resources(&self) {
+    pub fn destroy_resources(&mut self) {
+        if self.frame_id.0 % 20 == 0 {
+            self.delete_retained_textures();
+        }
         self.dispose_sender.send(DeviceMessage::Free).unwrap();
     }
 

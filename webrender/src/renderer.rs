@@ -5359,22 +5359,61 @@ impl<B: hal::Backend> Renderer<B> {
                 }
             });
 
+        #[cfg(not(feature = "gl"))]
+        let retained_idx = self.device.retained_textures
+            .iter()
+            .position(|texture| {
+                if texture.still_in_flight(_frame_id, self.device.frame_count) {
+                    false
+                } else {
+                    selector == TargetSelector {
+                        size: texture.get_dimensions(),
+                        num_layers: texture.get_layer_count() as usize,
+                        format: texture.get_format(),
+                    }
+                }
+            });
+
         let rt_info = RenderTargetInfo { has_depth: list.needs_depth() };
         let texture = if let Some(idx) = index {
             let mut t = self.texture_resolver.render_target_pool.swap_remove(idx);
             self.device.reuse_render_target::<u8>(&mut t, rt_info);
             t
         } else {
-            counters.targets_created.inc();
-            self.device.create_texture(
-                TextureTarget::Array,
-                list.format,
-                dimensions.width,
-                dimensions.height,
-                TextureFilter::Linear,
-                Some(rt_info),
-                list.targets.len() as _,
-            )
+            #[cfg(not(feature = "gl"))]
+            {
+                if let Some(idx) = retained_idx {
+                    let mut t = self.device.retained_textures.swap_remove(idx);
+                    self.device.reuse_render_target::<u8>(&mut t, rt_info);
+                    println!("## Reuse, YAY!");
+                    t
+                } else {
+                    counters.targets_created.inc();
+                    self.device.create_texture(
+                        TextureTarget::Array,
+                        list.format,
+                        dimensions.width,
+                        dimensions.height,
+                        TextureFilter::Linear,
+                        Some(rt_info),
+                        list.targets.len() as _,
+                    )
+                }
+
+            }
+            #[cfg(feature = "gl")]
+            {
+                counters.targets_created.inc();
+                self.device.create_texture(
+                    TextureTarget::Array,
+                    list.format,
+                    dimensions.width,
+                    dimensions.height,
+                    TextureFilter::Linear,
+                    Some(rt_info),
+                    list.targets.len() as _,
+                )
+            }
         };
 
         list.check_ready(&texture);
