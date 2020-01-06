@@ -123,16 +123,27 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         renderer_errors: &mut Vec<RendererError>,
     ) {
         let update_projection = self.cached_projection != *projection;
-        let program = match self.get_internal(device, ShaderPrecacheFlags::FULL_COMPILE) {
-            Ok(program) => program,
+        match self.get_internal(device, ShaderPrecacheFlags::FULL_COMPILE) {
+            Ok(program) => {
+                #[cfg(feature = "gl")]
+                {
+                    device.bind_program(program);
+                    if update_projection {
+                        device.set_uniforms(program, projection);
+                    }
+                }
+                #[cfg(not(feature = "gl"))]
+                {
+                    device.set_uniforms(program, projection);
+                    device.bind_program(program);
+                }
+            },
             Err(e) => {
                 renderer_errors.push(RendererError::from(e));
                 return;
             }
-        };
-        device.bind_program(program);
+        }
         if update_projection {
-            device.set_uniforms(program, projection);
             // thanks NLL for this (`program` technically borrows `self`)
             self.cached_projection = *projection;
         }
