@@ -9,7 +9,6 @@ layout(constant_id = 3) const bool dithering = false;
 layout(constant_id = 4) const bool debug_overdraw = false;
 layout(constant_id = 5) const bool repetition = false;
 layout(constant_id = 6) const bool antialiasing = false;
-layout(constant_id = 7) const bool push_constants = true;
 
 #if defined(GL_ES)
     #if GL_ES == 1
