@@ -37,7 +37,7 @@ use super::buffer::*;
 use super::command::*;
 use super::descriptor::*;
 use super::image::*;
-use super::program::{Program, RenderPassDepthState, PUSH_CONSTANT_BLOCK_SIZE};
+use super::program::{Program, RenderPassDepthState};
 use super::render_pass::*;
 use super::{PipelineRequirements, PrimitiveType, TextureId};
 use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
@@ -347,8 +347,6 @@ pub struct Device<B: hal::Backend> {
     cache_path: Option<PathBuf>,
     save_cache: bool,
 
-    // The device supports push constants
-    pub use_push_consts: bool,
     swizzle_settings: SwizzleSettings,
     color_formats: TextureFormatPair<ImageFormat>,
     optimal_pbo_stride: NonZeroUsize,
@@ -381,7 +379,7 @@ impl<B: hal::Backend> Device<B> {
             descriptor_count,
             cache_path,
             save_cache,
-            backend_api,
+            backend_api: _backend_api,
         } = init;
         let renderer_name = "TODO renderer name".to_owned();
         let features = adapter.physical_device.features();
@@ -463,12 +461,6 @@ impl<B: hal::Backend> Device<B> {
 
         let render_passes =
             HalRenderPasses::create_render_passes(&device, SURFACE_FORMAT, DEPTH_FORMAT);
-
-        // Disable push constants for Intel's Vulkan driver on Windows
-        let has_broken_push_const_support = cfg!(target_os = "windows")
-            && backend_api == BackendApiType::Vulkan
-            && adapter.info.vendor == 0x8086;
-        let use_push_consts = !has_broken_push_const_support;
 
         let (frame_depth, surface_format, dimensions, frame_count) =
             Self::init_drawables(&device, &mut heaps, &adapter, surface.as_mut(), dimensions);
@@ -654,10 +646,7 @@ impl<B: hal::Backend> Device<B> {
             let pipeline_layout = unsafe {
                 device.create_pipeline_layout(
                     &set_layouts,
-                    Some((
-                        hal::pso::ShaderStageFlags::VERTEX | hal::pso::ShaderStageFlags::FRAGMENT,
-                        0..PUSH_CONSTANT_BLOCK_SIZE as u32,
-                    )),
+                    &[],
                 )
             }
             .expect("create_pipeline_layout failed");
@@ -700,11 +689,7 @@ impl<B: hal::Backend> Device<B> {
             &descriptor_data,
             &DescriptorGroup::Default,
             DESCRIPTOR_SET_LOCALS,
-            if use_push_consts {
-                1
-            } else {
-                descriptor_count.unwrap_or(DESCRIPTOR_COUNT)
-            },
+            descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
             Vec::new(),
         );
 
@@ -821,7 +806,6 @@ impl<B: hal::Backend> Device<B> {
             download_buffer: None,
             instance_buffer_range: 0..0,
 
-            use_push_consts,
             swizzle_settings: SwizzleSettings {
                 bgra8_sampling_swizzle: Swizzle::Rgba,
             },
@@ -849,9 +833,6 @@ impl<B: hal::Backend> Device<B> {
                 device.readback_textures.push(texture);
             }
             device.inside_frame = false;
-        }
-        if device.use_push_consts {
-            device.bind_uniforms(Locals::default());
         }
         device
     }
@@ -1024,14 +1005,12 @@ impl<B: hal::Backend> Device<B> {
         }
         Self::reset(&mut self.bound_per_group_textures, &mut self.per_group_descriptors);
 
-        if !self.use_push_consts {
-            Self::push_back_and_reset(
-                &mut self.bound_locals_descriptor,
-                None,
-                &mut self.bound_locals,
-                &mut self.locals_descriptors,
-            );
-        }
+        Self::push_back_and_reset(
+            &mut self.bound_locals_descriptor,
+            None,
+            &mut self.bound_locals,
+            &mut self.locals_descriptors,
+        );
 
         self.locals_buffer.reset();
 
@@ -1276,7 +1255,6 @@ impl<B: hal::Backend> Device<B> {
             &mut self.shader_modules,
             self.pipeline_cache.as_ref(),
             self.surface_format,
-            self.use_push_consts,
         )
     }
 
@@ -1334,18 +1312,6 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn update_push_constants(&mut self) {
-        if self.use_push_consts {
-            self.programs
-                .get_mut(&self.bound_program)
-                .expect("Invalid bound program")
-                .constants[..]
-                .copy_from_slice(unsafe {
-                    std::mem::transmute::<_, &[u32; 17]>(&self.bound_locals)
-                });
-        }
-    }
-
     fn bind_uniforms(&mut self, locals: Locals) {
         let descriptor = self.locals_descriptors.bind_locals(
             locals,
@@ -1373,9 +1339,7 @@ impl<B: hal::Backend> Device<B> {
         if self.bound_locals.uTransform != projection {
             let mut new_locals = self.bound_locals;
             new_locals.uTransform = projection;
-            if !self.use_push_consts {
-                self.bind_uniforms(new_locals);
-            }
+            self.bind_uniforms(new_locals);
             self.bound_locals = new_locals;
         }
     }
@@ -1583,7 +1547,6 @@ impl<B: hal::Backend> Device<B> {
 
     fn draw(&mut self) {
         assert!(self.inside_render_pass);
-        self.update_push_constants();
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
         let descriptor_group = self
@@ -1611,10 +1574,9 @@ impl<B: hal::Backend> Device<B> {
                 self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
                 desc_set_per_pass,
                 desc_set_per_group,
-                self.bound_locals_descriptor.as_ref().map(|d| d.raw()),
+                self.bound_locals_descriptor.as_ref().unwrap().raw(),
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
-                self.use_push_consts,
                 &self.quad_buffer,
                 &self.instance_buffers[self.next_id],
                 self.instance_buffer_range.clone(),
@@ -2485,10 +2447,9 @@ impl<B: hal::Backend> Device<B> {
             descriptor.raw(),
             None,
             desc_set_per_group,
-            self.bound_locals_descriptor.as_ref().map(|d| d.raw()),
+            self.bound_locals_descriptor.as_ref().unwrap().raw(),
             self.next_id,
             self.descriptor_data.pipeline_layout(&descriptor_group),
-            self.use_push_consts,
             &self.quad_buffer,
             &self.instance_buffers[self.next_id],
             self.instance_buffer_range.clone(),
@@ -2792,9 +2753,7 @@ impl<B: hal::Backend> Device<B> {
         }
         let mut new_locals = self.bound_locals;
         new_locals.uMode = mode;
-        if !self.use_push_consts {
-            self.bind_uniforms(new_locals);
-        }
+        self.bind_uniforms(new_locals);
         self.bound_locals = new_locals;
     }
 

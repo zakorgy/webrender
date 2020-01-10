@@ -255,17 +255,7 @@ fn process_glsl_for_spirv(file_path: &Path, file_name: &str) -> Option<PipelineR
                 new_data.push_str(&line);
                 new_data.push('\n');
         } else {
-            if l.contains("uTransform") {
-                new_data.push_str("\t\t\tmat4 _transform;\n\t\t\tif (push_constants) { _transform =  pushConstants.uTransform; } else { _transform = uTransform; }\n");
-            }
-            if l.contains("uMode") {
-                new_data.push_str("\t\t\tint _umode;\n\t\t\tif (push_constants) { _umode =  pushConstants.uMode; } else { _umode = uMode; }\n");
-            }
-            new_data.push_str(
-                &l
-                    .replace("uTransform", "_transform")
-                    .replace("uMode", "_umode")
-            );
+            new_data.push_str(&l);
             new_data.push('\n');
         }
     }
@@ -341,14 +331,6 @@ fn extend_sampler_definition(
 }
 
 fn replace_non_sampler_uniforms(new_data: &mut String) {
-    new_data.push_str(
-        "\tlayout(push_constant) uniform PushConsts {\n\
-         \t\tmat4 uTransform;       // Orthographic projection\n\
-         \t\t// A generic uniform that shaders can optionally use to configure\n\
-         \t\t// an operation mode for this batch.\n\
-         \t\tint uMode;\n\
-         \t} pushConstants;\n",
-    );
     new_data.push_str(&format!(
         "\tlayout(set = {}, binding = 0) uniform Locals {{\n\
          \t\tuniform mat4 uTransform;       // Orthographic projection\n\
