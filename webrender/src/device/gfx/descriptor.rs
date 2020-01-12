@@ -140,7 +140,6 @@ impl From<ShaderKind> for DescriptorGroup {
 #[allow(non_snake_case)]
 pub(super) struct Locals {
     pub(super) uTransform: [[f32; 4]; 4],
-    pub(super) uMode: i32,
 }
 
 impl Locals {
@@ -152,13 +151,12 @@ impl Locals {
 impl Hash for Locals {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.transform_as_u32_slice().hash(state);
-        self.uMode.hash(state);
     }
 }
 
 impl PartialEq for Locals {
     fn eq(&self, other: &Locals) -> bool {
-        self.uTransform == other.uTransform && self.uMode == other.uMode
+        self.uTransform == other.uTransform
     }
 }
 

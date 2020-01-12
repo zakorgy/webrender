@@ -1591,8 +1591,6 @@ impl<B: hal::Backend> Device<B> {
             self.shader_is_ready = false;
         }
         self.reset_state();
-        self.switch_mode(0);
-
         self.frame_id
     }
 
@@ -2746,15 +2744,8 @@ impl<B: hal::Backend> Device<B> {
         external.id = 0;
     }
 
-    pub fn switch_mode(&mut self, mode: i32) {
+    pub fn switch_mode(&mut self, _mode: i32) {
         debug_assert!(self.inside_frame);
-        if self.bound_locals.uMode == mode {
-            return;
-        }
-        let mut new_locals = self.bound_locals;
-        new_locals.uMode = mode;
-        self.bind_uniforms(new_locals);
-        self.bound_locals = new_locals;
     }
 
     pub fn create_pbo(&mut self) -> PBO {
