@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::ImageFormat;
+use arrayvec::ArrayVec;
 use hal::{self, device::Device as BackendDevice};
 use hal::command::CommandBuffer;
 use crate::internal_types::FastHashMap;
@@ -18,7 +19,7 @@ use super::super::super::shader_source;
 
 const ENTRY_NAME: &str = "main";
 // The number of specialization constants in each shader.
-const SPECIALIZATION_CONSTANT_COUNT: usize = 7;
+const SPECIALIZATION_CONSTANT_COUNT: usize = 8;
 // Size of a specialization constant variable in bytes.
 const SPECIALIZATION_CONSTANT_SIZE: usize = 4;
 const SPECIALIZATION_FEATURES: &'static [&'static str] = &[
@@ -69,6 +70,11 @@ impl<B: hal::Backend> Program<B> {
         pipeline_cache: Option<&B::PipelineCache>,
         surface_format: ImageFormat,
     ) -> Program<B> {
+        use hal::pso::{BlendState, EntryPoint, GraphicsShaderSet, Specialization, SpecializationConstant};
+        use super::blend_state::*;
+        use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
+        use self::RenderPassDepthState as RPDS;
+
         if !shader_modules.contains_key(shader_name) {
             let vs_file = format!("{}.vert.spv", shader_name);
             let vs_module = unsafe {
@@ -94,54 +100,82 @@ impl<B: hal::Backend> Program<B> {
 
         let (vs_module, fs_module) = shader_modules.get(shader_name).unwrap();
 
-        let mut specialization_data =
-            vec![0; (SPECIALIZATION_CONSTANT_COUNT - 1) * SPECIALIZATION_CONSTANT_SIZE];
-        let constants = SPECIALIZATION_FEATURES
-            .iter()
-            .zip(specialization_data.chunks_mut(SPECIALIZATION_CONSTANT_SIZE))
+        let mut specialization_data = vec![];
+        let program_modes = if let ShaderKind::Text = shader_kind {
+            // 0 default uMode
+            // 3 uMode for ShaderColorMode::SubpixelWithBgColorPass0
+            // 4 uMode for ShaderColorMode::SubpixelWithBgColorPass1
+            // 5 uMode for ShaderColorMode::SubpixelWithBgColorPass2
+            [0, 3, 4, 5].into_iter()
+        } else {
+            [0].into_iter()
+        };
+        let constant_setups: ArrayVec<[ArrayVec<[_; SPECIALIZATION_CONSTANT_COUNT]>; 4]> =
+            program_modes
             .enumerate()
-            .map(|(i, (feature, out_data))| {
-                out_data[0] = features.contains(feature) as u8;
-                hal::pso::SpecializationConstant {
-                    id: i as _,
-                    range: (SPECIALIZATION_CONSTANT_SIZE * i) as _
-                        ..(SPECIALIZATION_CONSTANT_SIZE * (i + 1)) as _,
+            .map(|(i, mode)| {
+                specialization_data.push(vec![0; (SPECIALIZATION_CONSTANT_COUNT - 1) * SPECIALIZATION_CONSTANT_SIZE]);
+                let mut constants: ArrayVec<[_; SPECIALIZATION_CONSTANT_COUNT]> = SPECIALIZATION_FEATURES
+                    .iter()
+                    .zip(specialization_data[i].chunks_mut(SPECIALIZATION_CONSTANT_SIZE))
+                    .enumerate()
+                    .map(|(j, (feature, out_data))| {
+                        out_data[0] = features.contains(feature) as u8;
+                        SpecializationConstant {
+                            id: j as _,
+                            range: (SPECIALIZATION_CONSTANT_SIZE * j) as _
+                                ..(SPECIALIZATION_CONSTANT_SIZE * (j + 1)) as _,
+                        }
+                    })
+                    .collect();
+                if *mode != 0 {
+                    constants.push(SpecializationConstant {
+                        id: (SPECIALIZATION_CONSTANT_COUNT - 1) as _,
+                        range: {
+                            let from = (SPECIALIZATION_CONSTANT_COUNT - 1) * SPECIALIZATION_CONSTANT_SIZE;
+                            let to = from + SPECIALIZATION_CONSTANT_SIZE;
+                            from as _..to as _
+                        },
+                    });
+                    specialization_data[i].extend_from_slice(&[*mode as u8, 0, 0, 0]);
                 }
-            })
-            .collect::<Vec<_>>();
+                constants
+            }).collect();
 
         let pipelines = {
-            let (vs_entry, fs_entry) = (
-                hal::pso::EntryPoint::<B> {
-                    entry: ENTRY_NAME,
-                    module: &vs_module,
-                    specialization: hal::pso::Specialization {
-                        constants: Borrowed(&constants),
-                        data: Borrowed(&specialization_data.as_slice()),
-                    },
-                },
-                hal::pso::EntryPoint::<B> {
-                    entry: ENTRY_NAME,
-                    module: &fs_module,
-                    specialization: hal::pso::Specialization {
-                        constants: Borrowed(&constants),
-                        data: Borrowed(&specialization_data.as_slice()),
-                    },
-                },
-            );
+            let shader_entries: ArrayVec<[GraphicsShaderSet<B>; 4]> =
+                constant_setups
+                .iter()
+                .zip(specialization_data.iter())
+                .map(|(constants, spec_data)| {
+                    let (vs_entry, fs_entry) = (
+                        EntryPoint::<B> {
+                            entry: ENTRY_NAME,
+                            module: &vs_module,
+                            specialization: Specialization {
+                                constants: Borrowed(&constants),
+                                data: Borrowed(&spec_data.as_slice()),
+                            },
+                        },
+                        EntryPoint::<B> {
+                            entry: ENTRY_NAME,
+                            module: &fs_module,
+                            specialization: Specialization {
+                                constants: Borrowed(&constants),
+                                data: Borrowed(&spec_data.as_slice()),
+                            },
+                        },
+                    );
 
-            let shader_entries = hal::pso::GraphicsShaderSet {
-                vertex: vs_entry,
-                hull: None,
-                domain: None,
-                geometry: None,
-                fragment: Some(fs_entry),
-            };
-
-            use hal::pso::{BlendState};
-            use super::blend_state::*;
-            use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
-            use self::RenderPassDepthState as RPDS;
+                    GraphicsShaderSet {
+                        vertex: vs_entry,
+                        hull: None,
+                        domain: None,
+                        geometry: None,
+                        fragment: Some(fs_entry),
+                    }
+                })
+                .collect();
 
             let pipeline_states = match shader_kind {
                 ShaderKind::Cache(VertexArrayKind::Gradient) => {
@@ -497,7 +531,12 @@ impl<B: hal::Backend> Program<B> {
                     main_pass: render_passes.render_pass(format, depth_enabled, false),
                 };
                 let mut pipeline_descriptor = hal::pso::GraphicsPipelineDesc::new(
-                    shader_entries.clone(),
+                    match blend_state {
+                        Some(SUBPIXEL_WITH_BG_COLOR_PASS0) => shader_entries[1].clone(),
+                        Some(SUBPIXEL_WITH_BG_COLOR_PASS1) => shader_entries[2].clone(),
+                        Some(SUBPIXEL_WITH_BG_COLOR_PASS2) => shader_entries[3].clone(),
+                        _ => shader_entries[0].clone(),
+                    },
                     hal::pso::Primitive::TriangleList,
                     hal::pso::Rasterizer::FILL,
                     &pipeline_layout,
