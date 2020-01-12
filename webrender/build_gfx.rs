@@ -336,7 +336,6 @@ fn replace_non_sampler_uniforms(new_data: &mut String) {
          \t\tuniform mat4 uTransform;       // Orthographic projection\n\
          \t\t// A generic uniform that shaders can optionally use to configure\n\
          \t\t// an operation mode for this batch.\n\
-         \t\tuniform int uMode;\n\
          \t}};\n",
          DESCRIPTOR_SET_LOCALS
     ));
