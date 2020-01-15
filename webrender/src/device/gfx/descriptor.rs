@@ -3,20 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use arrayvec::ArrayVec;
+use euclid::default;
 use hal::device::Device;
 use hal::pso::{DescriptorSetLayoutBinding, DescriptorType as DT, ShaderStageFlags as SSF};
 use crate::internal_types::FastHashMap;
 use rendy_descriptor::{DescriptorAllocator, DescriptorRanges, DescriptorSet};
-use rendy_memory::Heaps;
 use smallvec::SmallVec;
 use std::clone::Clone;
 use std::cmp::Eq;
 use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::marker::Copy;
-use super::buffer::UniformBufferHandler;
+use super::buffer::{UniformBufferHandler};
 use super::image::Image;
-use super::TextureId;
+use super::{TextureId, MAX_FRAME_COUNT, PROJECTION_PER_FRAME};
 use super::super::{ShaderKind, TextureFilter, VertexArrayKind};
 
 pub(super) const DESCRIPTOR_SET_PER_PASS: usize = 0;
@@ -66,7 +66,7 @@ pub(super) const COMMON_SET_2: &'static [DescriptorSetLayoutBinding] = &[
 ];
 
 pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
-    // Locals
+    // Projection matrix
     descriptor_set_layout_binding(0, DT::UniformBuffer, SSF::VERTEX, false),
 ];
 
@@ -135,32 +135,6 @@ impl From<ShaderKind> for DescriptorGroup {
         }
     }
 }
-
-#[derive(Clone, Copy, Debug, Default)]
-#[allow(non_snake_case)]
-pub(super) struct Locals {
-    pub(super) uTransform: [[f32; 4]; 4],
-}
-
-impl Locals {
-    fn transform_as_u32_slice(&self) -> &[u32; 16] {
-        unsafe { std::mem::transmute::<&[[f32; 4]; 4], &[u32; 16]>(&self.uTransform) }
-    }
-}
-
-impl Hash for Locals {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.transform_as_u32_slice().hash(state);
-    }
-}
-
-impl PartialEq for Locals {
-    fn eq(&self, other: &Locals) -> bool {
-        self.uTransform == other.uTransform
-    }
-}
-
-impl Eq for Locals {}
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
 pub(super) struct PerDrawBindings(
@@ -278,8 +252,6 @@ impl DescGroupKey for PerPassBindings {
         self.0.contains(id)
     }
 }
-
-impl DescGroupKey for Locals {}
 
 pub(super) struct DescriptorSetHandler<K, B: hal::Backend, F> {
     free_sets: F,
@@ -433,54 +405,143 @@ where
         unsafe { device.write_descriptor_sets(descriptor_writes) };
         new_set
     }
+}
 
-    pub(super) fn bind_locals(
-        &mut self,
-        bindings: K,
-        device: &B::Device,
-        desc_allocator: &mut DescriptorAllocator<B>,
-        group_data: &DescriptorData<B>,
-        locals_buffer: &mut UniformBufferHandler<B>,
-        heaps: &mut Heaps<B>,
-    ) -> DescriptorSet<B> {
-        let desc_set = match self.descriptor_bindings.remove(&bindings) {
-            Some(set) => return set,
-            None => {
-                locals_buffer.add(&device, &[bindings], heaps);
-                let free_sets = self.free_sets.get_mut(&DescriptorGroup::Default);
-                match free_sets.pop() {
-                    Some(ds) => ds,
-                    None => {
-                        unsafe {
-                            desc_allocator.allocate(
-                                device,
-                                group_data.descriptor_layout(
-                                    &DescriptorGroup::Default,
-                                    DESCRIPTOR_SET_LOCALS,
-                                ),
-                                group_data.ranges(&DescriptorGroup::Default, DESCRIPTOR_SET_LOCALS),
-                                DESCRIPTOR_COUNT,
-                                free_sets,
-                            )
-                        }
-                        .expect("Allocate descriptor sets failed");
-                        free_sets.pop().unwrap()
-                    }
-                }
-            }
-        };
+struct BoundDecsriptor<B: hal::Backend> {
+    descriptor: DescriptorSet<B>,
+    bound: bool,
+}
 
-        unsafe {
-            device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-                set: desc_set.raw(),
-                binding: 0,
-                array_offset: 0,
-                descriptors: Some(hal::pso::Descriptor::Buffer(
-                    &locals_buffer.buffer().buffer,
-                    Some(0)..None,
-                )),
-            }));
+struct DecsriptorBundle<B: hal::Backend> {
+    descriptors: ArrayVec<[BoundDecsriptor<B>; PROJECTION_PER_FRAME]>,
+    next_id: usize,
+}
+
+impl<B: hal::Backend> DecsriptorBundle<B> {
+    fn from_vec(descriptors: &mut Vec<DescriptorSet<B>>) -> Self {
+        let descriptors = descriptors.drain(0..PROJECTION_PER_FRAME).map(|descriptor| BoundDecsriptor {
+            bound: false,
+            descriptor,
+        }).collect();
+        DecsriptorBundle {
+            descriptors,
+            next_id: 0,
         }
-        desc_set
+    }
+
+    fn reset(&mut self) {
+        self.next_id = 0;
+    }
+
+    fn step(&mut self) {
+        self.next_id += 1;
+    }
+
+    fn current_descriptor_set(&self) -> &B::DescriptorSet {
+        &self.descriptors[self.next_id - 1].descriptor.raw()
+    }
+
+    fn next_descriptor(&self) -> &BoundDecsriptor<B> {
+        &self.descriptors[self.next_id]
+    }
+
+    fn bind_next_descriptor(&mut self) {
+        self.descriptors[self.next_id].bound = true;
+        self.step();
+    }
+
+    unsafe fn write_descriptor_set<'a>(
+        &mut self,
+        device: &B::Device,
+        descriptor: hal::pso::Descriptor<'a, B>
+    ) {
+        device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
+            set: self.next_descriptor().descriptor.raw(),
+            binding: 0,
+            array_offset: 0,
+            descriptors: Some(descriptor),
+        }));
+        self.bind_next_descriptor();
+        assert!(self.next_id < PROJECTION_PER_FRAME)
+    }
+
+    unsafe fn free(self, allocator: &mut DescriptorAllocator<B>) {
+        allocator.free(self.descriptors.into_iter().map(|d| d.descriptor));
+    }
+}
+
+pub(super) struct SimpleDescriptorSetHandler<B: hal::Backend> {
+    bundles: ArrayVec<[DecsriptorBundle<B>; MAX_FRAME_COUNT]>,
+}
+
+impl<B: hal::Backend> SimpleDescriptorSetHandler<B> {
+    pub(super) fn new(
+        device: &B::Device,
+        descriptor_allocator: &mut DescriptorAllocator<B>,
+        group_data: &DescriptorData<B>,
+        group: &DescriptorGroup,
+        set_index: usize,
+        frame_count: usize,
+    ) -> Self {
+        debug_assert!(frame_count <= MAX_FRAME_COUNT);
+        let mut descriptors = Vec::new();
+        unsafe {
+            descriptor_allocator.allocate(
+                device,
+                group_data.descriptor_layout(group, set_index),
+                group_data.ranges(group, set_index),
+                (frame_count * PROJECTION_PER_FRAME) as u32,
+                &mut descriptors,
+            )
+        }
+        .expect("Allocate descriptor sets failed");
+        let mut bundles = ArrayVec::new();
+        for _ in 0..frame_count {
+            bundles.push(DecsriptorBundle::from_vec(&mut descriptors));
+        }
+        SimpleDescriptorSetHandler {
+            bundles,
+        }
+    }
+
+    pub(super) fn reset(&mut self, next_id: usize) {
+        self.bundles[next_id].reset()
+    }
+
+    pub(super) fn bind_projection(
+        &mut self,
+        projection: default::Transform3D<f32>,
+        device: &B::Device,
+        locals_buffer: &mut UniformBufferHandler<B>,
+        next_id: usize,
+    ) {
+        locals_buffer.add(&device, &[projection], next_id);
+        if self.bundles[next_id].next_descriptor().bound {
+            self.bundles[next_id].step();
+            return;
+        }
+        unsafe {
+            let (buffer, offset) = locals_buffer.buffer(next_id);
+            self.bundles[next_id].write_descriptor_set(
+                device,
+                hal::pso::Descriptor::Buffer(
+                    buffer,
+                    Some(offset)..Some(offset + std::mem::size_of::<default::Transform3D<f32>>() as u64),
+                )
+            )
+        }
+    }
+
+    pub(super) fn descriptor_set(
+        &self,
+        next_id: usize,
+    ) -> &B::DescriptorSet {
+        self.bundles[next_id].current_descriptor_set()
+    }
+
+    pub(super) unsafe fn free(self, allocator: &mut DescriptorAllocator<B>) {
+        for bundle in self.bundles {
+            bundle.free(allocator);
+        }
     }
 }

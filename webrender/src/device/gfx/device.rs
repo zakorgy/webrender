@@ -12,7 +12,7 @@ use api::TextureTarget;
 #[cfg(feature = "capture")]
 use api::ImageDescriptor;
 use arrayvec::ArrayVec;
-use euclid::Transform3D;
+use euclid::default;
 use crate::internal_types::{FastHashMap, RenderTargetInfo, Swizzle, SwizzleSettings};
 use rand::{self, Rng};
 use rendy_memory::{Block, DynamicConfig, Heaps, HeapsConfig, LinearConfig, MemoryUsageValue};
@@ -40,7 +40,7 @@ use super::image::*;
 use super::program::{Program, RenderPassDepthState};
 use super::render_pass::*;
 use super::{PipelineRequirements, PrimitiveType, TextureId};
-use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE};
+use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE, MAX_FRAME_COUNT};
 use super::vertex_types;
 
 use super::super::{BoundPBO, Capabilities};
@@ -73,8 +73,6 @@ pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 pub const DEBUG_READ_FBO: FBOId = FBOId(2);
 
-// Frame count if present mode is mailbox
-const MAX_FRAME_COUNT: usize = 3;
 const HEADLESS_FRAME_COUNT: usize = 1;
 const SURFACE_FORMAT: hal::format::Format = hal::format::Format::Bgra8Unorm;
 const DEPTH_FORMAT: hal::format::Format = hal::format::Format::D32Sfloat;
@@ -288,9 +286,9 @@ pub struct Device<B: hal::Backend> {
     bound_per_group_descriptors: [Option<DescriptorSet<B>>; 3],
 
     // Locals related things
-    locals_descriptors: DescriptorSetHandler<Locals, B, Vec<DescriptorSet<B>>>,
-    bound_locals: Locals,
-    bound_locals_descriptor: Option<DescriptorSet<B>>,
+    locals_descriptors: SimpleDescriptorSetHandler<B>,
+    locals_buffer: UniformBufferHandler<B>,
+    bound_projection: default::Transform3D<f32>,
 
     descriptor_data: DescriptorData<B>,
     bound_textures: [u32; RENDERER_TEXTURE_COUNT],
@@ -305,7 +303,6 @@ pub struct Device<B: hal::Backend> {
     device_pixel_ratio: f32,
     depth_available: bool,
     upload_method: UploadMethod,
-    locals_buffer: UniformBufferHandler<B>,
     quad_buffer: VertexBufferHandler<B>,
     instance_buffers: ArrayVec<[InstanceBufferHandler<B>; MAX_FRAME_COUNT]>,
     free_instance_buffers: Vec<InstancePoolBuffer<B>>,
@@ -548,8 +545,11 @@ impl<B: hal::Backend> Device<B> {
 
         let locals_buffer = UniformBufferHandler::new(
             hal::buffer::Usage::UNIFORM,
-            mem::size_of::<Locals>(),
+            mem::size_of::<default::Transform3D<f32>>(),
             (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+            frame_count,
+            &device,
+            &mut heaps,
         );
 
         let quad_buffer = VertexBufferHandler::new(
@@ -683,14 +683,13 @@ impl<B: hal::Backend> Device<B> {
             Vec::new(),
         );
 
-        let locals_descriptors = DescriptorSetHandler::new(
+        let locals_descriptors = SimpleDescriptorSetHandler::new(
             &device,
             &mut desc_allocator,
             &descriptor_data,
             &DescriptorGroup::Default,
             DESCRIPTOR_SET_LOCALS,
-            descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
-            Vec::new(),
+            frame_count,
         );
 
         let pipeline_cache = if let Some(ref path) = cache_path {
@@ -774,8 +773,7 @@ impl<B: hal::Backend> Device<B> {
             bound_per_group_descriptors: [None, None, None],
 
             locals_descriptors,
-            bound_locals: Locals::default(),
-            bound_locals_descriptor: None,
+            bound_projection: Default::default(),
             descriptor_data,
 
             bound_textures: [0; RENDERER_TEXTURE_COUNT],
@@ -1005,14 +1003,8 @@ impl<B: hal::Backend> Device<B> {
         }
         Self::reset(&mut self.bound_per_group_textures, &mut self.per_group_descriptors);
 
-        Self::push_back_and_reset(
-            &mut self.bound_locals_descriptor,
-            None,
-            &mut self.bound_locals,
-            &mut self.locals_descriptors,
-        );
-
-        self.locals_buffer.reset();
+        self.locals_descriptors.reset(self.next_id);
+        self.locals_buffer.reset(self.next_id);
 
         let (frame_depth, surface_format, dimensions, _frame_count) = Self::init_drawables(
             self.device.as_ref(),
@@ -1177,6 +1169,9 @@ impl<B: hal::Backend> Device<B> {
             }
             Self::begin_cmd_buffer(&mut self.command_buffer);
         }
+        self.bound_projection = Default::default();
+        self.locals_descriptors.reset(self.next_id);
+        self.locals_buffer.reset(self.next_id);
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
@@ -1312,35 +1307,20 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
-    fn bind_uniforms(&mut self, locals: Locals) {
-        let descriptor = self.locals_descriptors.bind_locals(
-            locals,
-            self.device.as_ref(),
-            &mut self.desc_allocator,
-            &self.descriptor_data,
-            &mut self.locals_buffer,
-            &mut *self.heaps.lock().unwrap(),
-        );
-
-        Self::push_back(
-            &mut self.bound_locals_descriptor,
-            Some(descriptor),
-            &self.bound_locals,
-            &mut self.locals_descriptors,
-        )
-    }
-
     pub fn set_uniforms(
         &mut self,
         _program_id: &ProgramId,
-        projection: &Transform3D<f32, euclid::UnknownUnit, euclid::UnknownUnit>,
+        projection: &default::Transform3D<f32>,
     ) {
-        let projection = projection.to_row_arrays();
-        if self.bound_locals.uTransform != projection {
-            let mut new_locals = self.bound_locals;
-            new_locals.uTransform = projection;
-            self.bind_uniforms(new_locals);
-            self.bound_locals = new_locals;
+        //let projection = projection.to_row_arrays();
+        if self.bound_projection != *projection {
+            self.locals_descriptors.bind_projection(
+                *projection,
+                self.device.as_ref(),
+                &mut self.locals_buffer,
+                self.next_id,
+            );
+            self.bound_projection = *projection;
         }
     }
 
@@ -1574,7 +1554,7 @@ impl<B: hal::Backend> Device<B> {
                 self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
                 desc_set_per_pass,
                 desc_set_per_group,
-                self.bound_locals_descriptor.as_ref().unwrap().raw(),
+                self.locals_descriptors.descriptor_set(self.next_id),
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 &self.quad_buffer,
@@ -2445,7 +2425,7 @@ impl<B: hal::Backend> Device<B> {
             descriptor.raw(),
             None,
             desc_set_per_group,
-            self.bound_locals_descriptor.as_ref().unwrap().raw(),
+            self.locals_descriptors.descriptor_set(self.next_id),
             self.next_id,
             self.descriptor_data.pipeline_layout(&descriptor_group),
             &self.quad_buffer,
@@ -3775,13 +3755,6 @@ impl<B: hal::Backend> Device<B> {
                     &mut self.per_group_descriptors,
                 );
             }
-
-            Self::push_back(
-                &mut self.bound_locals_descriptor,
-                None,
-                &self.bound_locals,
-                &mut self.locals_descriptors,
-            );
 
             let mut heaps = Arc::try_unwrap(self.heaps).unwrap().into_inner().unwrap();
 
