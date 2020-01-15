@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use arrayvec::ArrayVec;
 use hal;
 use hal::device::Device as BackendDevice;
 use rendy_memory::{Block, Heaps, Kind, MappedRange, MemoryBlock, MemoryUsage, MemoryUsageValue, Write};
@@ -9,6 +10,8 @@ use rendy_memory::{Block, Heaps, Kind, MappedRange, MemoryBlock, MemoryUsage, Me
 use std::cell::Cell;
 use std::sync::Arc;
 use std::mem;
+
+use super::{MAX_FRAME_COUNT, PROJECTION_PER_FRAME};
 
 pub const DOWNLOAD_BUFFER_SIZE: usize = 10 << 20; // 10MB
 
@@ -704,10 +707,9 @@ impl<B: hal::Backend> VertexBufferHandler<B> {
 }
 
 pub(super) struct UniformBufferHandler<B: hal::Backend> {
-    buffers: Vec<Buffer<B>>,
-    offset: usize,
-    buffer_usage: hal::buffer::Usage,
-    data_stride: usize,
+    buffers: ArrayVec<[Buffer<B>; MAX_FRAME_COUNT]>,
+    offsets: ArrayVec<[usize; MAX_FRAME_COUNT]>,
+    last_update_size: usize,
     pitch_alignment_mask: usize,
 }
 
@@ -716,38 +718,50 @@ impl<B: hal::Backend> UniformBufferHandler<B> {
         buffer_usage: hal::buffer::Usage,
         data_stride: usize,
         pitch_alignment_mask: usize,
+        frame_count: usize,
+        device: &B::Device,
+        heaps: &mut Heaps<B>
     ) -> Self {
+        let mut buffers = ArrayVec::new() ;
+        let mut offsets = ArrayVec::new() ;
+        for _ in 0..frame_count {
+            buffers.push(Buffer::new(
+                device,
+                heaps,
+                MemoryUsageValue::Dynamic,
+                buffer_usage,
+                pitch_alignment_mask,
+                PROJECTION_PER_FRAME,
+                data_stride,
+            ));
+            offsets.push(0);
+        }
         UniformBufferHandler {
-            buffers: vec![],
-            offset: 0,
-            buffer_usage,
-            data_stride,
+            buffers,
+            offsets,
+            last_update_size: 0,
             pitch_alignment_mask,
         }
     }
 
-    pub(super) fn add<T: Copy>(&mut self, device: &B::Device, data: &[T], heaps: &mut Heaps<B>) {
-        if self.buffers.len() == self.offset {
-            self.buffers.push(Buffer::new(
-                device,
-                heaps,
-                MemoryUsageValue::Dynamic,
-                self.buffer_usage,
-                self.pitch_alignment_mask,
-                data.len(),
-                self.data_stride,
-            ));
-        }
-        self.buffers[self.offset].update_all(device, data, self.pitch_alignment_mask as u64);
-        self.offset += 1;
+    pub(super) fn add<T: Copy>(
+        &mut self,
+        device: &B::Device,
+        data: &[T],
+        next_id: usize,
+    ) {
+        let update_size = self.buffers[next_id].update(device, data, self.offsets[next_id], self.pitch_alignment_mask as u64);
+        self.last_update_size = update_size;
+        self.offsets[next_id] += 1;
     }
 
-    pub(super) fn buffer(&self) -> &Buffer<B> {
-        &self.buffers[self.offset - 1]
+    pub(super) fn buffer(&self, next_id: usize) -> (&B::Buffer, u64) {
+        let ref buffer = self.buffers[next_id];
+        (&buffer.buffer, ((self.offsets[next_id] - 1) * buffer.stride)  as u64)
     }
 
-    pub(super) fn reset(&mut self) {
-        self.offset = 0;
+    pub(super) fn reset(&mut self, next_id: usize) {
+        self.offsets[next_id] = 0;
     }
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
