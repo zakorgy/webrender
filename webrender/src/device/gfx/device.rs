@@ -1335,6 +1335,7 @@ impl<B: hal::Backend> Device<B> {
         _program_id: &ProgramId,
         projection: &Transform3D<f32, euclid::UnknownUnit, euclid::UnknownUnit>,
     ) {
+        println!("# Trying to set uniform {:?}", projection);
         let projection = projection.to_row_arrays();
         if self.bound_locals.uTransform != projection {
             let mut new_locals = self.bound_locals;
@@ -1584,6 +1585,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn begin_frame(&mut self) -> GpuFrameId {
+        println!("######### Begin frame");
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
         #[cfg(debug_assertions)]
