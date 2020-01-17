@@ -31,7 +31,6 @@ pub const LESS_EQUAL_WRITE: hal::pso::DepthTest = hal::pso::DepthTest {
 };
 
 pub const MAX_FRAME_COUNT: usize = 3;
-pub const PROJECTION_PER_FRAME: usize = 32;
 
 #[derive(Clone, Deserialize)]
 pub struct PipelineRequirements {

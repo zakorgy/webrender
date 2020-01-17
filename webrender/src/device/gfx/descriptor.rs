@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use arrayvec::ArrayVec;
-use euclid::default;
 use hal::device::Device;
 use hal::pso::{DescriptorSetLayoutBinding, DescriptorType as DT, ShaderStageFlags as SSF};
 use crate::internal_types::FastHashMap;
@@ -14,15 +13,14 @@ use std::cmp::Eq;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::Copy;
-use super::buffer::{UniformBufferHandler};
 use super::image::Image;
-use super::{TextureId, MAX_FRAME_COUNT, PROJECTION_PER_FRAME};
+use super::TextureId;
 use super::super::{ShaderKind, TextureFilter, VertexArrayKind};
 
 pub(super) const DESCRIPTOR_SET_PER_PASS: usize = 0;
 pub(super) const DESCRIPTOR_SET_PER_GROUP: usize = 1;
-pub(super) const DESCRIPTOR_SET_PER_DRAW: usize = 2;
-pub(super) const DESCRIPTOR_SET_LOCALS: usize = 3;
+pub(super) const DESCRIPTOR_SET_PER_TARGET: usize = 2;
+pub(super) const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 
 pub(super) const DESCRIPTOR_COUNT: u32 = 96;
 pub(super) const PER_DRAW_TEXTURE_COUNT: usize = 3; // Color0, Color1, Color2
@@ -57,17 +55,17 @@ pub(super) const DEFAULT_SET_1: &'static [DescriptorSetLayoutBinding] = &[
 ];
 
 pub(super) const COMMON_SET_2: &'static [DescriptorSetLayoutBinding] = &[
+    // Projection matrix
+    descriptor_set_layout_binding(0, DT::UniformBufferDynamic, SSF::VERTEX, false),
+];
+
+pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
     // Color0
     descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, false),
     // Color1
     descriptor_set_layout_binding(1, DT::CombinedImageSampler, SSF::ALL, false),
     // Color2
     descriptor_set_layout_binding(2, DT::CombinedImageSampler, SSF::ALL, false),
-];
-
-pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
-    // Projection matrix
-    descriptor_set_layout_binding(0, DT::UniformBuffer, SSF::VERTEX, false),
 ];
 
 pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
@@ -159,7 +157,7 @@ pub(super) struct DescriptorData<B: hal::Backend>(
 );
 
 impl<B: hal::Backend> DescriptorData<B> {
-    fn descriptor_layout(
+    pub(super) fn descriptor_layout(
         &self,
         group: &DescriptorGroup,
         group_idx: usize,
@@ -167,7 +165,7 @@ impl<B: hal::Backend> DescriptorData<B> {
         &self.0[group].set_layouts[group_idx]
     }
 
-    fn ranges(&self, group: &DescriptorGroup, group_idx: usize) -> DescriptorRanges {
+    pub(super) fn ranges(&self, group: &DescriptorGroup, group_idx: usize) -> DescriptorRanges {
         self.0[group].ranges[group_idx]
     }
 
@@ -404,144 +402,5 @@ where
         }
         unsafe { device.write_descriptor_sets(descriptor_writes) };
         new_set
-    }
-}
-
-struct BoundDecsriptor<B: hal::Backend> {
-    descriptor: DescriptorSet<B>,
-    bound: bool,
-}
-
-struct DecsriptorBundle<B: hal::Backend> {
-    descriptors: ArrayVec<[BoundDecsriptor<B>; PROJECTION_PER_FRAME]>,
-    next_id: usize,
-}
-
-impl<B: hal::Backend> DecsriptorBundle<B> {
-    fn from_vec(descriptors: &mut Vec<DescriptorSet<B>>) -> Self {
-        let descriptors = descriptors.drain(0..PROJECTION_PER_FRAME).map(|descriptor| BoundDecsriptor {
-            bound: false,
-            descriptor,
-        }).collect();
-        DecsriptorBundle {
-            descriptors,
-            next_id: 0,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.next_id = 0;
-    }
-
-    fn step(&mut self) {
-        self.next_id += 1;
-    }
-
-    fn current_descriptor_set(&self) -> &B::DescriptorSet {
-        &self.descriptors[self.next_id - 1].descriptor.raw()
-    }
-
-    fn next_descriptor(&self) -> &BoundDecsriptor<B> {
-        &self.descriptors[self.next_id]
-    }
-
-    fn bind_next_descriptor(&mut self) {
-        self.descriptors[self.next_id].bound = true;
-        self.step();
-    }
-
-    unsafe fn write_descriptor_set<'a>(
-        &mut self,
-        device: &B::Device,
-        descriptor: hal::pso::Descriptor<'a, B>
-    ) {
-        device.write_descriptor_sets(Some(hal::pso::DescriptorSetWrite {
-            set: self.next_descriptor().descriptor.raw(),
-            binding: 0,
-            array_offset: 0,
-            descriptors: Some(descriptor),
-        }));
-        self.bind_next_descriptor();
-        assert!(self.next_id < PROJECTION_PER_FRAME)
-    }
-
-    unsafe fn free(self, allocator: &mut DescriptorAllocator<B>) {
-        allocator.free(self.descriptors.into_iter().map(|d| d.descriptor));
-    }
-}
-
-pub(super) struct SimpleDescriptorSetHandler<B: hal::Backend> {
-    bundles: ArrayVec<[DecsriptorBundle<B>; MAX_FRAME_COUNT]>,
-}
-
-impl<B: hal::Backend> SimpleDescriptorSetHandler<B> {
-    pub(super) fn new(
-        device: &B::Device,
-        descriptor_allocator: &mut DescriptorAllocator<B>,
-        group_data: &DescriptorData<B>,
-        group: &DescriptorGroup,
-        set_index: usize,
-        frame_count: usize,
-    ) -> Self {
-        debug_assert!(frame_count <= MAX_FRAME_COUNT);
-        let mut descriptors = Vec::new();
-        unsafe {
-            descriptor_allocator.allocate(
-                device,
-                group_data.descriptor_layout(group, set_index),
-                group_data.ranges(group, set_index),
-                (frame_count * PROJECTION_PER_FRAME) as u32,
-                &mut descriptors,
-            )
-        }
-        .expect("Allocate descriptor sets failed");
-        let mut bundles = ArrayVec::new();
-        for _ in 0..frame_count {
-            bundles.push(DecsriptorBundle::from_vec(&mut descriptors));
-        }
-        SimpleDescriptorSetHandler {
-            bundles,
-        }
-    }
-
-    pub(super) fn reset(&mut self, next_id: usize) {
-        self.bundles[next_id].reset()
-    }
-
-    pub(super) fn bind_projection(
-        &mut self,
-        projection: default::Transform3D<f32>,
-        device: &B::Device,
-        locals_buffer: &mut UniformBufferHandler<B>,
-        next_id: usize,
-    ) {
-        locals_buffer.add(&device, &[projection], next_id);
-        if self.bundles[next_id].next_descriptor().bound {
-            self.bundles[next_id].step();
-            return;
-        }
-        unsafe {
-            let (buffer, offset) = locals_buffer.buffer(next_id);
-            self.bundles[next_id].write_descriptor_set(
-                device,
-                hal::pso::Descriptor::Buffer(
-                    buffer,
-                    Some(offset)..Some(offset + std::mem::size_of::<default::Transform3D<f32>>() as u64),
-                )
-            )
-        }
-    }
-
-    pub(super) fn descriptor_set(
-        &self,
-        next_id: usize,
-    ) -> &B::DescriptorSet {
-        self.bundles[next_id].current_descriptor_set()
-    }
-
-    pub(super) unsafe fn free(self, allocator: &mut DescriptorAllocator<B>) {
-        for bundle in self.bundles {
-            bundle.free(allocator);
-        }
     }
 }
