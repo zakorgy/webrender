@@ -286,8 +286,7 @@ pub struct Device<B: hal::Backend> {
     bound_per_group_descriptors: [Option<DescriptorSet<B>>; 3],
 
     // Locals related things
-    locals_descriptors: SimpleDescriptorSetHandler<B>,
-    locals_buffer: UniformBufferHandler<B>,
+    uniform_buffer_handler: UniformBufferHandler<B>,
     bound_projection: default::Transform3D<f32>,
 
     descriptor_data: DescriptorData<B>,
@@ -543,15 +542,6 @@ impl<B: hal::Backend> Device<B> {
         // Start recording for the 1st frame
         unsafe { Self::begin_cmd_buffer(&mut command_buffer) };
 
-        let locals_buffer = UniformBufferHandler::new(
-            hal::buffer::Usage::UNIFORM,
-            mem::size_of::<default::Transform3D<f32>>(),
-            (limits.min_uniform_buffer_offset_alignment - 1) as usize,
-            frame_count,
-            &device,
-            &mut heaps,
-        );
-
         let quad_buffer = VertexBufferHandler::new(
             &device,
             &mut heaps,
@@ -683,13 +673,16 @@ impl<B: hal::Backend> Device<B> {
             Vec::new(),
         );
 
-        let locals_descriptors = SimpleDescriptorSetHandler::new(
+        let uniform_buffer_handler = UniformBufferHandler::new(
+            mem::size_of::<default::Transform3D<f32>>(),
+            (limits.min_uniform_buffer_offset_alignment - 1) as usize,
+            frame_count,
             &device,
+            &mut heaps,
             &mut desc_allocator,
             &descriptor_data,
             &DescriptorGroup::Default,
-            DESCRIPTOR_SET_LOCALS,
-            frame_count,
+            DESCRIPTOR_SET_PER_TARGET,
         );
 
         let pipeline_cache = if let Some(ref path) = cache_path {
@@ -772,7 +765,6 @@ impl<B: hal::Backend> Device<B> {
             bound_per_group_textures: PerGroupBindings::default(),
             bound_per_group_descriptors: [None, None, None],
 
-            locals_descriptors,
             bound_projection: Default::default(),
             descriptor_data,
 
@@ -797,7 +789,7 @@ impl<B: hal::Backend> Device<B> {
             cache_path,
             save_cache,
 
-            locals_buffer,
+            uniform_buffer_handler,
             quad_buffer,
             instance_buffers,
             free_instance_buffers: Vec::new(),
@@ -1003,8 +995,7 @@ impl<B: hal::Backend> Device<B> {
         }
         Self::reset(&mut self.bound_per_group_textures, &mut self.per_group_descriptors);
 
-        self.locals_descriptors.reset(self.next_id);
-        self.locals_buffer.reset(self.next_id);
+        self.uniform_buffer_handler.reset(self.next_id);
 
         let (frame_depth, surface_format, dimensions, _frame_count) = Self::init_drawables(
             self.device.as_ref(),
@@ -1170,8 +1161,7 @@ impl<B: hal::Backend> Device<B> {
             Self::begin_cmd_buffer(&mut self.command_buffer);
         }
         self.bound_projection = Default::default();
-        self.locals_descriptors.reset(self.next_id);
-        self.locals_buffer.reset(self.next_id);
+        self.uniform_buffer_handler.reset(self.next_id);
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
@@ -1312,15 +1302,13 @@ impl<B: hal::Backend> Device<B> {
         _program_id: &ProgramId,
         projection: &default::Transform3D<f32>,
     ) {
-        //let projection = projection.to_row_arrays();
         if self.bound_projection != *projection {
-            self.locals_descriptors.bind_projection(
-                *projection,
-                self.device.as_ref(),
-                &mut self.locals_buffer,
-                self.next_id,
-            );
             self.bound_projection = *projection;
+            self.uniform_buffer_handler.add(
+                self.device.as_ref(),
+                &[self.bound_projection],
+                self.next_id
+            );
         }
     }
 
@@ -1546,20 +1534,23 @@ impl<B: hal::Backend> Device<B> {
             _ => None,
         };
 
+        let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
+
         self.programs
             .get_mut(&self.bound_program)
             .expect("Program not found")
             .submit(
                 &mut self.command_buffer,
-                self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
-                desc_set_per_pass,
                 desc_set_per_group,
-                self.locals_descriptors.descriptor_set(self.next_id),
+                desc_set_per_pass,
+                desc_set_per_target,
+                self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 &self.quad_buffer,
                 &self.instance_buffers[self.next_id],
                 self.instance_buffer_range.clone(),
+                dynamic_offset,
             );
     }
 
@@ -2419,18 +2410,20 @@ impl<B: hal::Backend> Device<B> {
             );
         }
 
+        let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
 
         program.submit(
             &mut self.command_buffer,
-            descriptor.raw(),
-            None,
             desc_set_per_group,
-            self.locals_descriptors.descriptor_set(self.next_id),
+            None,
+            desc_set_per_target,
+            descriptor.raw(),
             self.next_id,
             self.descriptor_data.pipeline_layout(&descriptor_group),
             &self.quad_buffer,
             &self.instance_buffers[self.next_id],
             self.instance_buffer_range.clone(),
+            dynamic_offset,
         );
         unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
         self.per_draw_descriptors.push_back_descriptor_set(per_draw_bindings, descriptor);
@@ -3807,10 +3800,9 @@ impl<B: hal::Backend> Device<B> {
             self.per_draw_descriptors.free(&mut self.desc_allocator);
             self.per_group_descriptors.free(&mut self.desc_allocator);
             self.per_pass_descriptors.free(&mut self.desc_allocator);
-            self.locals_descriptors.free(&mut self.desc_allocator);
 
+            self.uniform_buffer_handler.deinit(self.device.as_ref(), &mut heaps, &mut self.desc_allocator);
             self.desc_allocator.dispose(self.device.as_ref());
-            self.locals_buffer.deinit(self.device.as_ref(), &mut heaps);
             for (_, program) in self.programs {
                 program.deinit(self.device.as_ref(), &mut heaps)
             }
