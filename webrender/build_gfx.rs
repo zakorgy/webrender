@@ -332,10 +332,8 @@ fn extend_sampler_definition(
 
 fn replace_non_sampler_uniforms(new_data: &mut String) {
     new_data.push_str(&format!(
-        "\tlayout(set = {}, binding = 0) uniform Locals {{\n\
+        "\tlayout(set = {}, binding = 0) uniform Projection {{\n\
          \t\tuniform mat4 uTransform;       // Orthographic projection\n\
-         \t\t// A generic uniform that shaders can optionally use to configure\n\
-         \t\t// an operation mode for this batch.\n\
          \t}};\n",
          DESCRIPTOR_SET_LOCALS
     ));

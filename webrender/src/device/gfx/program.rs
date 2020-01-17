@@ -643,6 +643,7 @@ impl<B: hal::Backend> Program<B> {
         vertex_buffer: &VertexBufferHandler<B>,
         instance_buffer: &InstanceBufferHandler<B>,
         instance_buffer_range: std::ops::Range<usize>,
+        dynamic_offset: u32,
     ) {
         if self.shader_kind.is_debug() {
             if self.last_frame_used != next_id {
@@ -665,7 +666,7 @@ impl<B: hal::Backend> Program<B> {
                     .chain(iter::once(desc_set_per_frame))
                     .chain(iter::once(desc_set_per_draw))
                     .chain(iter::once(desc_set_locals)),
-                &[],
+                &[dynamic_offset],
             );
 
             match &self.index_buffer {
