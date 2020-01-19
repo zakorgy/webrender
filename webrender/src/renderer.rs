@@ -997,6 +997,7 @@ impl<B: hal::Backend> TextureResolver<B> {
                 TextureFilter::Linear,
                 None,
                 1,
+                false,
             );
 
         device.upload_texture_immediate(
@@ -1054,18 +1055,15 @@ impl<B: hal::Backend> TextureResolver<B> {
         #[cfg(not(feature = "gl"))]
         let frame_count = device.frame_count;
         self.retain_targets(device, |texture| {
-            // We ignore the textures which are still used by the GPU
             #[cfg(not(feature = "gl"))]
             {
-                if texture.still_in_flight(frame_id, frame_count) {
-                    return true;
-                }
+                false
             }
-            #[cfg(not(feature = "gl"))]
-            let frame_treshold = 2;
             #[cfg(feature = "gl")]
-            let frame_treshold = 30;
-            texture.used_recently(frame_id, frame_treshold)
+            {
+                let frame_treshold = 30;
+                texture.used_recently(frame_id, frame_treshold)
+            }
         });
     }
 
@@ -1368,6 +1366,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             TextureFilter::Nearest,
             rt_info,
             1,
+            false,
         );
 
         // Blit the contents of the previous texture, if applicable.
@@ -1716,6 +1715,7 @@ impl<T, B: hal::Backend> VertexDataTexture<T, B> {
                 TextureFilter::Nearest,
                 None,
                 1,
+                false,
             );
             self.texture = Some(texture);
         }
@@ -2161,6 +2161,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 None,
                 1,
+                false,
             );
             device.upload_texture_immediate(&texture, &dither_matrix);
             device.bind_texture(TextureSampler::Dither, &texture, Swizzle::default());
@@ -3461,6 +3462,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 // tasks get rendered into the texture cache.
                                 Some(RenderTargetInfo { has_depth: info.has_depth }),
                                 info.layer_count,
+                                false,
                             );
 
                             if info.is_shared_cache {
@@ -5336,6 +5338,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Linear,
                 Some(rt_info),
                 list.targets.len() as _,
+                true,
             )
         };
 
@@ -5937,6 +5940,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 Some(RenderTargetInfo { has_depth: false }),
                 1,
+                false,
             );
 
             self.zoom_debug_texture = Some(texture);
@@ -6836,6 +6840,7 @@ impl<B: hal::Backend> Renderer<B> {
             plain.filter,
             rt_info,
             plain.size.1,
+            false,
         );
         device.upload_texture_immediate(&texture, &texels);
 
