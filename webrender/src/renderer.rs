@@ -997,6 +997,7 @@ impl<B: hal::Backend> TextureResolver<B> {
                 TextureFilter::Linear,
                 None,
                 1,
+                false,
             );
         device.upload_texture_immediate(
             &dummy_cache_texture,
@@ -1367,6 +1368,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             TextureFilter::Nearest,
             rt_info,
             1,
+            false,
         );
 
         // Blit the contents of the previous texture, if applicable.
@@ -1715,6 +1717,7 @@ impl<T, B: hal::Backend> VertexDataTexture<T, B> {
                 TextureFilter::Nearest,
                 None,
                 1,
+                false,
             );
             self.texture = Some(texture);
         }
@@ -2162,6 +2165,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 None,
                 1,
+                false,
             );
             device.upload_texture_immediate(&texture, &dither_matrix);
             device.bind_texture(TextureSampler::Dither, &texture, Swizzle::default());
@@ -3213,8 +3217,8 @@ impl<B: hal::Backend> Renderer<B> {
             self.unlock_external_images();
             self.active_documents = active_documents;
         });
-        println!("## Required memory for render targets {:?}",
-            self.rt_memory_size as f32 / (1024 * 1024) as f32);
+        /*println!("## Required memory for render targets {:?}",
+            self.rt_memory_size as f32 / (1024 * 1024) as f32);*/
         self.rt_memory_size = 0;
 
         if let Some(device_size) = device_size {
@@ -3467,6 +3471,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 // tasks get rendered into the texture cache.
                                 Some(RenderTargetInfo { has_depth: info.has_depth }),
                                 info.layer_count,
+                                false,
                             );
 
                             if info.is_shared_cache {
@@ -5331,16 +5336,17 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Linear,
                 Some(rt_info),
                 list.targets.len() as _,
+                true,
             )
         };
 
 
-        println!("# Adding texture with size {:?}, dimensions {:?}, format {:?}, layer count {:?}",
+        /*println!("# Adding texture with size {:?}, dimensions {:?}, format {:?}, layer count {:?}",
             texture.size_in_bytes() as f32 / (1024 * 1024) as f32,
             texture.get_dimensions(),
             texture.get_format(),
             texture.get_layer_count(),
-        );
+        );*/
         self.rt_memory_size += texture.size_in_bytes();
         list.check_ready(&texture);
         Some(ActiveTexture {
@@ -5938,6 +5944,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 Some(RenderTargetInfo { has_depth: false }),
                 1,
+                false,
             );
 
             self.zoom_debug_texture = Some(texture);
@@ -6835,6 +6842,7 @@ impl<B: hal::Backend> Renderer<B> {
             plain.filter,
             rt_info,
             plain.size.1,
+            false,
         );
         device.upload_texture_immediate(&texture, &texels);
 
