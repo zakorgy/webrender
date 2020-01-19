@@ -56,6 +56,8 @@ use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, Ve
              VertexUsageHint, VAO};
 use crate::device::{create_projection, DeviceInit, PrimitiveType, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
+#[cfg(not(feature = "gl"))]
+use crate::device::TextureUsage;
 use euclid::{rect, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
 use crate::glyph_cache::GlyphCache;
@@ -997,6 +999,8 @@ impl<B: hal::Backend> TextureResolver<B> {
                 TextureFilter::Linear,
                 None,
                 1,
+                #[cfg(not(feature = "gl"))]
+                TextureUsage::DontCare,
             );
 
         device.upload_texture_immediate(
@@ -1054,18 +1058,15 @@ impl<B: hal::Backend> TextureResolver<B> {
         #[cfg(not(feature = "gl"))]
         let frame_count = device.frame_count;
         self.retain_targets(device, |texture| {
-            // We ignore the textures which are still used by the GPU
             #[cfg(not(feature = "gl"))]
             {
-                if texture.still_in_flight(frame_id, frame_count) {
-                    return true;
-                }
+                false
             }
-            #[cfg(not(feature = "gl"))]
-            let frame_treshold = 2;
             #[cfg(feature = "gl")]
-            let frame_treshold = 30;
-            texture.used_recently(frame_id, frame_treshold)
+            {
+                let frame_treshold = 30;
+                texture.used_recently(frame_id, frame_treshold)
+            }
         });
     }
 
@@ -1368,6 +1369,8 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             TextureFilter::Nearest,
             rt_info,
             1,
+            #[cfg(not(feature = "gl"))]
+            TextureUsage::DontCare,
         );
 
         // Blit the contents of the previous texture, if applicable.
@@ -1716,6 +1719,8 @@ impl<T, B: hal::Backend> VertexDataTexture<T, B> {
                 TextureFilter::Nearest,
                 None,
                 1,
+                #[cfg(not(feature = "gl"))]
+                TextureUsage::DontCare,
             );
             self.texture = Some(texture);
         }
@@ -2161,6 +2166,8 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 None,
                 1,
+                #[cfg(not(feature = "gl"))]
+                TextureUsage::DontCare,
             );
             device.upload_texture_immediate(&texture, &dither_matrix);
             device.bind_texture(TextureSampler::Dither, &texture, Swizzle::default());
@@ -3461,6 +3468,9 @@ impl<B: hal::Backend> Renderer<B> {
                                 // tasks get rendered into the texture cache.
                                 Some(RenderTargetInfo { has_depth: info.has_depth }),
                                 info.layer_count,
+                                // TODO add enum here like {render target and texture cache, where texture cache doesn't have image_views}
+                                #[cfg(not(feature = "gl"))]
+                                TextureUsage::DontCare,
                             );
 
                             if info.is_shared_cache {
@@ -5304,22 +5314,22 @@ impl<B: hal::Backend> Renderer<B> {
             num_layers: list.targets.len(),
             format: list.format,
         };
+
+        #[cfg(feature = "gl")]
         let index = self.texture_resolver.render_target_pool
             .iter()
             .position(|texture| {
-                // We ignore the textures which are still used by the GPU
-                #[cfg(not(feature = "gl"))]
-                {
-                    if texture.still_in_flight(_frame_id, self.device.frame_count) {
-                        return false;
-                    }
-                }
                 selector == TargetSelector {
                     size: texture.get_dimensions(),
                     num_layers: texture.get_layer_count() as usize,
                     format: texture.get_format(),
                 }
             });
+
+        // With gfx backend we can skip the render target reuse
+        // since we have a memory preallocated for render targets
+        #[cfg(not(feature = "gl"))]
+        let index = None;
 
         let rt_info = RenderTargetInfo { has_depth: list.needs_depth() };
         let texture = if let Some(idx) = index {
@@ -5336,6 +5346,8 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Linear,
                 Some(rt_info),
                 list.targets.len() as _,
+                #[cfg(not(feature = "gl"))]
+                TextureUsage::OffScreenRenderTarget,
             )
         };
 
@@ -5937,6 +5949,8 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 Some(RenderTargetInfo { has_depth: false }),
                 1,
+                #[cfg(not(feature = "gl"))]
+                TextureUsage::DontCare,
             );
 
             self.zoom_debug_texture = Some(texture);
@@ -6836,6 +6850,8 @@ impl<B: hal::Backend> Renderer<B> {
             plain.filter,
             rt_info,
             plain.size.1,
+            #[cfg(not(feature = "gl"))]
+            TextureUsage::DontCare,
         );
         device.upload_texture_immediate(&texture, &texels);
 

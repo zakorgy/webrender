@@ -260,6 +260,8 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
                 TextureFilter::Linear,
                 Some(RenderTargetInfo { has_depth: false }),
                 1,
+                #[cfg(not(feature = "gl"))]
+                crate::device::TextureUsage::DontCare,
             );
             if level == self.scaling_textures.len() {
                 self.scaling_textures.push(texture);

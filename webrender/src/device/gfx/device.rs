@@ -48,7 +48,7 @@ use super::super::{ShaderKind, ExternalTexture, GpuFrameId, TextureSlot, Texture
 use super::super::{VertexDescriptor, UploadMethod, Texel, TextureFlags, TextureFormatPair};
 use super::super::{
     Texture, DrawTarget, ReadTarget, FBOId, RBOId, PBO, VertexUsageHint, ShaderError,
-    ShaderPrecacheFlags, SharedDepthTarget, ProgramCache,
+    ShaderPrecacheFlags, SharedDepthTarget, ProgramCache, TextureUsage
 };
 use super::super::{depth_target_size_in_bytes, record_gpu_alloc, record_gpu_free};
 use super::super::super::shader_source;
@@ -352,6 +352,7 @@ pub struct Device<B: hal::Backend> {
     #[cfg(debug_assertions)]
     shader_is_ready: bool,
     rebind_descriptors: bool,
+    render_target_memory: LinearMemoryBlock<B>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -422,6 +423,7 @@ impl<B: hal::Backend> Device<B> {
 
         let limits = adapter.physical_device.limits();
         let max_texture_size = limits.max_image_2d_size as i32;
+        let buffer_image_granularity = limits.buffer_image_granularity;
 
         let (device, queue_group_family, queue_group_queues) = {
             use hal::queue::QueueFamily;
@@ -694,6 +696,11 @@ impl<B: hal::Backend> Device<B> {
             None
         };
 
+        let render_target_memory = LinearMemoryBlock::new(
+            &device,
+            &mut heaps,
+        );
+
         let mut device = Device {
             device: Arc::new(device),
             heaps: Arc::new(Mutex::new(heaps)),
@@ -811,6 +818,7 @@ impl<B: hal::Backend> Device<B> {
             #[cfg(debug_assertions)]
             shader_is_ready: false,
             rebind_descriptors: true,
+            render_target_memory,
         };
 
         if readback_supported || device.headless_mode() {
@@ -823,6 +831,7 @@ impl<B: hal::Backend> Device<B> {
                 TextureFilter::Nearest,
                 Some(RenderTargetInfo { has_depth: true }),
                 1,
+                TextureUsage::DontCare,
             );
             device.readback_texture = Some(texture);
             device.inside_frame = false;
@@ -1175,6 +1184,7 @@ impl<B: hal::Backend> Device<B> {
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
+        self.render_target_memory.reset();
     }
 
     pub fn reset_state(&mut self) {
@@ -1934,6 +1944,7 @@ impl<B: hal::Backend> Device<B> {
         filter: TextureFilter,
         render_target: Option<RenderTargetInfo>,
         layer_count: i32,
+        texture_usage: TextureUsage,
     ) -> Texture {
         debug_assert!(self.inside_frame);
         assert!(!(width == 0 || height == 0 || layer_count == 0));
@@ -1993,6 +2004,11 @@ impl<B: hal::Backend> Device<B> {
             view_kind,
             mip_levels,
             usage,
+            if texture_usage == TextureUsage::OffScreenRenderTarget {
+                Some(&mut self.render_target_memory)
+            } else {
+                None
+            },
         );
 
         unsafe {
@@ -3847,6 +3863,7 @@ impl<B: hal::Backend> Device<B> {
             for (_, (_, program)) in self.blit_programs {
                 program.deinit(self.device.as_ref(), &mut heaps)
             }
+            self.render_target_memory.deinit(self.device.as_ref(), &mut heaps);
             heaps.dispose(self.device.as_ref());
             for (_, (vs_module, fs_module)) in self.shader_modules {
                 self.device.destroy_shader_module(vs_module);

@@ -340,6 +340,13 @@ bitflags! {
     }
 }
 
+#[cfg(not(feature = "gl"))]
+#[derive(Eq, PartialEq)]
+pub enum TextureUsage {
+    OffScreenRenderTarget,
+    DontCare,
+}
+
 /// WebRender interface to an OpenGL texture.
 ///
 /// Because freeing a texture requires various device handles that are not
