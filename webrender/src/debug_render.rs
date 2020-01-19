@@ -205,6 +205,7 @@ impl DebugRenderer {
             TextureFilter::Linear,
             None,
             1,
+            false,
         );
         device.upload_texture_immediate(
             &font_texture,

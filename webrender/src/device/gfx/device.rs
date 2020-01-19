@@ -350,6 +350,7 @@ pub struct Device<B: hal::Backend> {
     pub readback_supported: bool,
     #[cfg(debug_assertions)]
     shader_is_ready: bool,
+    linear_memory: LinearMemoryBlock<B>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -691,6 +692,11 @@ impl<B: hal::Backend> Device<B> {
             None
         };
 
+        let linear_memory = LinearMemoryBlock::new(
+            &device,
+            &mut heaps,
+        );
+
         let mut device = Device {
             device: Arc::new(device),
             heaps: Arc::new(Mutex::new(heaps)),
@@ -806,6 +812,7 @@ impl<B: hal::Backend> Device<B> {
 
             #[cfg(debug_assertions)]
             shader_is_ready: false,
+            linear_memory,
         };
 
         if readback_supported || device.headless_mode() {
@@ -819,6 +826,7 @@ impl<B: hal::Backend> Device<B> {
                     TextureFilter::Nearest,
                     Some(RenderTargetInfo { has_depth: true }),
                     1,
+                    false,
                 );
                 device.readback_textures.push(texture);
             }
@@ -1165,6 +1173,7 @@ impl<B: hal::Backend> Device<B> {
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
+        self.linear_memory.reset();
     }
 
     pub fn reset_state(&mut self) {
@@ -1895,6 +1904,7 @@ impl<B: hal::Backend> Device<B> {
         filter: TextureFilter,
         render_target: Option<RenderTargetInfo>,
         layer_count: i32,
+        use_linear_alloc: bool,
     ) -> Texture {
         debug_assert!(self.inside_frame);
         assert!(!(width == 0 || height == 0 || layer_count == 0));
@@ -1954,6 +1964,11 @@ impl<B: hal::Backend> Device<B> {
             view_kind,
             mip_levels,
             usage,
+            if use_linear_alloc {
+                Some(&mut self.linear_memory)
+            } else {
+                None
+            },
         );
 
         unsafe {
@@ -3809,6 +3824,7 @@ impl<B: hal::Backend> Device<B> {
             for (_, program) in self.blit_programs {
                 program.deinit(self.device.as_ref(), &mut heaps)
             }
+            self.linear_memory.deinit(self.device.as_ref(), &mut heaps);
             heaps.dispose(self.device.as_ref());
             for (_, (vs_module, fs_module)) in self.shader_modules {
                 self.device.destroy_shader_module(vs_module);

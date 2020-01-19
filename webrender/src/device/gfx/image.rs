@@ -25,6 +25,57 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 /// https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#VkBufferImageCopy
 const BUFFER_COPY_ALIGNMENT: i32 = 4;
 
+pub(super) struct LinearMemoryBlock<B: hal::Backend> {
+    memory_block: MemoryBlock<B>,
+    offset: u64,
+    alignment: u64,
+}
+
+impl<B: hal::Backend> LinearMemoryBlock<B> {
+    pub(super) fn new(
+        device: &B::Device,
+        heaps: &mut Heaps<B>,
+    ) -> Self {
+        let memory_block = heaps
+        .allocate(
+            device,
+            130, //type mask
+            MemoryUsageValue::Data,
+            128 << 20, //size 128 MB >>
+            4096, //alignment
+        )
+        .expect("Allocate memory failed");
+        LinearMemoryBlock {
+            memory_block,
+            offset: 0,
+            alignment: 4096,
+        }
+    }
+
+    fn has_size(&self, allocation_size: u64) -> bool {
+        (self.memory_block.size() - self.offset) >= allocation_size
+    }
+
+    fn add_offset(&mut self, size: u64) {
+        //println!("offset {:?} size {:?}", self.offset, size);
+        let offset_and_size = self.offset + size;
+        self.offset = if offset_and_size % self.alignment == 0 {
+            offset_and_size
+        } else {
+            ((offset_and_size / self.alignment) + 1) * self.alignment
+        };
+        //println!("## New offset {:?}", new_offset);
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
+        heaps.free(device, self.memory_block);
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) image: B::Image,
@@ -70,6 +121,7 @@ impl<B: hal::Backend> ImageCore<B> {
         format: hal::format::Format,
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
+        linear_memory: Option<&mut LinearMemoryBlock<B>>,
     ) -> Self {
         let mut image = unsafe {
             device.create_image(
@@ -84,29 +136,54 @@ impl<B: hal::Backend> ImageCore<B> {
         .expect("create_image failed");
         let requirements = unsafe { device.get_image_requirements(&image) };
 
-        let memory_block = heaps
-            .allocate(
-                device,
-                requirements.type_mask as u32,
-                MemoryUsageValue::Data,
-                requirements.size,
-                requirements.alignment,
-            )
-            .expect("Allocate memory failed");
+        match linear_memory {
+            Some(linear_memory) => {
+                if !linear_memory.has_size(requirements.size) {
+                    println!("## Can't fit");
+                    panic!("Can't fit");
+                }
+                unsafe {
+                    device
+                        .bind_image_memory(
+                            &linear_memory.memory_block.memory(),
+                            linear_memory.memory_block.range().start + linear_memory.offset,
+                            &mut image,
+                        )
+                        .expect("Bind image memory failed")
+                };
+                linear_memory.add_offset(requirements.size);
 
-        unsafe {
-            device
-                .bind_image_memory(
-                    &memory_block.memory(),
-                    memory_block.range().start,
-                    &mut image,
+                ImageCore {
+                    memory_block: None,
+                    ..Self::from_image(device, image, view_kind, format, subresource_range)
+                }
+            }
+            None => {
+                let memory_block = heaps
+                .allocate(
+                    device,
+                    requirements.type_mask as u32,
+                    MemoryUsageValue::Data,
+                    requirements.size,
+                    requirements.alignment,
                 )
-                .expect("Bind image memory failed")
-        };
+                .expect("Allocate memory failed");
 
-        ImageCore {
-            memory_block: Some(memory_block),
-            ..Self::from_image(device, image, view_kind, format, subresource_range)
+                unsafe {
+                    device
+                        .bind_image_memory(
+                            &memory_block.memory(),
+                            memory_block.range().start,
+                            &mut image,
+                        )
+                        .expect("Bind image memory failed")
+                };
+
+                ImageCore {
+                    memory_block: Some(memory_block),
+                    ..Self::from_image(device, image, view_kind, format, subresource_range)
+                }
+            }
         }
     }
 
@@ -114,13 +191,11 @@ impl<B: hal::Backend> ImageCore<B> {
         self.state.set((Access::empty(), Layout::Undefined));
     }
 
-    pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        unsafe { device.destroy_image_view(self.view) };
+    pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
+        device.destroy_image_view(self.view);
+        device.destroy_image(self.image);
         if let Some(memory_block) = self.memory_block {
-            unsafe {
-                device.destroy_image(self.image);
-                heaps.free(device, memory_block);
-            }
+            heaps.free(device, memory_block);
         }
     }
 
@@ -183,6 +258,7 @@ impl<B: hal::Backend> Image<B> {
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
+        linear_memory: Option<&mut LinearMemoryBlock<B>>,
     ) -> Self {
         let format = match image_format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
@@ -209,6 +285,7 @@ impl<B: hal::Backend> Image<B> {
                 levels: 0..mip_levels,
                 layers: 0..image_depth as _,
             },
+            linear_memory,
         );
 
         Image {
@@ -300,7 +377,7 @@ impl<B: hal::Backend> Image<B> {
     }
 
     pub fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        self.core.deinit(device, heaps);
+        unsafe { self.core.deinit(device, heaps) };
     }
 }
 
@@ -406,11 +483,12 @@ impl<B: hal::Backend> DepthBuffer<B> {
             depth_format,
             hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
             DEPTH_RANGE,
+            None,
         );
         DepthBuffer { core }
     }
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        self.core.deinit(device, heaps);
+        unsafe { self.core.deinit(device, heaps) };
     }
 }
