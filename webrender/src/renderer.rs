@@ -1061,7 +1061,7 @@ impl<B: hal::Backend> TextureResolver<B> {
                 }
             }
             #[cfg(not(feature = "gl"))]
-            let frame_treshold = 2;
+            let frame_treshold = 0;
             #[cfg(feature = "gl")]
             let frame_treshold = 30;
             texture.used_recently(frame_id, frame_treshold)
@@ -1948,6 +1948,8 @@ pub struct Renderer<B: hal::Backend> {
     /// If true, partial present state has been reset and everything needs to
     /// be drawn on the next render.
     force_redraw: bool,
+
+    rt_memory_size: usize,
 }
 
 #[derive(Debug)]
@@ -2488,6 +2490,7 @@ impl<B: hal::Backend> Renderer<B> {
             documents_seen: FastHashSet::default(),
             present_config,
             force_redraw: true,
+            rt_memory_size: 0,
         };
 
         // We initially set the flags to default and then now call set_debug_flags
@@ -3209,6 +3212,9 @@ impl<B: hal::Backend> Renderer<B> {
             self.unlock_external_images();
             self.active_documents = active_documents;
         });
+        println!("## Required memory for render targets {:?}",
+            self.rt_memory_size as f32 / (1024 * 1024) as f32);
+        self.rt_memory_size = 0;
 
         if let Some(device_size) = device_size {
             self.draw_render_target_debug(device_size);
@@ -5339,6 +5345,14 @@ impl<B: hal::Backend> Renderer<B> {
             )
         };
 
+
+        println!("# Adding texture with size {:?}, dimensions {:?}, format {:?}, layer count {:?}",
+            texture.size_in_bytes() as f32 / (1024 * 1024) as f32,
+            texture.get_dimensions(),
+            texture.get_format(),
+            texture.get_layer_count(),
+        );
+        self.rt_memory_size += texture.size_in_bytes();
         list.check_ready(&texture);
         Some(ActiveTexture {
             texture,
