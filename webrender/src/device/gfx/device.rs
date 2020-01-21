@@ -348,7 +348,6 @@ pub struct Device<B: hal::Backend> {
     optimal_pbo_stride: NonZeroUsize,
     last_rp_in_frame_reached: bool,
     pub readback_supported: bool,
-    rebind_descriptors: bool,
     #[cfg(debug_assertions)]
     shader_is_ready: bool,
 }
@@ -804,8 +803,6 @@ impl<B: hal::Backend> Device<B> {
             optimal_pbo_stride: NonZeroUsize::new(4).unwrap(),
             last_rp_in_frame_reached: false,
             readback_supported,
-            // Tracks if the pipeline layout or the used descriptor sets are changed between conscutive draws
-            rebind_descriptors: true,
 
             #[cfg(debug_assertions)]
             shader_is_ready: false,
@@ -1182,7 +1179,6 @@ impl<B: hal::Backend> Device<B> {
         self.bound_draw_fbo = DEFAULT_DRAW_FBO;
         self.draw_target_usage = DrawTargetUsage::Draw;
         self.bound_program = INVALID_PROGRAM_ID;
-        self.rebind_descriptors = true;
     }
 
     pub fn delete_program(&mut self, mut _program: ProgramId) {
@@ -1270,26 +1266,11 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn bind_program(&mut self, program_id: &ProgramId) {
-        let old_program = self.bound_program;
-
         debug_assert!(self.inside_frame);
         self.bound_program = *program_id;
         let program = self.programs
             .get(&self.bound_program)
             .expect("Program not found");
-
-
-        if old_program != INVALID_PROGRAM_ID {
-            let old_group: DescriptorGroup = self.programs
-                .get(&old_program)
-                .expect("Program not found")
-                .shader_kind
-                .into();
-            let new_group: DescriptorGroup = program.shader_kind.into();
-            if new_group != old_group {
-                self.rebind_descriptors = true;
-            }
-        }
 
         let format = self.fbos
             .get(&self.bound_draw_fbo)
@@ -1328,7 +1309,6 @@ impl<B: hal::Backend> Device<B> {
                 &[self.bound_projection],
                 self.next_id
             );
-            self.rebind_descriptors = true;
         }
     }
 
@@ -1351,7 +1331,6 @@ impl<B: hal::Backend> Device<B> {
         bound_sampler[1] = per_draw_bindings.1[1];
         bound_sampler[2] = per_draw_bindings.1[2];
 
-        self.rebind_descriptors = true;
         self.per_draw_descriptors.bind_textures(
             &bound_textures,
             &bound_sampler,
@@ -1397,7 +1376,6 @@ impl<B: hal::Backend> Device<B> {
             &mut self.per_pass_descriptors,
         );
         self.bound_per_pass_textures = per_pass_bindings;
-        self.rebind_descriptors = true;
     }
 
     fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, per_group_bindings: PerGroupBindings) {
@@ -1430,7 +1408,6 @@ impl<B: hal::Backend> Device<B> {
             &(descriptor_group, self.bound_per_group_textures),
             &mut self.per_group_descriptors,
         );
-        self.rebind_descriptors = true;
     }
 
     pub fn bind_per_draw_textures(&mut self) {
@@ -1574,10 +1551,7 @@ impl<B: hal::Backend> Device<B> {
                 &self.instance_buffers[self.next_id],
                 self.instance_buffer_range.clone(),
                 dynamic_offset,
-                self.rebind_descriptors,
             );
-
-            self.rebind_descriptors = false;
     }
 
     pub fn begin_frame(&mut self) -> GpuFrameId {
@@ -2450,10 +2424,7 @@ impl<B: hal::Backend> Device<B> {
             &self.instance_buffers[self.next_id],
             self.instance_buffer_range.clone(),
             dynamic_offset,
-            self.rebind_descriptors,
         );
-
-        self.rebind_descriptors = false;
         unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
         self.per_draw_descriptors.push_back_descriptor_set(per_draw_bindings, descriptor);
     }
