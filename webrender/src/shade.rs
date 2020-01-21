@@ -125,16 +125,8 @@ impl<B: hal::Backend> LazilyCompiledShader<B> {
         let update_projection = self.cached_projection != *projection;
         match self.get_internal(device, ShaderPrecacheFlags::FULL_COMPILE) {
             Ok(program) => {
-                #[cfg(feature = "gl")]
-                {
-                    device.bind_program(program);
-                    if update_projection {
-                        device.set_uniforms(program, projection);
-                    }
-                }
-                #[cfg(not(feature = "gl"))]
-                {
-                    device.bind_program(program);
+                device.bind_program(program);
+                if update_projection {
                     device.set_uniforms(program, projection);
                 }
             },
