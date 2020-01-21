@@ -682,7 +682,7 @@ impl<B: hal::Backend> Device<B> {
             &mut desc_allocator,
             &descriptor_data,
             &DescriptorGroup::Default,
-            DESCRIPTOR_SET_LOCALS,
+            DESCRIPTOR_SET_PER_TARGET,
         );
 
         let pipeline_cache = if let Some(ref path) = cache_path {
@@ -1541,10 +1541,10 @@ impl<B: hal::Backend> Device<B> {
             .expect("Program not found")
             .submit(
                 &mut self.command_buffer,
-                self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
-                desc_set_per_pass,
                 desc_set_per_group,
+                desc_set_per_pass,
                 desc_set_per_target,
+                self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
                 self.next_id,
                 self.descriptor_data.pipeline_layout(&descriptor_group),
                 &self.quad_buffer,
@@ -2414,10 +2414,10 @@ impl<B: hal::Backend> Device<B> {
 
         program.submit(
             &mut self.command_buffer,
-            descriptor.raw(),
-            None,
             desc_set_per_group,
+            None,
             desc_set_per_target,
+            descriptor.raw(),
             self.next_id,
             self.descriptor_data.pipeline_layout(&descriptor_group),
             &self.quad_buffer,

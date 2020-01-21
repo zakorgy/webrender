@@ -634,10 +634,10 @@ impl<B: hal::Backend> Program<B> {
     pub(super) fn submit(
         &mut self,
         cmd_buffer: &mut B::CommandBuffer,
-        desc_set_per_draw: &B::DescriptorSet,
-        desc_set_per_pass: Option<&B::DescriptorSet>,
         desc_set_per_frame: &B::DescriptorSet,
-        desc_set_locals: &B::DescriptorSet,
+        desc_set_per_pass: Option<&B::DescriptorSet>,
+        desc_set_per_target: &B::DescriptorSet,
+        desc_set_per_draw: &B::DescriptorSet,
         next_id: usize,
         pipeline_layout: &B::PipelineLayout,
         vertex_buffer: &VertexBufferHandler<B>,
@@ -664,8 +664,8 @@ impl<B: hal::Backend> Program<B> {
                 desc_set_per_pass
                     .into_iter()
                     .chain(iter::once(desc_set_per_frame))
-                    .chain(iter::once(desc_set_per_draw))
-                    .chain(iter::once(desc_set_locals)),
+                    .chain(iter::once(desc_set_per_target))
+                    .chain(iter::once(desc_set_per_draw)),
                 &[dynamic_offset],
             );
 

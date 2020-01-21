@@ -762,6 +762,7 @@ impl<B: hal::Backend> DynamicBufferBundle<B> {
         data: &[T],
         non_coherent_atom_size_mask: u64,
     ) {
+        debug_assert!(self.buffer_offset < PROJECTION_PER_FRAME as _);
         let _ = self.buffer.update(device, data, self.buffer_offset as usize, non_coherent_atom_size_mask);
         self.buffer_offset += 1;
     }

@@ -19,8 +19,8 @@ use super::super::{ShaderKind, TextureFilter, VertexArrayKind};
 
 pub(super) const DESCRIPTOR_SET_PER_PASS: usize = 0;
 pub(super) const DESCRIPTOR_SET_PER_GROUP: usize = 1;
-pub(super) const DESCRIPTOR_SET_PER_DRAW: usize = 2;
-pub(super) const DESCRIPTOR_SET_LOCALS: usize = 3;
+pub(super) const DESCRIPTOR_SET_PER_TARGET: usize = 2;
+pub(super) const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 
 pub(super) const DESCRIPTOR_COUNT: u32 = 96;
 pub(super) const PER_DRAW_TEXTURE_COUNT: usize = 3; // Color0, Color1, Color2
@@ -55,17 +55,17 @@ pub(super) const DEFAULT_SET_1: &'static [DescriptorSetLayoutBinding] = &[
 ];
 
 pub(super) const COMMON_SET_2: &'static [DescriptorSetLayoutBinding] = &[
+    // Projection matrix
+    descriptor_set_layout_binding(0, DT::UniformBufferDynamic, SSF::VERTEX, false),
+];
+
+pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
     // Color0
     descriptor_set_layout_binding(0, DT::CombinedImageSampler, SSF::ALL, false),
     // Color1
     descriptor_set_layout_binding(1, DT::CombinedImageSampler, SSF::ALL, false),
     // Color2
     descriptor_set_layout_binding(2, DT::CombinedImageSampler, SSF::ALL, false),
-];
-
-pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
-    // Projection matrix
-    descriptor_set_layout_binding(0, DT::UniformBufferDynamic, SSF::VERTEX, false),
 ];
 
 pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
