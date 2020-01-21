@@ -1302,14 +1302,7 @@ impl<B: hal::Backend> Device<B> {
         _program_id: &ProgramId,
         projection: &default::Transform3D<f32>,
     ) {
-        if self.bound_projection != *projection {
-            self.bound_projection = *projection;
-            self.uniform_buffer_handler.add(
-                self.device.as_ref(),
-                &[self.bound_projection],
-                self.next_id
-            );
-        }
+        assert_eq!(self.bound_projection, *projection);
     }
 
     unsafe fn begin_cmd_buffer(cmd_buffer: &mut B::CommandBuffer) {
@@ -1625,8 +1618,25 @@ impl<B: hal::Backend> Device<B> {
         self.bound_read_texture = (texture_id, layer_id);
     }
 
-    fn bind_draw_target_impl(&mut self, fbo_id: FBOId, usage: DrawTargetUsage) {
+    fn bind_draw_target_impl(
+        &mut self,
+        fbo_id: FBOId,
+        usage: DrawTargetUsage,
+        projection: Option<&default::Transform3D<f32>>,
+    ) {
         debug_assert!(self.inside_frame);
+
+        if let Some(projection) = projection {
+            // This check here can save us a bunch of buffer update
+            if self.bound_projection != *projection {
+                self.bound_projection = *projection;
+                self.uniform_buffer_handler.add(
+                    self.device.as_ref(),
+                    &[self.bound_projection],
+                    self.next_id
+                )
+            }
+        }
 
         let fbo_id = if fbo_id == DEFAULT_DRAW_FBO && self.headless_mode() {
             self.readback_textures[self.next_id].fbos_with_depth[0]
@@ -1669,13 +1679,18 @@ impl<B: hal::Backend> Device<B> {
         self.bind_read_target_impl(DEFAULT_READ_FBO);
     }
 
-    pub fn reset_draw_target(&mut self) {
-        self.bind_draw_target_impl(DEFAULT_DRAW_FBO, DrawTargetUsage::Draw);
+    pub fn reset_draw_target(&mut self, projection: Option<&default::Transform3D<f32>>) {
+        self.bind_draw_target_impl(DEFAULT_DRAW_FBO, DrawTargetUsage::Draw, projection);
         self.depth_available = true;
         self.render_pass_depth_state = RenderPassDepthState::Enabled;
     }
 
-    pub fn bind_draw_target(&mut self, texture_target: DrawTarget, usage: DrawTargetUsage) {
+    pub fn bind_draw_target(
+        &mut self,
+        texture_target: DrawTarget,
+        usage: DrawTargetUsage,
+        projection: Option<&default::Transform3D<f32>>,
+    ) {
         let (fbo_id, rect, depth_available) = match texture_target {
             DrawTarget::Default { rect, .. } => {
                 if let DrawTargetUsage::CopyOnly = usage {
@@ -1762,7 +1777,7 @@ impl<B: hal::Backend> Device<B> {
             true => RenderPassDepthState::Enabled,
             false => RenderPassDepthState::Disabled,
         };
-        self.bind_draw_target_impl(fbo_id, usage);
+        self.bind_draw_target_impl(fbo_id, usage, projection);
         self.viewport.rect = hal::pso::Rect {
             x: rect.origin.x as i16,
             y: rect.origin.y as i16,
@@ -2597,7 +2612,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         self.bind_read_target(src_target);
         if !self.inside_render_pass {
-            self.bind_draw_target(dest_target, DrawTargetUsage::Draw);
+            self.bind_draw_target(dest_target, DrawTargetUsage::Draw, None);
         }
         self.blit_render_target_impl(src_rect, dest_rect, filter);
     }
@@ -3138,7 +3153,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn end_frame(&mut self) {
-        self.reset_draw_target();
+        self.reset_draw_target(None);
         self.reset_read_target();
 
         debug_assert!(self.inside_frame);

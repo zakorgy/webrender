@@ -387,6 +387,10 @@ impl DebugRenderer {
                 true,
             );
 
+            #[cfg(not(feature = "gl"))]
+            {
+                device.reset_draw_target(Some(&projection));
+            }
             // Triangles
             if !self.tri_vertices.is_empty() {
                 device.bind_program(&self.color_program);

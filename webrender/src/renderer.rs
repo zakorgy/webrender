@@ -3573,6 +3573,8 @@ impl<B: hal::Backend> Renderer<B> {
                                 draw_target,
                                 #[cfg(not(feature="gl"))]
                                 DrawTargetUsage::Draw,
+                                #[cfg(not(feature="gl"))]
+                                None,
                             );
                             self.device.clear_target(
                                 Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
@@ -3754,6 +3756,8 @@ impl<B: hal::Backend> Renderer<B> {
             draw_target,
             #[cfg(not(feature="gl"))]
             DrawTargetUsage::Draw,
+            #[cfg(not(feature="gl"))]
+            None,
         );
         self.device.reset_read_target();
 
@@ -3899,6 +3903,8 @@ impl<B: hal::Backend> Renderer<B> {
                 draw_target,
                 #[cfg(not(feature="gl"))]
                 DrawTargetUsage::Draw,
+                #[cfg(not(feature="gl"))]
+                Some(&projection),
             );
             self.device.disable_depth();
             self.device.enable_depth_write();
@@ -4325,6 +4331,8 @@ impl<B: hal::Backend> Renderer<B> {
             draw_target,
             #[cfg(not(feature="gl"))]
             DrawTargetUsage::Draw,
+            #[cfg(not(feature="gl"))]
+            Some(&projection),
         );
         self.device.enable_depth();
         self.device.enable_depth_write();
@@ -4532,6 +4540,8 @@ impl<B: hal::Backend> Renderer<B> {
                 draw_target,
                 #[cfg(not(feature="gl"))]
                 DrawTargetUsage::Draw,
+                #[cfg(not(feature="gl"))]
+                Some(&projection),
             );
             self.device.disable_depth();
             self.set_blend(false, framebuffer_kind);
@@ -4821,6 +4831,8 @@ impl<B: hal::Backend> Renderer<B> {
                 draw_target,
                 #[cfg(not(feature="gl"))]
                 DrawTargetUsage::Draw,
+                #[cfg(not(feature="gl"))]
+                Some(&projection),
             );
             self.device.disable_depth();
             self.device.disable_depth_write();
@@ -5010,6 +5022,8 @@ impl<B: hal::Backend> Renderer<B> {
                 draw_target,
                 #[cfg(not(feature="gl"))]
                 DrawTargetUsage::Draw,
+                #[cfg(not(feature="gl"))]
+                Some(&projection),
             );
 
             self.device.disable_depth();
@@ -5491,8 +5505,8 @@ impl<B: hal::Backend> Renderer<B> {
                                         let clear_color = self.clear_color.map(|color| color.to_array());
                                         self.device.bind_draw_target(
                                             draw_target_read_back,
-                                            #[cfg(not(feature="gl"))]
                                             DrawTargetUsage::Draw,
+                                            Some(&projection),
                                         );
                                         self.device.enable_depth_write();
                                         self.device.clear_target(
@@ -5526,6 +5540,8 @@ impl<B: hal::Backend> Renderer<B> {
                                     draw_target,
                                     #[cfg(not(feature="gl"))]
                                     DrawTargetUsage::Draw,
+                                    #[cfg(not(feature="gl"))]
+                                    Some(&projection)
                                 );
                                 self.device.enable_depth_write();
                                 self.device.clear_target(
@@ -6353,6 +6369,8 @@ impl<B: hal::Backend> Renderer<B> {
                 ),
                 #[cfg(not(feature="gl"))]
                 DrawTargetUsage::Draw,
+                #[cfg(not(feature="gl"))]
+                None,
             );
             self.device.clear_target(
                 Some(color),
