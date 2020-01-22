@@ -1626,12 +1626,15 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
 
         if let Some(projection) = projection {
-            self.bound_projection = *projection;
-            self.uniform_buffer_handler.add(
-                self.device.as_ref(),
-                &[self.bound_projection],
-                self.next_id
-            )
+            // This check here can save us a bunch of buffer update
+            if self.bound_projection != *projection {
+                self.bound_projection = *projection;
+                self.uniform_buffer_handler.add(
+                    self.device.as_ref(),
+                    &[self.bound_projection],
+                    self.next_id
+                )
+            }
         }
 
         let fbo_id = if fbo_id == DEFAULT_DRAW_FBO && self.headless_mode() {
