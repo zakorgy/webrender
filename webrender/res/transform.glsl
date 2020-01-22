@@ -7,7 +7,6 @@ flat varying vec4 vTransformBounds;
 #ifdef WR_VERTEX_SHADER
 
 #define VECS_PER_TRANSFORM   8U
-uniform HIGHP_SAMPLER_FLOAT sampler2D sTransformPalette;
 
 void init_transform_vs(vec4 local_bounds) {
     vTransformBounds = local_bounds;

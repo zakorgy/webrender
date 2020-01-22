@@ -17,8 +17,8 @@ use super::image::Image;
 use super::TextureId;
 use super::super::{ShaderKind, TextureFilter, VertexArrayKind};
 
-pub(super) const DESCRIPTOR_SET_PER_PASS: usize = 0;
-pub(super) const DESCRIPTOR_SET_PER_GROUP: usize = 1;
+pub(super) const DESCRIPTOR_SET_PER_GROUP: usize = 0;
+pub(super) const DESCRIPTOR_SET_PER_PASS: usize = 1;
 pub(super) const DESCRIPTOR_SET_PER_TARGET: usize = 2;
 pub(super) const DESCRIPTOR_SET_PER_DRAW: usize = 3;
 
@@ -49,7 +49,7 @@ const fn descriptor_set_layout_binding(
     }
 }
 
-pub(super) const DEFAULT_SET_1: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const DEFAULT_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     // Dither
     descriptor_set_layout_binding(8, DT::CombinedImageSampler, SSF::ALL, true),
 ];
@@ -68,7 +68,7 @@ pub(super) const COMMON_SET_3: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(2, DT::CombinedImageSampler, SSF::ALL, false),
 ];
 
-pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const CLIP_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     // GpuCache
     descriptor_set_layout_binding(5, DT::StorageBuffer, SSF::ALL, false),
     // TransformPalette
@@ -79,7 +79,7 @@ pub(super) const CLIP_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(8, DT::CombinedImageSampler, SSF::ALL, true),
 ];
 
-pub(super) const PRIMITIVE_SET_1: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const PRIMITIVE_SET_0: &'static [DescriptorSetLayoutBinding] = &[
     // GpuCache
     descriptor_set_layout_binding(5, DT::StorageBuffer, SSF::ALL, false),
     // TransformPalette
@@ -94,7 +94,7 @@ pub(super) const PRIMITIVE_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     descriptor_set_layout_binding(10, DT::CombinedImageSampler, SSF::VERTEX, true),
 ];
 
-pub(super) const PRIMITIVE_SET_0: &'static [DescriptorSetLayoutBinding] = &[
+pub(super) const PRIMITIVE_SET_1: &'static [DescriptorSetLayoutBinding] = &[
     // PrevPassAlpha
     descriptor_set_layout_binding(3, DT::CombinedImageSampler, SSF::ALL, true),
     // PrevPassColor
@@ -121,8 +121,8 @@ impl From<ShaderKind> for DescriptorGroup {
             | ShaderKind::DebugFont
             | ShaderKind::Service
             | ShaderKind::VectorStencil
-            | ShaderKind::VectorCover => DescriptorGroup::Default,
-            ShaderKind::ClipCache => DescriptorGroup::Clip,
+            | ShaderKind::VectorCover => DescriptorGroup::Primitive,
+            ShaderKind::ClipCache => DescriptorGroup::Primitive,
             ShaderKind::Brush
             | ShaderKind::Cache(VertexArrayKind::Blur)
             | ShaderKind::Cache(VertexArrayKind::Scale)

@@ -226,6 +226,21 @@ uniform sampler2DArray sColor2;
 
 uniform sampler2D sDither;
 
+uniform sampler2DArray sPrevPassAlpha;
+uniform sampler2DArray sPrevPassColor;
+
+layout(set = 0, binding = 5, std430)readonly buffer sGpuCache
+{
+    vec4 gpu_cache[];
+};
+
+#ifdef WR_VERTEX_SHADER
+uniform HIGHP_SAMPLER_FLOAT sampler2D sTransformPalette;
+uniform HIGHP_SAMPLER_FLOAT sampler2D sRenderTasks;
+uniform HIGHP_SAMPLER_FLOAT sampler2D sPrimitiveHeadersF;
+uniform HIGHP_SAMPLER_FLOAT isampler2D sPrimitiveHeadersI;
+#endif
+
 //======================================================================================
 // Interpolator definitions
 //======================================================================================

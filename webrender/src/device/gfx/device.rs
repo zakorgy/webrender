@@ -553,37 +553,48 @@ impl<B: hal::Backend> Device<B> {
 
         let mut per_group_descriptor_sets = FastHashMap::default();
         let descriptor_data: FastHashMap<DescriptorGroup, DescriptorGroupData<B>> = [
-            DescriptorGroup::Default,
-            DescriptorGroup::Clip,
+            // DescriptorGroup::Default,
+            // DescriptorGroup::Clip,
             DescriptorGroup::Primitive,
         ]
         .iter()
         .map(|g| {
             let layouts_and_samplers = match g {
                 DescriptorGroup::Default => [
-                    (EMPTY_SET_0, vec![]),
-                    (DEFAULT_SET_1, vec![&sampler_nearest]),
+                    (
+                        PRIMITIVE_SET_0,
+                        vec![
+                            &sampler_nearest,
+                            &sampler_nearest,
+                            &sampler_nearest,
+                            &sampler_nearest,
+                            &sampler_nearest,
+                            &sampler_nearest,
+                        ],
+                    ),
+                    (PRIMITIVE_SET_1, vec![&sampler_linear, &sampler_linear]),
                     (COMMON_SET_2, vec![]),
                     (COMMON_SET_3, vec![]),
                 ],
                 DescriptorGroup::Clip => [
-                    (EMPTY_SET_0, vec![]),
                     (
-                        CLIP_SET_1,
+                        PRIMITIVE_SET_0,
                         vec![
+                            &sampler_nearest,
+                            &sampler_nearest,
                             &sampler_nearest,
                             &sampler_nearest,
                             &sampler_nearest,
                             &sampler_nearest,
                         ],
                     ),
+                    (PRIMITIVE_SET_1, vec![&sampler_linear, &sampler_linear]),
                     (COMMON_SET_2, vec![]),
                     (COMMON_SET_3, vec![]),
                 ],
                 DescriptorGroup::Primitive => [
-                    (PRIMITIVE_SET_0, vec![&sampler_linear, &sampler_linear]),
                     (
-                        PRIMITIVE_SET_1,
+                        PRIMITIVE_SET_0,
                         vec![
                             &sampler_nearest,
                             &sampler_nearest,
@@ -593,6 +604,7 @@ impl<B: hal::Backend> Device<B> {
                             &sampler_nearest,
                         ],
                     ),
+                    (PRIMITIVE_SET_1, vec![&sampler_linear, &sampler_linear]),
                     (COMMON_SET_2, vec![]),
                     (COMMON_SET_3, vec![]),
                 ],
@@ -667,7 +679,7 @@ impl<B: hal::Backend> Device<B> {
             &device,
             &mut desc_allocator,
             &descriptor_data,
-            &DescriptorGroup::Default,
+            &DescriptorGroup::Primitive,
             DESCRIPTOR_SET_PER_DRAW,
             descriptor_count.unwrap_or(DESCRIPTOR_COUNT),
             Vec::new(),
@@ -681,7 +693,7 @@ impl<B: hal::Backend> Device<B> {
             &mut heaps,
             &mut desc_allocator,
             &descriptor_data,
-            &DescriptorGroup::Default,
+            &DescriptorGroup::Primitive,
             DESCRIPTOR_SET_PER_TARGET,
         );
 
@@ -985,7 +997,7 @@ impl<B: hal::Backend> Device<B> {
             &mut self.per_pass_descriptors
         );
 
-        for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+        for descriptor_group in [/*DescriptorGroup::Default, DescriptorGroup::Clip,*/ DescriptorGroup::Primitive].iter() {
             Self::push_back(
                 &mut self.bound_per_group_descriptors[*descriptor_group as usize],
                 None,
@@ -1343,6 +1355,17 @@ impl<B: hal::Backend> Device<B> {
     pub fn bind_per_pass_textures(&mut self) {
         let per_pass_bindings = PerPassBindings([self.bound_textures[3], self.bound_textures[4]]);
         if per_pass_bindings == self.bound_per_pass_textures {
+            for descriptor_group in [/*DescriptorGroup::Default, DescriptorGroup::Clip,*/ DescriptorGroup::Primitive].iter() {
+                let pipeline_layout = self.descriptor_data.pipeline_layout(&descriptor_group);
+                unsafe {
+                    self.command_buffer.bind_graphics_descriptor_sets(
+                        pipeline_layout,
+                        DESCRIPTOR_SET_PER_PASS,
+                        std::iter::once(self.bound_per_pass_descriptor.as_ref().unwrap().raw()),
+                        &[],
+                    );
+                }
+            }
             return;
         }
         let descriptor = self.per_pass_descriptors.bind_textures(
@@ -1361,6 +1384,19 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_nearest,
         );
 
+        for descriptor_group in [/*DescriptorGroup::Default, DescriptorGroup::Clip,*/ DescriptorGroup::Primitive].iter() {
+            let pipeline_layout = self.descriptor_data.pipeline_layout(&descriptor_group);
+            unsafe {
+                self.command_buffer.bind_graphics_descriptor_sets(
+                    pipeline_layout,
+                    DESCRIPTOR_SET_PER_PASS,
+                    std::iter::once(descriptor.raw()),
+                    &[],
+                );
+            }
+        }
+
+
         Self::push_back(
             &mut self.bound_per_pass_descriptor,
             Some(descriptor),
@@ -1371,15 +1407,29 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, per_group_bindings: PerGroupBindings) {
+        let pipeline_layout = self.descriptor_data.pipeline_layout(&descriptor_group);
+        if per_group_bindings == self.bound_per_group_textures {
+            println!("# Bind with early return {:?}", (per_group_bindings, descriptor_group));
+            unsafe {
+                self.command_buffer.bind_graphics_descriptor_sets(
+                    pipeline_layout,
+                    DESCRIPTOR_SET_PER_GROUP,
+                    std::iter::once(self.bound_per_group_descriptors[descriptor_group as usize].as_ref().unwrap().raw()),
+                    &[],
+                );
+            }
+            return;
+        }
         let descriptor = self.per_group_descriptors.bind_textures(
             &self.bound_textures,
             &self.bound_sampler,
             (descriptor_group, per_group_bindings),
             &self.images,
-            match descriptor_group {
+            /*match descriptor_group {
                 DescriptorGroup::Default => None,
                 _ => self.gpu_cache_buffer.as_ref().map(|b| b.buffer.as_ref()),
-            },
+            },*/
+            self.gpu_cache_buffer.as_ref().map(|b| b.buffer.as_ref()),
             &mut self.desc_allocator,
             self.device.as_ref(),
             &self.descriptor_data,
@@ -1393,6 +1443,16 @@ impl<B: hal::Backend> Device<B> {
             &self.sampler_linear,
             &self.sampler_nearest,
         );
+
+        println!("# Bind without early return {:?}", (per_group_bindings, descriptor_group));
+        unsafe {
+            self.command_buffer.bind_graphics_descriptor_sets(
+                pipeline_layout,
+                DESCRIPTOR_SET_PER_GROUP,
+                std::iter::once(descriptor.raw()),
+                &[],
+            );
+        }
 
         Self::push_back(
             &mut self.bound_per_group_descriptors[descriptor_group as usize],
@@ -1449,10 +1509,7 @@ impl<B: hal::Backend> Device<B> {
             self.bound_textures[9],
             self.bound_textures[10],
         ]);
-        if per_group_bindings == self.bound_per_group_textures {
-            return;
-        }
-        for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+        for descriptor_group in [/*DescriptorGroup::Default, DescriptorGroup::Clip,*/ DescriptorGroup::Primitive].iter() {
             self.bind_per_group_textures_impl(*descriptor_group, per_group_bindings);
         }
         self.bound_per_group_textures = per_group_bindings;
@@ -1547,6 +1604,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     pub fn begin_frame(&mut self) -> GpuFrameId {
+        println!("##### Begin frame");
         debug_assert!(!self.inside_frame);
         self.inside_frame = true;
         #[cfg(debug_assertions)]
@@ -3751,7 +3809,7 @@ impl<B: hal::Backend> Device<B> {
                 &mut self.per_pass_descriptors,
             );
 
-            for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+            for descriptor_group in [/*DescriptorGroup::Default, DescriptorGroup::Clip,*/ DescriptorGroup::Primitive].iter() {
                 Self::push_back(
                     &mut self.bound_per_group_descriptors[*descriptor_group as usize],
                     None,

@@ -15,9 +15,6 @@
 #define RASTER_LOCAL            0
 #define RASTER_SCREEN           1
 
-uniform sampler2DArray sPrevPassAlpha;
-uniform sampler2DArray sPrevPassColor;
-
 vec2 clamp_rect(vec2 pt, RectWithSize rect) {
     return clamp(pt, rect.p0, rect.p0 + rect.size);
 }
@@ -40,9 +37,6 @@ varying vec4 vClipMaskUv;
 #define COLOR_MODE_BITMAP             7
 #define COLOR_MODE_COLOR_BITMAP       8
 #define COLOR_MODE_IMAGE              9
-
-uniform HIGHP_SAMPLER_FLOAT sampler2D sPrimitiveHeadersF;
-uniform HIGHP_SAMPLER_FLOAT isampler2D sPrimitiveHeadersI;
 
 // Instanced attributes
 in ivec4 aData;

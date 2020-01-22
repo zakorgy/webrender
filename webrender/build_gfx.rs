@@ -27,8 +27,8 @@ const VK_EXTENSIONS: &'static str = "#extension GL_ARB_shading_language_420pack 
 // https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#features-limits
 const MAX_INPUT_ATTRIBUTES: u32 = 16;
 
-const DESCRIPTOR_SET_PER_PASS: u32 = 0;
-const DESCRIPTOR_SET_PER_GROUP: u32 = 1;
+const DESCRIPTOR_SET_PER_GROUP: u32 = 0;
+const DESCRIPTOR_SET_PER_PASS: u32 = 1;
 const DESCRIPTOR_SET_PER_TARGET: u32 = 2;
 const DESCRIPTOR_SET_PER_DRAW: u32 = 3;
 
