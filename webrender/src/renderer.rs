@@ -998,6 +998,7 @@ impl<B: hal::Backend> TextureResolver<B> {
                 None,
                 1,
             );
+
         device.upload_texture_immediate(
             &dummy_cache_texture,
             &[0xff, 0xff, 0xff, 0xff],
@@ -3628,11 +3629,8 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(not(feature = "gl"))]
         {
             let can_skip_bind = *textures == BatchTextures::no_texture()
-                && self.device.bound_per_draw_descriptor.is_some()
                 && cfg!(not(debug_assertions));
-            if !can_skip_bind {
-                self.device.bind_per_draw_textures();
-            }
+                self.device.bind_per_draw_textures(can_skip_bind);
         }
 
         #[cfg(feature = "gl")]
