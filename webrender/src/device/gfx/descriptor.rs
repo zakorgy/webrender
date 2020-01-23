@@ -108,6 +108,7 @@ pub(super) enum DescriptorGroup {
     Default,
     Clip,
     Primitive,
+    Invalid,
 }
 
 impl From<ShaderKind> for DescriptorGroup {
@@ -137,7 +138,7 @@ impl From<ShaderKind> for DescriptorGroup {
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
 pub(super) struct PerDrawBindings(
     pub [TextureId; PER_DRAW_TEXTURE_COUNT],
-    pub [TextureFilter; PER_DRAW_TEXTURE_COUNT],
+    pub TextureFilter,
 );
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
