@@ -634,16 +634,10 @@ impl<B: hal::Backend> Program<B> {
     pub(super) fn submit(
         &mut self,
         cmd_buffer: &mut B::CommandBuffer,
-        desc_set_per_frame: &B::DescriptorSet,
-        desc_set_per_pass: Option<&B::DescriptorSet>,
-        desc_set_per_target: &B::DescriptorSet,
-        desc_set_per_draw: &B::DescriptorSet,
         next_id: usize,
-        pipeline_layout: &B::PipelineLayout,
         vertex_buffer: &VertexBufferHandler<B>,
         instance_buffer: &InstanceBufferHandler<B>,
         instance_buffer_range: std::ops::Range<usize>,
-        dynamic_offset: u32,
     ) {
         if self.shader_kind.is_debug() {
             if self.last_frame_used != next_id {
@@ -657,14 +651,6 @@ impl<B: hal::Backend> Program<B> {
             None => vertex_buffer,
         };
         unsafe {
-            /*use std::iter;
-            cmd_buffer.bind_graphics_descriptor_sets(
-                pipeline_layout,
-                super::descriptor::DESCRIPTOR_SET_PER_DRAW,
-                iter::once(desc_set_per_draw),
-                &[],
-            );*/
-
             match &self.index_buffer {
                 // Debug shaders
                 Some(ref index_buffer) => {

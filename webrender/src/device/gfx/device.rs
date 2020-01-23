@@ -1564,35 +1564,15 @@ impl<B: hal::Backend> Device<B> {
         assert!(self.inside_render_pass);
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
-        let descriptor_group = self.bound_program.1;
-
-        let ref desc_set_per_group = self
-            .bound_per_group_descriptors[descriptor_group as usize]
-            .as_ref()
-            .unwrap()
-            .raw();
-        let desc_set_per_pass = match descriptor_group {
-            DescriptorGroup::Primitive => self.bound_per_pass_descriptor.as_ref().map(|d| d.raw()),
-            _ => None,
-        };
-
-        let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
-
         self.programs
             .get_mut(&self.bound_program)
             .expect("Program not found")
             .submit(
                 &mut self.command_buffer,
-                desc_set_per_group,
-                desc_set_per_pass,
-                desc_set_per_target,
-                self.bound_per_draw_descriptor.as_ref().unwrap().raw(),
                 self.next_id,
-                self.descriptor_data.pipeline_layout(&descriptor_group),
                 &self.quad_buffer,
                 &self.instance_buffers[self.next_id],
                 self.instance_buffer_range.clone(),
-                dynamic_offset,
             );
     }
 
@@ -2452,12 +2432,6 @@ impl<B: hal::Backend> Device<B> {
         self.update_instances(&[data]);
 
         self.ensure_blit_program(view_kind);
-        let ref desc_set_per_group = self
-            .bound_per_group_descriptors[descriptor_group as usize]
-            .as_ref()
-            .unwrap()
-            .raw();
-
         let program = self.blit_programs.get_mut(&view_kind).unwrap();
         unsafe {
             self.command_buffer.bind_graphics_pipeline(
@@ -2471,8 +2445,6 @@ impl<B: hal::Backend> Device<B> {
             );
         }
 
-        let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
-
         unsafe {
             self.command_buffer.bind_graphics_descriptor_sets(
                 self.descriptor_data.pipeline_layout(&descriptor_group),
@@ -2484,16 +2456,10 @@ impl<B: hal::Backend> Device<B> {
 
         program.submit(
             &mut self.command_buffer,
-            desc_set_per_group,
-            None,
-            desc_set_per_target,
-            descriptor.raw(),
             self.next_id,
-            self.descriptor_data.pipeline_layout(&descriptor_group),
             &self.quad_buffer,
             &self.instance_buffers[self.next_id],
             self.instance_buffer_range.clone(),
-            dynamic_offset,
         );
         unsafe { self.command_buffer.set_viewports(0, &[self.viewport.clone()]) };
         self.per_draw_descriptors.push_back_descriptor_set(per_draw_bindings, descriptor);
