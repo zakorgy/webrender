@@ -1016,18 +1016,6 @@ impl<B: hal::Backend> Device<B> {
             *layout = hal::image::Layout::Undefined;
         }
 
-        let pipeline_cache = unsafe { self.device.create_pipeline_cache(None) }
-            .expect("Failed to create pipeline cache");
-        if let Some(ref cache) = self.pipeline_cache {
-            unsafe {
-                self.device
-                    .merge_pipeline_caches(&cache, Some(&pipeline_cache))
-                    .expect("merge_pipeline_caches failed");
-                self.device.destroy_pipeline_cache(pipeline_cache);
-            }
-        } else {
-            self.pipeline_cache = Some(pipeline_cache);
-        }
         (
             true,
             DeviceIntSize::new(self.dimensions.0, self.dimensions.1),
