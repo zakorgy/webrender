@@ -657,13 +657,13 @@ impl<B: hal::Backend> Program<B> {
             None => vertex_buffer,
         };
         unsafe {
-            use std::iter;
+            /*use std::iter;
             cmd_buffer.bind_graphics_descriptor_sets(
                 pipeline_layout,
                 super::descriptor::DESCRIPTOR_SET_PER_DRAW,
                 iter::once(desc_set_per_draw),
                 &[],
-            );
+            );*/
 
             match &self.index_buffer {
                 // Debug shaders

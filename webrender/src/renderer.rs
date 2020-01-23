@@ -3630,9 +3630,7 @@ impl<B: hal::Backend> Renderer<B> {
             let can_skip_bind = *textures == BatchTextures::no_texture()
                 && self.device.bound_per_draw_descriptor.is_some()
                 && cfg!(not(debug_assertions));
-            if !can_skip_bind {
-                self.device.bind_per_draw_textures();
-            }
+                self.device.bind_per_draw_textures(can_skip_bind);
         }
 
         #[cfg(feature = "gl")]

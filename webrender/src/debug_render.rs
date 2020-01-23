@@ -432,7 +432,7 @@ impl DebugRenderer {
                 );
                 #[cfg(not(feature = "gl"))]
                 {
-                    device.bind_per_draw_textures();
+                    device.bind_per_draw_textures(false);
                 }
                 device.draw_triangles_u32(0, self.font_indices.len() as i32);
             }

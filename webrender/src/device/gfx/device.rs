@@ -352,6 +352,7 @@ pub struct Device<B: hal::Backend> {
     #[cfg(debug_assertions)]
     shader_is_ready: bool,
     rebind_descriptors: bool,
+    pipeline_layout_changed: bool,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -811,6 +812,7 @@ impl<B: hal::Backend> Device<B> {
             #[cfg(debug_assertions)]
             shader_is_ready: false,
             rebind_descriptors: true,
+            pipeline_layout_changed: false,
         };
 
         if readback_supported || device.headless_mode() {
@@ -1272,7 +1274,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_program(&mut self, program_id: &ProgramId) {
         debug_assert!(self.inside_frame);
-        let pipeline_layout_changed = self.bound_program.1 != program_id.1;
+        self.pipeline_layout_changed = self.bound_program.1 != program_id.1;
         self.bound_program = *program_id;
         let program = self.programs
             .get(&self.bound_program)
@@ -1302,7 +1304,7 @@ impl<B: hal::Backend> Device<B> {
             if let Some(SUBPIXEL_CONSTANT_TEXT_COLOR) = blend_state  {
                 self.command_buffer.set_blend_constants(self.blend_color.to_array());
             }
-            if pipeline_layout_changed || self.rebind_descriptors {
+            if self.pipeline_layout_changed || self.rebind_descriptors {
                 use std::iter;
                 let descriptor_group = self.bound_program.1;
 
@@ -1447,36 +1449,49 @@ impl<B: hal::Backend> Device<B> {
         );
     }
 
-    pub fn bind_per_draw_textures(&mut self) {
+    pub fn bind_per_draw_textures(&mut self, can_skip_bind: bool) {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
-
         let descriptor_group = self.bound_program.1;
-        let per_draw_bindings = PerDrawBindings(
-            [
-                self.bound_textures[0],
-                self.bound_textures[1],
-                self.bound_textures[2],
-            ],
-            [
-                self.bound_sampler[0],
-                self.bound_sampler[1],
-                self.bound_sampler[2],
-            ],
-        );
 
-        if self.bound_per_draw_textures == per_draw_bindings {
-            return;
+        if !can_skip_bind {
+            let per_draw_bindings = PerDrawBindings(
+                [
+                    self.bound_textures[0],
+                    self.bound_textures[1],
+                    self.bound_textures[2],
+                ],
+                [
+                    self.bound_sampler[0],
+                    self.bound_sampler[1],
+                    self.bound_sampler[2],
+                ],
+            );
+
+            if self.bound_per_draw_textures != per_draw_bindings {
+                let descriptor = self.bind_per_draw_textures_impl(descriptor_group, per_draw_bindings);
+
+                Self::push_back(
+                    &mut self.bound_per_draw_descriptor,
+                    Some(descriptor),
+                    &self.bound_per_draw_textures,
+                    &mut self.per_draw_descriptors,
+                );
+                self.bound_per_draw_textures = per_draw_bindings;
+            }
         }
-        let descriptor = self.bind_per_draw_textures_impl(descriptor_group, per_draw_bindings);
 
-        Self::push_back(
-            &mut self.bound_per_draw_descriptor,
-            Some(descriptor),
-            &self.bound_per_draw_textures,
-            &mut self.per_draw_descriptors,
-        );
-        self.bound_per_draw_textures = per_draw_bindings;
+        if !can_skip_bind || self.pipeline_layout_changed  {
+            unsafe {
+                self.command_buffer.bind_graphics_descriptor_sets(
+                    self.descriptor_data.pipeline_layout(&descriptor_group),
+                    DESCRIPTOR_SET_PER_DRAW,
+                    self.bound_per_draw_descriptor.as_ref().map(|descriptor| descriptor.raw()),
+                    &[],
+                );
+            }
+            self.pipeline_layout_changed = false;
+        }
     }
 
     pub fn bind_per_group_textures(&mut self) {
@@ -2457,6 +2472,15 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
+
+        unsafe {
+            self.command_buffer.bind_graphics_descriptor_sets(
+                self.descriptor_data.pipeline_layout(&descriptor_group),
+                DESCRIPTOR_SET_PER_DRAW,
+                std::iter::once(descriptor.raw()),
+                &[],
+            );
+        }
 
         program.submit(
             &mut self.command_buffer,
