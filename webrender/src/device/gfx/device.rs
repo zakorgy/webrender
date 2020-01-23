@@ -351,6 +351,7 @@ pub struct Device<B: hal::Backend> {
     pub readback_supported: bool,
     #[cfg(debug_assertions)]
     shader_is_ready: bool,
+    rebind_descriptors: bool,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -809,6 +810,7 @@ impl<B: hal::Backend> Device<B> {
 
             #[cfg(debug_assertions)]
             shader_is_ready: false,
+            rebind_descriptors: true,
         };
 
         if readback_supported || device.headless_mode() {
@@ -1300,7 +1302,7 @@ impl<B: hal::Backend> Device<B> {
             if let Some(SUBPIXEL_CONSTANT_TEXT_COLOR) = blend_state  {
                 self.command_buffer.set_blend_constants(self.blend_color.to_array());
             }
-            if pipeline_layout_changed {
+            if pipeline_layout_changed || self.rebind_descriptors {
                 use std::iter;
                 let descriptor_group = self.bound_program.1;
 
@@ -1328,6 +1330,7 @@ impl<B: hal::Backend> Device<B> {
                         .chain(iter::once(desc_set_per_target)),
                     &[dynamic_offset],
                 );
+                self.rebind_descriptors = false;
             }
         }
         #[cfg(debug_assertions)]
@@ -1408,16 +1411,7 @@ impl<B: hal::Backend> Device<B> {
             &mut self.per_pass_descriptors,
         );
         self.bound_per_pass_textures = per_pass_bindings;
-        if self.bound_program.1 == DescriptorGroup::Primitive {
-            unsafe {
-                self.command_buffer.bind_graphics_descriptor_sets(
-                    self.descriptor_data.pipeline_layout(&self.bound_program.1),
-                    DESCRIPTOR_SET_PER_PASS,
-                    self.bound_per_pass_descriptor.as_ref().map(|d| d.raw()),
-                    &[],
-                );
-            }
-        }
+        self.rebind_descriptors = true;
     }
 
     fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, per_group_bindings: PerGroupBindings) {
@@ -1501,19 +1495,7 @@ impl<B: hal::Backend> Device<B> {
             self.bind_per_group_textures_impl(*descriptor_group, per_group_bindings);
         }
         self.bound_per_group_textures = per_group_bindings;
-        if self.bound_program != INVALID_PROGRAM_ID {
-            unsafe {
-                let descriptor_group = self.bound_program.1;
-                self.command_buffer.bind_graphics_descriptor_sets(
-                    self.descriptor_data.pipeline_layout(&descriptor_group),
-                    DESCRIPTOR_SET_PER_GROUP,
-                    self
-                        .bound_per_group_descriptors[descriptor_group as usize]
-                        .as_ref().map(|descriptor| descriptor.raw()),
-                    &[],
-                );
-            }
-        }
+        self.rebind_descriptors = true;
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
@@ -1687,17 +1669,7 @@ impl<B: hal::Backend> Device<B> {
                     &[self.bound_projection],
                     self.next_id
                 );
-                if self.bound_program != INVALID_PROGRAM_ID {
-                    let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
-                    unsafe {
-                        self.command_buffer.bind_graphics_descriptor_sets(
-                            self.descriptor_data.pipeline_layout(&self.bound_program.1),
-                            DESCRIPTOR_SET_PER_TARGET,
-                            std::iter::once(desc_set_per_target),
-                            &[dynamic_offset],
-                        );
-                    }
-                }
+                self.rebind_descriptors = true;
             }
         }
 
