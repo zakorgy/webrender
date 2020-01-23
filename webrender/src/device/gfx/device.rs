@@ -68,7 +68,7 @@ use hal::pool::{CommandPool as HalCommandPool};
 use hal::queue::{QueueFamilyId};
 
 pub const INVALID_TEXTURE_ID: TextureId = 0;
-pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0);
+pub const INVALID_PROGRAM_ID: ProgramId = ProgramId(0, DescriptorGroup::Invalid);
 pub const DEFAULT_READ_FBO: FBOId = FBOId(0);
 pub const DEFAULT_DRAW_FBO: FBOId = FBOId(1);
 pub const DEBUG_READ_FBO: FBOId = FBOId(2);
@@ -159,7 +159,7 @@ impl Texture {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
-pub struct ProgramId(u32);
+pub struct ProgramId(u32, DescriptorGroup);
 
 pub struct VAO;
 
@@ -259,6 +259,7 @@ pub struct Device<B: hal::Backend> {
     // device state
     programs: FastHashMap<ProgramId, Program<B>>,
     blit_programs: FastHashMap<hal::image::ViewKind, Program<B>>,
+    next_program_id: u32,
     shader_modules: FastHashMap<String, (B::ShaderModule, B::ShaderModule)>,
     images: FastHashMap<TextureId, Image<B>>,
     pub(crate) gpu_cache_buffer: Option<GpuCacheBuffer<B>>,
@@ -596,6 +597,7 @@ impl<B: hal::Backend> Device<B> {
                     (COMMON_SET_2, vec![]),
                     (COMMON_SET_3, vec![]),
                 ],
+                DescriptorGroup::Invalid => unimplemented!(),
             };
 
             let ranges = layouts_and_samplers
@@ -744,6 +746,7 @@ impl<B: hal::Backend> Device<B> {
 
             programs: FastHashMap::default(),
             blit_programs: FastHashMap::default(),
+            next_program_id: INVALID_PROGRAM_ID.0 + 1,
             shader_modules: FastHashMap::default(),
             images: FastHashMap::default(),
             gpu_cache_buffer: None,
@@ -1250,7 +1253,7 @@ impl<B: hal::Backend> Device<B> {
         features: &[&str],
     ) -> Result<ProgramId, ShaderError> {
         let program = self.create_program_inner(shader_name, shader_kind, features);
-        let id = self.generate_program_id();
+        let id = self.generate_program_id(DescriptorGroup::from(*shader_kind));
         self.programs.insert(id, program);
         Ok(id)
     }
@@ -1267,6 +1270,7 @@ impl<B: hal::Backend> Device<B> {
 
     pub fn bind_program(&mut self, program_id: &ProgramId) {
         debug_assert!(self.inside_frame);
+        let pipeline_layout_changed = self.bound_program.1 != program_id.1;
         self.bound_program = *program_id;
         let program = self.programs
             .get(&self.bound_program)
@@ -1282,13 +1286,48 @@ impl<B: hal::Backend> Device<B> {
                 &program
                     .pipelines
                     .get(&(format, blend_state, self.render_pass_depth_state, self.current_depth_test))
-                    .expect(&format!(
-                        "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
-                        blend_state, self.current_depth_test, self.render_pass_depth_state, format, program.shader_name
-                    )),
+                    .expect(
+                        // Creating this string takes a lot of time, so we only enable it in debug
+                        #[cfg(debug_assertions)]
+                        &format!(
+                            "The blend state {:?} with depth test {:?} and render_pass_depth_state {:?} and format {:?} not found for {} program!",
+                            blend_state, self.current_depth_test, self.render_pass_depth_state, format, program.shader_name
+                        ),
+                        #[cfg(not(debug_assertions))]
+                        "Pipeline not found"
+                    ),
             );
             if let Some(SUBPIXEL_CONSTANT_TEXT_COLOR) = blend_state  {
                 self.command_buffer.set_blend_constants(self.blend_color.to_array());
+            }
+            if pipeline_layout_changed {
+                use std::iter;
+                let descriptor_group = self.bound_program.1;
+
+                let desc_set_per_frame = self
+                    .bound_per_group_descriptors[descriptor_group as usize]
+                    .as_ref()
+                    .unwrap()
+                    .raw();
+                let (desc_set_per_pass, first_ds_slot) = match descriptor_group {
+                    DescriptorGroup::Primitive => (
+                        self.bound_per_pass_descriptor.as_ref().map(|d| d.raw()),
+                        DESCRIPTOR_SET_PER_PASS,
+                    ),
+                    _ => (None, DESCRIPTOR_SET_PER_GROUP),
+                };
+        
+                let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
+
+                self.command_buffer.bind_graphics_descriptor_sets(
+                    self.descriptor_data.pipeline_layout(&descriptor_group),
+                    first_ds_slot,
+                    desc_set_per_pass
+                        .into_iter()
+                        .chain(iter::once(desc_set_per_frame))
+                        .chain(iter::once(desc_set_per_target)),
+                    &[dynamic_offset],
+                );
             }
         }
         #[cfg(debug_assertions)]
@@ -1369,6 +1408,16 @@ impl<B: hal::Backend> Device<B> {
             &mut self.per_pass_descriptors,
         );
         self.bound_per_pass_textures = per_pass_bindings;
+        if self.bound_program.1 == DescriptorGroup::Primitive {
+            unsafe {
+                self.command_buffer.bind_graphics_descriptor_sets(
+                    self.descriptor_data.pipeline_layout(&self.bound_program.1),
+                    DESCRIPTOR_SET_PER_PASS,
+                    self.bound_per_pass_descriptor.as_ref().map(|d| d.raw()),
+                    &[],
+                );
+            }
+        }
     }
 
     fn bind_per_group_textures_impl(&mut self, descriptor_group: DescriptorGroup, per_group_bindings: PerGroupBindings) {
@@ -1390,6 +1439,7 @@ impl<B: hal::Backend> Device<B> {
                 DescriptorGroup::Default => PER_GROUP_RANGE_DEFAULT,
                 DescriptorGroup::Clip => PER_GROUP_RANGE_CLIP,
                 DescriptorGroup::Primitive => PER_GROUP_RANGE_PRIMITIVE,
+                DescriptorGroup::Invalid => unimplemented!(),
             },
             &self.sampler_linear,
             &self.sampler_nearest,
@@ -1407,13 +1457,7 @@ impl<B: hal::Backend> Device<B> {
         debug_assert!(self.inside_frame);
         assert_ne!(self.bound_program, INVALID_PROGRAM_ID);
 
-        let descriptor_group = {
-            let program = self
-                .programs
-                .get(&self.bound_program)
-                .expect("Program not found.");
-            program.shader_kind.into()
-        };
+        let descriptor_group = self.bound_program.1;
         let per_draw_bindings = PerDrawBindings(
             [
                 self.bound_textures[0],
@@ -1457,6 +1501,19 @@ impl<B: hal::Backend> Device<B> {
             self.bind_per_group_textures_impl(*descriptor_group, per_group_bindings);
         }
         self.bound_per_group_textures = per_group_bindings;
+        if self.bound_program != INVALID_PROGRAM_ID {
+            unsafe {
+                let descriptor_group = self.bound_program.1;
+                self.command_buffer.bind_graphics_descriptor_sets(
+                    self.descriptor_data.pipeline_layout(&descriptor_group),
+                    DESCRIPTOR_SET_PER_GROUP,
+                    self
+                        .bound_per_group_descriptors[descriptor_group as usize]
+                        .as_ref().map(|descriptor| descriptor.raw()),
+                    &[],
+                );
+            }
+        }
     }
 
     pub fn update_indices<I: Copy>(&mut self, indices: &[I]) {
@@ -1510,12 +1567,7 @@ impl<B: hal::Backend> Device<B> {
         assert!(self.inside_render_pass);
 
         assert_eq!(self.draw_target_usage, DrawTargetUsage::Draw);
-        let descriptor_group = self
-            .programs
-            .get(&self.bound_program)
-            .expect("Program not found")
-            .shader_kind
-            .into();
+        let descriptor_group = self.bound_program.1;
 
         let ref desc_set_per_group = self
             .bound_per_group_descriptors[descriptor_group as usize]
@@ -1634,7 +1686,18 @@ impl<B: hal::Backend> Device<B> {
                     self.device.as_ref(),
                     &[self.bound_projection],
                     self.next_id
-                )
+                );
+                if self.bound_program != INVALID_PROGRAM_ID {
+                    let(desc_set_per_target, dynamic_offset) = self.uniform_buffer_handler.buffer_info(self.next_id);
+                    unsafe {
+                        self.command_buffer.bind_graphics_descriptor_sets(
+                            self.descriptor_data.pipeline_layout(&self.bound_program.1),
+                            DESCRIPTOR_SET_PER_TARGET,
+                            std::iter::once(desc_set_per_target),
+                            &[dynamic_offset],
+                        );
+                    }
+                }
             }
         }
 
@@ -1816,13 +1879,9 @@ impl<B: hal::Backend> Device<B> {
         texture_id
     }
 
-    fn generate_program_id(&self) -> ProgramId {
-        let mut rng = rand::thread_rng();
-        let mut program_id = ProgramId(INVALID_PROGRAM_ID.0 + 1);
-        while self.programs.contains_key(&program_id) {
-            program_id =
-                ProgramId(rng.gen_range::<u32>(INVALID_PROGRAM_ID.0 + 1, u32::max_value()));
-        }
+    fn generate_program_id(&mut self, descriptor_group: DescriptorGroup) -> ProgramId {
+        let program_id = ProgramId(self.next_program_id, descriptor_group);
+        self.next_program_id += 1;
         program_id
     }
 

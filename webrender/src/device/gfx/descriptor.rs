@@ -108,6 +108,7 @@ pub(super) enum DescriptorGroup {
     Default,
     Clip,
     Primitive,
+    Invalid,
 }
 
 impl From<ShaderKind> for DescriptorGroup {

@@ -660,13 +660,9 @@ impl<B: hal::Backend> Program<B> {
             use std::iter;
             cmd_buffer.bind_graphics_descriptor_sets(
                 pipeline_layout,
-                if desc_set_per_pass.is_some() { 0 } else { 1 },
-                desc_set_per_pass
-                    .into_iter()
-                    .chain(iter::once(desc_set_per_frame))
-                    .chain(iter::once(desc_set_per_target))
-                    .chain(iter::once(desc_set_per_draw)),
-                &[dynamic_offset],
+                super::descriptor::DESCRIPTOR_SET_PER_DRAW,
+                iter::once(desc_set_per_draw),
+                &[],
             );
 
             match &self.index_buffer {
