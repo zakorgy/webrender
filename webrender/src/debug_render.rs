@@ -7,8 +7,10 @@ use api::units::*;
 use crate::debug_font_data;
 use crate::device::{create_projection, Device, Texture, TextureSlot, VertexDescriptor, ShaderError, VAO};
 use crate::device::{TextureFilter, VertexAttribute, VertexAttributeKind, VertexUsageHint};
-use euclid::{Point2D, Rect, Size2D, default};
+#[cfg(not(feature = "gl"))]
+use crate::device::TextureUsage;
 use crate::internal_types::Swizzle;
+use euclid::{Point2D, Rect, Size2D, default};
 use std::f32;
 
 cfg_if! {
@@ -205,7 +207,7 @@ impl DebugRenderer {
             TextureFilter::Linear,
             None,
             1,
-            false,
+            TextureUsage::DontCare,
         );
         device.upload_texture_immediate(
             &font_texture,

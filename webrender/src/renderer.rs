@@ -56,6 +56,8 @@ use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, Ve
              VertexUsageHint, VAO};
 use crate::device::{create_projection, DeviceInit, PrimitiveType, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
+#[cfg(not(feature = "gl"))]
+use crate::device::TextureUsage;
 use euclid::{rect, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
 use crate::glyph_cache::GlyphCache;
@@ -997,7 +999,7 @@ impl<B: hal::Backend> TextureResolver<B> {
                 TextureFilter::Linear,
                 None,
                 1,
-                false,
+                TextureUsage::DontCare,
             );
 
         device.upload_texture_immediate(
@@ -1366,7 +1368,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             TextureFilter::Nearest,
             rt_info,
             1,
-            false,
+            TextureUsage::DontCare,
         );
 
         // Blit the contents of the previous texture, if applicable.
@@ -1715,7 +1717,7 @@ impl<T, B: hal::Backend> VertexDataTexture<T, B> {
                 TextureFilter::Nearest,
                 None,
                 1,
-                false,
+                TextureUsage::DontCare,
             );
             self.texture = Some(texture);
         }
@@ -2161,7 +2163,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 None,
                 1,
-                false,
+                TextureUsage::DontCare,
             );
             device.upload_texture_immediate(&texture, &dither_matrix);
             device.bind_texture(TextureSampler::Dither, &texture, Swizzle::default());
@@ -3462,7 +3464,8 @@ impl<B: hal::Backend> Renderer<B> {
                                 // tasks get rendered into the texture cache.
                                 Some(RenderTargetInfo { has_depth: info.has_depth }),
                                 info.layer_count,
-                                false,
+                                // TODO add enum here like {render target and texture cache, where texture cache doesn't have image_views}
+                                TextureUsage::Cache,
                             );
 
                             if info.is_shared_cache {
@@ -5338,7 +5341,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Linear,
                 Some(rt_info),
                 list.targets.len() as _,
-                true,
+                TextureUsage::OffscreenTarget,
             )
         };
 
@@ -5940,7 +5943,7 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 Some(RenderTargetInfo { has_depth: false }),
                 1,
-                false,
+                TextureUsage::DontCare,
             );
 
             self.zoom_debug_texture = Some(texture);
@@ -6840,7 +6843,7 @@ impl<B: hal::Backend> Renderer<B> {
             plain.filter,
             rt_info,
             plain.size.1,
-            false,
+            TextureUsage::DontCare,
         );
         device.upload_texture_immediate(&texture, &texels);
 

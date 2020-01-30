@@ -47,7 +47,7 @@ use super::super::{BoundPBO, Capabilities};
 use super::super::{ShaderKind, ExternalTexture, GpuFrameId, TextureSlot, TextureFilter};
 use super::super::{VertexDescriptor, UploadMethod, Texel, TextureFlags, TextureFormatPair};
 use super::super::{
-    Texture, DrawTarget, ReadTarget, FBOId, RBOId, PBO, VertexUsageHint, ShaderError,
+    Texture, TextureUsage, DrawTarget, ReadTarget, FBOId, RBOId, PBO, VertexUsageHint, ShaderError,
     ShaderPrecacheFlags, SharedDepthTarget, ProgramCache,
 };
 use super::super::{depth_target_size_in_bytes, record_gpu_alloc, record_gpu_free};
@@ -833,7 +833,7 @@ impl<B: hal::Backend> Device<B> {
                     TextureFilter::Nearest,
                     Some(RenderTargetInfo { has_depth: true }),
                     1,
-                    false,
+                    TextureUsage::DontCare,
                 );
                 device.readback_textures.push(texture);
             }
@@ -1935,7 +1935,7 @@ impl<B: hal::Backend> Device<B> {
         filter: TextureFilter,
         render_target: Option<RenderTargetInfo>,
         layer_count: i32,
-        use_linear_alloc: bool,
+        texture_usage: TextureUsage,
     ) -> Texture {
         debug_assert!(self.inside_frame);
         assert!(!(width == 0 || height == 0 || layer_count == 0));
@@ -1995,7 +1995,7 @@ impl<B: hal::Backend> Device<B> {
             view_kind,
             mip_levels,
             usage,
-            if use_linear_alloc {
+            if texture_usage == TextureUsage::OffscreenTarget {
                 Some(&mut self.linear_memory)
             } else {
                 None

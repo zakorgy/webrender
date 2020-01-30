@@ -13,6 +13,8 @@ use api::units::*;
 use gleam::gl::GlType;
 
 use crate::device::{Device, PBO, DrawTarget, ReadTarget, Texture, TextureFilter};
+#[cfg(not(feature = "gl"))]
+use crate::device::TextureUsage;
 use crate::internal_types::RenderTargetInfo;
 use crate::renderer::Renderer;
 use crate::util::round_up_to_multiple;
@@ -260,7 +262,7 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
                 TextureFilter::Linear,
                 Some(RenderTargetInfo { has_depth: false }),
                 1,
-                false,
+                TextureUsage::DontCare,
             );
             if level == self.scaling_textures.len() {
                 self.scaling_textures.push(texture);
