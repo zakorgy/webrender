@@ -12,8 +12,10 @@ mod program;
 mod render_pass;
 pub(crate) mod vertex_types;
 
-pub use self::device::*;
 pub use self::buffer::{BufferMemorySlice, GpuCacheBuffer, PersistentlyMappedBuffer};
+pub use self::device::*;
+pub use self::image::PreAllocatedImage;
+pub use self::render_pass::HalRenderPasses;
 
 use hal;
 use crate::internal_types::FastHashMap;

@@ -244,7 +244,7 @@ pub struct Device<B: hal::Backend> {
     frame_depth: DepthBuffer<B>,
     swapchain_image_layouts: ArrayVec<[hal::image::Layout; MAX_FRAME_COUNT]>,
     readback_textures: ArrayVec<[Texture; MAX_FRAME_COUNT]>,
-    render_passes: HalRenderPasses<B>,
+    pub render_passes: Arc<HalRenderPasses<B>>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
     scissor_rect: hal::pso::Rect,
@@ -461,7 +461,7 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let render_passes =
-            HalRenderPasses::create_render_passes(&device, SURFACE_FORMAT, DEPTH_FORMAT);
+            Arc::new(HalRenderPasses::create_render_passes(&device, SURFACE_FORMAT, DEPTH_FORMAT));
 
         let (frame_depth, surface_format, dimensions, frame_count) =
             Self::init_drawables(&device, &mut heaps, &adapter, surface.as_mut(), dimensions);
@@ -1926,6 +1926,68 @@ impl<B: hal::Backend> Device<B> {
         }
     }
 
+    pub fn texture_from_preallocated(
+        &mut self,
+        pre_allocated: PreAllocatedImage<B>,
+    ) -> Texture {
+        let PreAllocatedImage {
+            image,
+            dimensions,
+            mut frame_buffers,
+            rt_info,
+        } = pre_allocated;
+
+        let mut texture = Texture {
+            id: self.generate_texture_id(),
+            target: TextureTarget::Array as _,
+            size: dimensions,
+            layer_count: frame_buffers.len() as _,
+            format: image.format,
+            filter: TextureFilter::Linear,
+            fbos: vec![],
+            fbos_with_depth: vec![],
+            last_frame_used: self.frame_id,
+            bound_in_frame: Cell::new(GpuFrameId(0)),
+            flags: TextureFlags::default(),
+            is_buffer: false,
+            active_swizzle: Cell::default(),
+            blit_workaround_buffer: None,
+        };
+
+        unsafe {
+            if let Some((barrier, pipeline_stages)) = image.core.transit(
+                (
+                    hal::image::Access::SHADER_READ,
+                    hal::image::Layout::ShaderReadOnlyOptimal,
+                ),
+                image.core.subresource_range.clone(),
+            ) {
+                // TODO: collect these transitions and execute them together
+                self.command_buffer.pipeline_barrier(
+                    pipeline_stages,
+                    hal::memory::Dependencies::empty(),
+                    &[barrier],
+                );
+            }
+        }
+
+        self.images.insert(texture.id, image);
+
+        let fbo_ids = self.generate_fbo_ids(frame_buffers.len() as _);
+        for (i, mut fb) in frame_buffers.drain(..).enumerate() {
+            fb.texture_id = texture.id;
+            self.fbos.insert(fbo_ids[i], fb);
+        }
+        texture.fbos = fbo_ids.to_vec();
+        if rt_info.has_depth {
+            self.init_fbos(&mut texture, true);
+        }
+
+        record_gpu_alloc(texture.size_in_bytes());
+
+        texture
+    }
+
     pub fn create_texture(
         &mut self,
         target: TextureTarget,
@@ -2043,15 +2105,20 @@ impl<B: hal::Backend> Device<B> {
         };
 
         for i in 0..texture.layer_count as u16 {
-            let fbo = Framebuffer::new(
+            let mut fbo = Framebuffer::new(
                 self.device.as_ref(),
-                &texture,
+                hal::image::Extent {
+                    width: texture.size.width as _,
+                    height: texture.size.height as _,
+                    depth: 1,
+                },
                 &self.images.get(&texture.id).unwrap(),
                 i,
                 &self.render_passes,
                 rbo_id.clone(),
                 depth,
             );
+            fbo.texture_id = texture.id;
             self.fbos.insert(new_fbos[i as usize], fbo);
 
             if with_depth {
@@ -3863,7 +3930,9 @@ impl<B: hal::Backend> Device<B> {
                 self.device.destroy_shader_module(fs_module);
             }
             self.descriptor_data.deinit(self.device.as_ref());
-            self.render_passes.deinit(self.device.as_ref());
+            if let Ok(render_passes) = Arc::try_unwrap(self.render_passes) {
+                render_passes.deinit(self.device.as_ref());
+            }
             for fence in self.frame_fence {
                 self.device.destroy_fence(fence.inner);
             }

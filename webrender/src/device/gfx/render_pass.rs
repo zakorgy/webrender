@@ -6,7 +6,7 @@ use api::ImageFormat;
 use hal::device::Device;
 use hal::image::Layout;
 
-pub(super) struct HalRenderPasses<B: hal::Backend> {
+pub struct HalRenderPasses<B: hal::Backend> {
     // passes of inermediate targets
     pub(super) r8: B::RenderPass,
     pub(super) r8_clear: B::RenderPass,
@@ -27,7 +27,7 @@ pub(super) struct HalRenderPasses<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> HalRenderPasses<B> {
-    pub(super) fn render_pass(
+    pub fn render_pass(
         &self,
         format: ImageFormat,
         depth_enabled: bool,

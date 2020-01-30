@@ -26,7 +26,7 @@ use crate::clip_scroll_tree::SpatialNodeIndex;
 #[cfg(feature = "debugger")]
 use crate::debug_server;
 #[cfg(not(feature = "gl"))]
-use crate::device::PersistentlyMappedBuffer;
+use crate::device::{HalRenderPasses, PersistentlyMappedBuffer, PreAllocatedImage};
 use crate::frame_builder::{FrameBuilder, FrameBuilderConfig};
 use crate::glyph_rasterizer::{FontInstance};
 use crate::gpu_cache::GpuCache;
@@ -700,6 +700,8 @@ pub struct RenderBackend<B: hal::Backend> {
     gpu_cache_buffer: Option<PersistentlyMappedBuffer<B>>,
     #[cfg(not(feature = "gl"))]
     send_buffer_handle_to_renderer: bool,
+    #[cfg(not(feature = "gl"))]
+    render_passes: Arc<HalRenderPasses<B>>,
 
     api_rx: MsgReceiver<ApiMsg>,
     payload_rx: Receiver<Payload>,
@@ -791,6 +793,7 @@ impl<B: hal::Backend> RenderBackend<B> {
         namespace_alloc_by_client: bool,
         device: Arc<B::Device>,
         heaps: Weak<Mutex<Heaps<B>>>,
+        render_passes: Arc<HalRenderPasses<B>>,
         non_coherent_atom_size_mask: u64,
     ) -> RenderBackend<B> {
         let heaps_strong = heaps.upgrade().unwrap();
@@ -805,6 +808,7 @@ impl<B: hal::Backend> RenderBackend<B> {
         RenderBackend {
             device,
             heaps,
+            render_passes,
             gpu_cache_buffer,
             send_buffer_handle_to_renderer: true,
             api_rx,

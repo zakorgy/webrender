@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{units::DeviceIntRect, ImageFormat};
+use api::{channel::MsgSender, units::{DeviceIntRect, DeviceIntSize}, ImageFormat};
+use crate::internal_types::RenderTargetInfo;
 use hal::{self, device::Device as BackendDevice};
 use hal::command::CommandBuffer;
 use hal::image::{Layout, Access};
@@ -416,30 +417,24 @@ pub(super) struct Framebuffer<B: hal::Backend> {
 impl<B: hal::Backend> Framebuffer<B> {
     pub(super) fn new(
         device: &B::Device,
-        texture: &Texture,
+        extent: hal::image::Extent,
         image: &Image<B>,
         layer_index: u16,
         render_passes: &HalRenderPasses<B>,
         rbo: RBOId,
         depth: Option<&B::ImageView>,
     ) -> Self {
-        let extent = hal::image::Extent {
-            width: texture.size.width as _,
-            height: texture.size.height as _,
-            depth: 1,
-        };
-        let format = match texture.format {
-            ImageFormat::R8 => hal::format::Format::R8Unorm,
-            ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
-            ImageFormat::RGBA8 => hal::format::Format::Rgba8Unorm,
-            ImageFormat::RGBAF32 => hal::format::Format::Rgba32Sfloat,
-            f => unimplemented!("TODO image format missing {:?}", f),
-        };
         let image_view = unsafe {
             device.create_image_view(
                 &image.core.image,
                 hal::image::ViewKind::D2Array,
-                format,
+                match image.format {
+                    ImageFormat::R8 => hal::format::Format::R8Unorm,
+                    ImageFormat::BGRA8 => hal::format::Format::Bgra8Unorm,
+                    ImageFormat::RGBA8 => hal::format::Format::Rgba8Unorm,
+                    ImageFormat::RGBAF32 => hal::format::Format::Rgba32Sfloat,
+                    f => unimplemented!("TODO image format missing {:?}", f),
+                },
                 hal::format::Swizzle::NO,
                 hal::image::SubresourceRange {
                     aspects: hal::format::Aspects::COLOR,
@@ -452,13 +447,13 @@ impl<B: hal::Backend> Framebuffer<B> {
         let fbo = unsafe {
             if rbo != RBOId(0) {
                 device.create_framebuffer(
-                    render_passes.render_pass(texture.format, true, false),
+                    render_passes.render_pass(image.format, true, false),
                     Some(&image_view).into_iter().chain(depth.into_iter()),
                     extent,
                 )
             } else {
                 device.create_framebuffer(
-                    render_passes.render_pass(texture.format, false, false),
+                    render_passes.render_pass(image.format, false, false),
                     Some(&image_view),
                     extent,
                 )
@@ -467,9 +462,9 @@ impl<B: hal::Backend> Framebuffer<B> {
         .expect("create_framebuffer failed");
 
         Framebuffer {
-            texture_id: texture.id,
+            texture_id: 0,
             layer_index,
-            format: texture.format,
+            format: image.format,
             image_view,
             fbo,
             rbo,
@@ -513,5 +508,61 @@ impl<B: hal::Backend> DepthBuffer<B> {
 
     pub(super) fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         unsafe { self.core.deinit(device, heaps) };
+    }
+}
+
+pub struct PreAllocatedImage<B: hal::Backend> {
+    pub(super) image: Image<B>,
+    pub(super) dimensions: DeviceIntSize,
+    pub(super) rt_info: RenderTargetInfo,
+    pub(super) frame_buffers: Vec<Framebuffer<B>>,
+}
+
+impl<B: hal::Backend> PreAllocatedImage<B> {
+    pub fn new(
+        device: &B::Device,
+        heaps: &mut Heaps<B>,
+        render_passes: &HalRenderPasses<B>,
+        format: ImageFormat,
+        dimensions: DeviceIntSize,
+        layer_count: i32,
+        rt_info: RenderTargetInfo,
+    ) -> Self {
+        let image = Image::new(
+            device,
+            heaps,
+            format,
+            dimensions.width as _,
+            dimensions.height as _,
+            layer_count,
+            hal::image::ViewKind::D2Array,
+            1,
+            hal::image::Usage::TRANSFER_SRC
+            | hal::image::Usage::TRANSFER_DST
+            | hal::image::Usage::SAMPLED
+            | hal::image::Usage::COLOR_ATTACHMENT,
+        );
+        let frame_buffers = (0..layer_count).into_iter().map(|l| {
+            Framebuffer::new(
+                device,
+                hal::image::Extent {
+                    width: dimensions.width as _,
+                    height: dimensions.height as _,
+                    depth: 1,
+                },
+                &image,
+                l as u16,
+                &render_passes,
+                RBOId(0),
+                None,
+            )
+        }).collect();
+
+        PreAllocatedImage{
+            image,
+            dimensions,
+            rt_info,
+            frame_buffers,
+        }
     }
 }

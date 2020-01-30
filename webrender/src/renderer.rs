@@ -2337,6 +2337,8 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(not(feature = "gl"))]
         let heaps_clone = Arc::downgrade(&device.heaps);
         #[cfg(not(feature = "gl"))]
+        let render_passes_clone = Arc::clone(&device.render_passes);
+        #[cfg(not(feature = "gl"))]
         let non_coherent_atom_size_mask = (device.limits.non_coherent_atom_size - 1) as u64;
         thread::Builder::new().name(rb_thread_name.clone()).spawn(move || {
             register_thread_with_profiler(rb_thread_name.clone());
@@ -2391,6 +2393,8 @@ impl<B: hal::Backend> Renderer<B> {
                 device_clone,
                 #[cfg(not(feature = "gl"))]
                 heaps_clone,
+                #[cfg(not(feature = "gl"))]
+                render_passes_clone,
                 #[cfg(not(feature = "gl"))]
                 non_coherent_atom_size_mask,
             );
