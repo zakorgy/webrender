@@ -1186,10 +1186,17 @@ impl<B: hal::Backend> RenderBackend<B> {
 
                 self.gpu_cache.clear();
 
-                let pending_update = self.resource_cache.pending_updates();
+                // TODO
+                let mut pending_update = self.resource_cache.pending_updates();
+                let pre_allocated_images = pending_update.pre_alloc(
+                    self.device.as_ref(),
+                    &mut self.heaps.upgrade().unwrap().lock().unwrap(),
+                    self.render_passes.as_ref(),
+                );
                 let msg = ResultMsg::UpdateResources {
                     updates: pending_update,
                     memory_pressure: true,
+                    pre_allocated_images,
                 };
                 self.result_tx.send(msg).unwrap();
                 self.notifier.wake_up();
@@ -1607,7 +1614,7 @@ impl<B: hal::Backend> RenderBackend<B> {
             doc.rendered_frame_is_valid = false;
 
             // borrow ck hack for profile_counters
-            let (pending_update, rendered_document) = {
+            let (mut pending_update, rendered_document) = {
                 let _timer = profile_counters.total_time.timer();
                 let frame_build_start_time = precise_time_ns();
 
@@ -1674,12 +1681,19 @@ impl<B: hal::Backend> RenderBackend<B> {
             let msg = ResultMsg::PublishPipelineInfo(doc.updated_pipeline_info());
             self.result_tx.send(msg).unwrap();
 
+            let pre_allocated_images = pending_update.pre_alloc(
+                self.device.as_ref(),
+                &mut self.heaps.upgrade().unwrap().lock().unwrap(),
+                self.render_passes.as_ref(),
+            );
+
             // Publish the frame
             let msg = ResultMsg::PublishDocument(
                 document_id,
                 rendered_document,
                 pending_update,
-                profile_counters.clone()
+                profile_counters.clone(),
+                pre_allocated_images,
             );
             self.result_tx.send(msg).unwrap();
             profile_counters.reset();
@@ -2015,10 +2029,17 @@ impl<B: hal::Backend> RenderBackend<B> {
 
         config.serialize(&backend, "backend");
 
+
+        let pre_allocated_images = self.resource_cache.pending_updates().pre_alloc(
+            self.device.as_ref(),
+            &mut self.heaps.upgrade().unwrap().lock().unwrap(),
+            self.render_passes.as_ref(),
+        );
         if config.bits.contains(CaptureBits::FRAME) {
             let msg_update_resources = ResultMsg::UpdateResources {
                 updates: self.resource_cache.pending_updates(),
                 memory_pressure: false,
+                pre_allocated_images,
             };
             self.result_tx.send(msg_update_resources).unwrap();
             // Save the texture/glyph/image caches.
@@ -2129,11 +2150,17 @@ impl<B: hal::Backend> RenderBackend<B> {
                     };
                     self.result_tx.send(msg_update).unwrap();
 
+                    let pre_allocated_images = self.resource_cache.pending_updates().pre_alloc(
+                        self.device.as_ref(),
+                        &mut self.heaps.upgrade().unwrap().lock().unwrap(),
+                        self.render_passes.as_ref(),
+                    );
                     let msg_publish = ResultMsg::PublishDocument(
                         id,
                         RenderedDocument { frame, is_new_scene: true },
                         self.resource_cache.pending_updates(),
                         profile_counters.clone(),
+                        pre_allocated_images,
                     );
                     self.result_tx.send(msg_publish).unwrap();
                     profile_counters.reset();

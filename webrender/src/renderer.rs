@@ -57,7 +57,7 @@ use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, Ve
 use crate::device::{create_projection, DeviceInit, PrimitiveType, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
 #[cfg(not(feature = "gl"))]
-use crate::device::TextureUsage;
+use crate::device::{TextureUsage, PreAllocatedImage};
 use euclid::{rect, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
 use crate::glyph_cache::GlyphCache;
@@ -1839,6 +1839,7 @@ pub struct Renderer<B: hal::Backend> {
     debug_server: Box<dyn DebugServer>,
     pub device: Device<B>,
     pending_texture_updates: Vec<TextureUpdateList>,
+    pre_allocated_images: FastHashMap<CacheTextureId, Option<PreAllocatedImage<B>>>,
     pending_gpu_cache_updates: Vec<GpuCacheUpdateList>,
     pending_gpu_cache_clear: bool,
     new_gpu_cache_bus: Option<GpuCacheBus>,
@@ -2429,6 +2430,7 @@ impl<B: hal::Backend> Renderer<B> {
             device,
             active_documents: Vec::new(),
             pending_texture_updates: Vec::new(),
+            pre_allocated_images: FastHashMap::default(),
             pending_gpu_cache_updates: Vec::new(),
             pending_gpu_cache_clear: false,
             new_gpu_cache_bus: None,
@@ -2585,6 +2587,7 @@ impl<B: hal::Backend> Renderer<B> {
                     doc,
                     texture_update_list,
                     profile_counters,
+                    pre_allocated_images,
                 ) => {
                     if doc.is_new_scene {
                         self.new_scene_indicator.changed();
@@ -2618,6 +2621,7 @@ impl<B: hal::Backend> Renderer<B> {
 
                     //TODO: associate `document_id` with target window
                     self.pending_texture_updates.push(texture_update_list);
+                    self.pre_allocated_images.extend(pre_allocated_images.into_iter());
                     self.backend_profile_counters = profile_counters;
                     self.documents_seen.insert(document_id);
                 }
@@ -2650,8 +2654,10 @@ impl<B: hal::Backend> Renderer<B> {
                 ResultMsg::UpdateResources {
                     updates,
                     memory_pressure,
+                    pre_allocated_images,
                 } => {
                     self.pending_texture_updates.push(updates);
+                    self.pre_allocated_images.extend(pre_allocated_images.into_iter());
                     self.device.begin_frame();
 
                     self.update_texture_cache();
@@ -3458,7 +3464,7 @@ impl<B: hal::Backend> Renderer<B> {
                             //
                             // Ensure no PBO is bound when creating the texture storage,
                             // or GL will attempt to read data from there.
-                            let mut texture = self.device.create_texture(
+                            let mut texture = /*self.device.create_texture(
                                 TextureTarget::Array,
                                 info.format,
                                 info.width,
@@ -3470,6 +3476,9 @@ impl<B: hal::Backend> Renderer<B> {
                                 info.layer_count,
                                 // TODO add enum here like {render target and texture cache, where texture cache doesn't have image_views}
                                 TextureUsage::Cache,
+                            );*/
+                            self.device.texture_from_preallocated(
+                                self.pre_allocated_images.remove(&allocation.id).unwrap().unwrap()
                             );
 
                             if info.is_shared_cache {

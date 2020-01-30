@@ -541,8 +541,9 @@ impl<B: hal::Backend> PreAllocatedImage<B> {
             | hal::image::Usage::TRANSFER_DST
             | hal::image::Usage::SAMPLED
             | hal::image::Usage::COLOR_ATTACHMENT,
+            None,
         );
-        let frame_buffers = (0..layer_count).into_iter().map(|l| {
+        let frame_buffers = (0..layer_count).into_iter().map(|layer_index| {
             Framebuffer::new(
                 device,
                 hal::image::Extent {
@@ -551,7 +552,7 @@ impl<B: hal::Backend> PreAllocatedImage<B> {
                     depth: 1,
                 },
                 &image,
-                l as u16,
+                layer_index as u16,
                 &render_passes,
                 RBOId(0),
                 None,

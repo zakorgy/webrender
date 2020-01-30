@@ -22,6 +22,11 @@ use std::f32;
 use std::hash::BuildHasherDefault;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(not(feature = "gl"))]
+use crate::device::{HalRenderPasses, PreAllocatedImage};
+use gfx_hal::Backend;
+#[cfg(not(feature = "gl"))]
+use rendy_memory::Heaps;
 
 #[cfg(feature = "capture")]
 use crate::capture::{CaptureConfig, ExternalCaptureImage};
@@ -313,6 +318,34 @@ pub struct TextureCacheAllocation {
     pub kind: TextureCacheAllocationKind,
 }
 
+#[cfg(not(feature = "gl"))]
+impl TextureCacheAllocation {
+    fn pre_alloc<B: hal::Backend>(
+        &mut self,
+        device: &B::Device,
+        heaps: &mut Heaps<B>,
+        render_passes: &HalRenderPasses<B>,
+    ) -> (CacheTextureId, Option<PreAllocatedImage<B>>) {
+       let image = match self.kind {
+            TextureCacheAllocationKind::Alloc(ref info)
+            | TextureCacheAllocationKind::Realloc(ref info)
+            | TextureCacheAllocationKind::Reset(ref info) => {
+                Some(PreAllocatedImage::new(
+                    device,
+                    heaps,
+                    render_passes,
+                    info.format,
+                    DeviceIntSize::new(info.width, info.height),
+                    info.layer_count,
+                    RenderTargetInfo { has_depth: info.has_depth },
+                ))
+            },
+            TextureCacheAllocationKind::Free => None,
+        };
+        (self.id, image)
+    }
+}
+
 /// Information used when allocating / reallocating.
 #[derive(Debug)]
 pub struct TextureCacheAllocInfo {
@@ -378,6 +411,21 @@ impl TextureUpdateList {
             allocations: Vec::new(),
             updates: Vec::new(),
         }
+    }
+
+    pub fn pre_alloc<B: hal::Backend>(
+        &mut self,
+        device: &B::Device,
+        heaps: &mut Heaps<B>,
+        render_passes: &HalRenderPasses<B>,
+    ) -> HashMap<CacheTextureId, Option<PreAllocatedImage<B>>> {
+        self.allocations.iter_mut().map(|alloc| {
+            alloc.pre_alloc(
+                device,
+                heaps,
+                render_passes,
+            )
+        }).collect()
     }
 
     /// Sets the clears_shared_cache flag for renderer-side sanity checks.
@@ -531,6 +579,7 @@ pub enum ResultMsg<B: hal::Backend> {
     UpdateResources {
         updates: TextureUpdateList,
         memory_pressure: bool,
+        pre_allocated_images: HashMap<CacheTextureId, Option<PreAllocatedImage<B>>>,
     },
     PublishPipelineInfo(PipelineInfo),
     PublishDocument(
@@ -538,6 +587,7 @@ pub enum ResultMsg<B: hal::Backend> {
         RenderedDocument,
         TextureUpdateList,
         BackendProfileCounters,
+        HashMap<CacheTextureId, Option<PreAllocatedImage<B>>>,
     ),
     AppendNotificationRequests(Vec<NotificationRequest>),
     #[cfg(not(feature = "gl"))]
