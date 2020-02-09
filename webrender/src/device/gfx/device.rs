@@ -243,7 +243,7 @@ pub struct Device<B: hal::Backend> {
     frame: Option<Frame<B>>,
     frame_depth: DepthBuffer<B>,
     swapchain_image_layouts: ArrayVec<[hal::image::Layout; MAX_FRAME_COUNT]>,
-    readback_textures: ArrayVec<[Texture; MAX_FRAME_COUNT]>,
+    readback_texture: Option<Texture>,
     render_passes: HalRenderPasses<B>,
     pub frame_count: usize,
     pub viewport: hal::pso::Viewport,
@@ -709,7 +709,7 @@ impl<B: hal::Backend> Device<B> {
             command_buffer,
             staging_buffer_pool,
             render_passes,
-            readback_textures: ArrayVec::new(),
+            readback_texture: None,
             frame: None,
             frame_depth,
             swapchain_image_layouts,
@@ -815,18 +815,16 @@ impl<B: hal::Backend> Device<B> {
 
         if readback_supported || device.headless_mode() {
             device.inside_frame = true;
-            for _ in 0..device.frame_count {
-                let texture = device.create_texture(
-                    TextureTarget::Default,
-                    ImageFormat::BGRA8,
-                    device.dimensions.0 as i32,
-                    device.dimensions.1 as i32,
-                    TextureFilter::Nearest,
-                    Some(RenderTargetInfo { has_depth: true }),
-                    1,
-                );
-                device.readback_textures.push(texture);
-            }
+            let texture = device.create_texture(
+                TextureTarget::Default,
+                ImageFormat::BGRA8,
+                device.dimensions.0 as i32,
+                device.dimensions.1 as i32,
+                TextureFilter::Nearest,
+                Some(RenderTargetInfo { has_depth: true }),
+                1,
+            );
+            device.readback_texture = Some(texture);
             device.inside_frame = false;
         }
         device
@@ -975,51 +973,69 @@ impl<B: hal::Backend> Device<B> {
                 );
             }
         }
-        let ref mut heaps = *self.heaps.lock().unwrap();
+        {
+            let ref mut heaps = *self.heaps.lock().unwrap();
 
-        Self::replace_active_descriptor_set_and_reset_handler(
-            &mut self.bound_per_draw_descriptor,
-            None,
-            &mut self.bound_per_draw_textures,
-            &mut self.per_draw_descriptors
-        );
-
-        Self::replace_active_descriptor_set_and_reset_handler(
-            &mut self.bound_per_pass_descriptor,
-            None,
-            &mut self.bound_per_pass_textures,
-            &mut self.per_pass_descriptors
-        );
-
-        for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
-            Self::replace_active_descriptor_set(
-                &mut self.bound_per_group_descriptors[*descriptor_group as usize],
+            Self::replace_active_descriptor_set_and_reset_handler(
+                &mut self.bound_per_draw_descriptor,
                 None,
-                &(*descriptor_group, self.bound_per_group_textures),
-                &mut self.per_group_descriptors,
+                &mut self.bound_per_draw_textures,
+                &mut self.per_draw_descriptors
             );
+
+            Self::replace_active_descriptor_set_and_reset_handler(
+                &mut self.bound_per_pass_descriptor,
+                None,
+                &mut self.bound_per_pass_textures,
+                &mut self.per_pass_descriptors
+            );
+
+            for descriptor_group in [DescriptorGroup::Default, DescriptorGroup::Clip, DescriptorGroup::Primitive].iter() {
+                Self::replace_active_descriptor_set(
+                    &mut self.bound_per_group_descriptors[*descriptor_group as usize],
+                    None,
+                    &(*descriptor_group, self.bound_per_group_textures),
+                    &mut self.per_group_descriptors,
+                );
+            }
+            Self::reset_descriptor_key_and_handler(&mut self.bound_per_group_textures, &mut self.per_group_descriptors);
+
+            self.uniform_buffer_handler.reset(self.next_id);
+
+            let (frame_depth, surface_format, dimensions, _frame_count) = Self::init_drawables(
+                self.device.as_ref(),
+                heaps,
+                &self.adapter,
+                self.surface.as_mut(),
+                window_size.unwrap_or(self.dimensions),
+            );
+
+            if let Some(old_frame) = self.frame.take() {
+                old_frame.deinit(self.device.as_ref());
+            }
+            let old_depth = mem::replace(&mut self.frame_depth, frame_depth);
+            old_depth.deinit(self.device.as_ref(), heaps);
+            self.dimensions = dimensions;
+            self.surface_format = surface_format;
         }
-        Self::reset_descriptor_key_and_handler(&mut self.bound_per_group_textures, &mut self.per_group_descriptors);
 
-        self.uniform_buffer_handler.reset(self.next_id);
-
-        let (frame_depth, surface_format, dimensions, _frame_count) = Self::init_drawables(
-            self.device.as_ref(),
-            heaps,
-            &self.adapter,
-            self.surface.as_mut(),
-            window_size.unwrap_or(self.dimensions),
-        );
-
-        if let Some(old_frame) = self.frame.take() {
-            old_frame.deinit(self.device.as_ref());
-        }
-        let old_depth = mem::replace(&mut self.frame_depth, frame_depth);
-        old_depth.deinit(self.device.as_ref(), heaps);
-        self.dimensions = dimensions;
-        self.surface_format = surface_format;
         for layout in self.swapchain_image_layouts.iter_mut() {
             *layout = hal::image::Layout::Undefined;
+        }
+
+        let old_readback_texture = self.readback_texture.take();
+        if let Some(texture) = old_readback_texture {
+            self.free_texture_unconditionaly(texture);
+            let texture = self.create_texture(
+                TextureTarget::Default,
+                ImageFormat::BGRA8,
+                self.dimensions.0 as i32,
+                self.dimensions.1 as i32,
+                TextureFilter::Nearest,
+                Some(RenderTargetInfo { has_depth: true }),
+                1,
+            );
+            self.readback_texture = Some(texture);
         }
 
         (
@@ -1651,7 +1667,7 @@ impl<B: hal::Backend> Device<B> {
         }
 
         let fbo_id = if fbo_id == DEFAULT_DRAW_FBO && self.headless_mode() {
-            self.readback_textures[self.next_id].fbos_with_depth[0]
+            self.readback_texture.as_ref().unwrap().fbos_with_depth[0]
         } else {
             fbo_id
         };
@@ -1711,7 +1727,7 @@ impl<B: hal::Backend> Device<B> {
                 (DEFAULT_DRAW_FBO, rect, true)
             }
             DrawTarget::ReadBack { rect, .. } => {
-                let texture = &self.readback_textures[self.next_id];
+                let texture = &self.readback_texture.as_ref().unwrap();
                 let fbo_id = texture.fbos_with_depth[0];
                 if self.bound_draw_fbo != fbo_id {
                     let image = &self.images[&texture.id].core;
@@ -2840,12 +2856,11 @@ impl<B: hal::Backend> Device<B> {
             let layer = fbo.layer_index;
             (&img.core, img.format, layer)
         } else {
-            if self.readback_textures.is_empty() {
+            if self.readback_texture.is_none() {
                 warn!("Readback mode disabled, can't read the content of the main FBO!");
                 return;
             }
-            let texture_id = (self.next_id + (self.frame_count - 1)) % self.frame_count;
-            let id = &self.readback_textures[texture_id].id;
+            let id = &self.readback_texture.as_ref().unwrap().id;
             (&self.images[&id].core, self.surface_format, 0)
         };
 
@@ -3706,7 +3721,7 @@ impl<B: hal::Backend> Device<B> {
         for texture in self.retained_textures.drain(..).collect::<Vec<_>>() {
             self.free_texture_unconditionaly(texture);
         }
-        for texture in self.readback_textures.drain(..).collect::<Vec<_>>() {
+        if let Some(texture) = self.readback_texture.take() {
             self.free_texture_unconditionaly(texture);
         }
         unsafe {
