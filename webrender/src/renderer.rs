@@ -1055,9 +1055,7 @@ impl<B: hal::Backend> TextureResolver<B> {
         // flush all the WebRender caches in that case [1].
         //
         // [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1494099
-        #[cfg(not(feature = "gl"))]
-        let frame_count = device.frame_count;
-        self.retain_targets(device, |texture| {
+        self.retain_targets(device, |_texture| {
             #[cfg(not(feature = "gl"))]
             {
                 false
@@ -1065,7 +1063,7 @@ impl<B: hal::Backend> TextureResolver<B> {
             #[cfg(feature = "gl")]
             {
                 let frame_treshold = 30;
-                texture.used_recently(frame_id, frame_treshold)
+                _texture.used_recently(frame_id, frame_treshold)
             }
         });
     }
@@ -5309,6 +5307,7 @@ impl<B: hal::Backend> Renderer<B> {
 
         // Try finding a match in the existing pool. If there's no match, we'll
         // create a new texture.
+        #[cfg(feature = "gl")]
         let selector = TargetSelector {
             size: dimensions,
             num_layers: list.targets.len(),

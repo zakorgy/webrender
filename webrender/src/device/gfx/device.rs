@@ -423,7 +423,6 @@ impl<B: hal::Backend> Device<B> {
 
         let limits = adapter.physical_device.limits();
         let max_texture_size = limits.max_image_2d_size as i32;
-        let buffer_image_granularity = limits.buffer_image_granularity;
 
         let (device, queue_group_family, queue_group_queues) = {
             use hal::queue::QueueFamily;
@@ -1184,7 +1183,6 @@ impl<B: hal::Backend> Device<B> {
         self.staging_buffer_pool[self.next_id].reset();
         self.instance_buffers[self.next_id].reset(&mut self.free_instance_buffers);
         self.delete_retained_textures();
-        self.render_target_memory.reset();
     }
 
     pub fn reset_state(&mut self) {
@@ -1994,6 +1992,13 @@ impl<B: hal::Backend> Device<B> {
                 usage_base | hal::image::Usage::COLOR_ATTACHMENT,
             ),
         };
+
+        let (memory, id) = if texture_usage == TextureUsage::OffScreenRenderTarget {
+            (Some(&mut self.render_target_memory), Some(texture.id))
+        } else {
+            (None, None)
+        };
+
         let img = Image::new(
             self.device.as_ref(),
             &mut *self.heaps.lock().unwrap(),
@@ -2004,11 +2009,8 @@ impl<B: hal::Backend> Device<B> {
             view_kind,
             mip_levels,
             usage,
-            if texture_usage == TextureUsage::OffScreenRenderTarget {
-                Some(&mut self.render_target_memory)
-            } else {
-                None
-            },
+            memory,
+            id,
         );
 
         unsafe {
@@ -2684,8 +2686,8 @@ impl<B: hal::Backend> Device<B> {
     ///
     /// FIXME(bholley): We could/should invalidate the depth targets earlier
     /// than the color targets, i.e. immediately after each pass.
-    pub fn invalidate_render_target(&mut self, _texture: &Texture) {
-        warn!("invalidate_render_target not implemented!");
+    pub fn invalidate_render_target(&mut self, texture: &Texture) {
+        self.render_target_memory.release_texture(texture.id);
     }
 
     /// Notifies the device that a render target is about to be reused.
