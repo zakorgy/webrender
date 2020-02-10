@@ -290,6 +290,7 @@ pub const ORTHO_FAR_PLANE: f32 = 0.0;
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTargetInfo {
     pub has_depth: bool,
+    pub persistent: bool,
 }
 
 #[derive(Debug)]

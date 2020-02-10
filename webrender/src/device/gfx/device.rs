@@ -48,7 +48,7 @@ use super::super::{ShaderKind, ExternalTexture, GpuFrameId, TextureSlot, Texture
 use super::super::{VertexDescriptor, UploadMethod, Texel, TextureFlags, TextureFormatPair};
 use super::super::{
     Texture, DrawTarget, ReadTarget, FBOId, RBOId, PBO, VertexUsageHint, ShaderError,
-    ShaderPrecacheFlags, SharedDepthTarget, ProgramCache, TextureUsage
+    ShaderPrecacheFlags, SharedDepthTarget, ProgramCache
 };
 use super::super::{depth_target_size_in_bytes, record_gpu_alloc, record_gpu_free};
 use super::super::super::shader_source;
@@ -828,9 +828,8 @@ impl<B: hal::Backend> Device<B> {
                 device.dimensions.0 as i32,
                 device.dimensions.1 as i32,
                 TextureFilter::Nearest,
-                Some(RenderTargetInfo { has_depth: true }),
+                Some(RenderTargetInfo { has_depth: true, persistent: true }),
                 1,
-                TextureUsage::DontCare,
             );
             device.readback_texture = Some(texture);
             device.inside_frame = false;
@@ -1040,7 +1039,7 @@ impl<B: hal::Backend> Device<B> {
                 self.dimensions.0 as i32,
                 self.dimensions.1 as i32,
                 TextureFilter::Nearest,
-                Some(RenderTargetInfo { has_depth: true }),
+                Some(RenderTargetInfo { has_depth: true, persistent: true }),
                 1,
             );
             self.readback_texture = Some(texture);
@@ -1942,7 +1941,6 @@ impl<B: hal::Backend> Device<B> {
         filter: TextureFilter,
         render_target: Option<RenderTargetInfo>,
         layer_count: i32,
-        texture_usage: TextureUsage,
     ) -> Texture {
         debug_assert!(self.inside_frame);
         assert!(!(width == 0 || height == 0 || layer_count == 0));
@@ -1993,10 +1991,9 @@ impl<B: hal::Backend> Device<B> {
             ),
         };
 
-        let (memory, id) = if texture_usage == TextureUsage::OffScreenRenderTarget {
-            (Some(&mut self.render_target_memory), Some(texture.id))
-        } else {
-            (None, None)
+        let (memory, id) = match render_target {
+            Some(RenderTargetInfo { has_depth: _, persistent}) if !persistent => (Some(&mut self.render_target_memory), Some(texture.id)),
+            _ => (None, None),
         };
 
         let img = Image::new(
