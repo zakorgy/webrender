@@ -9,6 +9,8 @@ use hal::image::{Layout, Access};
 use hal::pso::PipelineStage;
 use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
 
+use crate::internal_types::FastHashMap;
+
 use std::cell::Cell;
 use super::buffer::BufferPool;
 use super::render_pass::HalRenderPasses;
@@ -24,12 +26,41 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 /// The Vulkan spec states: bufferOffset must be a multiple of 4 for VkBufferImageCopy
 /// https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#VkBufferImageCopy
 const BUFFER_COPY_ALIGNMENT: i32 = 4;
+const RENDER_TARGET_MEMORY_SIZE: u64 = 128 << 20; // 128 MB
+
+struct MemoryRange(std::ops::Range<hal::buffer::Offset>);
+
+impl MemoryRange {
+    fn has_size(&self, allocation_size: hal::buffer::Offset) -> bool {
+        (self.0.end - self.0.start) >= allocation_size
+    }
+
+    fn split(self, size: hal::buffer::Offset) -> (Self, Self) {
+        (
+            MemoryRange(self.0.start .. self.0.start + size),
+            MemoryRange(self.0.start + size .. self.0.end)
+        )
+    }
+
+    fn can_merge(&self, other: &Self) -> bool {
+        self.0.end == other.0.start
+        || self.0.start == other.0.end
+    }
+
+    fn merge(self, other: Self) -> Self {
+        MemoryRange(
+            self.0.start.min(other.0.start)
+                .. self.0.end.max(other.0.end)
+        )
+    }
+}
 
 pub(super) struct LinearMemoryBlock<B: hal::Backend> {
     memory_block: MemoryBlock<B>,
-    offset: hal::buffer::Offset,
     alignment: u64,
     type_mask: u64,
+    free_chunks: Vec<MemoryRange>,
+    occupied: FastHashMap<TextureId, MemoryRange>,
 }
 
 impl<B: hal::Backend> LinearMemoryBlock<B> {
@@ -63,33 +94,71 @@ impl<B: hal::Backend> LinearMemoryBlock<B> {
             device,
             requirements.type_mask as _,
             MemoryUsageValue::Data,
-            192 << 20, //size 192 MB
+            RENDER_TARGET_MEMORY_SIZE,
             requirements.alignment,
         )
         .expect("Allocate memory failed");
+
+        let free_chunks = vec![MemoryRange(0..memory_block.size())];
+
         LinearMemoryBlock {
             memory_block,
-            offset: 0,
             alignment: requirements.alignment,
             type_mask: requirements.type_mask,
+            free_chunks,
+            occupied: FastHashMap::default(),
         }
     }
 
-    fn has_size(&self, allocation_size: u64) -> bool {
-        (self.memory_block.size() - self.offset) >= allocation_size
+    fn has_size(&self, allocation_size: u64) -> Option<usize> {
+        self.free_chunks
+            .iter()
+            .position(|r| r.has_size(allocation_size))
     }
 
-    fn add_offset(&mut self, size: u64) {
-        let offset_and_size = self.offset + size;
-        self.offset = if offset_and_size % self.alignment == 0 {
-            offset_and_size
-        } else {
-            ((offset_and_size / self.alignment) + 1) * self.alignment
-        };
+    fn bind_image(
+        &mut self,
+        device: &B::Device,
+        image: &mut B::Image,
+        size: hal::buffer::Offset,
+        texture_id: TextureId,
+    ) -> bool {
+        match self.has_size(size) {
+            Some(idx) => {
+                let mask = self.alignment - 1;
+                let size = (size + mask) & !mask;
+                let (chunk_use, chunk_free) = self.free_chunks.remove(idx).split(size);
+                unsafe {
+                    device
+                        .bind_image_memory(
+                            &self.memory_block.memory(),
+                            self.memory_block.range().start + chunk_use.0.start,
+                            image,
+                        )
+                        .expect("Bind image memory failed")
+                };
+                self.free_chunks.push(chunk_free);
+                self.occupied.insert(texture_id, chunk_use);
+                true
+            },
+            None => false,
+        }
     }
 
-    pub(super) fn reset(&mut self) {
-        self.offset = 0;
+    pub(super) fn release_texture(
+        &mut self,
+        id: TextureId,
+    ) {
+        if let Some(mut chunk) = self.occupied.remove(&id) {
+            while let Some(idx) = self
+                .free_chunks
+                .iter()
+                .position(|c| c.can_merge(&chunk)) {
+                    let free_chunk = self.free_chunks.remove(idx);
+                    chunk = chunk.merge(free_chunk);
+                }
+            self.free_chunks.push(chunk);
+        }
     }
 
     pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
@@ -143,6 +212,7 @@ impl<B: hal::Backend> ImageCore<B> {
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
         linear_memory: Option<&mut LinearMemoryBlock<B>>,
+        texture_id: Option<TextureId>,
     ) -> Self {
         let mut image = unsafe {
             device.create_image(
@@ -161,19 +231,11 @@ impl<B: hal::Backend> ImageCore<B> {
             Some(linear_memory) => {
                 assert_eq!(requirements.type_mask, linear_memory.type_mask);
                 assert_eq!(requirements.alignment, linear_memory.alignment);
-                if !linear_memory.has_size(requirements.size) {
-                    panic!("The maximum size of linear memory allocation exceeded");
+                if !linear_memory.bind_image(device, &mut image, requirements.size, texture_id.unwrap()) {
+                    // TODO: Manage multiple linear allocations if this occurs
+                    // at the moment we don't hit the 128 MB limit from `RENDER_TARGET_MEMORY_SIZE`
+                    panic!("Maximum size of linear allocation exceeded");
                 }
-                unsafe {
-                    device
-                        .bind_image_memory(
-                            &linear_memory.memory_block.memory(),
-                            linear_memory.memory_block.range().start + linear_memory.offset,
-                            &mut image,
-                        )
-                        .expect("Bind image memory failed")
-                };
-                linear_memory.add_offset(requirements.size);
 
                 ImageCore {
                     memory_block: None,
@@ -281,6 +343,7 @@ impl<B: hal::Backend> Image<B> {
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
         linear_memory: Option<&mut LinearMemoryBlock<B>>,
+        texture_id: Option<TextureId>,
     ) -> Self {
         let format = match image_format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
@@ -308,6 +371,7 @@ impl<B: hal::Backend> Image<B> {
                 layers: 0..image_depth as _,
             },
             linear_memory,
+            texture_id,
         );
 
         Image {
@@ -505,6 +569,7 @@ impl<B: hal::Backend> DepthBuffer<B> {
             depth_format,
             hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
             DEPTH_RANGE,
+            None,
             None,
         );
         DepthBuffer { core }
