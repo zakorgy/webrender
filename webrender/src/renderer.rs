@@ -56,8 +56,6 @@ use crate::device::{ShaderError, TextureFilter, TextureFlags, TextureSampler, Ve
              VertexUsageHint, VAO};
 use crate::device::{create_projection, DeviceInit, PrimitiveType, ProgramCache, ShaderPrecacheFlags};
 use crate::device::query::GpuTimer;
-#[cfg(not(feature = "gl"))]
-use crate::device::TextureUsage;
 use euclid::{rect, Scale, default};
 use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
 use crate::glyph_cache::GlyphCache;
@@ -999,8 +997,6 @@ impl<B: hal::Backend> TextureResolver<B> {
                 TextureFilter::Linear,
                 None,
                 1,
-                #[cfg(not(feature = "gl"))]
-                TextureUsage::DontCare,
             );
 
         device.upload_texture_immediate(
@@ -1038,7 +1034,7 @@ impl<B: hal::Backend> TextureResolver<B> {
         assert!(self.saved_targets.is_empty());
     }
 
-    fn end_frame(&mut self, device: &mut Device<B>, frame_id: GpuFrameId) {
+    fn end_frame(&mut self, device: &mut Device<B>, _frame_id: GpuFrameId) {
         // return the cached targets to the pool
         self.end_pass(device, None, None);
         // return the saved targets as well
@@ -1063,7 +1059,7 @@ impl<B: hal::Backend> TextureResolver<B> {
             #[cfg(feature = "gl")]
             {
                 let frame_treshold = 30;
-                _texture.used_recently(frame_id, frame_treshold)
+                _texture.used_recently(_frame_id, frame_treshold)
             }
         });
     }
@@ -1357,7 +1353,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         let rt_info =  if supports_copy_image_sub_data {
             None
         } else {
-            Some(RenderTargetInfo { has_depth: false })
+            Some(RenderTargetInfo { has_depth: false, persistent: true })
         };
         let mut texture = device.create_texture(
             TextureTarget::Default,
@@ -1367,8 +1363,6 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
             TextureFilter::Nearest,
             rt_info,
             1,
-            #[cfg(not(feature = "gl"))]
-            TextureUsage::DontCare,
         );
 
         // Blit the contents of the previous texture, if applicable.
@@ -1717,8 +1711,6 @@ impl<T, B: hal::Backend> VertexDataTexture<T, B> {
                 TextureFilter::Nearest,
                 None,
                 1,
-                #[cfg(not(feature = "gl"))]
-                TextureUsage::DontCare,
             );
             self.texture = Some(texture);
         }
@@ -2164,8 +2156,6 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Nearest,
                 None,
                 1,
-                #[cfg(not(feature = "gl"))]
-                TextureUsage::DontCare,
             );
             device.upload_texture_immediate(&texture, &dither_matrix);
             device.bind_texture(TextureSampler::Dither, &texture, Swizzle::default());
@@ -3464,11 +3454,8 @@ impl<B: hal::Backend> Renderer<B> {
                                 info.filter,
                                 // This needs to be a render target because some render
                                 // tasks get rendered into the texture cache.
-                                Some(RenderTargetInfo { has_depth: info.has_depth }),
+                                Some(RenderTargetInfo { has_depth: info.has_depth, persistent: true }),
                                 info.layer_count,
-                                // TODO add enum here like {render target and texture cache, where texture cache doesn't have image_views}
-                                #[cfg(not(feature = "gl"))]
-                                TextureUsage::DontCare,
                             );
 
                             if info.is_shared_cache {
@@ -5330,7 +5317,7 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(not(feature = "gl"))]
         let index = None;
 
-        let rt_info = RenderTargetInfo { has_depth: list.needs_depth() };
+        let rt_info = RenderTargetInfo { has_depth: list.needs_depth(), persistent: false };
         let texture = if let Some(idx) = index {
             let mut t = self.texture_resolver.render_target_pool.swap_remove(idx);
             self.device.reuse_render_target::<u8>(&mut t, rt_info);
@@ -5345,8 +5332,6 @@ impl<B: hal::Backend> Renderer<B> {
                 TextureFilter::Linear,
                 Some(rt_info),
                 list.targets.len() as _,
-                #[cfg(not(feature = "gl"))]
-                TextureUsage::OffScreenRenderTarget,
             )
         };
 
@@ -5946,10 +5931,8 @@ impl<B: hal::Backend> Renderer<B> {
                 source_rect.size.width,
                 source_rect.size.height,
                 TextureFilter::Nearest,
-                Some(RenderTargetInfo { has_depth: false }),
+                Some(RenderTargetInfo { has_depth: false, persistent: true }),
                 1,
-                #[cfg(not(feature = "gl"))]
-                TextureUsage::DontCare,
             );
 
             self.zoom_debug_texture = Some(texture);
@@ -6849,8 +6832,6 @@ impl<B: hal::Backend> Renderer<B> {
             plain.filter,
             rt_info,
             plain.size.1,
-            #[cfg(not(feature = "gl"))]
-            TextureUsage::DontCare,
         );
         device.upload_texture_immediate(&texture, &texels);
 
@@ -7031,7 +7012,7 @@ impl<B: hal::Backend> Renderer<B> {
                 let t = Self::load_texture(
                     TextureTarget::Array,
                     &texture,
-                    Some(RenderTargetInfo { has_depth: texture.has_depth }),
+                    Some(RenderTargetInfo { has_depth: texture.has_depth, persistent: true }),
                     &root,
                     &mut self.device
                 );
@@ -7045,7 +7026,7 @@ impl<B: hal::Backend> Renderer<B> {
             let (t, gpu_cache_data) = Self::load_texture(
                 TextureTarget::Default,
                 &renderer.gpu_cache,
-                Some(RenderTargetInfo { has_depth: false }),
+                Some(RenderTargetInfo { has_depth: false, persistent: true }),
                 &root,
                 &mut self.device,
             );

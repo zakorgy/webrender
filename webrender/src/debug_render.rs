@@ -15,7 +15,7 @@ cfg_if! {
     if #[cfg(feature = "gl")] {
         use crate::device::Program;
     } else {
-        use crate::device::{PrimitiveType, ProgramId as Program, ShaderKind, TextureUsage, vertex_types};
+        use crate::device::{PrimitiveType, ProgramId as Program, ShaderKind, vertex_types};
     }
 }
 
@@ -205,8 +205,6 @@ impl DebugRenderer {
             TextureFilter::Linear,
             None,
             1,
-            #[cfg(not(feature = "gl"))]
-            TextureUsage::DontCare,
         );
         device.upload_texture_immediate(
             &font_texture,
