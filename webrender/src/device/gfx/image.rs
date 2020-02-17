@@ -28,6 +28,7 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 const BUFFER_COPY_ALIGNMENT: i32 = 4;
 const RENDER_TARGET_MEMORY_SIZE: u64 = 128 << 20; // 128 MB
 
+type LinearMemoryId = usize;
 struct MemoryRange(std::ops::Range<hal::buffer::Offset>);
 
 impl MemoryRange {
@@ -55,7 +56,7 @@ impl MemoryRange {
     }
 }
 
-pub(super) struct LinearMemoryBlock<B: hal::Backend> {
+struct LinearMemoryBlock<B: hal::Backend> {
     memory_block: MemoryBlock<B>,
     alignment: u64,
     type_mask: u64,
@@ -64,9 +65,10 @@ pub(super) struct LinearMemoryBlock<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> LinearMemoryBlock<B> {
-    pub(super) fn new(
+    fn new(
         device: &B::Device,
         heaps: &mut Heaps<B>,
+        size: u64,
     ) -> Self {
         let usage = hal::image::Usage::TRANSFER_SRC
             | hal::image::Usage::TRANSFER_DST
@@ -94,7 +96,7 @@ impl<B: hal::Backend> LinearMemoryBlock<B> {
             device,
             requirements.type_mask as _,
             MemoryUsageValue::Data,
-            RENDER_TARGET_MEMORY_SIZE,
+            size,
             requirements.alignment,
         )
         .expect("Allocate memory failed");
@@ -145,7 +147,7 @@ impl<B: hal::Backend> LinearMemoryBlock<B> {
         }
     }
 
-    pub(super) fn release_texture(
+    fn release_texture(
         &mut self,
         id: TextureId,
     ) {
@@ -161,8 +163,74 @@ impl<B: hal::Backend> LinearMemoryBlock<B> {
         }
     }
 
-    pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
+    fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
         heaps.free(device, self.memory_block);
+    }
+}
+
+pub(super) struct LinearMemoryAllocator<B: hal::Backend>  {
+    blocks: Vec<LinearMemoryBlock<B>>,
+    locations: FastHashMap<TextureId, LinearMemoryId>,
+}
+
+impl<B: hal::Backend> LinearMemoryAllocator<B> {
+    pub(super) fn new(
+        device: &B::Device,
+        heaps: &mut Heaps<B>,
+    ) -> Self {
+        let linear_memory = LinearMemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE);
+        LinearMemoryAllocator {
+            blocks: vec![linear_memory],
+            locations: FastHashMap::default(),
+        }
+    }
+
+    pub(super) fn bind_image(
+        &mut self,
+        device: &B::Device,
+        heaps: &mut Heaps<B>,
+        image: &mut B::Image,
+        size: hal::buffer::Offset,
+        texture_id: TextureId,
+    ) {
+        // Find a linear memory with the proper size or create a new one if not found
+        if let Some(index) = self.blocks.iter_mut().position(|block| {
+            block.bind_image(
+                device,
+                image,
+                size,
+                texture_id,
+            )
+        }) {
+            self.locations.insert(texture_id, index);
+            return;
+        }
+        let linear_memory = LinearMemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE.max(size));
+        self.blocks.push(linear_memory);
+        self.locations.insert(texture_id, self.blocks.len() - 1);
+    }
+
+    pub(super) fn release_texture(
+        &mut self,
+        id: TextureId,
+    ) {
+        if let Some(index) = self.locations.get(&id) {
+            self.blocks[*index].release_texture(id);
+        }
+    }
+
+    pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
+        for block in self.blocks {
+            block.deinit(device, heaps);
+        }
+    }
+
+    fn alignment(&self) -> u64 {
+        self.blocks[0].alignment
+    }
+
+    fn type_mask(&self) -> u64 {
+        self.blocks[0].type_mask
     }
 }
 
@@ -211,7 +279,7 @@ impl<B: hal::Backend> ImageCore<B> {
         format: hal::format::Format,
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
-        linear_memory: Option<&mut LinearMemoryBlock<B>>,
+        linear_memory_allocator: Option<&mut LinearMemoryAllocator<B>>,
         texture_id: Option<TextureId>,
     ) -> Self {
         let mut image = unsafe {
@@ -227,15 +295,11 @@ impl<B: hal::Backend> ImageCore<B> {
         .expect("create_image failed");
         let requirements = unsafe { device.get_image_requirements(&image) };
 
-        match linear_memory {
-            Some(linear_memory) => {
-                assert_eq!(requirements.type_mask, linear_memory.type_mask);
-                assert_eq!(requirements.alignment, linear_memory.alignment);
-                if !linear_memory.bind_image(device, &mut image, requirements.size, texture_id.unwrap()) {
-                    // TODO: Manage multiple linear allocations if this occurs
-                    // at the moment we don't hit the 128 MB limit from `RENDER_TARGET_MEMORY_SIZE`
-                    panic!("Maximum size of linear allocation exceeded");
-                }
+        match linear_memory_allocator {
+            Some(allocator) => {
+                assert_eq!(requirements.type_mask, allocator.type_mask());
+                assert_eq!(requirements.alignment, allocator.alignment());
+                allocator.bind_image(device, heaps, &mut image, requirements.size, texture_id.unwrap());
 
                 ImageCore {
                     memory_block: None,
@@ -342,7 +406,7 @@ impl<B: hal::Backend> Image<B> {
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
-        linear_memory: Option<&mut LinearMemoryBlock<B>>,
+        linear_memory_allocator: Option<&mut LinearMemoryAllocator<B>>,
         texture_id: Option<TextureId>,
     ) -> Self {
         let format = match image_format {
@@ -370,7 +434,7 @@ impl<B: hal::Backend> Image<B> {
                 levels: 0..mip_levels,
                 layers: 0..image_depth as _,
             },
-            linear_memory,
+            linear_memory_allocator,
             texture_id,
         );
 
