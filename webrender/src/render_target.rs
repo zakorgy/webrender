@@ -30,7 +30,6 @@ use crate::texture_allocator::{ArrayAllocationTracker, FreeRectSlice};
 #[cfg(not(feature = "gl"))]
 use rendy_memory::Heaps;
 use std::{cmp, mem};
-use std::sync::{Arc, Mutex};
 
 
 const STYLE_SOLID: i32 = ((BorderStyle::Solid as i32) << 8) | ((BorderStyle::Solid as i32) << 16);
@@ -110,7 +109,7 @@ pub trait RenderTarget {
         _composite_state: &mut CompositeState,
         _buffer_manager: &mut InstanceBufferManager<B>,
         _device: &B::Device,
-        _heaps: Arc<Mutex<Heaps<B>>>,
+        _heaps: &mut Heaps<B>,
     ) {
     }
 
@@ -214,7 +213,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         composite_state: &mut CompositeState,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
         debug_assert_eq!(None, self.saved_index);
         self.saved_index = saved_index;
@@ -231,7 +230,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 composite_state,
                 buffer_manager,
                 device,
-                heaps.clone(),
+                heaps,
             );
         }
     }
@@ -371,7 +370,7 @@ impl RenderTarget for ColorRenderTarget {
         composite_state: &mut CompositeState,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
         let mut merged_batches = AlphaBatchContainer::new(None);
 
@@ -467,21 +466,21 @@ impl RenderTarget for ColorRenderTarget {
         self.vertical_blur_location = buffer_manager.add(
             device,
             &vertical_blurs,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
         self.horizontal_blur_location = buffer_manager.add(
             device,
             &horizontal_blurs,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         for container in self.alpha_batch_containers.iter_mut() {
             container.build(
                 buffer_manager,
                 device,
-                heaps.clone(),
+                heaps,
             );
         }
 
@@ -489,7 +488,7 @@ impl RenderTarget for ColorRenderTarget {
             let location = buffer_manager.add(
                 device,
                 &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                &mut heaps.lock().unwrap(),
+                heaps,
             );
             self.scaling_locations.insert(source, location);
         }
@@ -498,7 +497,7 @@ impl RenderTarget for ColorRenderTarget {
             let location = buffer_manager.add(
                 device,
                 &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                &mut heaps.lock().unwrap(),
+                heaps,
             );
             self.svg_filter_locations.push((batch_textures, location));
         }
@@ -818,29 +817,29 @@ impl RenderTarget for AlphaRenderTarget {
         _composite_state: &mut CompositeState,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
-        self.clip_batcher.build(buffer_manager, device, heaps.clone());
+        self.clip_batcher.build(buffer_manager, device, heaps);
 
         let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
         self.vertical_blur_location = buffer_manager.add(
             device,
             &vertical_blurs,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
         self.horizontal_blur_location = buffer_manager.add(
             device,
             &horizontal_blurs,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         for (source, instances) in self.scalings.drain() {
             let locations = buffer_manager.add(
                 device,
                 &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                &mut heaps.lock().unwrap(),
+                heaps,
             );
             self.scaling_locations.insert(source, locations);
         }
@@ -907,41 +906,41 @@ impl TextureCacheRenderTarget {
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
         let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
         self.horizontal_blur_location = buffer_manager.add(
             device,
             &horizontal_blurs,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let border_segments = self.border_segments_complex.drain(..).map(|bs| bs.to_primitive_type()).collect::<Vec<_>>();
         self.border_segment_complex_location = buffer_manager.add(
             device,
             &border_segments,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let border_segments = self.border_segments_solid.drain(..).map(|bs| bs.to_primitive_type()).collect::<Vec<_>>();
         self.border_segment_solid_location = buffer_manager.add(
             device,
             &border_segments,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let line_decorations = self.line_decorations.drain(..).map(|ld| ld.to_primitive_type()).collect::<Vec<_>>();
         self.line_decoration_location = buffer_manager.add(
             device,
             &line_decorations,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let gradients = self.gradients.drain(..).map(|g| g.to_primitive_type()).collect::<Vec<_>>();
         self.gradient_location = buffer_manager.add(
             device,
             &gradients,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
     }
 

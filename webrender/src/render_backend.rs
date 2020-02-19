@@ -541,7 +541,7 @@ impl Document {
         debug_flags: DebugFlags,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
@@ -1626,7 +1626,7 @@ impl<B: hal::Backend> RenderBackend<B> {
                     self.debug_flags,
                     &mut self.buffer_manager,
                     &self.device,
-                    self.heaps.upgrade().unwrap(),
+                    &mut self.heaps.upgrade().unwrap().lock().unwrap(),
                 );
 
                 debug!("generated frame for document {:?} with {} passes",
@@ -1929,7 +1929,7 @@ impl<B: hal::Backend> RenderBackend<B> {
                     self.debug_flags,
                     &mut self.buffer_manager,
                     &self.device,
-                    self.heaps.upgrade().unwrap(),
+                    &mut self.heaps.upgrade().unwrap().lock().unwrap(),
                 );
                 // After we rendered the frames, there are pending updates to both
                 // GPU cache and resources. Instead of serializing them, we are going to make sure

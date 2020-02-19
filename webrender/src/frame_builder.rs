@@ -33,7 +33,7 @@ use crate::segment::SegmentBuilder;
 #[cfg(not(feature = "gl"))]
 use rendy_memory::Heaps;
 use std::{f32, mem};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use crate::util::MaxRect;
 
 
@@ -455,7 +455,7 @@ impl FrameBuilder {
         debug_flags: DebugFlags,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) -> Frame {
         profile_scope!("build");
         profile_marker!("BuildFrame");
@@ -555,7 +555,7 @@ impl FrameBuilder {
                     &mut composite_state,
                     buffer_manager,
                     device,
-                    heaps.clone(),
+                    heaps,
                 );
 
                 match pass.kind {
@@ -620,7 +620,7 @@ pub fn build_render_pass<B: hal::Backend>(
     composite_state: &mut CompositeState,
     buffer_manager: &mut InstanceBufferManager<B>,
     device: &B::Device,
-    heaps: Arc<Mutex<Heaps<B>>>,
+    heaps: &mut Heaps<B>,
 ) {
     profile_scope!("RenderPass::build");
 
@@ -649,7 +649,7 @@ pub fn build_render_pass<B: hal::Backend>(
                 composite_state,
                 buffer_manager,
                 device,
-                heaps.clone(),
+                heaps,
             );
         }
         RenderPassKind::OffScreen {
@@ -880,7 +880,7 @@ pub fn build_render_pass<B: hal::Backend>(
                             alpha_batch_container.build(
                                 buffer_manager,
                                 &device,
-                                heaps.clone()
+                                heaps,
                             );
                             let target = PictureCacheTarget {
                                 texture,
@@ -902,7 +902,7 @@ pub fn build_render_pass<B: hal::Backend>(
                 cache.build(
                     buffer_manager,
                     device,
-                    heaps.clone(),
+                    heaps,
                 );
             }
 
@@ -918,7 +918,7 @@ pub fn build_render_pass<B: hal::Backend>(
                 composite_state,
                 buffer_manager,
                 device,
-                heaps.clone(),
+                heaps,
             );
             alpha.build(
                 ctx,
@@ -932,7 +932,7 @@ pub fn build_render_pass<B: hal::Backend>(
                 composite_state,
                 buffer_manager,
                 device,
-                heaps.clone(),
+                heaps,
             );
         }
     }

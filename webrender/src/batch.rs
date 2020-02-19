@@ -33,7 +33,6 @@ use crate::resource_cache::{CacheItem, GlyphFetchResult, ImageRequest, ResourceC
 use rendy_memory::Heaps;
 use smallvec::SmallVec;
 use std::{f32, i32, usize};
-use std::sync::{Arc, Mutex};
 use crate::util::{project_rect, TransformedRectKind};
 
 // Special sentinel value recognized by the shader. It is considered to be
@@ -383,13 +382,13 @@ impl PrimitiveBatch {
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
         let instances = self.instances.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
         self.instance_locations = buffer_manager.add(
             device,
             &instances,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
     }
 }
@@ -467,10 +466,10 @@ impl AlphaBatchContainer {
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
         for batch in self.opaque_batches.iter_mut().chain(self.alpha_batches.iter_mut()) {
-            batch.build(buffer_manager, device, heaps.clone());
+            batch.build(buffer_manager, device, heaps);
         }
     }
 }
@@ -2854,27 +2853,27 @@ impl ClipBatchList {
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
         let slow_rects = self.slow_rectangles.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
         self.slow_rectangle_locations = buffer_manager.add(
             device,
             &slow_rects,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         let fast_rects = self.fast_rectangles.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
         self.fast_rectangle_locations = buffer_manager.add(
             device,
             &fast_rects,
-            &mut heaps.lock().unwrap(),
+            heaps,
         );
 
         for (source, instances) in self.images.drain() {
             let locations = buffer_manager.add(
                 device,
                 &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                &mut heaps.lock().unwrap(),
+                heaps,
             );
             self.image_locations.insert(source, locations);
         }
@@ -2883,7 +2882,7 @@ impl ClipBatchList {
             let locations = buffer_manager.add(
                 device,
                 &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                &mut heaps.lock().unwrap(),
+                heaps,
             );
             self.box_shadow_locations.insert(source, locations);
         }
@@ -2935,10 +2934,10 @@ impl ClipBatcher {
         &mut self,
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
-        heaps: Arc<Mutex<Heaps<B>>>,
+        heaps: &mut Heaps<B>,
     ) {
-        self.primary_clips.build(buffer_manager, device, heaps.clone());
-        self.secondary_clips.build(buffer_manager, device, heaps.clone());
+        self.primary_clips.build(buffer_manager, device, heaps);
+        self.secondary_clips.build(buffer_manager, device, heaps);
     }
 
     pub fn add_clip_region(
