@@ -49,24 +49,6 @@ pub(super) enum InstanceSource<'a, B: hal::Backend> {
     },
 }
 
-impl<'a, B: hal::Backend> From<(&'a InstanceBufferHandler<B>, std::ops::Range<usize>)> for InstanceSource<'a, B> {
-    fn from((handler, range): (&'a InstanceBufferHandler<B>, std::ops::Range<usize>)) -> InstanceSource<'a, B> {
-        InstanceSource::Handler {
-            handler,
-            range,
-        }
-    }
-}
-
-impl<'a, B: hal::Backend> From<(&'a FastHashMap<BufferId, InstancePoolBuffer<B>>, &'a [InstanceLocation])> for InstanceSource<'a, B> {
-    fn from((buffers, locations): (&'a FastHashMap<BufferId, InstancePoolBuffer<B>>, &'a [InstanceLocation])) -> InstanceSource<'a, B> {
-        InstanceSource::Uploaded {
-            buffers,
-            locations,
-        }
-    }
-}
-
 type PipelineKey = (
     ImageFormat,
     Option<hal::pso::BlendState>,

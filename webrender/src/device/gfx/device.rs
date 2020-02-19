@@ -37,7 +37,7 @@ use super::buffer::*;
 use super::command::*;
 use super::descriptor::*;
 use super::image::*;
-use super::program::{Program, RenderPassDepthState};
+use super::program::{InstanceSource, Program, RenderPassDepthState};
 use super::render_pass::*;
 use super::{PipelineRequirements, PrimitiveType, TextureId};
 use super::{LESS_EQUAL_TEST, LESS_EQUAL_WRITE, MAX_FRAME_COUNT};
@@ -1573,9 +1573,15 @@ impl<B: hal::Backend> Device<B> {
                 for id in buffer_ids {
                     self.received_instance_buffers.get_mut(&id).unwrap().bound_in_frame = self.frame_id;
                 }
-                (&self.received_instance_buffers, locations).into()
+                InstanceSource::Uploaded {
+                    buffers: &self.received_instance_buffers,
+                    locations: locations,
+                }
             },
-            None => (&self.instance_buffers[self.next_id], self.instance_buffer_range.clone()).into(),
+            None => InstanceSource::Handler {
+                handler: &self.instance_buffers[self.next_id],
+                range: self.instance_buffer_range.clone(),
+            },
         };
 
         self.programs
@@ -2468,10 +2474,10 @@ impl<B: hal::Backend> Device<B> {
             &mut self.command_buffer,
             self.next_id,
             &self.quad_buffer,
-            (
-                &self.instance_buffers[self.next_id],
-                self.instance_buffer_range.clone(),
-            ).into(),
+            InstanceSource::Handler {
+                handler: &self.instance_buffers[self.next_id],
+                range: self.instance_buffer_range.clone(),
+            },
         );
 
         // Reset states after the draw
