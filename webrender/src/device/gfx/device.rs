@@ -149,12 +149,7 @@ impl ShaderKind {
 
 impl Texture {
     pub fn still_in_flight(&self, frame_id: GpuFrameId, frame_count: usize) -> bool {
-        for i in 0..frame_count {
-            if self.bound_in_frame.get() == GpuFrameId(frame_id.0 - i) {
-                return true;
-            }
-        }
-        false
+        self.bound_in_frame.get().0 + frame_count >= frame_id.0
     }
 }
 
