@@ -25,6 +25,7 @@ use std::convert::Into;
 use std::collections::hash_map::Entry;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
+use std::iter;
 use std::mem;
 use std::path::PathBuf;
 use std::num::NonZeroUsize;
@@ -197,7 +198,7 @@ impl<B: hal::Backend> Frame<B> {
             let framebuffer = unsafe {
                 device.create_framebuffer(
                     &render_passe,
-                    std::iter::once(self.swapchain_image.borrow()).chain(std::iter::once(depth)),
+                    iter::once(self.swapchain_image.borrow()).chain(iter::once(depth)),
                     image_extent,
                 )
             }
@@ -1305,7 +1306,6 @@ impl<B: hal::Backend> Device<B> {
                 self.command_buffer.set_blend_constants(self.blend_color.to_array());
             }
             if self.rebind_descriptors {
-                use std::iter;
                 let descriptor_group = self.bound_program.1;
 
                 let desc_set_per_frame = self
@@ -3666,6 +3666,7 @@ impl<B: hal::Backend> Device<B> {
                     }
                 }
             }
+            self.command_buffer.bind_vertex_buffers(0, iter::once((&self.quad_buffer.buffer().buffer, 0)));
         }
     }
 

@@ -10,6 +10,7 @@ use crate::internal_types::FastHashMap;
 use smallvec::SmallVec;
 use rendy_memory::Heaps;
 use std::borrow::Cow::{Borrowed};
+use std::iter;
 
 use super::buffer::{BufferId, InstanceBufferHandler, InstancePoolBuffer, InstanceLocation, VertexBufferHandler};
 use super::render_pass::HalRenderPasses;
@@ -646,7 +647,7 @@ impl<B: hal::Backend> Program<B> {
         &mut self,
         cmd_buffer: &mut B::CommandBuffer,
         next_id: usize,
-        vertex_buffer: &VertexBufferHandler<B>,
+        quad_buffer: &VertexBufferHandler<B>,
         instances: InstanceSource<B>,
     ) {
         if self.shader_kind.is_debug() {
@@ -656,15 +657,11 @@ impl<B: hal::Backend> Program<B> {
                 self.last_frame_used = next_id;
             }
         }
-        let vertex_buffer = match &self.vertex_buffer {
-            Some(ref vb) => vb.get(next_id).unwrap(),
-            None => vertex_buffer,
-        };
         unsafe {
             match &self.index_buffer {
                 // Debug shaders
                 Some(ref index_buffer) => {
-                    cmd_buffer.bind_vertex_buffers(0, Some((&vertex_buffer.buffer().buffer, 0)));
+                    cmd_buffer.bind_vertex_buffers(0, Some((&self.vertex_buffer.as_ref().unwrap().get(next_id).unwrap().buffer().buffer, 0)));
                     cmd_buffer.bind_index_buffer(hal::buffer::IndexBufferView {
                         buffer: &index_buffer[next_id].buffer().buffer,
                         offset: 0,
@@ -676,6 +673,8 @@ impl<B: hal::Backend> Program<B> {
                         0,
                         0..1,
                     );
+                    // rebind previous vertex buffer, because debug shaders use different vertices
+                    cmd_buffer.bind_vertex_buffers(0, Some((&quad_buffer.buffer().buffer, 0)));
                 }
                 // Default WR shaders
                 None => {
@@ -683,14 +682,12 @@ impl<B: hal::Backend> Program<B> {
                         InstanceSource::Handler {handler, range} => {
                             let number_of_vertices = match self.shader_kind {
                                 ShaderKind::Service => 3,
-                                _ => vertex_buffer.buffer_len,
+                                _ => quad_buffer.buffer_len,
                             };
                             for i in range.into_iter() {
                                 cmd_buffer.bind_vertex_buffers(
-                                    0,
-                                    Some((&vertex_buffer.buffer().buffer, 0))
-                                        .into_iter()
-                                        .chain(Some((&handler.buffers[i].buffer.buffer, 0))),
+                                    1,
+                                    iter::once((&handler.buffers[i].buffer.buffer, 0)),
                                 );
 
                                 let data_stride = handler.buffers[i].last_data_stride;
@@ -702,12 +699,10 @@ impl<B: hal::Backend> Program<B> {
                         InstanceSource::Uploaded {buffers, locations} => {
                             for InstanceLocation {buffer_id, range} in locations {
                                 cmd_buffer.bind_vertex_buffers(
-                                    0,
-                                    Some((&vertex_buffer.buffer().buffer, 0))
-                                        .into_iter()
-                                        .chain(Some((&buffers[&buffer_id].buffer.buffer, 0))),
+                                    1,
+                                    iter::once((&buffers[&buffer_id].buffer.buffer, 0)),
                                 );
-                                cmd_buffer.draw(0..vertex_buffer.buffer_len as u32, range.clone());
+                                cmd_buffer.draw(0..quad_buffer.buffer_len as u32, range.clone());
                             }
                         }
                     }
