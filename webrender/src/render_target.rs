@@ -59,7 +59,7 @@ pub enum RenderTargetKind {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTargetIndex(pub usize);
 
-pub struct RenderTargetContext<'a, 'rc> {
+pub struct RenderTargetContext<'a, 'rc, B: hal::Backend> {
     pub global_device_pixel_scale: DevicePixelScale,
     pub prim_store: &'a PrimitiveStore,
     pub resource_cache: &'rc mut ResourceCache,
@@ -73,6 +73,25 @@ pub struct RenderTargetContext<'a, 'rc> {
     pub scratch: &'a PrimitiveScratchBuffer,
     pub screen_world_rect: WorldRect,
     pub globals: &'a FrameGlobalResources,
+    #[cfg(not(feature = "gl"))]
+    pub buffer_manager: &'a mut InstanceBufferManager<B>,
+    #[cfg(not(feature = "gl"))]
+    pub device: &'a B::Device,
+    #[cfg(not(feature = "gl"))]
+    pub heaps: &'a mut Heaps<B>,
+    #[cfg(feature = "gl")]
+    phantom: std::marker::PhantomData<B>,
+}
+
+#[cfg(not(feature = "gl"))]
+impl<'a, 'rc, B: hal::Backend> RenderTargetContext<'a, 'rc, B> {
+    pub fn upload_primitive_data<T: Copy + Clone>(&mut self, data: &[T]) -> Vec<InstanceLocation> {
+        self.buffer_manager.add(
+            self.device,
+            data,
+            self.heaps,
+        )
+    }
 }
 
 /// Represents a number of rendering operations on a surface.
@@ -99,7 +118,7 @@ pub trait RenderTarget {
     /// end of the build phase.
     fn build<B: hal::Backend>(
         &mut self,
-        _ctx: &mut RenderTargetContext,
+        _ctx: &mut RenderTargetContext<B>,
         _gpu_cache: &mut GpuCache,
         _render_tasks: &mut RenderTaskGraph,
         _deferred_resolves: &mut Vec<DeferredResolve>,
@@ -107,9 +126,6 @@ pub trait RenderTarget {
         _transforms: &mut TransformPalette,
         _z_generator: &mut ZBufferIdGenerator,
         _composite_state: &mut CompositeState,
-        _buffer_manager: &mut InstanceBufferManager<B>,
-        _device: &B::Device,
-        _heaps: &mut Heaps<B>,
     ) {
     }
 
@@ -122,10 +138,10 @@ pub trait RenderTarget {
     /// bit of extra overhead to store the image key here and the resolve them
     /// in the build step separately.  BUT: if/when we add more texture cache
     /// target jobs, we might want to tidy this up.
-    fn add_task(
+    fn add_task<B: hal::Backend>(
         &mut self,
         task_id: RenderTaskId,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskGraph,
         clip_store: &ClipStore,
@@ -202,7 +218,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
 
     pub fn build<B: hal::Backend>(
         &mut self,
-        ctx: &mut RenderTargetContext,
+        ctx: &mut RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskGraph,
         deferred_resolves: &mut Vec<DeferredResolve>,
@@ -211,9 +227,6 @@ impl<T: RenderTarget> RenderTargetList<T> {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
     ) {
         debug_assert_eq!(None, self.saved_index);
         self.saved_index = saved_index;
@@ -228,9 +241,6 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 transforms,
                 z_generator,
                 composite_state,
-                buffer_manager,
-                device,
-                heaps,
             );
         }
     }
@@ -360,7 +370,7 @@ impl RenderTarget for ColorRenderTarget {
 
     fn build<B: hal::Backend>(
         &mut self,
-        ctx: &mut RenderTargetContext,
+        ctx: &mut RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskGraph,
         deferred_resolves: &mut Vec<DeferredResolve>,
@@ -368,9 +378,6 @@ impl RenderTarget for ColorRenderTarget {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
     ) {
         let mut merged_batches = AlphaBatchContainer::new(None);
 
@@ -463,50 +470,32 @@ impl RenderTarget for ColorRenderTarget {
         }
 
         let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
-        self.vertical_blur_location = buffer_manager.add(
-            device,
-            &vertical_blurs,
-            heaps,
-        );
+        self.vertical_blur_location = ctx.upload_primitive_data(&vertical_blurs);
 
         let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
-        self.horizontal_blur_location = buffer_manager.add(
-            device,
-            &horizontal_blurs,
-            heaps,
-        );
+        self.horizontal_blur_location = ctx.upload_primitive_data(&horizontal_blurs);
 
         for container in self.alpha_batch_containers.iter_mut() {
             container.build(
-                buffer_manager,
-                device,
-                heaps,
+                ctx,
             );
         }
 
         for(source, instances) in self.scalings.drain() {
-            let location = buffer_manager.add(
-                device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                heaps,
-            );
+            let location = ctx.upload_primitive_data(&instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>());
             self.scaling_locations.insert(source, location);
         }
 
         for (batch_textures, instances) in self.svg_filters.drain(..) {
-            let location = buffer_manager.add(
-                device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                heaps,
-            );
+            let location = ctx.upload_primitive_data(&instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>());
             self.svg_filter_locations.push((batch_textures, location));
         }
     }
 
-    fn add_task(
+    fn add_task<B: hal::Backend>(
         &mut self,
         task_id: RenderTaskId,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskGraph,
         _: &ClipStore,
@@ -694,10 +683,10 @@ impl RenderTarget for AlphaRenderTarget {
         }
     }
 
-    fn add_task(
+    fn add_task<B: hal::Backend>(
         &mut self,
         task_id: RenderTaskId,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskGraph,
         clip_store: &ClipStore,
@@ -807,7 +796,7 @@ impl RenderTarget for AlphaRenderTarget {
 
     fn build<B: hal::Backend>(
         &mut self,
-        _ctx: &mut RenderTargetContext,
+        ctx: &mut RenderTargetContext<B>,
         _gpu_cache: &mut GpuCache,
         _render_tasks: &mut RenderTaskGraph,
         _deferred_resolves: &mut Vec<DeferredResolve>,
@@ -815,32 +804,17 @@ impl RenderTarget for AlphaRenderTarget {
         _transforms: &mut TransformPalette,
         _z_generator: &mut ZBufferIdGenerator,
         _composite_state: &mut CompositeState,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
     ) {
-        self.clip_batcher.build(buffer_manager, device, heaps);
+        self.clip_batcher.build(ctx);
 
         let vertical_blurs = self.vertical_blurs.drain(..).map(|vb| vb.to_primitive_type()).collect::<Vec<_>>();
-        self.vertical_blur_location = buffer_manager.add(
-            device,
-            &vertical_blurs,
-            heaps,
-        );
+        self.vertical_blur_location = ctx.upload_primitive_data(&vertical_blurs);
 
         let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
-        self.horizontal_blur_location = buffer_manager.add(
-            device,
-            &horizontal_blurs,
-            heaps,
-        );
+        self.horizontal_blur_location = ctx.upload_primitive_data(&horizontal_blurs);
 
         for (source, instances) in self.scalings.drain() {
-            let locations = buffer_manager.add(
-                device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                heaps,
-            );
+            let locations = ctx.upload_primitive_data(&instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>());
             self.scaling_locations.insert(source, locations);
         }
     }
@@ -904,44 +878,22 @@ impl TextureCacheRenderTarget {
     #[cfg(not(feature = "gl"))]
     pub fn build<B: hal::Backend>(
         &mut self,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
+        ctx: &mut RenderTargetContext<B>,
     ) {
         let horizontal_blurs = self.horizontal_blurs.drain(..).map(|hb| hb.to_primitive_type()).collect::<Vec<_>>();
-        self.horizontal_blur_location = buffer_manager.add(
-            device,
-            &horizontal_blurs,
-            heaps,
-        );
+        self.horizontal_blur_location = ctx.upload_primitive_data(&horizontal_blurs);
 
         let border_segments = self.border_segments_complex.drain(..).map(|bs| bs.to_primitive_type()).collect::<Vec<_>>();
-        self.border_segment_complex_location = buffer_manager.add(
-            device,
-            &border_segments,
-            heaps,
-        );
+        self.border_segment_complex_location = ctx.upload_primitive_data(&border_segments);
 
         let border_segments = self.border_segments_solid.drain(..).map(|bs| bs.to_primitive_type()).collect::<Vec<_>>();
-        self.border_segment_solid_location = buffer_manager.add(
-            device,
-            &border_segments,
-            heaps,
-        );
+        self.border_segment_solid_location = ctx.upload_primitive_data(&border_segments);
 
         let line_decorations = self.line_decorations.drain(..).map(|ld| ld.to_primitive_type()).collect::<Vec<_>>();
-        self.line_decoration_location = buffer_manager.add(
-            device,
-            &line_decorations,
-            heaps,
-        );
+        self.line_decoration_location = ctx.upload_primitive_data(&line_decorations);
 
         let gradients = self.gradients.drain(..).map(|g| g.to_primitive_type()).collect::<Vec<_>>();
-        self.gradient_location = buffer_manager.add(
-            device,
-            &gradients,
-            heaps,
-        );
+        self.gradient_location = ctx.upload_primitive_data(&gradients);
     }
 
     pub fn add_task(

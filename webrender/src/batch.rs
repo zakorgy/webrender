@@ -380,16 +380,10 @@ impl PrimitiveBatch {
 
     fn build<B: hal::Backend>(
         &mut self,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
+        ctx: &mut RenderTargetContext<B>,
     ) {
         let instances = self.instances.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
-        self.instance_locations = buffer_manager.add(
-            device,
-            &instances,
-            heaps,
-        );
+        self.instance_locations = ctx.upload_primitive_data(&instances);
     }
 }
 
@@ -464,12 +458,10 @@ impl AlphaBatchContainer {
 
     pub fn build<B: hal::Backend>(
         &mut self,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
+        ctx: &mut RenderTargetContext<B>,
     ) {
         for batch in self.opaque_batches.iter_mut().chain(self.alpha_batches.iter_mut()) {
-            batch.build(buffer_manager, device, heaps);
+            batch.build(ctx);
         }
     }
 }
@@ -664,10 +656,10 @@ impl BatchBuilder {
     }
 
     /// Add a picture to a given batch builder.
-    pub fn add_pic_to_batch(
+    pub fn add_pic_to_batch<B: hal::Backend>(
         &mut self,
         pic: &PicturePrimitive,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskGraph,
         deferred_resolves: &mut Vec<DeferredResolve>,
@@ -703,11 +695,11 @@ impl BatchBuilder {
     // It can recursively call itself in some situations, for
     // example if it encounters a picture where the items
     // in that picture are being drawn into the same target.
-    fn add_prim_to_batch(
+    fn add_prim_to_batch<B: hal::Backend>(
         &mut self,
         prim_instance: &PrimitiveInstance,
         prim_spatial_node_index: SpatialNodeIndex,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
         gpu_cache: &mut GpuCache,
         render_tasks: &RenderTaskGraph,
         deferred_resolves: &mut Vec<DeferredResolve>,
@@ -2424,7 +2416,7 @@ impl BatchBuilder {
     }
 
     /// Add a single segment instance to a batch.
-    fn add_segment_to_batch(
+    fn add_segment_to_batch<B: hal::Backend>(
         &mut self,
         segment: &BrushSegment,
         segment_data: &SegmentInstanceData,
@@ -2440,7 +2432,7 @@ impl BatchBuilder {
         prim_opacity: PrimitiveOpacity,
         clip_task_index: ClipTaskIndex,
         prim_vis_mask: PrimitiveVisibilityMask,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
     ) {
         debug_assert!(clip_task_index != ClipTaskIndex::INVALID);
 
@@ -2483,7 +2475,7 @@ impl BatchBuilder {
     }
 
     /// Add any segment(s) from a brush to batches.
-    fn add_segmented_prim_to_batch(
+    fn add_segmented_prim_to_batch<B: hal::Backend>(
         &mut self,
         brush_segments: Option<&[BrushSegment]>,
         prim_opacity: PrimitiveOpacity,
@@ -2498,7 +2490,7 @@ impl BatchBuilder {
         z_id: ZBufferId,
         clip_task_index: ClipTaskIndex,
         prim_vis_mask: PrimitiveVisibilityMask,
-        ctx: &RenderTargetContext,
+        ctx: &RenderTargetContext<B>,
     ) {
         match (brush_segments, &params.segment_data) {
             (Some(ref brush_segments), SegmentDataKind::Instanced(ref segment_data)) => {
@@ -2851,39 +2843,21 @@ impl ClipBatchList {
     #[cfg(not(feature = "gl"))]
     fn build<B: hal::Backend>(
         &mut self,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
+        ctx: &mut RenderTargetContext<B>,
     ) {
         let slow_rects = self.slow_rectangles.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
-        self.slow_rectangle_locations = buffer_manager.add(
-            device,
-            &slow_rects,
-            heaps,
-        );
+        self.slow_rectangle_locations = ctx.upload_primitive_data(&slow_rects);
 
         let fast_rects = self.fast_rectangles.drain(..).map(|i| i.to_primitive_type()).collect::<Vec<_>>();
-        self.fast_rectangle_locations = buffer_manager.add(
-            device,
-            &fast_rects,
-            heaps,
-        );
+        self.fast_rectangle_locations = ctx.upload_primitive_data(&fast_rects);
 
         for (source, instances) in self.images.drain() {
-            let locations = buffer_manager.add(
-                device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                heaps,
-            );
+            let locations = ctx.upload_primitive_data(&instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>());
             self.image_locations.insert(source, locations);
         }
 
         for (source, instances) in self.box_shadows.drain() {
-            let locations = buffer_manager.add(
-                device,
-                &instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>(),
-                heaps,
-            );
+            let locations = ctx.upload_primitive_data(&instances.iter().map(|i| i.to_primitive_type()).collect::<Vec<_>>());
             self.box_shadow_locations.insert(source, locations);
         }
     }
@@ -2932,12 +2906,10 @@ impl ClipBatcher {
     #[cfg(not(feature = "gl"))]
     pub fn build<B: hal::Backend>(
         &mut self,
-        buffer_manager: &mut InstanceBufferManager<B>,
-        device: &B::Device,
-        heaps: &mut Heaps<B>,
+        ctx: &mut RenderTargetContext<B>,
     ) {
-        self.primary_clips.build(buffer_manager, device, heaps);
-        self.secondary_clips.build(buffer_manager, device, heaps);
+        self.primary_clips.build(ctx);
+        self.secondary_clips.build(ctx);
     }
 
     pub fn add_clip_region(
@@ -3282,7 +3254,7 @@ fn get_shader_opacity(opacity: f32) -> i32 {
     (opacity * 65535.0).round() as i32
 }
 
-impl<'a, 'rc> RenderTargetContext<'a, 'rc> {
+impl<'a, 'rc, B: hal::Backend> RenderTargetContext<'a, 'rc, B> {
     /// Retrieve the GPU task address for a given clip task instance.
     /// Returns None if the segment was completely clipped out.
     /// Returns Some(OPAQUE_TASK_ADDRESS) if no clip mask is needed.

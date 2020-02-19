@@ -540,6 +540,14 @@ impl FrameBuilder {
                     scratch,
                     screen_world_rect,
                     globals: &self.globals,
+                    #[cfg(not(feature = "gl"))]
+                    buffer_manager,
+                    #[cfg(not(feature = "gl"))]
+                    device,
+                    #[cfg(not(feature = "gl"))]
+                    heaps,
+                    #[cfg(feature = "gl")]
+                    phantom: std::marker::PhantomData,
                 };
 
                 build_render_pass(
@@ -553,9 +561,6 @@ impl FrameBuilder {
                     &mut prim_headers,
                     &mut z_generator,
                     &mut composite_state,
-                    buffer_manager,
-                    device,
-                    heaps,
                 );
 
                 match pass.kind {
@@ -609,7 +614,7 @@ impl FrameBuilder {
 /// target.
 pub fn build_render_pass<B: hal::Backend>(
     pass: &mut RenderPass,
-    ctx: &mut RenderTargetContext,
+    ctx: &mut RenderTargetContext<B>,
     gpu_cache: &mut GpuCache,
     render_tasks: &mut RenderTaskGraph,
     deferred_resolves: &mut Vec<DeferredResolve>,
@@ -618,9 +623,6 @@ pub fn build_render_pass<B: hal::Backend>(
     prim_headers: &mut PrimitiveHeaders,
     z_generator: &mut ZBufferIdGenerator,
     composite_state: &mut CompositeState,
-    buffer_manager: &mut InstanceBufferManager<B>,
-    device: &B::Device,
-    heaps: &mut Heaps<B>,
 ) {
     profile_scope!("RenderPass::build");
 
@@ -647,9 +649,6 @@ pub fn build_render_pass<B: hal::Backend>(
                 transforms,
                 z_generator,
                 composite_state,
-                buffer_manager,
-                device,
-                heaps,
             );
         }
         RenderPassKind::OffScreen {
@@ -877,11 +876,7 @@ pub fn build_render_pass<B: hal::Backend>(
                             );
                             debug_assert!(batch_containers.is_empty());
 
-                            alpha_batch_container.build(
-                                buffer_manager,
-                                &device,
-                                heaps,
-                            );
+                            alpha_batch_container.build(ctx);
                             let target = PictureCacheTarget {
                                 texture,
                                 layer: layer as usize,
@@ -899,11 +894,7 @@ pub fn build_render_pass<B: hal::Backend>(
             }
 
             for (_, ref mut cache) in texture_cache.iter_mut() {
-                cache.build(
-                    buffer_manager,
-                    device,
-                    heaps,
-                );
+                cache.build(ctx);
             }
 
             color.build(
@@ -916,9 +907,6 @@ pub fn build_render_pass<B: hal::Backend>(
                 transforms,
                 z_generator,
                 composite_state,
-                buffer_manager,
-                device,
-                heaps,
             );
             alpha.build(
                 ctx,
@@ -930,9 +918,6 @@ pub fn build_render_pass<B: hal::Backend>(
                 transforms,
                 z_generator,
                 composite_state,
-                buffer_manager,
-                device,
-                heaps,
             );
         }
     }
