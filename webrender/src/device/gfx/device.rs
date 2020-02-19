@@ -1567,10 +1567,7 @@ impl<B: hal::Backend> Device<B> {
 
         let instances = match instance_locations {
             Some(locations) => {
-                let mut buffer_ids = locations.iter().map(|l| l.buffer_id).collect::<Vec<_>>();
-                buffer_ids.sort();
-                buffer_ids.dedup();
-                for id in buffer_ids {
+                for id in locations.iter().map(|l| l.buffer_id) {
                     self.received_instance_buffers.get_mut(&id).unwrap().bound_in_frame = self.frame_id;
                 }
                 InstanceSource::Uploaded {
