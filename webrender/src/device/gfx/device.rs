@@ -828,7 +828,10 @@ impl<B: hal::Backend> Device<B> {
         device
     }
 
-    pub fn add_instance_buffers(&mut self, buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>) {
+    pub fn add_instance_buffers(&mut self, mut buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>) {
+        for (_, ref mut buffer) in buffers.iter_mut() {
+            buffer.bound_in_frame = self.frame_id;
+        }
         self.received_instance_buffers.extend(buffers);
     }
 

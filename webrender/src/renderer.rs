@@ -1843,7 +1843,7 @@ pub struct Renderer<B: hal::Backend> {
     pending_gpu_cache_clear: bool,
     new_gpu_cache_bus: Option<GpuCacheBus>,
     pending_shader_updates: Vec<PathBuf>,
-    active_documents: Vec<(DocumentId, RenderedDocument)>,
+    active_documents: Vec<(DocumentId, RenderedDocument<B>)>,
 
     shaders: Rc<RefCell<Shaders<B>>>,
 
@@ -2590,15 +2590,16 @@ impl<B: hal::Backend> Renderer<B> {
                 }
                 ResultMsg::PublishDocument(
                     document_id,
-                    doc,
+                    mut doc,
                     texture_update_list,
                     profile_counters,
-                    instance_buffers,
                 ) => {
                     if doc.is_new_scene {
                         self.new_scene_indicator.changed();
                     }
 
+                    #[cfg(not(feature = "gl"))]
+                    self.device.add_instance_buffers(std::mem::replace(&mut doc.instance_buffers, FastHashMap::default()));
                     // Add a new document to the active set, expressed as a `Vec` in order
                     // to re-order based on `DocumentLayer` during rendering.
                     match self.active_documents.iter().position(|&(id, _)| id == document_id) {
@@ -2629,7 +2630,6 @@ impl<B: hal::Backend> Renderer<B> {
                     self.pending_texture_updates.push(texture_update_list);
                     self.backend_profile_counters = profile_counters;
                     self.documents_seen.insert(document_id);
-                    self.device.add_instance_buffers(instance_buffers);
                 }
                 ResultMsg::UpdateGpuCache(mut list) => {
                     if list.clear {
@@ -2755,8 +2755,6 @@ impl<B: hal::Backend> Renderer<B> {
                         }
                     }
                 }
-                #[cfg(feature = "gl")]
-                ResultMsg::Phantom(..) => {}
             }
         }
     }

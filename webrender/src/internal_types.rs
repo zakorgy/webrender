@@ -509,9 +509,13 @@ impl TextureUpdateList {
 }
 
 /// Wraps a frame_builder::Frame, but conceptually could hold more information
-pub struct RenderedDocument {
+pub struct RenderedDocument<B: hal::Backend> {
     pub frame: Frame,
     pub is_new_scene: bool,
+    #[cfg(not(feature="gl"))]
+    pub instance_buffers: FastHashMap<BufferId, InstancePoolBuffer<B>>,
+    #[cfg(feature="gl")]
+    phantom: std::marker::PhantomData<B>,
 }
 
 pub enum DebugOutput {
@@ -536,18 +540,15 @@ pub enum ResultMsg<B: hal::Backend> {
     PublishPipelineInfo(PipelineInfo),
     PublishDocument(
         DocumentId,
-        RenderedDocument,
+        RenderedDocument<B>,
         TextureUpdateList,
         BackendProfileCounters,
-        FastHashMap<BufferId, InstancePoolBuffer<B>>,
     ),
     AppendNotificationRequests(Vec<NotificationRequest>),
     #[cfg(not(feature = "gl"))]
     UpdateWindowSize(DeviceIntSize),
     #[cfg(not(feature="gl"))]
     UpdateGpuCacheBuffer(GpuCacheBufferUpdate<B>),
-    #[cfg(feature="gl")]
-    Phantom(std::marker::PhantomData<B>),
 }
 
 #[derive(Clone, Debug)]

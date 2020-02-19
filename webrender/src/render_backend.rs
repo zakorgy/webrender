@@ -542,7 +542,7 @@ impl Document {
         buffer_manager: &mut InstanceBufferManager<B>,
         device: &B::Device,
         heaps: &mut Heaps<B>,
-    ) -> RenderedDocument {
+    ) -> RenderedDocument<B> {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
 
@@ -586,6 +586,10 @@ impl Document {
         RenderedDocument {
             frame,
             is_new_scene,
+            #[cfg(not(feature = "gl"))]
+            instance_buffers: buffer_manager.recorded_buffers(),
+            #[cfg(feature = "gl")]
+            phantom: std::marker::PhantomData,
         }
     }
 
@@ -1691,7 +1695,6 @@ impl<B: hal::Backend> RenderBackend<B> {
                 rendered_document,
                 pending_update,
                 profile_counters.clone(),
-                self.buffer_manager.recorded_buffers(),
             );
             self.result_tx.send(msg).unwrap();
             profile_counters.reset();
@@ -2146,10 +2149,16 @@ impl<B: hal::Backend> RenderBackend<B> {
 
                     let msg_publish = ResultMsg::PublishDocument(
                         id,
-                        RenderedDocument { frame, is_new_scene: true },
+                        RenderedDocument {
+                            frame,
+                            is_new_scene: true,
+                            #[cfg(not(feature = "gl"))]
+                            instance_buffers: FastHashMap::default(),
+                            #[cfg(feature = "gl")]
+                            phantom: std::marker::PhantomData,
+                        },
                         self.resource_cache.pending_updates(),
                         profile_counters.clone(),
-                        self.buffer_manager.recorded_buffers(),
                     );
                     self.result_tx.send(msg_publish).unwrap();
                     profile_counters.reset();
