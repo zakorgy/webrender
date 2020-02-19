@@ -948,11 +948,11 @@ impl<B: hal::Backend> InstanceBufferManager<B> {
             } else {
                 self.current_buffer_mut().align_offset_to(data_stride);
             }
-            let update_size =
+            let upload_count =
             (self.current_buffer().space_left() / data_stride).min(instance_data.len());
             self.current_buffer_mut().update(
                 device,
-                instance_data_to_u8_slice(&instance_data[0..update_size]),
+                instance_data_to_u8_slice(&instance_data[0..upload_count]),
                 data_stride,
             );
 
@@ -960,20 +960,24 @@ impl<B: hal::Backend> InstanceBufferManager<B> {
             let end = self.current_buffer().offset / data_stride;
             let start = end - self.current_buffer().last_update_size / data_stride;
             locations.push(InstanceLocation {
-                buffer_id: BufferId(self.next_id.0 - 1),
+                buffer_id: self.current_buffer_id(),
                 range: start as u32 ..end as u32,
             });
-            instance_data = &instance_data[update_size..];
+            instance_data = &instance_data[upload_count..];
         }
         locations
     }
 
+    fn current_buffer_id(&self) -> BufferId {
+        BufferId(self.next_id.0 - 1)
+    }
+
     fn current_buffer(&self) -> &InstancePoolBuffer<B> {
-        &self.buffers[&BufferId(self.next_id.0 - 1)]
+        &self.buffers[&self.current_buffer_id()]
     }
 
     fn current_buffer_mut(&mut self) -> &mut InstancePoolBuffer<B> {
-        self.buffers.get_mut(&BufferId(self.next_id.0 - 1)).unwrap()
+        self.buffers.get_mut(&self.current_buffer_id()).unwrap()
     }
 
     pub fn recorded_buffers(&mut self) -> FastHashMap<BufferId, InstancePoolBuffer<B>> {
