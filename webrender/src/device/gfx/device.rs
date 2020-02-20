@@ -352,7 +352,7 @@ pub struct Device<B: hal::Backend> {
     #[cfg(debug_assertions)]
     shader_is_ready: bool,
     rebind_descriptors: bool,
-    render_target_memory: LinearMemoryAllocator<B>,
+    render_target_memory: MemoryAllocator<B>,
 }
 
 impl<B: hal::Backend> Device<B> {
@@ -695,7 +695,7 @@ impl<B: hal::Backend> Device<B> {
             None
         };
 
-        let render_target_memory = LinearMemoryAllocator::new(
+        let render_target_memory = MemoryAllocator::new(
             &device,
             &mut heaps,
         );

@@ -7,7 +7,7 @@ use hal::{self, device::Device as BackendDevice};
 use hal::command::CommandBuffer;
 use hal::image::{Layout, Access};
 use hal::pso::PipelineStage;
-use rendy_memory::{Block, Heaps, MemoryBlock, MemoryUsageValue};
+use rendy_memory::{Block, Heaps, MemoryBlock as RendyMemoryBlock, MemoryUsageValue};
 
 use crate::internal_types::FastHashMap;
 
@@ -28,7 +28,7 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 const BUFFER_COPY_ALIGNMENT: i32 = 4;
 const RENDER_TARGET_MEMORY_SIZE: u64 = 128 << 20; // 128 MB
 
-type LinearMemoryId = usize;
+type MemoryBlockId = usize;
 struct MemoryRange(std::ops::Range<hal::buffer::Offset>);
 
 impl MemoryRange {
@@ -56,15 +56,15 @@ impl MemoryRange {
     }
 }
 
-struct LinearMemoryBlock<B: hal::Backend> {
-    memory_block: MemoryBlock<B>,
+struct MemoryBlock<B: hal::Backend> {
+    memory_block: RendyMemoryBlock<B>,
     alignment: u64,
     type_mask: u64,
     free_chunks: Vec<MemoryRange>,
     occupied: FastHashMap<TextureId, MemoryRange>,
 }
 
-impl<B: hal::Backend> LinearMemoryBlock<B> {
+impl<B: hal::Backend> MemoryBlock<B> {
     fn new(
         device: &B::Device,
         heaps: &mut Heaps<B>,
@@ -103,7 +103,7 @@ impl<B: hal::Backend> LinearMemoryBlock<B> {
 
         let free_chunks = vec![MemoryRange(0..memory_block.size())];
 
-        LinearMemoryBlock {
+        MemoryBlock {
             memory_block,
             alignment: requirements.alignment,
             type_mask: requirements.type_mask,
@@ -168,18 +168,18 @@ impl<B: hal::Backend> LinearMemoryBlock<B> {
     }
 }
 
-pub(super) struct LinearMemoryAllocator<B: hal::Backend>  {
-    blocks: Vec<LinearMemoryBlock<B>>,
-    locations: FastHashMap<TextureId, LinearMemoryId>,
+pub(super) struct MemoryAllocator<B: hal::Backend>  {
+    blocks: Vec<MemoryBlock<B>>,
+    locations: FastHashMap<TextureId, MemoryBlockId>,
 }
 
-impl<B: hal::Backend> LinearMemoryAllocator<B> {
+impl<B: hal::Backend> MemoryAllocator<B> {
     pub(super) fn new(
         device: &B::Device,
         heaps: &mut Heaps<B>,
     ) -> Self {
-        let linear_memory = LinearMemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE);
-        LinearMemoryAllocator {
+        let linear_memory = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE);
+        MemoryAllocator {
             blocks: vec![linear_memory],
             locations: FastHashMap::default(),
         }
@@ -205,7 +205,7 @@ impl<B: hal::Backend> LinearMemoryAllocator<B> {
             self.locations.insert(texture_id, index);
             return;
         }
-        let linear_memory = LinearMemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE.max(size));
+        let linear_memory = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE.max(size));
         self.blocks.push(linear_memory);
         self.locations.insert(texture_id, self.blocks.len() - 1);
     }
@@ -237,7 +237,7 @@ impl<B: hal::Backend> LinearMemoryAllocator<B> {
 #[derive(Debug)]
 pub(super) struct ImageCore<B: hal::Backend> {
     pub(super) image: B::Image,
-    pub(super) memory_block: Option<MemoryBlock<B>>,
+    pub(super) memory_block: Option<RendyMemoryBlock<B>>,
     pub(super) view: B::ImageView,
     pub(super) subresource_range: hal::image::SubresourceRange,
     pub(super) state: Cell<hal::image::State>,
@@ -279,7 +279,7 @@ impl<B: hal::Backend> ImageCore<B> {
         format: hal::format::Format,
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
-        linear_memory_allocator: Option<&mut LinearMemoryAllocator<B>>,
+        linear_memory_allocator: Option<&mut MemoryAllocator<B>>,
         texture_id: Option<TextureId>,
     ) -> Self {
         let mut image = unsafe {
@@ -406,7 +406,7 @@ impl<B: hal::Backend> Image<B> {
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
-        linear_memory_allocator: Option<&mut LinearMemoryAllocator<B>>,
+        linear_memory_allocator: Option<&mut MemoryAllocator<B>>,
         texture_id: Option<TextureId>,
     ) -> Self {
         let format = match image_format {
