@@ -178,9 +178,9 @@ impl<B: hal::Backend> MemoryAllocator<B> {
         device: &B::Device,
         heaps: &mut Heaps<B>,
     ) -> Self {
-        let linear_memory = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE);
+        let memory_block = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE);
         MemoryAllocator {
-            blocks: vec![linear_memory],
+            blocks: vec![memory_block],
             locations: FastHashMap::default(),
         }
     }
@@ -205,8 +205,8 @@ impl<B: hal::Backend> MemoryAllocator<B> {
             self.locations.insert(texture_id, index);
             return;
         }
-        let linear_memory = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE.max(size));
-        self.blocks.push(linear_memory);
+        let memory_block = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE.max(size));
+        self.blocks.push(memory_block);
         self.locations.insert(texture_id, self.blocks.len() - 1);
     }
 
@@ -279,7 +279,7 @@ impl<B: hal::Backend> ImageCore<B> {
         format: hal::format::Format,
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
-        linear_memory_allocator: Option<&mut MemoryAllocator<B>>,
+        memory_allocator: Option<&mut MemoryAllocator<B>>,
         texture_id: Option<TextureId>,
     ) -> Self {
         let mut image = unsafe {
@@ -295,7 +295,7 @@ impl<B: hal::Backend> ImageCore<B> {
         .expect("create_image failed");
         let requirements = unsafe { device.get_image_requirements(&image) };
 
-        match linear_memory_allocator {
+        match memory_allocator {
             Some(allocator) => {
                 assert_eq!(requirements.type_mask, allocator.type_mask());
                 assert_eq!(requirements.alignment, allocator.alignment());
@@ -406,7 +406,7 @@ impl<B: hal::Backend> Image<B> {
         view_kind: hal::image::ViewKind,
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
-        linear_memory_allocator: Option<&mut MemoryAllocator<B>>,
+        memory_allocator: Option<&mut MemoryAllocator<B>>,
         texture_id: Option<TextureId>,
     ) -> Self {
         let format = match image_format {
@@ -434,7 +434,7 @@ impl<B: hal::Backend> Image<B> {
                 levels: 0..mip_levels,
                 layers: 0..image_depth as _,
             },
-            linear_memory_allocator,
+            memory_allocator,
             texture_id,
         );
 
