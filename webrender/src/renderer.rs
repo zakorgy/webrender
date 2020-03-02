@@ -1062,6 +1062,8 @@ impl<B: hal::Backend> TextureResolver<B> {
                 _texture.used_recently(_frame_id, frame_treshold)
             }
         });
+        #[cfg(not(feature = "gl"))]
+        device.release_per_frame_render_targets();
     }
 
     /// Transfers ownership of a render target back to the pool.
@@ -1353,7 +1355,7 @@ impl<B: hal::Backend> GpuCacheTexture<B> {
         let rt_info =  if supports_copy_image_sub_data {
             None
         } else {
-            Some(RenderTargetInfo { has_depth: false, persistent: true })
+            Some(RenderTargetInfo { has_depth: false, persistent: true, used_in_multiple_passes: false })
         };
         let mut texture = device.create_texture(
             TextureTarget::Default,
@@ -3454,7 +3456,7 @@ impl<B: hal::Backend> Renderer<B> {
                                 info.filter,
                                 // This needs to be a render target because some render
                                 // tasks get rendered into the texture cache.
-                                Some(RenderTargetInfo { has_depth: info.has_depth, persistent: true }),
+                                Some(RenderTargetInfo { has_depth: info.has_depth, persistent: true, used_in_multiple_passes: false }),
                                 info.layer_count,
                             );
 
@@ -5317,7 +5319,7 @@ impl<B: hal::Backend> Renderer<B> {
         #[cfg(not(feature = "gl"))]
         let index = None;
 
-        let rt_info = RenderTargetInfo { has_depth: list.needs_depth(), persistent: false };
+        let rt_info = RenderTargetInfo { has_depth: list.needs_depth(), persistent: false, used_in_multiple_passes: list.saved_index.is_some() };
         let texture = if let Some(idx) = index {
             let mut t = self.texture_resolver.render_target_pool.swap_remove(idx);
             self.device.reuse_render_target::<u8>(&mut t, rt_info);
@@ -5931,7 +5933,7 @@ impl<B: hal::Backend> Renderer<B> {
                 source_rect.size.width,
                 source_rect.size.height,
                 TextureFilter::Nearest,
-                Some(RenderTargetInfo { has_depth: false, persistent: true }),
+                Some(RenderTargetInfo { has_depth: false, persistent: true, used_in_multiple_passes: false }),
                 1,
             );
 
@@ -7012,7 +7014,7 @@ impl<B: hal::Backend> Renderer<B> {
                 let t = Self::load_texture(
                     TextureTarget::Array,
                     &texture,
-                    Some(RenderTargetInfo { has_depth: texture.has_depth, persistent: true }),
+                    Some(RenderTargetInfo { has_depth: texture.has_depth, persistent: true, used_in_multiple_passes: false }),
                     &root,
                     &mut self.device
                 );
@@ -7026,7 +7028,7 @@ impl<B: hal::Backend> Renderer<B> {
             let (t, gpu_cache_data) = Self::load_texture(
                 TextureTarget::Default,
                 &renderer.gpu_cache,
-                Some(RenderTargetInfo { has_depth: false, persistent: true }),
+                Some(RenderTargetInfo { has_depth: false, persistent: true, used_in_multiple_passes: false }),
                 &root,
                 &mut self.device,
             );

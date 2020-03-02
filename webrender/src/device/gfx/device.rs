@@ -828,7 +828,7 @@ impl<B: hal::Backend> Device<B> {
                 device.dimensions.0 as i32,
                 device.dimensions.1 as i32,
                 TextureFilter::Nearest,
-                Some(RenderTargetInfo { has_depth: true, persistent: true }),
+                Some(RenderTargetInfo { has_depth: true, persistent: true, used_in_multiple_passes: false }),
                 1,
             );
             device.readback_texture = Some(texture);
@@ -1039,7 +1039,7 @@ impl<B: hal::Backend> Device<B> {
                 self.dimensions.0 as i32,
                 self.dimensions.1 as i32,
                 TextureFilter::Nearest,
-                Some(RenderTargetInfo { has_depth: true, persistent: true }),
+                Some(RenderTargetInfo { has_depth: true, persistent: true, used_in_multiple_passes: false }),
                 1,
             );
             self.readback_texture = Some(texture);
@@ -1992,8 +1992,8 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let (memory, id) = match render_target {
-            Some(RenderTargetInfo { has_depth: _, persistent}) if !persistent => (Some(&mut self.render_target_memory), Some(texture.id)),
-            _ => (None, None),
+            Some(RenderTargetInfo { has_depth: _, persistent, used_in_multiple_passes}) if !persistent => (Some(&mut self.render_target_memory), used_in_multiple_passes),
+            _ => (None, false),
         };
 
         let img = Image::new(
@@ -2683,8 +2683,8 @@ impl<B: hal::Backend> Device<B> {
     ///
     /// FIXME(bholley): We could/should invalidate the depth targets earlier
     /// than the color targets, i.e. immediately after each pass.
-    pub fn invalidate_render_target(&mut self, texture: &Texture) {
-        self.render_target_memory.release_texture(texture.id);
+    pub fn invalidate_render_target(&mut self, _texture: &Texture) {
+        info!("invalidate_render_target is not used with gfx backend");
     }
 
     /// Notifies the device that a render target is about to be reused.
@@ -3188,6 +3188,10 @@ impl<B: hal::Backend> Device<B> {
         #[cfg(debug_assertions)]
         debug_assert!(self.shader_is_ready);
         self.draw();
+    }
+
+    pub fn release_per_frame_render_targets(&mut self) {
+        self.render_target_memory.reset_per_frame_blocks();
     }
 
     pub fn end_frame(&mut self) {
