@@ -258,7 +258,7 @@ impl<B: hal::Backend> AsyncScreenshotGrabber<B> {
                 texture_size.width,
                 texture_size.height,
                 TextureFilter::Linear,
-                Some(RenderTargetInfo { has_depth: false, persistent: true }),
+                Some(RenderTargetInfo { has_depth: false, persistent: true, used_in_multiple_passes: false }),
                 1,
             );
             if level == self.scaling_textures.len() {

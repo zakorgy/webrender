@@ -9,8 +9,6 @@ use hal::image::{Layout, Access};
 use hal::pso::PipelineStage;
 use rendy_memory::{Block, Heaps, MemoryBlock as RendyMemoryBlock, MemoryUsageValue};
 
-use crate::internal_types::FastHashMap;
-
 use std::cell::Cell;
 use super::buffer::BufferPool;
 use super::render_pass::HalRenderPasses;
@@ -26,42 +24,25 @@ const DEPTH_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 /// The Vulkan spec states: bufferOffset must be a multiple of 4 for VkBufferImageCopy
 /// https://www.khronos.org/registry/vulkan/specs/1.1-extensions/html/vkspec.html#VkBufferImageCopy
 const BUFFER_COPY_ALIGNMENT: i32 = 4;
-const RENDER_TARGET_MEMORY_SIZE: u64 = 128 << 20; // 128 MB
+/// The memory size for render targets allocated per pass, we use this in a ring buffer manner.
+/// The big size required because we have to keep alive the allocations until the end of the next pass,
+/// otherwise we start seeing flickering on the screen.
+const PER_PASS_RENDER_TARGET_MEMORY_SIZE: u64 = 192 << 20; // 192 MB
+/// The memory size for render targets which are persistent across the entire frame
+const PER_FRAME_RENDER_TARGET_MEMORY_SIZE: u64 = 128 << 20; // 128 MB
 
-type MemoryBlockId = usize;
-struct MemoryRange(std::ops::Range<hal::buffer::Offset>);
-
-impl MemoryRange {
-    fn has_size(&self, allocation_size: hal::buffer::Offset) -> bool {
-        (self.0.end - self.0.start) >= allocation_size
-    }
-
-    fn split(self, size: hal::buffer::Offset) -> (Self, Self) {
-        (
-            MemoryRange(self.0.start .. self.0.start + size),
-            MemoryRange(self.0.start + size .. self.0.end)
-        )
-    }
-
-    fn can_merge(&self, other: &Self) -> bool {
-        self.0.end == other.0.start
-        || self.0.start == other.0.end
-    }
-
-    fn merge(self, other: Self) -> Self {
-        MemoryRange(
-            self.0.start.min(other.0.start)
-                .. self.0.end.max(other.0.end)
-        )
-    }
+#[derive(Debug, Eq, PartialEq)]
+enum TextureScope {
+    Pass,
+    Frame,
 }
 
 struct MemoryBlock<B: hal::Backend> {
     memory_block: RendyMemoryBlock<B>,
     alignment: u64,
     type_mask: u64,
-    free_chunks: Vec<MemoryRange>,
-    occupied: FastHashMap<TextureId, MemoryRange>,
+    size: u64,
+    offset: hal::buffer::Offset,
 }
 
 impl<B: hal::Backend> MemoryBlock<B> {
@@ -101,21 +82,17 @@ impl<B: hal::Backend> MemoryBlock<B> {
         )
         .expect("Allocate memory failed");
 
-        let free_chunks = vec![MemoryRange(0..memory_block.size())];
-
         MemoryBlock {
+            size: memory_block.size() as u64,
             memory_block,
             alignment: requirements.alignment,
             type_mask: requirements.type_mask,
-            free_chunks,
-            occupied: FastHashMap::default(),
+            offset: 0,
         }
     }
 
-    fn has_size(&self, allocation_size: u64) -> Option<usize> {
-        self.free_chunks
-            .iter()
-            .position(|r| r.has_size(allocation_size))
+    fn has_size(&self, allocation_size: u64) -> bool {
+        (self.size - self.offset) > allocation_size
     }
 
     fn bind_image(
@@ -123,44 +100,35 @@ impl<B: hal::Backend> MemoryBlock<B> {
         device: &B::Device,
         image: &mut B::Image,
         size: hal::buffer::Offset,
-        texture_id: TextureId,
+        texture_scope: TextureScope,
     ) -> bool {
-        match self.has_size(size) {
-            Some(idx) => {
-                let mask = self.alignment - 1;
-                let size = (size + mask) & !mask;
-                let (chunk_use, chunk_free) = self.free_chunks.remove(idx).split(size);
-                unsafe {
-                    device
-                        .bind_image_memory(
-                            &self.memory_block.memory(),
-                            self.memory_block.range().start + chunk_use.0.start,
-                            image,
-                        )
-                        .expect("Bind image memory failed")
-                };
-                self.free_chunks.push(chunk_free);
-                self.occupied.insert(texture_id, chunk_use);
+        let can_bind = match self.has_size(size) {
+            true => true,
+            false if texture_scope == TextureScope::Pass => {
+                self.reset();
                 true
             },
-            None => false,
+            _ => false,
+        };
+        if can_bind {
+            let mask = self.alignment - 1;
+            let size = (size + mask) & !mask;
+            unsafe {
+                device
+                    .bind_image_memory(
+                        &self.memory_block.memory(),
+                        self.memory_block.range().start + self.offset,
+                        image,
+                    )
+                    .expect("Bind image memory failed");
+            };
+            self.offset += size;
         }
+        can_bind
     }
 
-    fn release_texture(
-        &mut self,
-        id: TextureId,
-    ) {
-        if let Some(mut chunk) = self.occupied.remove(&id) {
-            while let Some(idx) = self
-                .free_chunks
-                .iter()
-                .position(|c| c.can_merge(&chunk)) {
-                    let free_chunk = self.free_chunks.remove(idx);
-                    chunk = chunk.merge(free_chunk);
-                }
-            self.free_chunks.push(chunk);
-        }
+    fn reset(&mut self) {
+        self.offset = 0;
     }
 
     fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
@@ -169,8 +137,8 @@ impl<B: hal::Backend> MemoryBlock<B> {
 }
 
 pub(super) struct MemoryAllocator<B: hal::Backend>  {
-    blocks: Vec<MemoryBlock<B>>,
-    locations: FastHashMap<TextureId, MemoryBlockId>,
+    per_pass_block: MemoryBlock<B>,
+    per_frame_blocks: Vec<MemoryBlock<B>>,
 }
 
 impl<B: hal::Backend> MemoryAllocator<B> {
@@ -178,10 +146,9 @@ impl<B: hal::Backend> MemoryAllocator<B> {
         device: &B::Device,
         heaps: &mut Heaps<B>,
     ) -> Self {
-        let memory_block = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE);
         MemoryAllocator {
-            blocks: vec![memory_block],
-            locations: FastHashMap::default(),
+            per_pass_block: MemoryBlock::new(device, heaps, PER_PASS_RENDER_TARGET_MEMORY_SIZE),
+            per_frame_blocks: vec![MemoryBlock::new(device, heaps, PER_FRAME_RENDER_TARGET_MEMORY_SIZE)],
         }
     }
 
@@ -191,46 +158,55 @@ impl<B: hal::Backend> MemoryAllocator<B> {
         heaps: &mut Heaps<B>,
         image: &mut B::Image,
         size: hal::buffer::Offset,
-        texture_id: TextureId,
+        used_in_multiple_passes: bool,
     ) {
-        // Find a linear memory with the proper size or create a new one if not found
-        if let Some(index) = self.blocks.iter_mut().position(|block| {
-            block.bind_image(
+        if used_in_multiple_passes {
+            // Find a memory block with the proper size or create a new one if not found
+            if !self.per_frame_blocks.iter_mut().any(|block| {
+                block.bind_image(
+                    device,
+                    image,
+                    size,
+                    TextureScope::Frame,
+                )
+            }) {
+                let mut memory_block = MemoryBlock::new(device, heaps, PER_FRAME_RENDER_TARGET_MEMORY_SIZE.max(size));
+                memory_block.bind_image(
+                    device,
+                    image,
+                    size,
+                    TextureScope::Frame,
+                );
+                self.per_frame_blocks.push(memory_block);
+            }
+        } else {
+            self.per_pass_block.bind_image(
                 device,
                 image,
                 size,
-                texture_id,
-            )
-        }) {
-            self.locations.insert(texture_id, index);
-            return;
-        }
-        let memory_block = MemoryBlock::new(device, heaps, RENDER_TARGET_MEMORY_SIZE.max(size));
-        self.blocks.push(memory_block);
-        self.locations.insert(texture_id, self.blocks.len() - 1);
+                TextureScope::Pass,
+            );
+        };
     }
 
-    pub(super) fn release_texture(
-        &mut self,
-        id: TextureId,
-    ) {
-        if let Some(index) = self.locations.get(&id) {
-            self.blocks[*index].release_texture(id);
+    pub(super) fn reset_per_frame_blocks(&mut self) {
+        for block in self.per_frame_blocks.iter_mut() {
+            block.reset();
         }
     }
 
     pub(super) unsafe fn deinit(self, device: &B::Device, heaps: &mut Heaps<B>) {
-        for block in self.blocks {
+        for block in std::iter::once(self.per_pass_block).chain(self.per_frame_blocks.into_iter()) {
             block.deinit(device, heaps);
         }
     }
 
     fn alignment(&self) -> u64 {
-        self.blocks[0].alignment
+        self.per_pass_block.alignment
     }
 
     fn type_mask(&self) -> u64 {
-        self.blocks[0].type_mask
+        self.per_pass_block.type_mask
     }
 }
 
@@ -280,7 +256,7 @@ impl<B: hal::Backend> ImageCore<B> {
         usage: hal::image::Usage,
         subresource_range: hal::image::SubresourceRange,
         memory_allocator: Option<&mut MemoryAllocator<B>>,
-        texture_id: Option<TextureId>,
+        used_in_multiple_passes: bool,
     ) -> Self {
         let mut image = unsafe {
             device.create_image(
@@ -299,7 +275,7 @@ impl<B: hal::Backend> ImageCore<B> {
             Some(allocator) => {
                 assert_eq!(requirements.type_mask, allocator.type_mask());
                 assert_eq!(requirements.alignment, allocator.alignment());
-                allocator.bind_image(device, heaps, &mut image, requirements.size, texture_id.unwrap());
+                allocator.bind_image(device, heaps, &mut image, requirements.size, used_in_multiple_passes);
 
                 ImageCore {
                     memory_block: None,
@@ -407,7 +383,7 @@ impl<B: hal::Backend> Image<B> {
         mip_levels: hal::image::Level,
         usage: hal::image::Usage,
         memory_allocator: Option<&mut MemoryAllocator<B>>,
-        texture_id: Option<TextureId>,
+        used_in_multiple_passes: bool,
     ) -> Self {
         let format = match image_format {
             ImageFormat::R8 => hal::format::Format::R8Unorm,
@@ -435,7 +411,7 @@ impl<B: hal::Backend> Image<B> {
                 layers: 0..image_depth as _,
             },
             memory_allocator,
-            texture_id,
+            used_in_multiple_passes,
         );
 
         Image {
@@ -634,7 +610,7 @@ impl<B: hal::Backend> DepthBuffer<B> {
             hal::image::Usage::TRANSFER_DST | hal::image::Usage::DEPTH_STENCIL_ATTACHMENT,
             DEPTH_RANGE,
             None,
-            None,
+            false,
         );
         DepthBuffer { core }
     }

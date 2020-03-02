@@ -291,6 +291,7 @@ pub const ORTHO_FAR_PLANE: f32 = 0.0;
 pub struct RenderTargetInfo {
     pub has_depth: bool,
     pub persistent: bool,
+    pub used_in_multiple_passes: bool,
 }
 
 #[derive(Debug)]
