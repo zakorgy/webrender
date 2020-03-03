@@ -241,6 +241,7 @@ pub struct Device<B: hal::Backend> {
     command_buffer: B::CommandBuffer,
     staging_buffer_pool: ArrayVec<[BufferPool<B>; MAX_FRAME_COUNT]>,
     frame: Option<Frame<B>>,
+    prev_frame: Option<Frame<B>>,
     frame_depth: DepthBuffer<B>,
     swapchain_image_layouts: ArrayVec<[hal::image::Layout; MAX_FRAME_COUNT]>,
     readback_texture: Option<Texture>,
@@ -337,6 +338,7 @@ pub struct Device<B: hal::Backend> {
     features: hal::Features,
 
     next_id: usize,
+    prev_id: usize,
     frame_fence: ArrayVec<[Fence<B>; MAX_FRAME_COUNT]>,
     render_finished_semaphores: ArrayVec<[B::Semaphore; MAX_FRAME_COUNT]>,
     pipeline_requirements: FastHashMap<String, PipelineRequirements>,
@@ -717,6 +719,7 @@ impl<B: hal::Backend> Device<B> {
             render_passes,
             readback_texture: None,
             frame: None,
+            prev_frame: None,
             frame_depth,
             swapchain_image_layouts,
             frame_count,
@@ -792,6 +795,7 @@ impl<B: hal::Backend> Device<B> {
             features,
 
             next_id: 0,
+            prev_id: 0,
             frame_fence,
             render_finished_semaphores,
             pipeline_requirements,
@@ -1020,6 +1024,9 @@ impl<B: hal::Backend> Device<B> {
             if let Some(old_frame) = self.frame.take() {
                 old_frame.deinit(self.device.as_ref());
             }
+            if let Some(old_frame) = self.prev_frame.take() {
+                old_frame.deinit(self.device.as_ref());
+            }
             let old_depth = mem::replace(&mut self.frame_depth, frame_depth);
             old_depth.deinit(self.device.as_ref(), heaps);
             self.dimensions = dimensions;
@@ -1150,7 +1157,7 @@ impl<B: hal::Backend> Device<B> {
     }
 
     fn reset_next_frame_resources(&mut self) {
-        let prev_id = self.next_id;
+        self.prev_id = self.next_id;
         self.next_id = (self.next_id + 1) % self.frame_count;
         self.reset_state();
         if self.frame_fence[self.next_id].is_submitted {
@@ -1173,7 +1180,7 @@ impl<B: hal::Backend> Device<B> {
                     &mut self.command_buffer,
                     self.command_pools[self.next_id].remove_cmd_buffer(),
                 );
-                self.command_pools[prev_id].return_cmd_buffer(old_buffer);
+                self.command_pools[self.prev_id].return_cmd_buffer(old_buffer);
             }
             Self::begin_cmd_buffer(&mut self.command_buffer);
         }
@@ -3665,26 +3672,28 @@ impl<B: hal::Backend> Device<B> {
                         .submit(submission, Some(&mut self.frame_fence[self.next_id].inner));
                     self.frame_fence[self.next_id].is_submitted = true;
 
-                    let frame = self.frame.take().unwrap();
+                    let prev_frame = self.prev_frame.replace(self.frame.take().unwrap());
 
                     // present frame
-                    match self.queue_group_queues[0].present_surface(
-                        surface,
-                        frame.swapchain_image,
-                        Some(&self.render_finished_semaphores[self.next_id]),
-                    ) {
-                        Ok(suboptimal) => {
-                            if suboptimal.is_some() {
-                                warn!("The swapchain no longer matches the surface, but we still can use it.");
+                    if let Some(frame) = prev_frame {
+                        match self.queue_group_queues[0].present_surface(
+                            surface,
+                            frame.swapchain_image,
+                            Some(&self.render_finished_semaphores[self.prev_id]),
+                        ) {
+                            Ok(suboptimal) => {
+                                if suboptimal.is_some() {
+                                    warn!("The swapchain no longer matches the surface, but we still can use it.");
+                                }
+                            }
+                            Err(presenterr) => {
+                                error!("Present error {:?}, recrating swapchian.", presenterr);
+                                self.recreate_swapchain(None);
                             }
                         }
-                        Err(presenterr) => {
-                            error!("Present error {:?}, recrating swapchian.", presenterr);
-                            self.recreate_swapchain(None);
+                        for (_, fb) in frame.framebuffers {
+                            self.device.destroy_framebuffer(fb);
                         }
-                    }
-                    for (_, fb) in frame.framebuffers {
-                        self.device.destroy_framebuffer(fb);
                     }
                 }
                 None => {
