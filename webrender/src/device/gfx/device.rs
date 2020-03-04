@@ -57,7 +57,7 @@ use hal;
 use hal::adapter::PhysicalDevice;
 use hal::pso::{BlendState, DepthTest};
 use hal::device::Device as _;
-use hal::window::{Surface, SwapchainConfig, PresentationSurface};
+use hal::window::{AcquireError, Surface, SwapchainConfig, PresentationSurface};
 use hal::pso::PipelineStage;
 use hal::queue::CommandQueue;
 use hal::command::{
@@ -3222,6 +3222,10 @@ impl<B: hal::Backend> Device<B> {
         };
 
         let (render_pass, frame_buffer, rect) = if self.bound_draw_fbo == DEFAULT_DRAW_FBO {
+            if self.frame.is_none() {
+                unsafe { self.try_acquire_swapchain_image(None); }
+            }
+
             let new_layout = if last_main_fbo_pass {
                 self.last_rp_in_frame_reached = true;
                 hal::image::Layout::Present
@@ -3619,42 +3623,47 @@ impl<B: hal::Backend> Device<B> {
         warn!("echo_driver_messages is unimplemeneted");
     }
 
+    unsafe fn try_acquire_swapchain_image(&mut self, timeout_ns: Option<u64>) {
+        if let Some(ref mut surface) = self.surface.as_mut() {
+            if self.frame.is_some() {
+                return;
+            }
+            match surface.acquire_image(timeout_ns.unwrap_or(!0)) {
+                Ok((swapchain_image, suboptimal)) => {
+                    if suboptimal.is_some() {
+                        debug!("The swapchain no longer matches the surface, but we still can use it.");
+                    }
+                    self.frame = Some(Frame::new(swapchain_image));
+                }
+                Err(AcquireError::NotReady) | Err(AcquireError::Timeout) if timeout_ns.is_some() => {
+                    debug!("Could not get the swapchain image iwthin the timeout specified");
+                }
+                error => {
+                    error!("Acquire error {:?}, recrating swapchian.", error);
+                    self.recreate_swapchain(None);
+                }
+            }
+        }
+    }
+
     pub fn set_next_frame_id(&mut self) {
         self.last_rp_in_frame_reached = false;
-        if let Some((barrier, pipeline_stages)) = self.frame_depth.core.transit(
-            (
-                hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
-                    | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                hal::image::Layout::DepthStencilAttachmentOptimal,
-            ),
-            self.frame_depth.core.subresource_range.clone(),
-        ) {
-            unsafe {
+        unsafe {
+            if let Some((barrier, pipeline_stages)) = self.frame_depth.core.transit(
+                (
+                    hal::image::Access::DEPTH_STENCIL_ATTACHMENT_READ
+                        | hal::image::Access::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                    hal::image::Layout::DepthStencilAttachmentOptimal,
+                ),
+                self.frame_depth.core.subresource_range.clone(),
+            ) {
                 self.command_buffer.pipeline_barrier(
                     pipeline_stages,
                     hal::memory::Dependencies::empty(),
                     &[barrier],
                 );
             }
-        }
-        unsafe {
-            if let Some(ref mut surface) = self.surface.as_mut() {
-                if self.frame.is_some() {
-                    return;
-                }
-                match surface.acquire_image(!0) {
-                    Ok((swapchain_image, suboptimal)) => {
-                        if suboptimal.is_some() {
-                            warn!("The swapchain no longer matches the surface, but we still can use it.");
-                        }
-                        self.frame = Some(Frame::new(swapchain_image));
-                    }
-                    Err(acquire_error) => {
-                        error!("Acquire error {:?}, recrating swapchian.", acquire_error);
-                        self.recreate_swapchain(None);
-                    }
-                }
-            }
+            self.try_acquire_swapchain_image(Some(0));
         }
     }
 
